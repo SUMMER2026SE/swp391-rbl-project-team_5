@@ -1,0 +1,385 @@
+<!DOCTYPE html><html class="light" lang="vi"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Hồ sơ cá nhân - VietTicket Travel</title>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary-fixed": "#271900",
+                    "on-secondary-fixed-variant": "#5e4200",
+                    "on-error-container": "#93000a",
+                    "secondary": "#7c5800",
+                    "primary": "#006068",
+                    "tertiary-container": "#6c706f",
+                    "on-primary-container": "#d5faff",
+                    "surface-tint": "#006971",
+                    "on-tertiary-fixed": "#181c1c",
+                    "surface-container-high": "#e8e8ea",
+                    "on-tertiary-container": "#f1f4f3",
+                    "surface-variant": "#e2e2e5",
+                    "primary-fixed": "#96f1fc",
+                    "surface-container-highest": "#e2e2e5",
+                    "on-surface-variant": "#3e494a",
+                    "secondary-container": "#feb700",
+                    "primary-container": "#007b85",
+                    "tertiary-fixed-dim": "#c4c7c6",
+                    "secondary-fixed": "#ffdea8",
+                    "surface-dim": "#dadadc",
+                    "outline-variant": "#bdc9ca",
+                    "on-surface": "#1a1c1e",
+                    "on-secondary-container": "#6b4b00",
+                    "background": "#f9f9fc",
+                    "tertiary": "#545857",
+                    "primary-fixed-dim": "#7ad4df",
+                    "error": "#ba1a1a",
+                    "surface-container-lowest": "#ffffff",
+                    "surface-bright": "#f9f9fc",
+                    "on-primary-fixed": "#001f23",
+                    "inverse-on-surface": "#f0f0f3",
+                    "on-tertiary": "#ffffff",
+                    "secondary-fixed-dim": "#ffba20",
+                    "surface-container": "#eeeef0",
+                    "error-container": "#ffdad6",
+                    "inverse-primary": "#7ad4df",
+                    "on-tertiary-fixed-variant": "#434847",
+                    "on-primary-fixed-variant": "#004f56",
+                    "on-background": "#1a1c1e",
+                    "on-error": "#ffffff",
+                    "inverse-surface": "#2f3133",
+                    "on-secondary": "#ffffff",
+                    "outline": "#6e797a",
+                    "tertiary-fixed": "#e0e3e2",
+                    "on-primary": "#ffffff",
+                    "surface-container-low": "#f3f3f6",
+                    "surface": "#f9f9fc"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin-mobile": "16px",
+                    "gutter": "24px",
+                    "margin-desktop": "64px",
+                    "section-gap": "80px",
+                    "base": "8px",
+                    "container-max": "1280px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Plus Jakarta Sans"],
+                    "label-sm": ["Plus Jakarta Sans"],
+                    "headline-md": ["Be Vietnam Pro"],
+                    "headline-lg": ["Be Vietnam Pro"],
+                    "body-md": ["Plus Jakarta Sans"],
+                    "label-md": ["Plus Jakarta Sans"],
+                    "display-lg": ["Be Vietnam Pro"],
+                    "display-lg-mobile": ["Be Vietnam Pro"]
+            },
+            "fontSize": {
+                    "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                    "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "500"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "600"}],
+                    "display-lg": ["56px", {"lineHeight": "64px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "display-lg-mobile": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.01em", "fontWeight": "700"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .active-nav-border {
+            box-shadow: inset 4px 0 0 0 #006068;
+        }
+        .glass-effect {
+            backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.7);
+        }
+        .custom-shadow {
+            box-shadow: 0px 8px 30px rgba(0, 123, 133, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar -->
+<header class="sticky top-0 w-full z-50 shadow-md dark:shadow-none bg-surface/90 backdrop-blur-md">
+<div class="flex justify-between items-center h-20 px-margin-desktop max-w-container-max mx-auto">
+<div class="font-headline-md text-headline-md font-bold text-primary tracking-tight">
+                VietTicket Travel
+            </div>
+<nav class="hidden md:flex items-center gap-8">
+<a class="text-on-surface-variant font-label-md hover:text-primary transition-colors" href="#">Attractions</a>
+<a class="text-on-surface-variant font-label-md hover:text-primary transition-colors" href="#">Destinations</a>
+<a class="text-on-surface-variant font-label-md hover:text-primary transition-colors" href="#">Tickets</a>
+<a class="text-on-surface-variant font-label-md hover:text-primary transition-colors" href="#">Bookings</a>
+<a class="text-on-surface-variant font-label-md hover:text-primary transition-colors" href="#">Support</a>
+</nav>
+<div class="flex items-center gap-4">
+<button class="p-2 hover:bg-surface-container-high rounded-full transition-all duration-300">
+<span class="material-symbols-outlined text-primary">language</span>
+</button>
+<button class="p-2 hover:bg-surface-container-high rounded-full transition-all duration-300">
+<span class="material-symbols-outlined text-primary">shopping_cart</span>
+</button>
+<div class="h-10 w-10 rounded-full bg-primary-container flex items-center justify-center overflow-hidden border-2 border-primary">
+<img alt="User profile" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCxKNHSH84p7s1mwVOhZF-sRbQQAmiCPQZy_EesDzNsSKZH1M_eJ6nnKiFwXBPBkjwZ0f8BLYO0O0REmxrQp4DKI_PNiwOUgrQkom_xJPQbKLIHg3kZsdMNPI3g9c5E82R_ZNjWnNDOJxwwVRduZv4I_Erms-YLDumUzd2-Hcn_x--zCUdsLT-SYeCLFqmIIoQ77jxvs5H3x1D51RRVcjP8vJ8J27gUAknE4-4eUkMIVJcx0UpWvCWX54MLpNKwuxtcjR_oUKyYNlc">
+</div>
+</div>
+</div>
+</header>
+<main class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-12">
+<div class="flex flex-col md:flex-row gap-gutter">
+<!-- Sidebar Navigation -->
+<aside class="w-full md:w-80 shrink-0">
+<div class="bg-surface-container-lowest rounded-[24px] custom-shadow overflow-hidden p-4 space-y-1">
+<div class="px-4 py-6 text-center border-b border-surface-variant/50 mb-4">
+<div class="relative w-24 h-24 mx-auto mb-4">
+<img alt="User Avatar" class="w-full h-full rounded-full object-cover border-4 border-primary-fixed" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC52OCYFLzzls6JC75R-1pTiYdPH8yNAE-Ciz5xuKeb9EzVjtakVCCvp7Loi7Klep5ckgg9AslgE6IhRukQH-APF6uHuxEu810mD6lZOlaL8iYYDXgv9J8CYK7TCEtEVGDOzAQa6yDhIN7A5rulVEwZJZ3YCKJjVm3u_3HFNzx__SptPVSRAH0CpGBqSpD4e86URw6Jf2Z8og5ICEtORRwqDq6QdkO0bmrb-anzSR0wRYJqUg6DD_-sXkUh2ZsTn49mxW0NGgQt7Eo">
+<button class="absolute bottom-0 right-0 bg-primary text-white p-1.5 rounded-full shadow-lg border-2 border-white hover:scale-105 transition-transform">
+<span class="material-symbols-outlined text-sm">edit</span>
+</button>
+</div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Nguyễn Minh Anh</h2>
+<span class="inline-flex items-center gap-1.5 px-3 py-1 bg-secondary-fixed text-on-secondary-fixed rounded-full text-label-sm mt-2">
+<span class="material-symbols-outlined text-[16px]" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+                            Thành viên Vàng
+                        </span>
+</div>
+<a class="flex items-center gap-3 px-4 py-3.5 rounded-xl bg-primary-container/10 text-primary active-nav-border font-label-md transition-all" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">person</span>
+                        Thông tin cá nhân
+                    </a>
+<a class="flex items-center gap-3 px-4 py-3.5 rounded-xl text-on-surface-variant hover:bg-surface-container-high font-label-md transition-all" href="#">
+<span class="material-symbols-outlined">confirmation_number</span>
+                        Vé của tôi
+                    </a>
+<a class="flex items-center gap-3 px-4 py-3.5 rounded-xl text-on-surface-variant hover:bg-surface-container-high font-label-md transition-all" href="#">
+<span class="material-symbols-outlined">history</span>
+                        Lịch sử giao dịch
+                    </a>
+<a class="flex items-center gap-3 px-4 py-3.5 rounded-xl text-on-surface-variant hover:bg-surface-container-high font-label-md transition-all" href="#">
+<span class="material-symbols-outlined">sell</span>
+                        Ưu đãi &amp; Mã giảm giá
+                    </a>
+<!-- New Wishlist Sidebar Item -->
+<a class="flex items-center gap-3 px-4 py-3.5 rounded-xl text-on-surface-variant hover:bg-surface-container-high font-label-md transition-all" href="#wishlist">
+<span class="material-symbols-outlined">favorite</span>
+                        Điểm đến đã lưu
+                    </a>
+<a class="flex items-center gap-3 px-4 py-3.5 rounded-xl text-on-surface-variant hover:bg-surface-container-high font-label-md transition-all" href="#">
+<span class="material-symbols-outlined">notifications</span>
+                        Thông báo
+                        <span class="ml-auto bg-error text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full">3</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3.5 rounded-xl text-on-surface-variant hover:bg-surface-container-high font-label-md transition-all" href="#">
+<span class="material-symbols-outlined">lock</span>
+                        Đổi mật khẩu
+                    </a>
+<div class="pt-4 mt-4 border-t border-surface-variant/50">
+<button class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-error hover:bg-error-container/20 font-label-md transition-all">
+<span class="material-symbols-outlined">logout</span>
+                            Đăng xuất
+                        </button>
+</div>
+</div>
+</aside>
+<!-- Main Content -->
+<div class="flex-1 space-y-gutter">
+<!-- Personal Info Form -->
+<section class="bg-surface-container-lowest rounded-[24px] custom-shadow p-6 md:p-10">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+<div class="space-y-1">
+<h1 class="font-headline-lg text-headline-lg text-on-surface">Thông tin cá nhân</h1>
+<p class="text-on-surface-variant font-body-md">Xem thông tin tài khoản của bạn</p>
+</div>
+<button class="flex items-center gap-2 px-6 h-12 rounded-full border-2 border-primary text-primary font-label-md hover:bg-primary hover:text-white transition-all">
+<span class="material-symbols-outlined text-[20px]">edit</span>
+                            Chỉnh sửa hồ sơ
+                        </button>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<div class="space-y-1 px-1">
+<label class="block font-label-sm text-primary uppercase tracking-wider">Họ và tên</label>
+<p class="font-body-lg text-on-surface py-1">Nguyễn Minh Anh</p>
+</div>
+<div class="space-y-1 px-1">
+<label class="block font-label-sm text-primary uppercase tracking-wider">Số điện thoại</label>
+<p class="font-body-lg text-on-surface py-1">098 765 4321</p>
+</div>
+<div class="space-y-1 px-1">
+<label class="block font-label-sm text-primary uppercase tracking-wider">Email</label>
+<div class="flex items-center gap-2 py-1">
+<p class="font-body-lg text-on-surface">minhanh.nguyen@example.com</p>
+<span class="material-symbols-outlined text-primary text-[20px]" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+</div>
+<div class="space-y-1 px-1">
+<label class="block font-label-sm text-primary uppercase tracking-wider">Ngày sinh</label>
+<p class="font-body-lg text-on-surface py-1">15/08/1995</p>
+</div>
+<div class="md:col-span-2 space-y-1 px-1">
+<label class="block font-label-sm text-primary uppercase tracking-wider">Địa chỉ</label>
+<p class="font-body-lg text-on-surface py-1">123 Đường Lê Lợi, Quận 1, TP. Hồ Chí Minh</p>
+</div>
+</div>
+</section>
+<!-- Recent Bookings Widget -->
+<section class="bg-surface-container-lowest rounded-[24px] custom-shadow p-6 md:p-8">
+<div class="flex items-center justify-between mb-6">
+<h3 class="font-headline-md text-headline-md text-on-surface">Đơn hàng gần đây</h3>
+<a class="text-primary font-label-md hover:underline" href="#">Xem tất cả</a>
+</div>
+<div class="group relative flex flex-col md:flex-row items-center gap-6 p-4 rounded-[20px] border border-surface-variant hover:border-primary/30 transition-all hover:bg-primary-container/5 cursor-pointer">
+<div class="w-full md:w-32 h-24 rounded-xl overflow-hidden shrink-0">
+<img alt="Sun World Ba Na Hills" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDg08v00jscRj2H8v9bUuBlN8CAr_w8jVJn8yeVmjESBmnc8t-h9YsfZgK9K_L7q84N-NtEHTVYYVkJ_4kRdZsgt5LKFBveGgsjDYnEeIzB8Dumm5wrWwGfUWYxtKLMrtltoxT7RVRpCKtOy7tW_w-3P3nmbnljt6BOY7Im4-nSkRj6H3voMhc8hvFx4rBQjg_R2qSjdynSqLhzOQ9TYHCW77jPH0Lpk459lSDJzbUHGVZiwupKbm8wZ-lNchaaWueHMw5Lc2agvlA">
+</div>
+<div class="flex-1 space-y-1">
+<div class="flex justify-between items-start">
+<h4 class="font-headline-md text-[18px] text-on-surface">Vé Sun World Ba Na Hills - Combo Cáp Treo &amp; Buffet</h4>
+<span class="bg-primary-container text-on-primary-container px-3 py-1 rounded-full text-label-sm">Đã thanh toán</span>
+</div>
+<div class="flex items-center gap-4 text-on-surface-variant text-label-md">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[18px]">calendar_today</span> 25/12/2023</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[18px]">group</span> 2 người lớn</span>
+</div>
+<div class="pt-2 text-primary font-bold">1,450,000 ₫</div>
+</div>
+<div class="md:pr-4">
+<span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+</div>
+</div>
+</section>
+<!-- New Wishlist Section -->
+<section class="bg-surface-container-lowest rounded-[24px] custom-shadow p-6 md:p-8" id="wishlist">
+<div class="flex items-center justify-between mb-6">
+<h3 class="font-headline-md text-headline-md text-on-surface">Danh sách yêu thích</h3>
+<a class="text-primary font-label-md hover:underline" href="#">Xem tất cả</a>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<!-- Wishlist Item 1 -->
+<div class="group relative p-4 rounded-[20px] border border-surface-variant hover:border-primary/30 transition-all hover:bg-primary-container/5">
+<div class="flex gap-4">
+<div class="w-24 h-24 rounded-xl overflow-hidden shrink-0 relative">
+<img alt="Phố cổ Hội An" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDIObQ2xqwRYlqftoiT3usAzPakG4WchG8cfnMekMSu42LqOqk91ASdQGxuQpnEC6-d_rpTOCDtd40sUqFm8O0BlqlRCd5XxW3Fn8YbglzE9cJN4VpHe_1twvorWRDfmIZQVZT4nW8ZvtlLfilKx9nqVV0Kqi7kooQ0Zyb0z1CElpo2JwpAT9PBjhhe46XT76L4DqMLDhME-PHjS6Pqew2o4KOY3XeNTVgxyBUhueckYVbK-dsQhMUJd3RdrbuaUnJIrfkZT9r2u74">
+<button class="absolute top-1 right-1 p-1 bg-white/80 backdrop-blur rounded-full text-error hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">favorite</span>
+</button>
+</div>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<h4 class="font-headline-md text-[16px] text-on-surface line-clamp-1">Phố cổ Hội An - Tour đi bộ &amp; thả đèn</h4>
+<div class="text-primary font-bold text-label-md mt-1">Từ 350,000 ₫</div>
+</div>
+<button class="w-fit px-4 py-1.5 rounded-full bg-primary text-white font-label-sm hover:bg-primary-container transition-colors mt-2">
+                                        Đặt ngay
+                                    </button>
+</div>
+</div>
+</div>
+<!-- Wishlist Item 2 -->
+<div class="group relative p-4 rounded-[20px] border border-surface-variant hover:border-primary/30 transition-all hover:bg-primary-container/5">
+<div class="flex gap-4">
+<div class="w-24 h-24 rounded-xl overflow-hidden shrink-0 relative">
+<img alt="Cáp treo Hòn Thơm" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB3EmmxTzeH7uD6QC_eEerSrJ9h0aUeuJ0fcKoVeRHBZGFONNQZcTRiOEaFg6BtNTw8He3hF096BrfZtwiuQ0GWYM_toyZfHfIS7UDpAX95ifs7wv8O7J-hynId1gW0ukJmhDVt-imnRDYxKY24EmrEa8IzgC4pkT8DyZ2rIeozGLIyqXi5yLMR8-aExscW7YtCNe2l12wDyqLxMUqqVxWgIpV5hQ27doOpCMkMD_YDgL6tl7k7ZcmO3o_aMNKKmSbkEXWPThKAELs">
+<button class="absolute top-1 right-1 p-1 bg-white/80 backdrop-blur rounded-full text-error hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">favorite</span>
+</button>
+</div>
+<div class="flex-1 flex flex-col justify-between">
+<div>
+<h4 class="font-headline-md text-[16px] text-on-surface line-clamp-1">Cáp treo Hòn Thơm - Sun World Phú Quốc</h4>
+<div class="text-primary font-bold text-label-md mt-1">Từ 600,000 ₫</div>
+</div>
+<button class="w-fit px-4 py-1.5 rounded-full bg-primary text-white font-label-sm hover:bg-primary-container transition-colors mt-2">
+                                        Đặt ngay
+                                    </button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-primary dark:bg-on-primary-fixed-variant w-full py-section-gap">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-gutter px-margin-desktop max-w-container-max mx-auto text-on-primary">
+<div class="space-y-6">
+<div class="font-headline-md text-headline-md font-bold text-on-primary">VietTicket Travel</div>
+<p class="font-body-md text-on-primary/80 leading-relaxed">
+                    Khám phá vẻ đẹp Việt Nam cùng VietTicket. Chúng tôi cung cấp những trải nghiệm du lịch đẳng cấp và dịch vụ đặt vé nhanh chóng, an toàn.
+                </p>
+</div>
+<div class="space-y-4">
+<div class="font-label-md text-label-md uppercase tracking-wider">Khám phá</div>
+<ul class="space-y-3">
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Địa điểm nổi tiếng</a></li>
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Cẩm nang du lịch</a></li>
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Tour đặc sắc</a></li>
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Vé tham quan</a></li>
+</ul>
+</div>
+<div class="space-y-4">
+<div class="font-label-md text-label-md uppercase tracking-wider">Hỗ trợ</div>
+<ul class="space-y-3">
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Trung tâm trợ giúp</a></li>
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Chính sách bảo mật</a></li>
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Điều khoản dịch vụ</a></li>
+<li class=""><a class="font-label-sm text-label-sm text-on-primary/80 hover:text-on-primary hover:translate-x-1 transition-all block" href="#">Liên hệ</a></li>
+</ul>
+</div>
+<div class="space-y-4">
+<div class="font-label-md text-label-md uppercase tracking-wider">Kết nối với chúng tôi</div>
+<div class="flex gap-4">
+<a class="w-10 h-10 rounded-full border border-on-primary/20 flex items-center justify-center hover:bg-on-primary hover:text-primary transition-all" href="#">
+<svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M22 12c0-5.523-4.477-10-10-10S2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.878v-6.987h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.988C18.343 21.128 22 16.991 22 12z"></path></svg>
+</a>
+<a class="w-10 h-10 rounded-full border border-on-primary/20 flex items-center justify-center hover:bg-on-primary hover:text-primary transition-all" href="#">
+<svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M12.315 2c2.43 0 2.784.013 3.808.06 1.064.049 1.791.218 2.427.465a4.902 4.902 0 011.772 1.153 4.902 4.902 0 011.153 1.772c.247.636.416 1.363.465 2.427.048 1.067.06 1.407.06 4.123v.08c0 2.643-.012 2.987-.06 4.043-.049 1.064-.218 1.791-.465 2.427a4.902 4.902 0 01-1.153 1.772 4.902 4.902 0 01-1.772 1.153c-.636.247-1.363.416-2.427.465-1.067.048-1.407.06-4.123.06h-.08c-2.643 0-2.987-.012-4.043-.06-1.064-.049-1.791-.218-2.427-.465a4.902 4.902 0 01-1.772-1.153 4.902 4.902 0 01-1.153-1.772c-.247-.636-.416-1.363-.465-2.427-.047-1.024-.06-1.379-.06-3.808v-.63c0-2.43.013-2.784.06-3.808.049-1.064.218-1.791.465-2.427a4.902 4.902 0 011.153-1.772A4.902 4.902 0 015.45 2.525c.636-.247 1.363-.416 2.427-.465C8.901 2.013 9.256 2 11.685 2h.63zm-.081 1.802h-.468c-2.456 0-2.784.011-3.807.058-.975.045-1.504.207-1.857.344-.467.182-.8.398-1.15.748-.35.35-.566.683-.748 1.15-.137.353-.3.882-.344 1.857-.047 1.023-.058 1.351-.058 3.807v.468c0 2.456.011 2.784.058 3.807.045.975.207 1.504.344 1.857.182.466.399.8.748 1.15.35.35.683.566 1.15.748.353.137.882.3 1.857.344 1.054.048 1.37.058 4.041.058h.08c2.597 0 2.917-.01 3.96-.058.976-.045 1.505-.207 1.858-.344.466-.182.8-.398 1.15-.748.35-.35.566-.683.748-1.15.137-.353.3-.882.344-1.857.048-1.055.058-1.37.058-4.041v-.08c0-2.597-.01-2.917-.058-3.96-.045-.976-.207-1.505-.344-1.858a3.097 3.097 0 00-.748-1.15 3.098 3.098 0 00-1.15-.748c-.353-.137-.882-.3-1.857-.344-1.023-.047-1.351-.058-3.807-.058zM12 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16.4a4.238 4.238 0 110-8.476 4.238 4.238 0 010 8.476zm7.82-10.312a1.44 1.44 0 11-2.88 0 1.44 1.44 0 012.88 0z"></path></svg>
+</a>
+</div>
+<div class="pt-6">
+<p class="font-body-md text-on-primary/60">© 2024 VietTicket Travel. All rights reserved.</p>
+</div>
+</div>
+</div>
+</footer>
+<script>
+        // Simple micro-interaction for form focus
+        const inputs = document.querySelectorAll('input, textarea');
+        inputs.forEach(input => {
+            input.addEventListener('focus', () => {
+                input.parentElement.classList.add('scale-[1.01]');
+            });
+            input.addEventListener('blur', () => {
+                input.parentElement.classList.remove('scale-[1.01]');
+            });
+        });
+
+        // Simple button ripple effect simulation
+        const buttons = document.querySelectorAll('button');
+        buttons.forEach(button => {
+            button.addEventListener('mousedown', function(e) {
+                this.classList.add('scale-95');
+            });
+            button.addEventListener('mouseup', function(e) {
+                this.classList.remove('scale-95');
+            });
+        });
+    </script>
+
+
+</body></html>

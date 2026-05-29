@@ -1,0 +1,30 @@
+import { BrowserRouter } from 'react-router-dom'
+import { GoogleOAuthProvider } from '@react-oauth/google'
+import { ToastContainer } from 'react-toastify'
+import { AuthProvider } from './context/AuthContext.jsx'
+import AppRoutes from './routes/AppRoutes.jsx'
+
+function App() {
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || 'missing-google-client-id'
+
+  return (
+    <GoogleOAuthProvider clientId={googleClientId}>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppRoutes />
+          <ToastContainer
+            autoClose={2600}
+            closeOnClick
+            draggable
+            newestOnTop
+            pauseOnHover
+            position="top-right"
+            theme="light"
+          />
+        </AuthProvider>
+      </BrowserRouter>
+    </GoogleOAuthProvider>
+  )
+}
+
+export default App

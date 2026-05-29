@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+
+<html class="light" lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Đăng ký - VietTicket Travel</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;family=Plus+Jakarta+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-error-container": "#93000a",
+                        "background": "#f9f9fc",
+                        "surface-container-high": "#e8e8ea",
+                        "tertiary-fixed-dim": "#c4c7c6",
+                        "error-container": "#ffdad6",
+                        "surface-variant": "#e2e2e5",
+                        "outline-variant": "#bdc9ca",
+                        "on-secondary-fixed": "#271900",
+                        "surface-container": "#eeeef0",
+                        "on-background": "#1a1c1e",
+                        "on-primary-container": "#d5faff",
+                        "primary-fixed": "#96f1fc",
+                        "inverse-primary": "#7ad4df",
+                        "surface-container-highest": "#e2e2e5",
+                        "on-tertiary-fixed": "#181c1c",
+                        "inverse-on-surface": "#f0f0f3",
+                        "surface-dim": "#dadadc",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#feb700",
+                        "on-primary": "#ffffff",
+                        "tertiary-fixed": "#e0e3e2",
+                        "primary-container": "#007b85",
+                        "on-tertiary": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "secondary-fixed": "#ffdea8",
+                        "surface-tint": "#006971",
+                        "surface-container-low": "#f3f3f6",
+                        "primary-fixed-dim": "#7ad4df",
+                        "on-secondary-container": "#6b4b00",
+                        "on-error": "#ffffff",
+                        "outline": "#6e797a",
+                        "inverse-surface": "#2f3133",
+                        "secondary": "#7c5800",
+                        "tertiary-container": "#6c706f",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary-fixed-variant": "#004f56",
+                        "on-surface": "#1a1c1e",
+                        "on-secondary-fixed-variant": "#5e4200",
+                        "secondary-fixed-dim": "#ffba20",
+                        "tertiary": "#545857",
+                        "on-tertiary-fixed-variant": "#434847",
+                        "on-tertiary-container": "#f1f4f3",
+                        "on-primary-fixed": "#001f23",
+                        "surface-bright": "#f9f9fc",
+                        "surface": "#f9f9fc",
+                        "primary": "#006068",
+                        "on-surface-variant": "#3e494a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "gutter": "24px",
+                        "section-gap": "80px",
+                        "margin-mobile": "16px",
+                        "margin-desktop": "64px",
+                        "container-max": "1280px",
+                        "base": "8px"
+                    },
+                    "fontFamily": {
+                        "headline-lg": ["Be Vietnam Pro"],
+                        "display-lg-mobile": ["Be Vietnam Pro"],
+                        "label-sm": ["Plus Jakarta Sans"],
+                        "body-lg": ["Plus Jakarta Sans"],
+                        "label-md": ["Plus Jakarta Sans"],
+                        "body-md": ["Plus Jakarta Sans"],
+                        "headline-md": ["Be Vietnam Pro"],
+                        "display-lg": ["Be Vietnam Pro"]
+                    },
+                    "fontSize": {
+                        "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "600"}],
+                        "display-lg-mobile": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                        "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "500"}],
+                        "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                        "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "600"}],
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                        "display-lg": ["56px", {"lineHeight": "64px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md overflow-x-hidden">
+<main class="min-h-screen flex flex-col md:flex-row">
+<!-- Left Side: Visual Inspiration (Suppressed Nav Shell as per Task) -->
+<section class="hidden md:flex md:w-1/2 relative overflow-hidden bg-primary-container">
+<div class="absolute inset-0 z-0">
+<img alt="Hội An Sunset" class="w-full h-full object-cover" data-alt="A breathtaking cinematic wide-angle shot of the ancient town of Hoi An at sunset. The sky is a gradient of deep orange and soft violet, reflecting perfectly on the calm Thu Bon River. Traditional Vietnamese yellow houses with weathered textures line the waterfront, decorated with glowing silk lanterns in vibrant red and teal. The lighting is warm and ethereal, capturing the premium explorer aesthetic with a rich, aspirational atmosphere that evokes timeless travel discovery." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCw0Rm60MaLr1foI6gwgH8eOPOqUUK-fDsZQmwZYwQyy_TXgZtQuF9S9kQ_FYI3QGCqyyv2BwR7TTt11s6Y6qmL_LIp6STwYsjTdWZhYGVIcHdGU9ZyiIxdAyaVgiJkezCEIvczuLpaqZWPaBn1QIn8TJlCZCKRp-UapOQtDC8lywYjaHi9m-WIBo7HG1fceVTbfbhdddyhDdDDmHhFf_sDOaZKFAPUDb5s810bIcFOIzOgOLQR50jDo5J7rK-rZ7g2QDjOUG6WJ-A"/>
+<div class="absolute inset-0 bg-gradient-to-t from-primary/80 via-primary/20 to-transparent"></div>
+</div>
+<div class="relative z-10 p-margin-desktop flex flex-col justify-end w-full h-full">
+<div class="max-w-md">
+<h1 class="font-display-lg text-display-lg text-on-primary mb-4 leading-tight tracking-tight">
+                        Khám phá <br/> Việt Nam theo <br/> cách riêng của bạn.
+                    </h1>
+<p class="font-body-lg text-body-lg text-on-primary/90">
+                        Hành trình vạn dặm bắt đầu từ một bước chân. Hãy để VietTicket Travel đồng hành cùng bạn trên mọi nẻo đường của tổ quốc.
+                    </p>
+</div>
+</div>
+<!-- Logo Overlay -->
+<div class="absolute top-margin-desktop left-margin-desktop z-20">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-on-primary text-4xl" data-icon="explore" style="font-variation-settings: 'FILL' 1;">explore</span>
+<span class="font-headline-md text-headline-md font-bold text-on-primary tracking-tight">VietTicket Travel</span>
+</div>
+</div>
+</section>
+<!-- Right Side: Registration Form -->
+<section class="w-full md:w-1/2 bg-surface flex items-center justify-center p-margin-mobile md:p-margin-desktop">
+<div class="w-full max-w-[480px]">
+<!-- Header -->
+<div class="mb-10 text-center md:text-left">
+<div class="md:hidden flex justify-center mb-6">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-4xl" data-icon="explore" style="font-variation-settings: 'FILL' 1;">explore</span>
+<span class="font-headline-md text-headline-md font-bold text-primary tracking-tight">VietTicket Travel</span>
+</div>
+</div>
+<h2 class="font-headline-lg text-headline-lg text-on-surface mb-2">Tạo tài khoản mới</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">Bắt đầu hành trình khám phá vẻ đẹp Việt Nam ngay hôm nay.</p>
+</div>
+<!-- Social Sign-up -->
+<div class="grid grid-cols-2 gap-4 mb-8">
+<button class="flex items-center justify-center gap-2 h-14 rounded-lg border border-outline-variant bg-surface hover:bg-surface-container-low transition-all active:scale-95">
+<img alt="Google Logo" class="w-6 h-6" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAo-TnpSqd-h858CcpNO3GocNaqTdMlQXptDcR0KbzAJcOq1WqbKYZIOgYL7j_1J5N_hR7PLzAk7GL6bxF6-lfUF1cFZ2nkAtdStB8vTGpE96ImJH8mmXlbmFTAmStQ_DXNQvleM3mc2I_6aFbW8ut3qpPJUsG0HOQr7f-DkMuQBJUNcZxu7I7OT_1KgJHPawXQhKHLELPTgB2Ca3OaTpwwAB_gmBHTkzol_pX7BQkIRLW1nsHQJnpxrRMIBENQNfn-6JNKVxZW96c"/>
+<span class="font-label-md text-label-md">Google</span>
+</button>
+<button class="flex items-center justify-center gap-2 h-14 rounded-lg border border-outline-variant bg-surface hover:bg-surface-container-low transition-all active:scale-95">
+<span class="material-symbols-outlined text-on-surface" data-icon="apple" style="font-variation-settings: 'FILL' 1;">ios</span>
+<span class="font-label-md text-label-md">Apple</span>
+</button>
+</div>
+<div class="relative flex items-center mb-8">
+<div class="flex-grow border-t border-outline-variant"></div>
+<span class="flex-shrink mx-4 font-label-sm text-label-sm text-outline">HOẶC ĐĂNG KÝ VỚI EMAIL</span>
+<div class="flex-grow border-t border-outline-variant"></div>
+</div>
+<!-- Registration Form -->
+<form class="space-y-5" id="registerForm" onsubmit="return false;">
+<!-- Full Name -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant ml-1" for="fullName">Họ và tên</label>
+<div class="relative">
+<input class="w-full h-14 px-4 bg-surface-container-low border border-outline-variant rounded-lg focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-body-md" id="fullName" placeholder="Nguyễn Văn A" type="text"/>
+</div>
+</div>
+<!-- Email -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant ml-1" for="email">Địa chỉ email</label>
+<div class="relative">
+<input class="w-full h-14 px-4 bg-surface-container-low border border-outline-variant rounded-lg focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-body-md" id="email" placeholder="email@vietticket.vn" type="email"/>
+</div>
+</div>
+<!-- Password -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant ml-1" for="password">Mật khẩu</label>
+<div class="relative">
+<input class="w-full h-14 px-4 pr-12 bg-surface-container-low border border-outline-variant rounded-lg focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-body-md" id="password" placeholder="••••••••" type="password"/>
+<button class="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors" onclick="togglePassword('password', this)" type="button">
+<span class="material-symbols-outlined" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<!-- Confirm Password -->
+<div class="space-y-2">
+<label class="font-label-md text-label-md text-on-surface-variant ml-1" for="confirmPassword">Xác nhận mật khẩu</label>
+<div class="relative">
+<input class="w-full h-14 px-4 pr-12 bg-surface-container-low border border-outline-variant rounded-lg focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all font-body-md" id="confirmPassword" placeholder="••••••••" type="password"/>
+<button class="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors" onclick="togglePassword('confirmPassword', this)" type="button">
+<span class="material-symbols-outlined" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<!-- Terms -->
+<div class="flex items-start gap-3 pt-2">
+<div class="relative flex items-center">
+<input class="peer h-5 w-5 rounded border-outline-variant text-primary focus:ring-primary transition-all cursor-pointer" id="terms" type="checkbox"/>
+</div>
+<label class="font-label-sm text-label-sm text-on-surface-variant leading-tight cursor-pointer" for="terms">
+                            Tôi đồng ý với <a class="text-primary hover:underline" href="#">Điều khoản</a> và <a class="text-primary hover:underline" href="#">Chính sách bảo mật</a> của VietTicket Travel.
+                        </label>
+</div>
+<!-- CTA Button -->
+<button class="w-full h-14 bg-primary text-on-primary font-headline-md text-headline-md rounded-lg shadow-md hover:bg-primary-container transition-all active:scale-[0.98] mt-4 flex items-center justify-center gap-2" type="submit">
+<span>Đăng ký ngay</span>
+<span class="material-symbols-outlined" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</form>
+<!-- Footer -->
+<div class="mt-8 text-center">
+<p class="font-body-md text-body-md text-on-surface-variant">
+                        Đã có tài khoản? 
+                        <a class="text-primary font-label-md text-label-md hover:underline ml-1" href="#">Đăng nhập ngay</a>
+</p>
+</div>
+<!-- Support link -->
+<div class="mt-12 flex justify-center gap-6">
+<a class="font-label-sm text-label-sm text-outline hover:text-primary transition-colors" href="#">Trợ giúp</a>
+<a class="font-label-sm text-label-sm text-outline hover:text-primary transition-colors" href="#">Quyền riêng tư</a>
+<a class="font-label-sm text-label-sm text-outline hover:text-primary transition-colors" href="#">Liên hệ</a>
+</div>
+</div>
+</section>
+</main>
+<script>
+        function togglePassword(id, btn) {
+            const input = document.getElementById(id);
+            const icon = btn.querySelector('.material-symbols-outlined');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.textContent = 'visibility_off';
+            } else {
+                input.type = 'password';
+                icon.textContent = 'visibility';
+            }
+        }
+
+        // Atmospheric micro-interaction: Subtle parallax on mouse move for desktop hero image
+        document.addEventListener('mousemove', (e) => {
+            const img = document.querySelector('section img');
+            if (!img) return;
+            const x = (e.clientX / window.innerWidth - 0.5) * 10;
+            const y = (e.clientY / window.innerHeight - 0.5) * 10;
+            img.style.transform = `scale(1.1) translate(${x}px, ${y}px)`;
+        });
+    </script>
+</body></html>
