@@ -38,10 +38,11 @@ function RegisterPage() {
       email: validateEmail(form.email),
       phone: validatePhone(form.phone),
       password: validatePassword(form.password),
-      confirmPassword:
-        form.confirmPassword && form.confirmPassword === form.password
-          ? ''
-          : 'Mật khẩu xác nhận không khớp.',
+      confirmPassword: !form.confirmPassword
+        ? 'Vui lòng xác nhận mật khẩu.'
+        : form.confirmPassword !== form.password
+          ? 'Mật khẩu xác nhận không khớp.'
+          : '',
       acceptedTerms: form.acceptedTerms ? '' : 'Vui lòng đồng ý điều khoản.',
     }),
     [form],

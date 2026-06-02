@@ -31,10 +31,10 @@ router.post('/register', authRateLimit, register);
 router.post('/verify-email', authRateLimit, verifyEmail);
 router.post('/resend-verification', authRateLimit, resendVerification);
 router.post('/login', authRateLimit, login);
-router.post('/google', googleLogin);
+router.post('/google', authRateLimit, googleLogin);
 router.post('/logout', logout);
 router.post('/forgot-password', authRateLimit, forgotPassword);
-router.post('/reset-password', resetPassword);
+router.post('/reset-password', authRateLimit, resetPassword);
 router.get('/me', protect, getMe);
 
 module.exports = router;

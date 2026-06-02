@@ -803,6 +803,80 @@
   font-size: 14px;
 }
 
+/* Coming-soon nav item */
+.account-nav-item--disabled {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--color-outline);
+  padding: 13px 14px;
+  font-weight: 700;
+  opacity: 0.6;
+  cursor: not-allowed;
+  user-select: none;
+}
+
+.account-nav-badge {
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--color-surface-highest);
+  color: var(--color-text-muted);
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* Empty activity state */
+.activity-list--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border: 1px dashed var(--color-surface-highest);
+  border-radius: 20px;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.activity-list--empty .material-symbols-outlined {
+  font-size: 40px;
+  color: var(--color-outline);
+}
+
+/* ForgotPassword success state */
+.auth-success-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(0, 96, 104, 0.16);
+  border-radius: 20px;
+  background: rgba(0, 123, 133, 0.06);
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.auth-success-state .material-symbols-outlined {
+  font-size: 48px;
+  color: var(--color-primary);
+}
+
+.auth-success-state p {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+/* Supplementary note helper */
+.auth-helper--note {
+  border-radius: 14px;
+  background: var(--color-surface-low);
+  padding: 10px 14px;
+}
+
 .profile-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -133,7 +133,7 @@ function VerifyEmailPage() {
         {hasAutoToken ? (
           <div className="auth-form auth-form--relaxed">
             <div className="auth-loading-state" aria-live="polite">
-              <span className="auth-spinner" aria-hidden="true" />
+              {status === 'verifying' && <span className="auth-spinner" aria-hidden="true" />}
               <p>
                 {status === 'verifying'
                   ? 'Đang xác minh email...'
@@ -150,7 +150,7 @@ function VerifyEmailPage() {
               label="Mã xác minh email"
               icon="key"
               type="text"
-              placeholder="Dán token từ link email hoặc terminal backend"
+              placeholder="Dán mã xác minh từ email"
               value={token}
               onChange={(event) => setToken(event.target.value)}
               required
