@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+
+<html lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>VietTicket Admin - Quản lý Tài khoản</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-low": "#f3f3f6",
+                    "on-secondary-container": "#6b4b00",
+                    "tertiary-fixed": "#96f1fc",
+                    "secondary-fixed": "#ffdea8",
+                    "error-container": "#ffdad6",
+                    "tertiary-fixed-dim": "#79d4df",
+                    "on-tertiary-container": "#7fdae5",
+                    "outline": "#6f797a",
+                    "secondary-container": "#feb700",
+                    "on-secondary": "#ffffff",
+                    "secondary": "#7c5800",
+                    "inverse-primary": "#8ad2db",
+                    "tertiary-container": "#006068",
+                    "surface-container": "#eeeef0",
+                    "primary": "#00474d",
+                    "on-primary-container": "#90d8e1",
+                    "primary-fixed": "#a6eff8",
+                    "surface-bright": "#f9f9fc",
+                    "on-primary-fixed-variant": "#004f56",
+                    "tertiary": "#00474d",
+                    "on-primary": "#ffffff",
+                    "on-primary-fixed": "#001f23",
+                    "on-secondary-fixed-variant": "#5e4200",
+                    "inverse-surface": "#2f3133",
+                    "primary-fixed-dim": "#8ad2db",
+                    "surface-container-lowest": "#ffffff",
+                    "on-tertiary-fixed": "#001f23",
+                    "surface-variant": "#e2e2e5",
+                    "on-tertiary": "#ffffff",
+                    "surface-dim": "#dadadc",
+                    "background": "#f9f9fc",
+                    "outline-variant": "#bec8ca",
+                    "on-secondary-fixed": "#271900",
+                    "on-error-container": "#93000a",
+                    "on-error": "#ffffff",
+                    "on-tertiary-fixed-variant": "#004f56",
+                    "surface-container-high": "#e8e8ea",
+                    "surface-tint": "#136870",
+                    "inverse-on-surface": "#f0f0f3",
+                    "primary-container": "#006068",
+                    "secondary-fixed-dim": "#ffba22",
+                    "surface": "#f9f9fc",
+                    "on-surface": "#1a1c1e",
+                    "surface-container-highest": "#e2e2e5",
+                    "error": "#ba1a1a",
+                    "on-surface-variant": "#3f484a",
+                    "on-background": "#1a1c1e"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "sidebar-width": "280px",
+                    "container-max-width": "1440px",
+                    "unit": "8px",
+                    "gutter": "24px",
+                    "margin-mobile": "16px",
+                    "margin-desktop": "32px"
+            },
+            "fontFamily": {
+                    "display-lg": ["Be Vietnam Pro"],
+                    "label-sm": ["Plus Jakarta Sans"],
+                    "headline-lg": ["Be Vietnam Pro"],
+                    "label-lg": ["Plus Jakarta Sans"],
+                    "body-lg": ["Plus Jakarta Sans"],
+                    "headline-lg-mobile": ["Be Vietnam Pro"],
+                    "label-md": ["Plus Jakarta Sans"],
+                    "body-md": ["Plus Jakarta Sans"],
+                    "headline-md": ["Be Vietnam Pro"],
+                    "display-md": ["Be Vietnam Pro"],
+                    "headline-sm": ["Be Vietnam Pro"],
+                    "body-sm": ["Plus Jakarta Sans"]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+      body {
+        background-color: #f9f9fc;
+        color: #1a1c1e;
+        overflow-x: hidden;
+      }
+      .glass-nav {
+        backdrop-filter: blur(12px);
+        background: rgba(255, 255, 255, 0.7);
+      }
+      .card-shadow {
+        box-shadow: 0 8px 30px rgba(0, 123, 133, 0.08);
+      }
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 6px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #bec8ca;
+        border-radius: 10px;
+      }
+      .modal-backdrop {
+        backdrop-filter: blur(4px);
+        background: rgba(0, 0, 0, 0.3);
+      }
+    </style>
+</head>
+<body class="font-body-md text-body-md">
+<!-- Left SideNavBar -->
+<aside class="fixed left-0 top-0 h-screen w-sidebar-width bg-surface-container-lowest border-r border-outline-variant/20 shadow-md flex flex-col py-8 z-50">
+<div class="px-8 mb-10">
+<h1 class="font-display-md text-display-md font-bold text-primary">VietTicket</h1>
+<p class="text-on-surface-variant font-body-sm">Travel Administration</p>
+</div>
+<nav class="flex-1 space-y-1 overflow-y-auto custom-scrollbar">
+<a class="text-on-surface-variant font-medium mx-4 py-3 px-4 flex items-center gap-3 hover:bg-surface-container-high rounded-lg transition-all active:scale-98" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-lg text-label-lg">Dashboard</span>
+</a>
+<a class="bg-primary-container text-on-primary-container font-bold rounded-lg mx-4 py-3 px-4 flex items-center gap-3 transition-all active:scale-98" href="#">
+<span class="material-symbols-outlined">group</span>
+<span class="font-label-lg text-label-lg">User Management</span>
+</a>
+<a class="text-on-surface-variant font-medium mx-4 py-3 px-4 flex items-center gap-3 hover:bg-surface-container-high rounded-lg transition-all active:scale-98" href="#">
+<span class="material-symbols-outlined">confirmation_number</span>
+<span class="font-label-lg text-label-lg">Booking Management</span>
+</a>
+<a class="text-on-surface-variant font-medium mx-4 py-3 px-4 flex items-center gap-3 hover:bg-surface-container-high rounded-lg transition-all active:scale-98" href="#">
+<span class="material-symbols-outlined">map</span>
+<span class="font-label-lg text-label-lg">Attractions</span>
+</a>
+<a class="text-on-surface-variant font-medium mx-4 py-3 px-4 flex items-center gap-3 hover:bg-surface-container-high rounded-lg transition-all active:scale-98" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span class="font-label-lg text-label-lg">Reports</span>
+</a>
+<a class="text-on-surface-variant font-medium mx-4 py-3 px-4 flex items-center gap-3 hover:bg-surface-container-high rounded-lg transition-all active:scale-98" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-lg text-label-lg">Settings</span>
+</a>
+</nav>
+<div class="mt-auto px-4">
+<button class="w-full text-on-surface-variant font-medium py-3 px-4 flex items-center gap-3 hover:bg-surface-container-high rounded-lg transition-all active:scale-98">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-label-lg text-label-lg">Logout</span>
+</button>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="ml-[280px] min-h-screen pb-20">
+<!-- TopNavBar -->
+<header class="fixed top-0 right-0 left-[280px] h-16 glass-nav border-b border-outline-variant/10 shadow-[0_8px_30px_rgba(0,123,133,0.08)] flex items-center justify-between px-margin-desktop z-40">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative w-full max-w-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full pl-10 pr-4 py-2 bg-surface-container-low border-none rounded-full text-body-sm focus:ring-2 focus:ring-primary/20" placeholder="Tìm kiếm nhanh..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<button class="relative text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-error rounded-full"></span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+<div class="flex items-center gap-3 border-l border-outline-variant/20 pl-6">
+<div class="text-right hidden xl:block">
+<p class="font-label-lg text-label-lg text-on-surface">Admin VietTicket</p>
+<p class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Super Admin</p>
+</div>
+<img alt="Admin Avatar" class="w-10 h-10 rounded-full object-cover border-2 border-primary-container" data-alt="A professional headshot of a confident young Vietnamese man with a friendly smile, set against a blurred, high-end office background with modern teak accents. The lighting is bright and airy, reflecting a clean and premium corporate atmosphere. The color palette is composed of soft whites, neutral grays, and subtle teal tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAqwA2vVYPBeL8Zcb0iWCd3VwEHMbxsQBwtAnbHawOM_mKGz2tLtmZ14et_O20hSW5_OzpDTD1HjJXa4QWWoq3CtgiloJo7OgLN8NTM3g3utt3m1iEcrRWdixGUF0USX0Z844P35QVdQ2zbC_rCOotGyEAWwa-bxqpYitdy51AMVEph1hD5Pi9L5w2qGXbGBAjs2nxR122LdtV48HzBEtEqq3h_chF544B-TxKxoosLrX_AGz87SWR3Iw4WV4P1gZR4xTgPytgzTvU"/>
+</div>
+</div>
+</header>
+<!-- Page Canvas -->
+<div class="pt-24 px-margin-desktop max-w-container-max-width mx-auto">
+<!-- Header Section -->
+<div class="mb-10">
+<h2 class="font-headline-lg text-headline-lg text-primary mb-1">Quản lý Tài khoản</h2>
+<p class="text-on-surface-variant font-body-md">Xem danh sách, kiểm soát trạng thái hoạt động của thành viên và đối tác.</p>
+</div>
+<!-- Stats Row -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-gutter mb-10">
+<div class="bg-surface-container-lowest p-6 rounded-[20px] card-shadow flex flex-col relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+<div class="flex justify-between items-start mb-4">
+<div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined">group</span>
+</div>
+</div>
+<p class="text-on-surface-variant font-label-lg uppercase tracking-tight mb-1">Total Accounts</p>
+<h3 class="font-headline-lg text-headline-lg text-on-surface">1,248</h3>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-[20px] card-shadow flex flex-col relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+<div class="flex justify-between items-start mb-4">
+<div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined">person</span>
+</div>
+</div>
+<p class="text-on-surface-variant font-label-lg uppercase tracking-tight mb-1">Active Customers</p>
+<h3 class="font-headline-lg text-headline-lg text-on-surface">982</h3>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-[20px] card-shadow flex flex-col relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+<div class="flex justify-between items-start mb-4">
+<div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined">store</span>
+</div>
+</div>
+<p class="text-on-surface-variant font-label-lg uppercase tracking-tight mb-1">Attraction Partners</p>
+<h3 class="font-headline-lg text-headline-lg text-on-surface">256</h3>
+</div>
+<div class="bg-surface-container-lowest p-6 rounded-[20px] card-shadow flex flex-col relative overflow-hidden group">
+<div class="absolute top-0 right-0 w-24 h-24 bg-error/5 rounded-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
+<div class="flex justify-between items-start mb-4">
+<div class="w-12 h-12 rounded-full bg-error/10 flex items-center justify-center text-error">
+<span class="material-symbols-outlined">lock</span>
+</div>
+</div>
+<p class="text-on-surface-variant font-label-lg uppercase tracking-tight mb-1">Locked Accounts</p>
+<h3 class="font-headline-lg text-headline-lg text-error">10</h3>
+</div>
+</div>
+<!-- Filters & Search Bar -->
+<div class="bg-surface-container-lowest p-4 rounded-[20px] card-shadow mb-6 flex flex-col lg:flex-row lg:items-center gap-4">
+<div class="flex-1 relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full pl-10 pr-4 py-3 border border-outline-variant/30 rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none text-body-sm transition-all" id="search-input" placeholder="Tìm kiếm theo tên, email, số điện thoại..." type="text"/>
+</div>
+<div class="flex flex-wrap items-center gap-3">
+<div class="relative min-w-[140px]">
+<select class="w-full pl-4 pr-10 py-3 appearance-none border border-outline-variant/30 rounded-xl bg-transparent focus:border-primary focus:ring-1 focus:ring-primary outline-none text-body-sm" id="role-filter">
+<option value="">Vai trò: Tất cả</option>
+<option value="CUSTOMER">CUSTOMER</option>
+<option value="PARTNER">PARTNER</option>
+<option value="ADMIN">ADMIN</option>
+<option value="STAFF">STAFF</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-outline">expand_more</span>
+</div>
+<div class="relative min-w-[140px]">
+<select class="w-full pl-4 pr-10 py-3 appearance-none border border-outline-variant/30 rounded-xl bg-transparent focus:border-primary focus:ring-1 focus:ring-primary outline-none text-body-sm" id="status-filter">
+<option value="">Trạng thái: Tất cả</option>
+<option value="ACTIVE">ACTIVE</option>
+<option value="LOCKED">LOCKED</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-outline">expand_more</span>
+</div>
+<button class="px-6 py-3 bg-surface-container-low text-on-surface-variant font-label-lg rounded-xl hover:bg-surface-container-high transition-colors active:scale-95 flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]">restart_alt</span>
+                        Reset
+                    </button>
+</div>
+</div>
+<!-- User Table -->
+<div class="bg-surface-container-lowest rounded-[20px] card-shadow overflow-hidden">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant/20">
+<th class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">Người dùng</th>
+<th class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">Vai trò</th>
+<th class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest text-center">Google</th>
+<th class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">Trạng thái</th>
+<th class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">Ngày đăng ký</th>
+<th class="px-6 py-4 font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest text-right">Hành động</th>
+</tr>
+</thead>
+<tbody id="user-table-body">
+<!-- Rows will be injected by JS -->
+</tbody>
+</table>
+</div>
+<!-- Pagination Mock -->
+<div class="px-6 py-4 border-t border-outline-variant/10 flex items-center justify-between">
+<p class="text-body-sm text-on-surface-variant">Hiển thị 1 - 5 trong tổng số 1,248 tài khoản</p>
+<div class="flex items-center gap-2">
+<button class="p-2 rounded-lg hover:bg-surface-container-high disabled:opacity-30" disabled="">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button class="w-8 h-8 rounded-lg bg-primary text-white font-label-md flex items-center justify-center">1</button>
+<button class="w-8 h-8 rounded-lg hover:bg-surface-container-high font-label-md flex items-center justify-center">2</button>
+<button class="w-8 h-8 rounded-lg hover:bg-surface-container-high font-label-md flex items-center justify-center">3</button>
+<span class="px-2">...</span>
+<button class="p-2 rounded-lg hover:bg-surface-container-high">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Modals Overlay -->
+<div class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4" id="modal-container">
+<div class="modal-backdrop absolute inset-0"></div>
+<!-- Lock Account Modal -->
+<div class="relative bg-white w-full max-w-md rounded-[24px] shadow-2xl overflow-hidden hidden transform transition-all scale-95 opacity-0 duration-300" id="lock-modal">
+<div class="p-8">
+<div class="flex items-center gap-4 mb-6">
+<div class="w-12 h-12 rounded-full bg-error/10 flex items-center justify-center text-error">
+<span class="material-symbols-outlined">lock_person</span>
+</div>
+<div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface">Khóa tài khoản</h4>
+<p class="text-on-surface-variant text-body-sm">Hành động này sẽ ngăn người dùng truy cập.</p>
+</div>
+</div>
+<div class="space-y-6">
+<div>
+<label class="block font-label-lg text-label-lg text-on-surface mb-2">Lý do khóa tài khoản</label>
+<textarea class="w-full p-4 border border-outline-variant/40 rounded-xl focus:border-error focus:ring-1 focus:ring-error outline-none text-body-sm h-32 resize-none" placeholder="Nhập lý do chi tiết..."></textarea>
+</div>
+<label class="flex items-center gap-3 cursor-pointer group">
+<div class="relative flex items-center">
+<input checked="" class="peer sr-only" type="checkbox"/>
+<div class="w-5 h-5 border-2 border-outline rounded flex items-center justify-center peer-checked:bg-error peer-checked:border-error transition-all">
+<span class="material-symbols-outlined text-white text-[14px] font-bold">check</span>
+</div>
+</div>
+<span class="text-body-sm text-on-surface-variant group-hover:text-on-surface transition-colors">Gửi email thông báo cho người dùng</span>
+</label>
+</div>
+<div class="mt-8 flex gap-3">
+<button class="flex-1 py-3 px-4 rounded-xl font-label-lg text-on-surface-variant hover:bg-surface-container-high transition-all" onclick="closeModals()">Hủy</button>
+<button class="flex-1 py-3 px-4 rounded-xl font-label-lg bg-error text-white hover:bg-red-700 transition-all active:scale-95 shadow-lg shadow-error/20" onclick="confirmAction('LOCK')">Xác nhận Khóa</button>
+</div>
+</div>
+</div>
+<!-- Unlock Account Modal -->
+<div class="relative bg-white w-full max-w-md rounded-[24px] shadow-2xl overflow-hidden hidden transform transition-all scale-95 opacity-0 duration-300" id="unlock-modal">
+<div class="p-8">
+<div class="flex items-center gap-4 mb-6">
+<div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined">lock_open</span>
+</div>
+<div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface">Mở khóa tài khoản</h4>
+<p class="text-on-surface-variant text-body-sm">Khôi phục quyền truy cập cho người dùng này.</p>
+</div>
+</div>
+<div class="space-y-6">
+<p class="text-body-md text-on-surface">Bạn có chắc chắn muốn mở khóa cho tài khoản này? Người dùng sẽ có thể đăng nhập lại ngay lập tức.</p>
+<label class="flex items-center gap-3 cursor-pointer group">
+<div class="relative flex items-center">
+<input checked="" class="peer sr-only" type="checkbox"/>
+<div class="w-5 h-5 border-2 border-outline rounded flex items-center justify-center peer-checked:bg-primary peer-checked:border-primary transition-all">
+<span class="material-symbols-outlined text-white text-[14px] font-bold">check</span>
+</div>
+</div>
+<span class="text-body-sm text-on-surface-variant group-hover:text-on-surface transition-colors">Gửi email thông báo kích hoạt lại</span>
+</label>
+</div>
+<div class="mt-8 flex gap-3">
+<button class="flex-1 py-3 px-4 rounded-xl font-label-lg text-on-surface-variant hover:bg-surface-container-high transition-all" onclick="closeModals()">Hủy</button>
+<button class="flex-1 py-3 px-4 rounded-xl font-label-lg bg-primary text-white hover:bg-primary-container hover:text-on-primary-container transition-all active:scale-95 shadow-lg shadow-primary/20" onclick="confirmAction('UNLOCK')">Mở khóa Ngay</button>
+</div>
+</div>
+</div>
+</div>
+<script>
+        const usersMock = [
+            { id: 1, name: "Nguyễn Văn An", email: "an.nguyen@example.com", avatar: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=100", role: "CUSTOMER", google: true, status: "ACTIVE", date: "15/05/2023" },
+            { id: 2, name: "Trần Thị Bình", email: "binh.tt@partner-tour.vn", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=100", role: "PARTNER", google: false, status: "ACTIVE", date: "02/11/2022" },
+            { id: 3, name: "Lê Minh Công", email: "cong.le@vietticket.com", avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100", role: "ADMIN", google: true, status: "ACTIVE", date: "01/01/2022" },
+            { id: 4, name: "Phạm Diệu Hoa", email: "hoa.pham@example.com", avatar: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&q=80&w=100", role: "CUSTOMER", google: true, status: "LOCKED", date: "20/08/2023" },
+            { id: 5, name: "Hoàng Gia Bảo", email: "bao.hoang@staff.vietticket.vn", avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=100", role: "STAFF", google: false, status: "ACTIVE", date: "12/03/2023" }
+        ];
+
+        let currentUserAction = null;
+
+        function renderUsers(users) {
+            const tbody = document.getElementById('user-table-body');
+            tbody.innerHTML = users.map(user => `
+                <tr class="hover:bg-surface-container-low transition-colors group">
+                    <td class="px-6 py-4">
+                        <div class="flex items-center gap-3">
+                            <img src="${user.avatar}" alt="${user.name}" class="w-10 h-10 rounded-full object-cover">
+                            <div>
+                                <p class="font-label-lg text-label-lg text-on-surface">${user.name}</p>
+                                <p class="text-on-surface-variant text-body-sm">${user.email}</p>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4">
+                        <span class="px-3 py-1 rounded-full font-label-sm text-label-sm ${getRoleStyles(user.role)}">
+                            ${user.role}
+                        </span>
+                    </td>
+                    <td class="px-6 py-4 text-center">
+                        ${user.google ? 
+                            '<span class="material-symbols-outlined text-primary" style="font-variation-settings: \'FILL\' 1">check_circle</span>' : 
+                            '<span class="material-symbols-outlined text-outline-variant">cancel</span>'}
+                    </td>
+                    <td class="px-6 py-4">
+                        <div class="flex items-center gap-2">
+                            <div class="w-2 h-2 rounded-full ${user.status === 'ACTIVE' ? 'bg-primary' : 'bg-error'}"></div>
+                            <span class="font-label-md text-label-md ${user.status === 'ACTIVE' ? 'text-primary' : 'text-error'}">${user.status}</span>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 text-on-surface-variant font-body-sm">
+                        ${user.date}
+                    </td>
+                    <td class="px-6 py-4 text-right">
+                        <div class="flex items-center justify-end gap-2">
+                            ${user.status === 'ACTIVE' ? 
+                                `<button onclick="openLockModal(${user.id})" class="p-2 text-outline-variant hover:text-error hover:bg-error/5 rounded-lg transition-all" title="Khóa">
+                                    <span class="material-symbols-outlined text-[20px]">lock</span>
+                                </button>` : 
+                                `<button onclick="openUnlockModal(${user.id})" class="p-2 text-outline-variant hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="Mở khóa">
+                                    <span class="material-symbols-outlined text-[20px]">lock_open</span>
+                                </button>`
+                            }
+                            <button class="p-2 text-outline-variant hover:text-primary hover:bg-primary/5 rounded-lg transition-all" title="Chỉnh sửa">
+                                <span class="material-symbols-outlined text-[20px]">edit</span>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function getRoleStyles(role) {
+            switch(role) {
+                case 'ADMIN': return 'bg-primary text-white';
+                case 'PARTNER': return 'bg-secondary-container text-on-secondary-container';
+                case 'STAFF': return 'bg-surface-container-highest text-on-surface';
+                default: return 'bg-surface-container-high text-on-surface-variant';
+            }
+        }
+
+        function openLockModal(id) {
+            currentUserAction = id;
+            const container = document.getElementById('modal-container');
+            const modal = document.getElementById('lock-modal');
+            container.classList.remove('hidden');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function openUnlockModal(id) {
+            currentUserAction = id;
+            const container = document.getElementById('modal-container');
+            const modal = document.getElementById('unlock-modal');
+            container.classList.remove('hidden');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function closeModals() {
+            const container = document.getElementById('modal-container');
+            const modals = [document.getElementById('lock-modal'), document.getElementById('unlock-modal')];
+            
+            modals.forEach(m => {
+                m.classList.remove('scale-100', 'opacity-100');
+                m.classList.add('scale-95', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                container.classList.add('hidden');
+                modals.forEach(m => m.classList.add('hidden'));
+                currentUserAction = null;
+            }, 300);
+        }
+
+        function confirmAction(type) {
+            const user = usersMock.find(u => u.id === currentUserAction);
+            if(user) {
+                user.status = (type === 'LOCK') ? 'LOCKED' : 'ACTIVE';
+                renderUsers(usersMock);
+            }
+            closeModals();
+            // Optional: Success toast simulation
+        }
+
+        // Search & Filter Logic
+        const searchInput = document.getElementById('search-input');
+        const roleFilter = document.getElementById('role-filter');
+        const statusFilter = document.getElementById('status-filter');
+
+        function applyFilters() {
+            const search = searchInput.value.toLowerCase();
+            const role = roleFilter.value;
+            const status = statusFilter.value;
+
+            const filtered = usersMock.filter(u => {
+                const matchesSearch = u.name.toLowerCase().includes(search) || u.email.toLowerCase().includes(search);
+                const matchesRole = !role || u.role === role;
+                const matchesStatus = !status || u.status === status;
+                return matchesSearch && matchesRole && matchesStatus;
+            });
+
+            renderUsers(filtered);
+        }
+
+        searchInput.addEventListener('input', applyFilters);
+        roleFilter.addEventListener('change', applyFilters);
+        statusFilter.addEventListener('change', applyFilters);
+
+        // Init
+        renderUsers(usersMock);
+    </script>
+</body></html>

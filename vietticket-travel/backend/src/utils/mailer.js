@@ -22,6 +22,15 @@ function createTransporter() {
   });
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
 function createEmailTemplate({ title, preview, buttonText, link }) {
   return `
     <div style="margin:0;padding:32px;background:#f9f6f2;font-family:Arial,sans-serif;color:#113336;">
@@ -101,7 +110,47 @@ async function sendPasswordResetEmail({ to, token }) {
   });
 }
 
+async function sendAccountStatusEmail({ to, fullName, status, reason }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const loginLink = `${frontendUrl}/login`;
+  const safeFullName = escapeHtml(fullName || 'bạn');
+  const safeReason = escapeHtml(reason || 'Không có lý do cụ thể.');
+
+  if (status === 'LOCKED') {
+    return sendMail({
+      to,
+      subject: 'Tài khoản của bạn đã bị khóa - VietTicket Travel',
+      text: `Xin chào ${fullName || 'bạn'}, tài khoản VietTicket Travel của bạn đã bị khóa. Lý do: ${reason || 'Không có lý do cụ thể.'}`,
+      fallbackLink: loginLink,
+      html: createEmailTemplate({
+        title: 'Tài khoản của bạn đã bị khóa',
+        preview: `Xin chào ${safeFullName}, tài khoản VietTicket Travel của bạn đã bị khóa bởi quản trị viên.<br /><br /><strong>Lý do:</strong> ${safeReason}`,
+        buttonText: 'Truy cập VietTicket',
+        link: loginLink,
+      }),
+    });
+  }
+
+  if (status === 'ACTIVE') {
+    return sendMail({
+      to,
+      subject: 'Tài khoản của bạn đã được kích hoạt lại - VietTicket Travel',
+      text: `Xin chào ${fullName || 'bạn'}, tài khoản VietTicket Travel của bạn đã được kích hoạt lại. Bạn có thể đăng nhập và tiếp tục sử dụng dịch vụ.`,
+      fallbackLink: loginLink,
+      html: createEmailTemplate({
+        title: 'Tài khoản đã được kích hoạt lại',
+        preview: `Xin chào ${safeFullName}, tài khoản VietTicket Travel của bạn hiện đã hoạt động trở lại. Bạn có thể đăng nhập và tiếp tục sử dụng dịch vụ.`,
+        buttonText: 'Đăng nhập ngay',
+        link: loginLink,
+      }),
+    });
+  }
+
+  return { sent: false, reason: 'UNSUPPORTED_ACCOUNT_STATUS' };
+}
+
 module.exports = {
+  sendAccountStatusEmail,
   sendPasswordResetEmail,
   sendVerificationEmail,
 };

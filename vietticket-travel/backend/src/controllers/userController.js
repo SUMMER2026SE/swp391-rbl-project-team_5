@@ -117,7 +117,30 @@ async function uploadAvatar(req, res, next) {
       return res.status(400).json({ message: 'Vui lòng chọn ảnh đại diện.' });
     }
 
-    const avatarUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    // Delete old avatar file if it exists on local storage
+    const existingUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: { profile: true },
+    });
+
+    const oldAvatarUrl = existingUser?.profile?.avatarUrl;
+    if (oldAvatarUrl) {
+      try {
+        const uploadsDir = require('path').join(__dirname, '../../uploads');
+        const oldFilename = oldAvatarUrl.split('/uploads/').pop();
+        if (oldFilename) {
+          const oldPath = require('path').join(uploadsDir, oldFilename);
+          require('fs').unlink(oldPath, () => {});
+        }
+      } catch {
+        // Non-critical: log but continue
+      }
+    }
+
+    const baseUrl =
+      process.env.BACKEND_URL ||
+      `${req.protocol}://${req.get('host')}`;
+    const avatarUrl = `${baseUrl}/uploads/${req.file.filename}`;
 
     const updatedUser = await prisma.user.update({
       where: { id: req.user.id },

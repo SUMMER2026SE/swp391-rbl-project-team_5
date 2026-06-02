@@ -45,6 +45,11 @@ function Header({ links }) {
           </button>
           {isAuthenticated ? (
             <>
+              {user?.role === 'ADMIN' && (
+                <Link className="text-button" to="/admin/users" style={{ marginRight: '16px', color: 'var(--color-primary)', fontWeight: 'bold' }}>
+                  Trang quản trị
+                </Link>
+              )}
               <Link className="header-profile-link" to="/profile">
                 <span className="header-avatar" aria-hidden="true">
                   <img src={avatar} alt="" />
@@ -94,6 +99,11 @@ function Header({ links }) {
           <div className="mobile-menu__actions">
             {isAuthenticated ? (
               <>
+                {user?.role === 'ADMIN' && (
+                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                    Trang quản trị
+                  </Link>
+                )}
                 <Link className="button button--primary" to="/profile" onClick={closeMenu}>
                   Hồ sơ
                 </Link>

@@ -4,24 +4,6 @@ import AccountLayout from '../components/auth/AccountLayout.jsx'
 import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
 
-const recentBookingImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuDg08v00jscRj2H8v9bUuBlN8CAr_w8jVJn8yeVmjESBmnc8t-h9YsfZgK9K_L7q84N-NtEHTVYYVkJ_4kRdZsgt5LKFBveGgsjDYnEeIzB8Dumm5wrWwGfUWYxtKLMrtltoxT7RVRpCKtOy7tW_w-3P3nmbnljt6BOY7Im4-nSkRj6H3voMhc8hvFx4rBQjg_R2qSjdynSqLhzOQ9TYHCW77jPH0Lpk459lSDJzbUHGVZiwupKbm8wZ-lNchaaWueHMw5Lc2agvlA'
-
-const savedAttractions = [
-  {
-    title: 'Tour đi bộ Phố cổ Hội An',
-    price: 'từ 350.000 VND',
-    image:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuDIObQ2xqwRYlqftoiT3usAzPakG4WchG8cfnMekMSu42LqOqk91ASdQGxuQpnEC6-d_rpTOCDtd40sUqFm8O0BlqlRCd5XxW3Fn8YbglzE9cJN4VpHe_1twvorWRDfmIZQVZT4nW8ZvtlLfilKx9nqVV0Kqi7kooQ0Zyb0z1CElpo2JwpAT9PBjhhe46XT76L4DqMLDhME-PHjS6Pqew2o4KOY3XeNTVgxyBUhueckYVbK-dsQhMUJd3RdrbuaUnJIrfkZT9r2u74',
-  },
-  {
-    title: 'Vé cáp treo Hòn Thơm',
-    price: 'từ 600.000 VND',
-    image:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuB3EmmxTzeH7uD6QC_eEerSrJ9h0aUeuJ0fcKoVeRHBZGFONNQZcTRiOEaFg6BtNTw8He3hF096BrfZtwiuQ0GWYM_toyZfHfIS7UDpAX95ifs7wv8O7J-hynId1gW0ukJmhDVt-imnRDYxKY24EmrEa8IzgC4pkT8DyZ2rIeozGLIyqXi5yLMR8-aExscW7YtCNe2l12wDyqLxMUqqVxWgIpV5hQ27doOpCMkMD_YDgL6tl7k7ZcmO3o_aMNKKmSbkEXWPThKAELs',
-  },
-]
-
 function ProfilePage() {
   const navigate = useNavigate()
   const { user, logout, getProfile } = useAuth()
@@ -103,6 +85,30 @@ function ProfilePage() {
             <p>{currentUser.phone || 'Chưa cập nhật'}</p>
           </div>
           <div className="profile-field">
+            <span>Ngày sinh</span>
+            <p>
+              {currentUser.dateOfBirth
+                ? new Date(currentUser.dateOfBirth).toLocaleDateString('vi-VN', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric',
+                  })
+                : 'Chưa cập nhật'}
+            </p>
+          </div>
+          <div className="profile-field">
+            <span>Giới tính</span>
+            <p>
+              {currentUser.gender
+                ? currentUser.gender.charAt(0).toUpperCase() + currentUser.gender.slice(1)
+                : 'Chưa cập nhật'}
+            </p>
+          </div>
+          <div className="profile-field">
+            <span>Địa chỉ</span>
+            <p>{currentUser.address || 'Chưa cập nhật'}</p>
+          </div>
+          <div className="profile-field">
             <span>Nhà cung cấp đăng nhập</span>
             <p>{currentUser.provider === 'GOOGLE' ? 'Google' : 'Email và mật khẩu'}</p>
           </div>
@@ -134,21 +140,12 @@ function ProfilePage() {
         <div className="account-card__header">
           <div>
             <h2>Đặt chỗ gần đây</h2>
-            <p>Vé demo tĩnh cho module đặt vé trong tương lai.</p>
+            <p>Lịch sử đặt vé tham quan của bạn.</p>
           </div>
         </div>
-        <div className="activity-list">
-          <article className="activity-item">
-            <img
-              src={recentBookingImage}
-              alt="Vé cáp treo và buffet Sun World Bà Nà Hills"
-            />
-            <div className="activity-item__content">
-              <h3>Vé Sun World Bà Nà Hills - Cáp treo và Buffet</h3>
-              <p>25/12/2026 · 2 người lớn · Đã thanh toán</p>
-            </div>
-            <strong className="activity-price">1,450,000 VND</strong>
-          </article>
+        <div className="activity-list activity-list--empty">
+          <span className="material-symbols-outlined" aria-hidden="true">confirmation_number</span>
+          <p>Bạn chưa có đặt chỗ nào. Hãy khám phá các điểm tham quan!</p>
         </div>
       </section>
 
@@ -159,17 +156,9 @@ function ProfilePage() {
             <p>Các ý tưởng điểm tham quan Việt Nam bạn đã lưu.</p>
           </div>
         </div>
-        <div className="activity-list">
-          {savedAttractions.map((attraction) => (
-            <article className="activity-item" key={attraction.title}>
-              <img src={attraction.image} alt={attraction.title} />
-              <div className="activity-item__content">
-                <h3>{attraction.title}</h3>
-                <p>Đã lưu để xem sau</p>
-              </div>
-              <strong className="activity-price">{attraction.price}</strong>
-            </article>
-          ))}
+        <div className="activity-list activity-list--empty">
+          <span className="material-symbols-outlined" aria-hidden="true">favorite</span>
+          <p>Bạn chưa lưu điểm tham quan nào.</p>
         </div>
       </section>
 

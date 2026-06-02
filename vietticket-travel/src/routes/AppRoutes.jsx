@@ -1,5 +1,6 @@
 import { Route, Routes } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute.jsx'
+import AdminUserManagementPage from '../pages/AdminUserManagementPage.jsx'
 import ChangePasswordPage from '../pages/ChangePasswordPage.jsx'
 import EditProfilePage from '../pages/EditProfilePage.jsx'
 import ForgotPasswordPage from '../pages/ForgotPasswordPage.jsx'
@@ -40,6 +41,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ChangePasswordPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/users"
+        element={
+          <ProtectedRoute allowedRoles={['ADMIN']}>
+            <AdminUserManagementPage />
           </ProtectedRoute>
         }
       />
