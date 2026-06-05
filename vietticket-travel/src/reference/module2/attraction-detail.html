@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+
+<html lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Sun World Bà Nà Hills - VietTicket Travel</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "on-secondary-fixed": "#271900",
+                "surface-bright": "#f9f9fc",
+                "on-error": "#ffffff",
+                "tertiary-fixed": "#ffdcc5",
+                "secondary-container": "#feb700",
+                "on-tertiary-fixed-variant": "#6a3b12",
+                "background": "#f9f9fc",
+                "surface-container": "#edeef1",
+                "on-secondary": "#ffffff",
+                "on-error-container": "#93000a",
+                "inverse-primary": "#8ad2db",
+                "surface-container-high": "#e8e8eb",
+                "error": "#ba1a1a",
+                "error-container": "#ffdad6",
+                "on-surface": "#1a1c1e",
+                "tertiary": "#61330a",
+                "surface-tint": "#136870",
+                "secondary-fixed": "#ffdea8",
+                "on-primary-fixed": "#001f23",
+                "on-background": "#1a1c1e",
+                "surface-container-low": "#f3f3f6",
+                "surface-container-highest": "#e2e2e5",
+                "outline-variant": "#bec8ca",
+                "surface": "#f9f9fc",
+                "inverse-surface": "#2f3133",
+                "secondary-fixed-dim": "#ffba22",
+                "primary-fixed-dim": "#8ad2db",
+                "secondary": "#7c5800",
+                "tertiary-fixed-dim": "#fdb784",
+                "on-secondary-fixed-variant": "#5e4200",
+                "on-primary": "#ffffff",
+                "on-tertiary": "#ffffff",
+                "surface-variant": "#e2e2e5",
+                "inverse-on-surface": "#f0f0f3",
+                "surface-dim": "#d9dadd",
+                "on-secondary-container": "#6b4b00",
+                "on-primary-container": "#90d8e1",
+                "tertiary-container": "#7d4a20",
+                "outline": "#6f797a",
+                "on-surface-variant": "#3f484a",
+                "primary": "#00474d",
+                "on-tertiary-fixed": "#301400",
+                "surface-container-lowest": "#ffffff",
+                "on-tertiary-container": "#ffbf90",
+                "primary-container": "#006068",
+                "primary-fixed": "#a6eff8",
+                "on-primary-fixed-variant": "#004f56"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+            },
+            "spacing": {
+                "container-max": "1280px",
+                "section-gap": "64px",
+                "unit": "8px",
+                "stack-sm": "8px",
+                "margin-mobile": "20px",
+                "stack-md": "16px",
+                "margin-desktop": "48px",
+                "gutter": "24px",
+                "stack-lg": "32px"
+            },
+            "fontFamily": {
+                "display-lg": ["Be Vietnam Pro"],
+                "body-md": ["Plus Jakarta Sans"],
+                "label-md": ["Plus Jakarta Sans"],
+                "headline-sm": ["Be Vietnam Pro"],
+                "headline-md": ["Be Vietnam Pro"]
+            },
+            "fontSize": {
+                "display-lg": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                "body-md": ["16px", {"lineHeight": "1.6", "fontWeight": "400"}],
+                "label-md": ["14px", {"lineHeight": "1.2", "letterSpacing": "0.01em", "fontWeight": "600"}],
+                "headline-sm": ["20px", {"lineHeight": "1.4", "fontWeight": "600"}],
+                "headline-md": ["24px", {"lineHeight": "1.3", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #f9f9fc;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: #1a1c1e;
+        }
+        .soft-shadow {
+            box-shadow: 0px 4px 20px rgba(0, 96, 104, 0.04);
+        }
+        .interactive-shadow:hover {
+            box-shadow: 0px 12px 32px rgba(0, 96, 104, 0.08);
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .tab-active {
+            border-bottom: 2px solid #00474d;
+            color: #00474d;
+            font-weight: 600;
+        }
+        .hide-scroll::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-surface">
+<!-- TopNavBar -->
+<nav class="bg-surface/80 backdrop-blur-xl border-b border-white/20 shadow-sm docked full-width top-0 sticky z-50">
+<div class="flex justify-between items-center h-20 px-48 max-w-container-max mx-auto">
+<div class="font-display-lg text-headline-md font-bold text-primary">VietTicket</div>
+<div class="hidden md:flex items-center gap-stack-lg">
+<a class="font-display-lg text-headline-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Destinations</a>
+<a class="font-display-lg text-headline-sm text-primary border-b-2 border-primary pb-1" href="#">Attractions</a>
+<a class="font-display-lg text-headline-sm text-on-surface-variant hover:text-primary transition-colors" href="#">Bookings</a>
+</div>
+<div class="flex items-center gap-stack-md">
+<button class="material-symbols-outlined text-on-surface-variant hover:bg-primary/5 p-2 rounded-full transition-all">search</button>
+<button class="bg-primary text-on-primary px-6 py-2 rounded-full font-label-md scale-95 active:scale-90 transition-transform">Sign In</button>
+</div>
+</div>
+</nav>
+<!-- Breadcrumb -->
+<nav aria-label="Breadcrumb" class="max-w-container-max mx-auto px-margin-desktop py-3 flex items-center gap-2 text-label-md font-label-md text-on-surface-variant">
+  <a href="#" class="hover:text-primary transition-colors">Trang chủ</a>
+  <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+  <a href="/attractions" class="hover:text-primary transition-colors">Khám phá</a>
+  <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+  <a href="#" class="hover:text-primary transition-colors">Đà Nẵng</a>
+  <span class="material-symbols-outlined text-[16px]">chevron_right</span>
+  <span class="text-primary font-semibold">Sun World Bà Nà Hills</span>
+</nav>
+<main class="max-w-container-max mx-auto px-margin-desktop py-stack-lg">
+<!-- Gallery Section -->
+<section class="mb-section-gap">
+<div class="relative rounded-xl overflow-hidden aspect-[21/9] soft-shadow mb-stack-md group">
+<img alt="Sun World Ba Na Hills" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC8Obh9J3W67YZYfg7Rd0OMWCkJ57CHJISoc2WFL2cxBAWxwR0wQdffk2w_hBRrPAVcdMTjYqV25D3NSgsyBMWsitsPVdG4kJPpLKswUUbGTCpIytepBPOayEdlpp7yVm5O8OFnFYNYmFpg7ColoomMRS71dnbFpJEMnekGDwvovQVh0Mv-c840_6uhAiDzbpjAMDfgK363W3AbYJNChupnI24c8moSAB4p7ffHSFXtrNJuhkF-uO3o-HVdrnnfBVfsrTG3GoaWWT4"/>
+<div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent"></div>
+<!-- Gallery Controls -->
+<button class="absolute left-4 top-1/2 -translate-y-1/2 bg-white/20 backdrop-blur-md p-3 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/40">
+<span class="material-symbols-outlined">arrow_back_ios_new</span>
+</button>
+<button class="absolute right-4 top-1/2 -translate-y-1/2 bg-white/20 backdrop-blur-md p-3 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/40">
+<span class="material-symbols-outlined">arrow_forward_ios</span>
+</button>
+<!-- Featured Badge -->
+<div class="absolute bottom-6 left-6 glass-card px-4 py-2 rounded-lg flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary-container" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="text-on-surface font-label-md">Điểm đến hàng đầu Đà Nẵng</span>
+</div>
+</div>
+<!-- Thumbnails -->
+<div class="flex gap-4 overflow-x-auto hide-scroll">
+<div class="min-w-[120px] h-20 rounded-lg overflow-hidden border-2 border-primary cursor-pointer ring-2 ring-primary/20 ring-offset-2">
+<img class="w-full h-full object-cover" data-alt="A focused close up of the iconic Golden Bridge in Da Nang held by giant stone hands during golden hour." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC8Obh9J3W67YZYfg7Rd0OMWCkJ57CHJISoc2WFL2cxBAWxwR0wQdffk2w_hBRrPAVcdMTjYqV25D3NSgsyBMWsitsPVdG4kJPpLKswUUbGTCpIytepBPOayEdlpp7yVm5O8OFnFYNYmFpg7ColoomMRS71dnbFpJEMnekGDwvovQVh0Mv-c840_6uhAiDzbpjAMDfgK363W3AbYJNChupnI24c8moSAB4p7ffHSFXtrNJuhkF-uO3o-HVdrnnfBVfsrTG3GoaWWT4"/>
+</div>
+<div class="min-w-[120px] h-20 rounded-lg overflow-hidden border border-outline-variant hover:border-primary transition-colors cursor-pointer">
+<img class="w-full h-full object-cover" data-alt="Panoramic view of the French Village at Ba Na Hills, showcasing gothic architecture, cobblestone streets, and misty mountain clouds in a bright day." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBfQA1SvY6S4CtYJQsyTIo_XF0ohBLkBXYyfKIrRj7aJ3q0q_aKM_9BUQuJARXbNZj5EghwriK7YH0Yhhdi0apIwUU1_h1xd9NCNe9ueY2pDXjlzuKUSKR29acie-KGEPuo8ldJxiFnn1mmR8S26SOJ4zkgn0h9s-KnyuVi47VrQbXWDEkv7cR6i1k-wIO8uHCZDoF6kZSK-49ssp1IIdJyZkQiFvbk5xRp_4onkwflsFbvWmXDnTTK-h_5gnhz7JYHArjt2gdXacg"/>
+</div>
+<div class="min-w-[120px] h-20 rounded-lg overflow-hidden border border-outline-variant hover:border-primary transition-colors cursor-pointer">
+<img class="w-full h-full object-cover" data-alt="Wide angle shot of the cable car system at Ba Na Hills floating over lush green tropical forests and cascading waterfalls under a clear blue sky." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAVzq7iqoicSsBqnMnzXepbqflg-cB29r3x0NJNrPAx-wfiFpHWFpadfYGsCGR23pxynHUQ6g48hSYHIb6JPHGX-kNuNq2wvpEQoMAjDoaCLsiTLwKA0XPuUHblPdYDKA1nX_OX1ofVbmUtSFyteYTBN0DfTx9YatUchhDGG5Y558IlpgkwZhimFDp1tGki-PRe_yEa9U2al3mvCzsTAK9tnFKAJmsRMIFE-zf8D3NmepICsIB4Wc8G2NsFIEVkSirLNTXkD0Tshbc"/>
+</div>
+<div class="min-w-[120px] h-20 rounded-lg overflow-hidden border border-outline-variant hover:border-primary transition-colors cursor-pointer">
+<img class="w-full h-full object-cover" data-alt="Linh Ung Pagoda at Ba Na Hills featuring the massive white Lady Buddha statue against a backdrop of rolling mountains and mystical morning fog." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAJL5pzVSudkdv4tcDu7RFjvcSRjZkN_6_tYJMbUhMEhm_Hj3OPOYhpikIG497bburkg24tEqWjj0_y7eeTIaHciYx_hhSOrQSCBPAKlMSg0SZZnN6IMm5tcgdGKtoyL7OWosZV8_5gwsWc0cgCNLOnEE3f0NL3FjW__PRCveUxBytU5V1YT9gkoZcTgWByTxaJriAeZTuGZDaX3YiBwjj3ro_S7oSfFmGh5-ZGGx9n4wcjRMy0d-ueqLHLVlI6UGbixga95dBeQCc"/>
+</div>
+<div class="min-w-[120px] h-20 rounded-lg overflow-hidden border border-outline-variant hover:border-primary transition-colors cursor-pointer relative group">
+<div class="absolute inset-0 bg-black/50 flex items-center justify-center text-white font-label-md">+12 Ảnh</div>
+<img class="w-full h-full object-cover" data-alt="A collection of colorful gardens and floral arrangements at Le Jardin D'Amour, showcasing vibrant flower beds and classical statues in a sunny outdoor setting." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB77E5AR60g0BfOeAWt2TPEqb0F2Fx0EF6Sc9jvXkoAYwb9_dN5BUGmkfSqt2Dm5oIxrQpjGPnVGZul6G8tz4O8S1SEwZ6a75XMp9na50N0w-t2KEBO0Rj0ZC64ETRUroTbvKASYg3FuANVDIcLOLh9V_42uXzdLpTDijvdGArJv2g7aH1n-YprqzT12ImsNIVNyjMrNJHSRaM8ZO6Z_22fDMKsdoMGCPZjQ0Y3r2NL0Seb53_25MJrepqIg_b5ZU4nuYn78k9vi9c"/>
+</div>
+</div>
+</section>
+<!-- Content Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-10 gap-gutter items-start">
+<!-- Left Column (70%) -->
+<div class="lg:col-span-7 space-y-stack-lg">
+<header class="space-y-stack-sm">
+<h1 class="font-display-lg text-display-lg text-primary">Sun World Bà Nà Hills - Đường lên tiên cảnh</h1>
+<div class="flex flex-wrap items-center gap-6">
+<div class="flex items-center gap-1 text-on-surface-variant font-label-md">
+<span class="material-symbols-outlined text-primary text-[20px]">location_on</span>
+                            Hòa Ninh, Hòa Vang, Đà Nẵng, Việt Nam
+                        </div>
+<div class="flex items-center gap-2">
+<div class="flex items-center gap-0.5">
+<span class="material-symbols-outlined text-secondary-container" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-secondary-container" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-secondary-container" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-secondary-container" style="font-variation-settings: 'FILL' 1;">star</span>
+<span class="material-symbols-outlined text-secondary-container" style="font-variation-settings: 'FILL' 1;">star_half</span>
+</div>
+<span class="text-primary font-bold">4.9</span>
+<span class="text-on-surface-variant text-sm">(2,540 đánh giá)</span>
+</div>
+</div>
+</header>
+<!-- Map Widget -->
+<div class="rounded-xl overflow-hidden h-[240px] soft-shadow relative group cursor-pointer">
+<img alt="Map of Ba Na Hills" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" data-location="Ba Na Hills, Da Nang" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD4SQfZEiMvqJFA8JXu1XSAVXVbQC3saek2qaqrSTQnpEZl6Yt2UY26pnGFeGhs2TxKfl9ubg5G9d6PEfAualT8Y5KUNo8M66zKkH4wOABLefNgiYPja3eqgjT-7zOI34hJRwqJwCIhWjZwR6riy2St1eQkzw2u3jz1DgPd_lztB7tcP9tPPGppkXgYZI9yINIvgmhdcUQZq4SUhu3XpcVh5VlU9dECTRW_mm-ZU8ztcy3DCh6axjQDrtCJzWYLSvpBkqOIVSpwuXM"/>
+<div class="absolute top-4 left-4 glass-card px-4 py-2 rounded-lg text-primary font-label-md flex items-center gap-2">
+<span class="material-symbols-outlined">map</span>
+                        Xem bản đồ chi tiết
+                    </div>
+</div>
+<!-- Tabs Section -->
+<div class="space-y-stack-md">
+<div class="flex border-b border-outline-variant">
+<button class="px-8 py-4 font-headline-sm transition-all tab-active" id="tab-intro" onclick="switchTab('intro')">Giới thiệu</button>
+<button class="px-8 py-4 font-headline-sm text-on-surface-variant hover:text-primary transition-all" id="tab-amenity" onclick="switchTab('amenity')">Tiện ích</button>
+<button class="px-8 py-4 font-headline-sm text-on-surface-variant hover:text-primary transition-all" id="tab-review" onclick="switchTab('review')">Đánh giá</button>
+</div>
+<div class="space-y-stack-md text-on-surface-variant leading-relaxed font-body-md py-4" id="content-intro">
+<p>Nằm ở độ cao 1.487m so với mực nước biển, Sun World Bà Nà Hills được mệnh danh là "chốn bồng lai tiên cảnh", sở hữu khí hậu tuyệt vời cùng cảnh quan thiên nhiên kỳ vĩ. Đây là điểm đến không thể bỏ qua khi du lịch Đà Nẵng.</p>
+<p>Đến với Bà Nà Hills, du khách sẽ được trải nghiệm hệ thống cáp treo đạt nhiều kỷ lục thế giới, dạo bước trên Cầu Vàng - biểu tượng du lịch mới của Việt Nam, hay lạc bước giữa không gian kiến trúc Pháp cổ kính lãng mạn.</p>
+<div class="grid grid-cols-2 gap-stack-md pt-4">
+<div class="bg-primary/5 p-4 rounded-xl border border-primary/10 flex gap-4">
+<span class="material-symbols-outlined text-primary">verified_user</span>
+<div>
+<p class="font-label-md text-primary">Xác nhận tức thì</p>
+<p class="text-sm opacity-80">Nhận vé ngay sau khi đặt thành công</p>
+</div>
+</div>
+<div class="bg-primary/5 p-4 rounded-xl border border-primary/10 flex gap-4">
+<span class="material-symbols-outlined text-primary">event_available</span>
+<div>
+<p class="font-label-md text-primary">Linh hoạt thời gian</p>
+<p class="text-sm opacity-80">Sử dụng trong vòng 30 ngày</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Review Tab Content -->
+<div id="content-review" class="hidden py-4 space-y-stack-lg">
+  <!-- Rating Summary -->
+  <div class="flex flex-col md:flex-row gap-8 p-6 bg-primary/5 rounded-2xl">
+    <div class="text-center flex-shrink-0">
+      <div class="font-display-lg text-[56px] font-bold text-primary">4.9</div>
+      <div class="flex justify-center gap-0.5 my-2">
+        <span class="material-symbols-outlined text-secondary-container" style="font-variation-settings:'FILL' 1">star</span>
+        <span class="material-symbols-outlined text-secondary-container" style="font-variation-settings:'FILL' 1">star</span>
+        <span class="material-symbols-outlined text-secondary-container" style="font-variation-settings:'FILL' 1">star</span>
+        <span class="material-symbols-outlined text-secondary-container" style="font-variation-settings:'FILL' 1">star</span>
+        <span class="material-symbols-outlined text-secondary-container" style="font-variation-settings:'FILL' 1">star_half</span>
+      </div>
+      <p class="text-on-surface-variant font-label-md text-label-md">2,540 đánh giá</p>
+    </div>
+    <div class="flex-1 space-y-3">
+      <div class="flex items-center gap-3">
+        <span class="text-label-md font-label-md w-4">5</span>
+        <span class="material-symbols-outlined text-secondary-container text-[16px]" style="font-variation-settings:'FILL' 1">star</span>
+        <div class="flex-1 h-2 bg-surface-container-high rounded-full overflow-hidden">
+          <div class="h-full bg-secondary-container rounded-full" style="width:78%"></div>
+        </div>
+        <span class="text-label-md font-label-md text-on-surface-variant w-8">78%</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-label-md font-label-md w-4">4</span>
+        <span class="material-symbols-outlined text-secondary-container text-[16px]" style="font-variation-settings:'FILL' 1">star</span>
+        <div class="flex-1 h-2 bg-surface-container-high rounded-full overflow-hidden">
+          <div class="h-full bg-secondary-container rounded-full" style="width:15%"></div>
+        </div>
+        <span class="text-label-md font-label-md text-on-surface-variant w-8">15%</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-label-md font-label-md w-4">3</span>
+        <span class="material-symbols-outlined text-secondary-container text-[16px]" style="font-variation-settings:'FILL' 1">star</span>
+        <div class="flex-1 h-2 bg-surface-container-high rounded-full overflow-hidden">
+          <div class="h-full bg-secondary-container rounded-full" style="width:5%"></div>
+        </div>
+        <span class="text-label-md font-label-md text-on-surface-variant w-8">5%</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-label-md font-label-md w-4">2</span>
+        <span class="material-symbols-outlined text-secondary-container text-[16px]" style="font-variation-settings:'FILL' 1">star</span>
+        <div class="flex-1 h-2 bg-surface-container-high rounded-full overflow-hidden">
+          <div class="h-full bg-secondary-container rounded-full" style="width:1%"></div>
+        </div>
+        <span class="text-label-md font-label-md text-on-surface-variant w-8">1%</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-label-md font-label-md w-4">1</span>
+        <span class="material-symbols-outlined text-secondary-container text-[16px]" style="font-variation-settings:'FILL' 1">star</span>
+        <div class="flex-1 h-2 bg-surface-container-high rounded-full overflow-hidden">
+          <div class="h-full bg-secondary-container rounded-full" style="width:1%"></div>
+        </div>
+        <span class="text-label-md font-label-md text-on-surface-variant w-8">1%</span>
+      </div>
+    </div>
+  </div>
+  <!-- Individual Reviews -->
+  <div class="space-y-6">
+    <div class="flex gap-4 pb-6 border-b border-outline-variant/30">
+      <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 font-bold text-primary">NT</div>
+      <div class="flex-1">
+        <div class="flex items-center justify-between mb-1">
+          <h4 class="font-label-md text-label-md text-on-surface font-bold">Nguyễn Thị Thu</h4>
+          <span class="text-label-sm font-label-sm text-on-surface-variant">05/2026</span>
+        </div>
+        <div class="flex gap-0.5 mb-2">
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+        </div>
+        <p class="font-body-md text-body-md text-on-surface-variant">Trải nghiệm tuyệt vời! Cáp treo dài nhất thế giới thực sự ấn tượng. Cầu Vàng đẹp hơn trong ảnh nhiều lần. Nhân viên phục vụ nhiệt tình và chuyên nghiệp. Chắc chắn sẽ quay lại!</p>
+      </div>
+    </div>
+    <div class="flex gap-4 pb-6 border-b border-outline-variant/30">
+      <div class="w-12 h-12 rounded-full bg-secondary-container/30 flex items-center justify-center flex-shrink-0 font-bold text-secondary">TH</div>
+      <div class="flex-1">
+        <div class="flex items-center justify-between mb-1">
+          <h4 class="font-label-md text-label-md text-on-surface font-bold">Trần Hoàng</h4>
+          <span class="text-label-sm font-label-sm text-on-surface-variant">04/2026</span>
+        </div>
+        <div class="flex gap-0.5 mb-2">
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]" style="font-variation-settings:'FILL' 1">star</span>
+          <span class="material-symbols-outlined text-secondary-container text-[14px]">star</span>
+        </div>
+        <p class="font-body-md text-body-md text-on-surface-variant">Rất xứng đáng với số tiền bỏ ra. Khu Làng Pháp cực đẹp, nhà thờ cổ kính rất photogenic. Thức ăn ở đây hơi đắt nhưng chất lượng ổn. Nên đặt vé trực tuyến để bỏ qua hàng chờ.</p>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<!-- Right Column (30%) - Booking Widget -->
+<aside class="lg:col-span-3 sticky top-28 space-y-stack-md">
+<div class="bg-white rounded-2xl p-stack-md soft-shadow border border-outline-variant/30 space-y-stack-md">
+<div class="flex justify-between items-center mb-2">
+  <h3 class="font-headline-md text-primary">Đặt vé ngay</h3>
+  <div class="flex items-center gap-2">
+    <button class="w-10 h-10 flex items-center justify-center rounded-full border border-outline-variant hover:border-primary hover:text-primary transition-all"><span class="material-symbols-outlined text-[20px]">favorite</span></button>
+    <button class="w-10 h-10 flex items-center justify-center rounded-full border border-outline-variant hover:border-primary hover:text-primary transition-all"><span class="material-symbols-outlined text-[20px]">share</span></button>
+  </div>
+</div>
+<!-- Ticket Card 1 -->
+<div class="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-3 transition-all hover:border-primary">
+<div class="flex justify-between items-start">
+<div>
+<h4 class="font-label-md text-on-surface">Vé Cổng Người Lớn</h4>
+<span class="bg-secondary-container/20 text-on-secondary-container text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Hoàn tiền 100%</span>
+</div>
+<div class="text-right">
+<p class="text-xs text-on-surface-variant line-through">900,000 VND</p>
+<p class="text-lg font-bold text-primary">850,000 VND</p>
+</div>
+</div>
+<div class="flex items-center justify-between pt-2">
+<div class="flex items-center gap-3 bg-white px-3 py-1 rounded-lg border border-outline-variant">
+<button class="text-primary font-bold">-</button>
+<span class="font-label-md">1</span>
+<button class="text-primary font-bold">+</button>
+</div>
+<button class="bg-primary text-on-primary px-4 py-1.5 rounded-lg font-label-md scale-95 active:scale-90 transition-all">Chọn</button>
+</div>
+</div>
+<!-- Ticket Card 2 -->
+<div class="p-4 rounded-xl border border-outline-variant hover:border-primary transition-all space-y-3">
+<div class="flex justify-between items-start">
+<div>
+<h4 class="font-label-md text-on-surface">Vé Cổng Trẻ Em</h4>
+<span class="bg-secondary-container/20 text-on-secondary-container text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Hoàn tiền 100%</span>
+</div>
+<div class="text-right">
+<p class="text-xs text-on-surface-variant line-through">750,000 VND</p>
+<p class="text-lg font-bold text-primary">700,000 VND</p>
+</div>
+</div>
+<div class="flex items-center justify-between pt-2">
+<div class="flex items-center gap-3 bg-surface-container-low px-3 py-1 rounded-lg border border-outline-variant">
+<button class="text-on-surface-variant">-</button>
+<span class="font-label-md">0</span>
+<button class="text-primary font-bold">+</button>
+</div>
+<button class="border border-primary text-primary px-4 py-1.5 rounded-lg font-label-md hover:bg-primary/5 transition-all">Chọn</button>
+</div>
+</div>
+<!-- Total Section -->
+<div class="pt-4 border-t border-outline-variant space-y-stack-md">
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant font-label-md">Tổng cộng (1 vé)</span>
+<span class="text-xl font-display-lg text-primary">850,000 VND</span>
+</div>
+<button class="w-full bg-secondary-container text-on-secondary-container py-4 rounded-xl font-display-lg text-headline-sm interactive-shadow transition-all active:scale-95 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">shopping_cart_checkout</span>
+                            Đặt vé ngay
+                        </button>
+<p class="text-[11px] text-center text-on-surface-variant">Không mất phí đặt vé • Hỗ trợ 24/7</p>
+</div>
+</div>
+<!-- Why Us Banner -->
+<div class="glass-card rounded-2xl p-6 border border-white/50 space-y-4">
+<p class="font-label-md text-primary">Tại sao chọn VietTicket?</p>
+<ul class="space-y-3">
+<li class="flex items-center gap-3 text-sm text-on-surface-variant">
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            Giá rẻ hơn tại quầy
+                        </li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant">
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            Bỏ qua hàng chờ mua vé
+                        </li>
+<li class="flex items-center gap-3 text-sm text-on-surface-variant">
+<span class="material-symbols-outlined text-primary text-lg" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                            Tích điểm đổi quà
+                        </li>
+</ul>
+</div>
+</aside>
+</div>
+</main>
+<!-- Footer -->
+<footer class="bg-surface-container-highest dark:bg-inverse-surface full-width py-16 mt-section-gap">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-gutter px-48 max-w-container-max mx-auto">
+<div class="space-y-stack-md">
+<div class="font-display-lg text-headline-md font-bold text-primary">VietTicket</div>
+<p class="text-on-surface-variant text-sm pr-4">Nền tảng đặt vé du lịch hàng đầu Việt Nam. Khám phá hàng ngàn điểm đến hấp dẫn với giá tốt nhất.</p>
+</div>
+<div>
+<h4 class="font-headline-sm text-primary mb-6">Liên kết</h4>
+<ul class="space-y-3">
+<li><a class="text-on-surface-variant hover:text-secondary transition-colors font-body-md text-body-md" href="#">About Us</a></li>
+<li><a class="text-on-surface-variant hover:text-secondary transition-colors font-body-md text-body-md" href="#">Support Center</a></li>
+<li><a class="text-on-surface-variant hover:text-secondary transition-colors font-body-md text-body-md" href="#">Travel Guides</a></li>
+</ul>
+</div>
+<div>
+<h4 class="font-headline-sm text-primary mb-6">Pháp lý</h4>
+<ul class="space-y-3">
+<li><a class="text-on-surface-variant hover:text-secondary transition-colors font-body-md text-body-md" href="#">Privacy Policy</a></li>
+<li><a class="text-on-surface-variant hover:text-secondary transition-colors font-body-md text-body-md" href="#">Terms of Service</a></li>
+</ul>
+</div>
+<div class="space-y-stack-md">
+<h4 class="font-headline-sm text-primary mb-6">Kết nối</h4>
+<div class="flex gap-4">
+<button class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-primary shadow-sm hover:scale-110 transition-transform">
+<span class="material-symbols-outlined">share</span>
+</button>
+<button class="w-10 h-10 rounded-full bg-white flex items-center justify-center text-primary shadow-sm hover:scale-110 transition-transform">
+<span class="material-symbols-outlined">mail</span>
+</button>
+</div>
+</div>
+</div>
+<div class="max-w-container-max mx-auto px-48 mt-12 pt-8 border-t border-outline-variant/30 text-center">
+<p class="text-on-surface-variant text-sm">© 2024 VietTicket Travel. All rights reserved.</p>
+</div>
+</footer>
+<script>
+        function switchTab(tabId) {
+            const tabs = ['intro', 'amenity', 'review'];
+            tabs.forEach(t => {
+                const tabBtn = document.getElementById(`tab-${t}`);
+                const content = document.getElementById(`content-${t}`);
+                
+                if (t === tabId) {
+                    tabBtn.classList.add('tab-active');
+                    tabBtn.classList.remove('text-on-surface-variant');
+                    if(content) content.classList.remove('hidden');
+                } else {
+                    tabBtn.classList.remove('tab-active');
+                    tabBtn.classList.add('text-on-surface-variant');
+                    if(content) content.classList.add('hidden');
+                }
+            });
+        }
+    </script>
+</body></html>

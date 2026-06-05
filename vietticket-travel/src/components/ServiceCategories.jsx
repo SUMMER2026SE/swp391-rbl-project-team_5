@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 function ServiceCategories({ categories }) {
   return (
     <section className="section container text-center" id="services">
@@ -6,8 +8,11 @@ function ServiceCategories({ categories }) {
 
       <div className="service-grid">
         {categories.map((category) => (
-          <article
-            className={`service-card${category.featured ? ' service-card--featured' : ''}`}
+          <Link
+            to="/attractions"
+            className={`service-card block transition hover:-translate-y-1 hover:shadow-lg focus:outline-none${
+              category.featured ? ' service-card--featured' : ''
+            }`}
             key={category.title}
           >
             <div className="service-card__icon">
@@ -17,7 +22,7 @@ function ServiceCategories({ categories }) {
             </div>
             <h3>{category.title}</h3>
             <p>{category.description}</p>
-          </article>
+          </Link>
         ))}
       </div>
     </section>
