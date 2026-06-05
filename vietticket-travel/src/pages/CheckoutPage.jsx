@@ -50,7 +50,7 @@ function CheckoutPage() {
       const options = { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }
       let formatted = date.toLocaleDateString('vi-VN', options)
       return formatted.charAt(0).toUpperCase() + formatted.slice(1)
-    } catch (e) {
+    } catch {
       return dStr
     }
   }
@@ -172,7 +172,7 @@ function CheckoutPage() {
                   <div>
                     <p className="text-xs text-gray-500 mb-0.5">Loại vé</p>
                     <p className="font-semibold text-gray-800">
-                      Vé người lớn x{adultCount}{childCount > 0 ? `, Vé trẻ em x${childCount}` : ''}
+                      {ticketName} (Người lớn x{adultCount}{childCount > 0 ? `, Trẻ em x${childCount}` : ''})
                     </p>
                   </div>
                 </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const formatCurrency = (value) => {
@@ -15,19 +15,6 @@ const toDateInputValue = (date) => {
   const timezoneOffset = date.getTimezoneOffset() * 60000
   return new Date(date.getTime() - timezoneOffset).toISOString().split('T')[0]
 }
-
-const buildDateOptions = () =>
-  Array.from({ length: 7 }, (_, index) => {
-    const date = new Date()
-    date.setDate(date.getDate() + index)
-
-    return {
-      value: toDateInputValue(date),
-      day: date.toLocaleDateString('vi-VN', { day: '2-digit' }),
-      weekday: date.toLocaleDateString('vi-VN', { weekday: 'short' }),
-      month: date.toLocaleDateString('vi-VN', { month: '2-digit' }),
-    }
-  })
 
 const getSlotId = (slot) => slot.timeSlotId || slot.id
 

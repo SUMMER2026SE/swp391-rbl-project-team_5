@@ -120,34 +120,34 @@ export default function SearchAttractionsPage() {
   const [totalPages, setTotalPages] = useState(1)
   const [errorMessage, setErrorMessage] = useState('')
 
-  // Fallback client-side filter
-  const filterMockAttractions = () => {
-    return mockAttractions.filter(item => {
-      if (selectedCity !== 'Tất cả thành phố' && item.city !== selectedCity) return false
-      if (selectedCategory !== 'All' && item.category !== selectedCategory) return false
-      if (item.minPrice > priceRange) return false
-      if (selectedStars.length > 0) {
-        const matchStars = selectedStars.some(star => {
-          if (star === 5) return item.averageRating >= 5
-          if (star === 4) return item.averageRating >= 4
-          if (star === 3) return item.averageRating >= 3
-          return true
-        })
-        if (!matchStars) return false
-      }
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase().trim()
-        const matchTitle = item.title.toLowerCase().includes(query)
-        const matchCity = item.city.toLowerCase().includes(query)
-        const matchDesc = item.description?.toLowerCase().includes(query)
-        if (!matchTitle && !matchCity && !matchDesc) return false
-      }
-      return true
-    })
-  }
-
   // 3. Gọi API fetch danh sách địa điểm
   useEffect(() => {
+    // Fallback client-side filter
+    const filterMockAttractions = () => {
+      return mockAttractions.filter(item => {
+        if (selectedCity !== 'Tất cả thành phố' && item.city !== selectedCity) return false
+        if (selectedCategory !== 'All' && item.category !== selectedCategory) return false
+        if (item.minPrice > priceRange) return false
+        if (selectedStars.length > 0) {
+          const matchStars = selectedStars.some(star => {
+            if (star === 5) return item.averageRating >= 5
+            if (star === 4) return item.averageRating >= 4
+            if (star === 3) return item.averageRating >= 3
+            return true
+          })
+          if (!matchStars) return false
+        }
+        if (searchQuery) {
+          const query = searchQuery.toLowerCase().trim()
+          const matchTitle = item.title.toLowerCase().includes(query)
+          const matchCity = item.city.toLowerCase().includes(query)
+          const matchDesc = item.description?.toLowerCase().includes(query)
+          if (!matchTitle && !matchCity && !matchDesc) return false
+        }
+        return true
+      })
+    }
+
     const fetchAttractions = async () => {
       setLoading(true)
       setErrorMessage('')
