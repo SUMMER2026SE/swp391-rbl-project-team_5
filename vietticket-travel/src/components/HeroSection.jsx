@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 function HeroSection({ content }) {
   return (
     <section className="hero-section section container" id="top">
@@ -8,9 +10,9 @@ function HeroSection({ content }) {
           <p className="hero-description">{content.description}</p>
 
           <div className="hero-actions">
-            <a className="button button--secondary button--large" href="#destinations">
+            <Link className="button button--secondary button--large" to="/attractions">
               {content.primaryCta}
-            </a>
+            </Link>
             <button className="demo-button" type="button">
               <span className="demo-button__icon" aria-hidden="true">
                 <span className="material-symbols-outlined filled">play_arrow</span>

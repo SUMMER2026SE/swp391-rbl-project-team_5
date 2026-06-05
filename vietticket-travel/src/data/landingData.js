@@ -8,7 +8,7 @@ import phongNhaImg from '../assets/phong_nha.png'
 import muiNeImg from '../assets/mui_ne.png'
 
 export const navLinks = [
-  { label: 'Điểm tham quan', href: '#destinations', active: true },
+  { label: 'Điểm tham quan', href: '/attractions' },
   { label: 'Điểm đến', href: '#destinations' },
   { label: 'Vé', href: '#services' },
   { label: 'Đặt chỗ', href: '#steps' },
@@ -260,15 +260,15 @@ export const partners = [
 
 export const footerLinks = {
   company: [
-    { label: 'Về chúng tôi', href: '#' },
-    { label: 'Tuyển dụng', href: '#' },
-    { label: 'Blog', href: '#' },
+    { label: 'Về chúng tôi', href: '/#steps' },
+    { label: 'Tuyển dụng', href: '/' },
+    { label: 'Blog', href: '/' },
   ],
   support: [
-    { label: 'Liên hệ', href: '#' },
-    { label: 'FAQ', href: '#' },
-    { label: 'Điều khoản dịch vụ', href: '#' },
-    { label: 'Chính sách bảo mật', href: '#' },
+    { label: 'Liên hệ', href: '/#support' },
+    { label: 'FAQ', href: '/' },
+    { label: 'Điều khoản dịch vụ', href: '/' },
+    { label: 'Chính sách bảo mật', href: '/' },
   ],
 }
 

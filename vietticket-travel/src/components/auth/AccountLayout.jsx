@@ -14,9 +14,8 @@ const navItems = [
   {
     label: 'Điểm đã lưu',
     icon: 'favorite',
-    to: null,
+    to: '/favorites',
     active: 'saved',
-    comingSoon: true,
   },
   {
     label: 'Phương thức thanh toán',
