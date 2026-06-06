@@ -42,6 +42,7 @@ model User {
   partnerProfile          PartnerProfile?
   favoriteAttractions     FavoriteAttraction[]
   reviews                 Review[]
+  reservations            Reservation[]
 }
 
 model UserProfile {
@@ -121,6 +122,30 @@ enum RefundPolicyType {
   NON_REFUNDABLE
   FREE_CANCELLATION
   REFUND_WITH_FEE
+}
+
+// Reservation enum + model (Task 6)
+enum ReservationStatus {
+  HELD
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+}
+
+model Reservation {
+  id              String            @id @default(uuid())
+  userId          String
+  ticketProductId String
+  timeSlotId      String?
+  date            DateTime          @db.Date
+  quantity        Int
+  status          ReservationStatus @default(HELD)
+  expiresAt       DateTime
+  createdAt       DateTime          @default(now())
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketProduct TicketProduct @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
+  timeSlot      TimeSlot?     @relation(fields: [timeSlotId], references: [id])
 }
 
 // ==========================================
@@ -218,6 +243,7 @@ model TicketProduct {
   attraction   Attraction     @relation(fields: [attractionId], references: [id], onDelete: Cascade)
   timeSlots    TimeSlot[]
   dailyStocks  DailyStock[]   
+  reservations Reservation[]
 }
 
 model TimeSlot {
@@ -230,6 +256,7 @@ model TimeSlot {
 
   ticketProduct   TicketProduct     @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
   timeSlotStocks  TimeSlotStock[]   
+  reservations    Reservation[]
 }
 
 model DailyStock {

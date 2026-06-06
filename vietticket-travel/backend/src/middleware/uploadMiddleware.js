@@ -33,6 +33,22 @@ const uploadAvatar = multer({
   },
 });
 
+// Upload ảnh địa điểm (Partner)
+const uploadAttractionImages = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter(req, file, callback) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) {
+      const error = new Error('Chỉ hỗ trợ ảnh JPEG, PNG hoặc WebP.');
+      error.statusCode = 400;
+      return callback(error);
+    }
+
+    return callback(null, true);
+  },
+});
+
 module.exports = {
   uploadAvatar,
+  uploadAttractionImages,
 };
