@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute.jsx'
 import AdminUserManagementPage from '../pages/AdminUserManagementPage.jsx'
 import AttractionDetailPage from '../pages/AttractionDetailPage.jsx'
@@ -9,6 +9,19 @@ import EditProfilePage from '../pages/EditProfilePage.jsx'
 import ForgotPasswordPage from '../pages/ForgotPasswordPage.jsx'
 import HomePage from '../pages/HomePage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
+import PartnerAddAttractionPage from '../pages/PartnerAddAttractionPage.jsx'
+import PartnerAttractionsPage from '../pages/PartnerAttractionsPage.jsx'
+import PartnerBookingsPage from '../pages/PartnerBookingsPage.jsx'
+import PartnerDashboardPage from '../pages/PartnerDashboardPage.jsx'
+import PartnerEditAttractionPage from '../pages/PartnerEditAttractionPage.jsx'
+import PartnerKycPage from '../pages/PartnerKycPage.jsx'
+import PartnerPendingPage from '../pages/PartnerPendingPage.jsx'
+import PartnerRegisterPage from '../pages/PartnerRegisterPage.jsx'
+import PartnerReportsPage from '../pages/PartnerReportsPage.jsx'
+import PartnerSchedulePage from '../pages/PartnerSchedulePage.jsx'
+import PartnerSettingsPage from '../pages/PartnerSettingsPage.jsx'
+import PartnerTicketFormPage from '../pages/PartnerTicketFormPage.jsx'
+import PartnerTicketsPage from '../pages/PartnerTicketsPage.jsx'
 import ProfilePage from '../pages/ProfilePage.jsx'
 import RegisterPage from '../pages/RegisterPage.jsx'
 import ResetPasswordPage from '../pages/ResetPasswordPage.jsx'
@@ -24,6 +37,112 @@ function AppRoutes() {
       <Route path="/attractions/:id" element={<AttractionDetailPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/partner" element={<Navigate to="/partner/dashboard" replace />} />
+      <Route path="/partner/register" element={<PartnerRegisterPage />} />
+      <Route
+        path="/partner/dashboard"
+        element={
+          <ProtectedRoute>
+            <PartnerDashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/bookings"
+        element={
+          <ProtectedRoute>
+            <PartnerBookingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/reports"
+        element={
+          <ProtectedRoute>
+            <PartnerReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/settings"
+        element={
+          <ProtectedRoute>
+            <PartnerSettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/attractions"
+        element={
+          <ProtectedRoute>
+            <PartnerAttractionsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/attractions/new"
+        element={
+          <ProtectedRoute>
+            <PartnerAddAttractionPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/attractions/:id/edit"
+        element={
+          <ProtectedRoute>
+            <PartnerEditAttractionPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/attractions/:id/tickets"
+        element={
+          <ProtectedRoute>
+            <PartnerTicketsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/attractions/:id/tickets/new"
+        element={
+          <ProtectedRoute>
+            <PartnerTicketFormPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/attractions/:id/tickets/:ticketId/edit"
+        element={
+          <ProtectedRoute>
+            <PartnerTicketFormPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/attractions/:id/schedule"
+        element={
+          <ProtectedRoute>
+            <PartnerSchedulePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/pending"
+        element={
+          <ProtectedRoute>
+            <PartnerPendingPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/kyc"
+        element={
+          <ProtectedRoute>
+            <PartnerKycPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />

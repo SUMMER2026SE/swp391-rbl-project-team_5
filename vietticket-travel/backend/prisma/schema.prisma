@@ -117,6 +117,13 @@ enum TicketStatus {
   INACTIVE
 }
 
+enum TicketType {
+  ADULT
+  CHILD
+  FAMILY
+  GROUP
+}
+
 enum RefundPolicyType {
   NON_REFUNDABLE
   FREE_CANCELLATION
@@ -130,15 +137,20 @@ enum RefundPolicyType {
 model PartnerProfile {
   id                  String        @id @default(uuid())
   userId              String        @unique
-  businessName        String        
-  businessLicenseUrl  String?       
-  taxCode             String?       
-  bankName            String?       
-  bankAccountNumber   String?       
-  bankAccountName     String?       
-  commissionRate      Decimal       @default(0.10) @db.Decimal(5, 2) 
+  businessName        String
+  businessLicenseUrl  String?
+  taxCode             String?
+  bankName            String?
+  branchName          String?
+  bankAccountNumber   String?
+  bankAccountName     String?
+  swiftCode           String?
+  payoutCurrency      String        @default("VND")
+  website             String?
+  description         String?
+  commissionRate      Decimal       @default(0.10) @db.Decimal(5, 2)
   status              PartnerStatus @default(PENDING)
-  rejectionReason     String?       
+  rejectionReason     String?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -152,11 +164,16 @@ model Attraction {
   title           String
   description     String           @db.Text
   address         String
-  city            String           
+  city            String
+  district        String?
+  openTime        String?          // Giờ mở cửa, định dạng "HH:MM"
+  closeTime       String?          // Giờ đóng cửa, định dạng "HH:MM"
+  openDays        String?          // 7 ngày trong tuần dạng CSV bool, vd "1,1,1,1,1,0,0"
+  defaultCapacity Int              @default(100)
   latitude        Float?
   longitude       Float?
   status          AttractionStatus @default(DRAFT)
-  rejectionReason String?          
+  rejectionReason String?
   averageRating   Float            @default(0.0)
   totalReviews    Int              @default(0)
   createdAt       DateTime         @default(now())
@@ -167,7 +184,9 @@ model Attraction {
   categories     AttractionCategory[]
   ticketProducts TicketProduct[]
   favoritedBy    FavoriteAttraction[]
-  reviews        Review[]            
+  reviews        Review[]
+  timeSlots      TimeSlot[]          // Khung giờ cấp điểm tham quan (Module 2)
+  specialDates   SpecialDate[]       // Lịch đặc biệt (đóng cửa / đổi sức chứa)
 
   @@index([city])
   @@index([status])
@@ -206,12 +225,13 @@ model TicketProduct {
   id             String           @id @default(uuid())
   attractionId   String
   name           String
+  type           TicketType       @default(ADULT)
   description    String           @db.Text
-  originalPrice  Decimal          @db.Decimal(12, 2) 
-  sellingPrice   Decimal          @db.Decimal(12, 2) 
+  originalPrice  Decimal          @db.Decimal(12, 2)
+  sellingPrice   Decimal          @db.Decimal(12, 2)
   status         TicketStatus     @default(ACTIVE)
   refundPolicy   RefundPolicyType @default(NON_REFUNDABLE)
-  refundFeeRate  Decimal          @default(0.0) @db.Decimal(5, 2) 
+  refundFeeRate  Decimal          @default(0.0) @db.Decimal(5, 2)
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -222,14 +242,32 @@ model TicketProduct {
 
 model TimeSlot {
   id              String   @id @default(uuid())
-  ticketProductId String
-  startTime       String   
-  endTime         String   
-  maxCapacity     Int      
+  ticketProductId String?  // Khung giờ theo gói vé (luồng đặt vé)
+  attractionId    String?  // Khung giờ cấp điểm tham quan (Module 2 - trang Lịch)
+  startTime       String
+  endTime         String
+  maxCapacity     Int
   isActive        Boolean  @default(true)
 
-  ticketProduct   TicketProduct     @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
-  timeSlotStocks  TimeSlotStock[]   
+  ticketProduct   TicketProduct?    @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
+  attraction      Attraction?       @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  timeSlotStocks  TimeSlotStock[]
+
+  @@index([attractionId])
+}
+
+model SpecialDate {
+  id           String   @id @default(uuid())
+  attractionId String
+  date         DateTime @db.Date
+  closed       Boolean  @default(false)
+  capacity     Int?     // Sức chứa ghi đè cho ngày này (null = dùng mặc định)
+  note         String?
+  createdAt    DateTime @default(now())
+
+  attraction   Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+
+  @@unique([attractionId, date])
 }
 
 model DailyStock {

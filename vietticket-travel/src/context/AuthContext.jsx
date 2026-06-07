@@ -93,6 +93,11 @@ export function AuthProvider({ children }) {
     let isMounted = true
 
     async function hydrateSession() {
+      // If there's cached auth in localStorage, use it immediately while we verify with the server.
+      const cachedAuth = readStorage(AUTH_STORAGE_KEY, null)
+      const cachedUser = readStorage(USER_STORAGE_KEY, null)
+      const hasCachedSession = cachedAuth?.authenticated && cachedUser
+
       try {
         const data = await apiRequest('/auth/me', { method: 'GET' })
 
@@ -100,7 +105,10 @@ export function AuthProvider({ children }) {
 
         persistSession(data.user)
       } catch {
-        if (isMounted) {
+        if (!isMounted) return
+        // If the server is unreachable but we have a cached session, keep it so the user
+        // isn't unexpectedly logged out when the backend is temporarily down.
+        if (!hasCachedSession) {
           clearSession()
         }
       } finally {
@@ -321,6 +329,23 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // Dev/demo helper — bypass real auth when backend is unavailable
+  const demoLogin = (mockUserData = {}) => {
+    const mockUser = {
+      fullName: 'Đối tác Demo',
+      email: 'demo@vietticket.com',
+      role: 'PARTNER',
+      avatar: '',
+      emailVerified: true,
+      ...mockUserData,
+    }
+    const nextAuth = { authenticated: true, loggedInAt: new Date().toISOString() }
+    setUser(mockUser)
+    setAuth(nextAuth)
+    writeStorage(USER_STORAGE_KEY, mockUser)
+    writeStorage(AUTH_STORAGE_KEY, nextAuth)
+  }
+
   const logout = async () => {
     try {
       await apiRequest('/auth/logout', { method: 'POST' })
@@ -347,6 +372,7 @@ export function AuthProvider({ children }) {
     uploadAvatar,
     changePassword,
     logout,
+    demoLogin,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
