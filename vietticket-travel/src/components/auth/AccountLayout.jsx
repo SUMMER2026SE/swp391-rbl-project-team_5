@@ -40,6 +40,11 @@ function AccountLayout({ active = 'profile', children }) {
             VietTicket Travel
           </Link>
           <div className="account-header__actions">
+            {currentUser?.role === 'ADMIN' && (
+              <Link className="text-button" to="/admin">
+                Trang quản trị
+              </Link>
+            )}
             <Link className="text-button" to="/">
               Trang chủ
             </Link>
@@ -78,6 +83,14 @@ function AccountLayout({ active = 'profile', children }) {
           </div>
 
           <nav className="account-nav">
+            {currentUser?.role === 'ADMIN' && (
+              <Link to="/admin">
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  admin_panel_settings
+                </span>
+                Trang quản trị
+              </Link>
+            )}
             {visibleNavItems.map((item) => (
               <Link
                 className={item.active === active ? 'active' : ''}
