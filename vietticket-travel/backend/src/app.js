@@ -6,6 +6,9 @@ const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const partnerRoutes = require('./routes/partnerRoutes');
+const attractionRoutes = require('./routes/attractionRoutes');
+const { router: attractionTicketRouter, ticketRouter } = require('./routes/ticketRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -55,6 +58,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/partners', partnerRoutes);
+app.use('/api/attractions', attractionRoutes);
+app.use('/api/attractions/:attractionId/tickets', attractionTicketRouter);
+app.use('/api/tickets', ticketRouter);
+app.use('/api/upload', uploadRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

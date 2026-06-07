@@ -219,4 +219,8 @@ module.exports = {
   getMyPartner,
   updateSettings,
   getDashboard,
+  // Aliases để tương thích với MPhu
+  registerPartner: submitKyc,
+  getMyPartnerProfile: getMyPartner,
 };
+

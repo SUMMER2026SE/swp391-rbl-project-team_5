@@ -154,3 +154,71 @@ module.exports = {
   sendPasswordResetEmail,
   sendVerificationEmail,
 };
+
+async function sendPartnerReviewEmail({ to, businessName, action, rejectionReason }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const safeBusiness = escapeHtml(businessName || 'Đối tác');
+  if (action === 'APPROVED') {
+    const link = `${frontendUrl}/partner/dashboard`;
+    return sendMail({
+      to,
+      subject: 'Hồ sơ đối tác đã được duyệt - VietTicket Travel',
+      text: `Hồ sơ đối tác ${businessName} đã được duyệt. Truy cập: ${link}`,
+      fallbackLink: link,
+      html: createEmailTemplate({
+        title: 'Hồ sơ đối tác đã được duyệt',
+        preview: `Chúc mừng ${safeBusiness}, hồ sơ đối tác của bạn đã được chấp thuận.`,
+        buttonText: 'Vào trang đối tác',
+        link,
+      }),
+    });
+  }
+
+  if (action === 'REJECTED') {
+    const link = `${frontendUrl}/`;
+    const safeReason = escapeHtml(rejectionReason || 'Không có lý do cụ thể.');
+    return sendMail({
+      to,
+      subject: 'Hồ sơ đối tác bị từ chối - VietTicket Travel',
+      text: `Hồ sơ đối tác ${businessName} bị từ chối. Lý do: ${rejectionReason}`,
+      fallbackLink: link,
+      html: createEmailTemplate({
+        title: 'Hồ sơ đối tác bị từ chối',
+        preview: `Xin chào ${safeBusiness}, hồ sơ đối tác của bạn không được chấp thuận.<br /><br /><strong>Lý do:</strong> ${safeReason}`,
+        buttonText: 'Liên hệ hỗ trợ',
+        link,
+      }),
+    });
+  }
+
+  return { sent: false, reason: 'INVALID_ACTION' };
+}
+
+async function sendAttractionViolationEmail({ to, partnerName, attractionTitle, reason }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/support`;
+  const safePartner = escapeHtml(partnerName || 'Đối tác');
+  const safeAttraction = escapeHtml(attractionTitle || 'địa điểm');
+  const safeReason = escapeHtml(reason || 'Không có lý do cụ thể.');
+
+  return sendMail({
+    to,
+    subject: `⚠️ Địa điểm của bạn đã bị tạm ẩn - ${safeAttraction}`,
+    text: `Địa điểm ${attractionTitle} của bạn đã bị tạm ẩn. Lý do: ${reason}. Liên hệ: ${link}`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Địa điểm của bạn đã bị tạm ẩn',
+      preview: `Xin chào ${safePartner}, địa điểm "${safeAttraction}" vi phạm chính sách. Lý do: ${safeReason}`,
+      buttonText: 'Liên hệ hỗ trợ',
+      link,
+    }),
+  });
+}
+
+module.exports = {
+  sendAccountStatusEmail,
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+  sendPartnerReviewEmail,
+  sendAttractionViolationEmail,
+};

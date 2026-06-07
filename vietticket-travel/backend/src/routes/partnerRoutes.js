@@ -45,3 +45,4 @@ router.get('/attractions/:id/schedule', scheduleController.getSchedule);
 router.put('/attractions/:id/schedule', scheduleController.saveSchedule);
 
 module.exports = router;
+
