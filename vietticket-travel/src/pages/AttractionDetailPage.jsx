@@ -458,6 +458,8 @@ export default function AttractionDetailPage() {
       {isBookingOpen && selectedTicketProduct && (
         <BookingModal
           attractionId={id}
+          attractionImage={activeImage || getPrimaryImageUrl(images)}
+          attractionLocation={getAddress(attraction)}
           attractionTitle={attraction.title}
           isOpen={isBookingOpen}
           onClose={() => setIsBookingOpen(false)}

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/useAuth.js'
+import bookingService from '../services/bookingService.js'
 import { apiRequest } from '../services/api.js'
 
 const formatCurrency = (value) => {
@@ -36,8 +38,17 @@ const isSlotUnavailable = (slot) =>
   slot.available === false ||
   ['UNAVAILABLE', 'SOLD_OUT', 'DISABLED'].includes(slot.status)
 
-export default function BookingModal({ isOpen, onClose, ticketProduct, attractionId, attractionTitle }) {
+export default function BookingModal({
+  isOpen,
+  onClose,
+  ticketProduct,
+  attractionId,
+  attractionTitle,
+  attractionLocation,
+  attractionImage,
+}) {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const todayStr = toDateInputValue(new Date())
   const [selectedDate, setSelectedDate] = useState(todayStr)
   const [selectedTimeSlotId, setSelectedTimeSlotId] = useState('')
@@ -190,13 +201,15 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
   }
 
   const handleCheckout = async () => {
+    setErrorMessage('')
+
     if (!ticketId) {
-      alert('Không tìm thấy loại vé cần đặt.')
+      setErrorMessage('Không tìm thấy loại vé cần đặt. Vui lòng thử lại.')
       return
     }
 
     if (!selectedTimeSlotId) {
-      alert('Vui lòng chọn khung giờ tham quan!')
+      setErrorMessage('Vui lòng chọn khung giờ tham quan trước khi tiếp tục.')
       return
     }
 
@@ -214,18 +227,32 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
         },
       })
       const slot = timeSlots.find(s => getSlotId(s) === selectedTimeSlotId)
-      navigate(`/checkout/${result.data.reservationId}`, {
-        state: {
-          attractionTitle: attractionTitle || 'Sun World Bà Nà Hills',
-          ticketName: ticketProduct?.name || 'Vé tham quan',
-          date: selectedDate,
-          timeSlotLabel: getSlotLabel(slot),
-          adultCount: counts.adult,
-          childCount: counts.child,
-          adultPrice,
-          childPrice,
-        }
+      bookingService.reserveTicket({
+        bookingId: result.data?.reservationId || result.data?.id,
+        attractionId,
+        attractionTitle: attractionTitle || 'Điểm tham quan',
+        attractionLocation: attractionLocation || 'Việt Nam',
+        attractionImage,
+        ticketId,
+        ticketName: ticketProduct?.name || 'Vé tham quan',
+        visitDate: selectedDate,
+        timeSlotId: selectedTimeSlotId,
+        timeSlotLabel: getSlotLabel(slot || { label: '09:00 - 17:00' }),
+        adultCount: counts.adult,
+        childCount: counts.child,
+        adultPrice,
+        childPrice,
+        requiresPartnerApproval: Boolean(
+          ticketProduct?.requiresPartnerApproval || ticketProduct?.approvalRequired,
+        ),
+        customer: {
+          fullName: user?.fullName,
+          email: user?.email,
+          phone: user?.phone,
+        },
       })
+      onClose()
+      navigate(`/checkout/${result.data?.reservationId || result.data?.id}`)
     } catch (error) {
       console.error('Lỗi khi giữ vé:', error)
       setErrorMessage(error.message)
@@ -421,6 +448,14 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
                 Đã bao gồm VAT & phí dịch vụ
               </span>
             </div>
+
+            {errorMessage && (
+              <div className="mb-4 flex items-start gap-2 rounded-2xl border border-[#ba1a1a]/20 bg-[#ffedea] px-4 py-3 text-sm font-semibold text-[#ba1a1a]">
+                <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px]" aria-hidden="true">error</span>
+                {errorMessage}
+              </div>
+            )}
+
             <button
               className="group flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#006068] to-[#007b85] text-lg font-bold text-white shadow-lg shadow-[#006068]/20 transition hover:scale-[1.01] hover:shadow-[#006068]/40 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
               disabled={isSubmitting || !ticketId}

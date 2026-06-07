@@ -3,7 +3,13 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
 
-function Header({ links }) {
+const defaultLinks = [
+  { label: 'Trang chủ', href: '/' },
+  { label: 'Điểm tham quan', href: '/attractions' },
+  { label: 'Vé của tôi', href: '/my-tickets', activeKey: 'My Tickets' },
+]
+
+function Header({ links = defaultLinks, activeLink = '' }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -21,6 +27,15 @@ function Header({ links }) {
 
   const isHomePage = location.pathname === '/'
 
+  const displayLinks = links.map((link) => ({
+    ...link,
+    active:
+      link.active ||
+      link.label === activeLink ||
+      link.activeKey === activeLink ||
+      link.href === location.pathname,
+  }))
+
   return (
     <header className="site-header">
       <nav className="site-nav container" aria-label="Điều hướng chính">
@@ -29,7 +44,7 @@ function Header({ links }) {
         </Link>
 
         <div className="desktop-nav">
-          {links.map((link) => {
+          {displayLinks.map((link) => {
             const isHash = link.href.startsWith('#')
             if (isHash && isHomePage) {
               return (
@@ -125,7 +140,7 @@ function Header({ links }) {
         id="mobile-menu"
       >
         <div className="mobile-menu__inner container">
-          {links.map((link) => {
+          {displayLinks.map((link) => {
             const isHash = link.href.startsWith('#')
             if (isHash && isHomePage) {
               return (
