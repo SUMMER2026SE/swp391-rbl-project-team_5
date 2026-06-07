@@ -263,6 +263,7 @@ export const footerLinks = {
     { label: 'Về chúng tôi', href: '/#steps' },
     { label: 'Tuyển dụng', href: '/' },
     { label: 'Blog', href: '/' },
+    { label: 'Trở thành đối tác', href: '/partner/register' },
   ],
   support: [
     { label: 'Liên hệ', href: '/#support' },
