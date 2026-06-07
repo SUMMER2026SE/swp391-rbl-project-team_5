@@ -70,12 +70,28 @@ function LoginPage() {
     setIsSubmitting(false)
 
     if (!result.ok) {
-      toast.error(result.message || 'Không thể đăng nhập bằng thông tin này.')
+      if (result.code === 'EMAIL_NOT_VERIFIED') {
+        toast.error(
+          <span>
+            Email chưa được xác minh.{' '}
+            <a
+              href="/verify-email"
+              style={{ color: 'inherit', fontWeight: 600, textDecoration: 'underline' }}
+            >
+              Xác minh ngay
+            </a>
+          </span>,
+          { autoClose: 6000 },
+        )
+      } else {
+        toast.error(result.message || 'Không thể đăng nhập bằng thông tin này.')
+      }
       return
     }
 
     toast.success(result.message || 'Đăng nhập thành công.')
-    navigate(redirectTo, { replace: Boolean(redirectFrom) })
+    const dest = result.user?.role === 'ADMIN' ? '/admin/users' : redirectTo
+    navigate(dest, { replace: Boolean(redirectFrom) })
   }
 
   const handleGoogleSuccess = async (credentialResponse) => {
@@ -89,7 +105,8 @@ function LoginPage() {
     }
 
     toast.success(result.message || 'Đăng nhập Google thành công.')
-    navigate('/')
+    const dest = result.user?.role === 'ADMIN' ? '/admin/users' : redirectTo
+    navigate(dest, { replace: Boolean(redirectFrom) })
   }
 
   return (

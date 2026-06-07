@@ -4,9 +4,26 @@ import { useAuth } from '../../context/useAuth.js'
 
 const navItems = [
   { label: 'Hồ sơ của tôi', icon: 'person', to: '/profile', active: 'profile' },
-  { label: 'Đặt chỗ gần đây', icon: 'confirmation_number', to: '/profile' },
-  { label: 'Điểm đã lưu', icon: 'favorite', to: '/profile' },
-  { label: 'Phương thức thanh toán', icon: 'credit_card', to: '/profile' },
+  {
+    label: 'Đặt chỗ gần đây',
+    icon: 'confirmation_number',
+    to: null,
+    active: 'bookings',
+    comingSoon: true,
+  },
+  {
+    label: 'Điểm đã lưu',
+    icon: 'favorite',
+    to: '/favorites',
+    active: 'saved',
+  },
+  {
+    label: 'Phương thức thanh toán',
+    icon: 'credit_card',
+    to: null,
+    active: 'payment',
+    comingSoon: true,
+  },
   {
     label: 'Đổi mật khẩu',
     icon: 'lock_reset',
@@ -74,12 +91,6 @@ function AccountLayout({ active = 'profile', children }) {
               <h2>{currentUser.fullName}</h2>
               <p>{currentUser.email}</p>
             </div>
-            <span className="account-badge">
-              <span className="material-symbols-outlined filled" aria-hidden="true">
-                workspace_premium
-              </span>
-              Nhà khám phá cao cấp
-            </span>
           </div>
 
           <nav className="account-nav">
@@ -91,18 +102,33 @@ function AccountLayout({ active = 'profile', children }) {
                 Trang quản trị
               </Link>
             )}
-            {visibleNavItems.map((item) => (
-              <Link
-                className={item.active === active ? 'active' : ''}
-                key={item.label}
-                to={item.to}
-              >
-                <span className="material-symbols-outlined" aria-hidden="true">
-                  {item.icon}
+            {visibleNavItems.map((item) =>
+              item.comingSoon ? (
+                <span
+                  className="account-nav-item--disabled"
+                  key={item.label}
+                  title="Tính năng đang phát triển"
+                  aria-disabled="true"
+                >
+                  <span className="material-symbols-outlined" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                  {item.label}
+                  <span className="account-nav-badge">Sắp ra mắt</span>
                 </span>
-                {item.label}
-              </Link>
-            ))}
+              ) : (
+                <Link
+                  className={item.active === active ? 'active' : ''}
+                  key={item.label}
+                  to={item.to}
+                >
+                  <span className="material-symbols-outlined" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                  {item.label}
+                </Link>
+              ),
+            )}
             <button type="button" onClick={handleLogout}>
               <span className="material-symbols-outlined" aria-hidden="true">
                 logout

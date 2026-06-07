@@ -23,10 +23,11 @@ function ChangePasswordPage() {
     () => ({
       currentPassword: form.currentPassword ? '' : 'Vui lòng nhập mật khẩu hiện tại.',
       newPassword: validatePassword(form.newPassword),
-      confirmPassword:
-        form.confirmPassword && form.confirmPassword === form.newPassword
-          ? ''
-          : 'Mật khẩu xác nhận không khớp.',
+      confirmPassword: !form.confirmPassword
+        ? 'Vui lòng xác nhận mật khẩu.'
+        : form.confirmPassword !== form.newPassword
+          ? 'Mật khẩu xác nhận không khớp.'
+          : '',
     }),
     [form],
   )
@@ -134,7 +135,7 @@ function ChangePasswordPage() {
             Sử dụng ít nhất 8 ký tự, bao gồm chữ cái và số.
           </p>
           <div className="auth-actions-row">
-            <button className="auth-submit" type="submit" disabled={isSubmitting}>
+            <button className="auth-submit" type="submit" disabled={isSubmitting || !isFormValid}>
               {isSubmitting ? 'Đang cập nhật...' : 'Cập nhật mật khẩu'}
             </button>
             <Link className="auth-secondary-button" to="/profile">

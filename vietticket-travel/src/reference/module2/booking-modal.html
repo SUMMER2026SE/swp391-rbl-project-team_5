@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+
+<html class="light" lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-secondary-fixed": "#271900",
+                      "on-tertiary-fixed-variant": "#434847",
+                      "surface-container": "#eeeef0",
+                      "inverse-surface": "#2f3133",
+                      "on-secondary-container": "#6b4b00",
+                      "surface": "#f9f9fc",
+                      "on-tertiary-fixed": "#181c1c",
+                      "on-primary-fixed": "#001f23",
+                      "background": "#f9f9fc",
+                      "outline": "#6e797a",
+                      "surface-container-highest": "#e2e2e5",
+                      "tertiary-container": "#6c706f",
+                      "on-primary-fixed-variant": "#004f56",
+                      "tertiary-fixed": "#e0e3e2",
+                      "secondary-container": "#feb700",
+                      "on-primary": "#ffffff",
+                      "on-surface": "#1a1c1e",
+                      "secondary": "#7c5800",
+                      "primary-container": "#007b85",
+                      "on-error": "#ffffff",
+                      "on-tertiary-container": "#f1f4f3",
+                      "on-secondary": "#ffffff",
+                      "secondary-fixed": "#ffdea8",
+                      "on-background": "#1a1c1e",
+                      "error-container": "#ffdad6",
+                      "tertiary": "#545857",
+                      "surface-tint": "#006971",
+                      "error": "#ba1a1a",
+                      "tertiary-fixed-dim": "#c4c7c6",
+                      "on-error-container": "#93000a",
+                      "on-tertiary": "#ffffff",
+                      "primary-fixed-dim": "#7ad4df",
+                      "surface-dim": "#dadadc",
+                      "surface-container-high": "#e8e8ea",
+                      "secondary-fixed-dim": "#ffba20",
+                      "surface-bright": "#f9f9fc",
+                      "on-secondary-fixed-variant": "#5e4200",
+                      "inverse-primary": "#7ad4df",
+                      "primary-fixed": "#96f1fc",
+                      "surface-container-low": "#f3f3f6",
+                      "surface-container-lowest": "#ffffff",
+                      "on-surface-variant": "#3e494a",
+                      "surface-variant": "#e2e2e5",
+                      "primary": "#006068",
+                      "on-primary-container": "#d5faff",
+                      "outline-variant": "#bdc9ca",
+                      "inverse-on-surface": "#f0f0f3"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "container-max": "1280px",
+                      "gutter": "24px",
+                      "section-gap": "80px",
+                      "margin-desktop": "64px",
+                      "margin-mobile": "16px",
+                      "base": "8px"
+              },
+              "fontFamily": {
+                      "label-md": ["Plus Jakarta Sans"],
+                      "display-lg": ["Be Vietnam Pro"],
+                      "headline-lg": ["Be Vietnam Pro"],
+                      "display-lg-mobile": ["Be Vietnam Pro"],
+                      "label-sm": ["Plus Jakarta Sans"],
+                      "headline-md": ["Be Vietnam Pro"],
+                      "body-md": ["Plus Jakarta Sans"],
+                      "body-lg": ["Plus Jakarta Sans"]
+              },
+              "fontSize": {
+                      "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.02em", "fontWeight": "600"}],
+                      "display-lg": ["56px", {"lineHeight": "64px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "600"}],
+                      "display-lg-mobile": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                      "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "500"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f9f9fc; }
+        .font-headline { font-family: 'Be Vietnam Pro', sans-serif; }
+        .glass-modal {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .shadow-premium {
+            box-shadow: 0px 8px 30px rgba(0, 123, 133, 0.08);
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #006068; border-radius: 10px; }
+
+        /* Calendar day cell base */
+        .cal-day {
+            height: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.75rem;
+            font-size: 14px;
+            line-height: 20px;
+            font-weight: 500;
+            transition: background-color 0.15s, color 0.15s;
+        }
+        .cal-day.past {
+            opacity: 0.30;
+            cursor: not-allowed;
+        }
+        .cal-day.today {
+            ring-width: 2px;
+            box-shadow: 0 0 0 2px #006068;
+            color: #006068;
+            font-weight: 700;
+        }
+        .cal-day.selected {
+            background-color: #006068;
+            color: #ffffff;
+            box-shadow: 0 4px 12px rgba(0, 96, 104, 0.30);
+            cursor: pointer;
+        }
+        .cal-day.available {
+            color: #1a1c1e;
+            cursor: pointer;
+        }
+        .cal-day.available:hover {
+            background-color: #eeeef0;
+        }
+        .cal-day.today.available:hover {
+            background-color: rgba(0, 96, 104, 0.08);
+        }
+        .cal-day.filler {
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4 overflow-hidden">
+<!-- Background Context (Mock Attraction Detail Page) -->
+<div class="fixed inset-0 z-0">
+<img alt="Ha Long Bay Background" class="w-full h-full object-cover brightness-50" data-alt="A breathtaking cinematic wide shot of a traditional Vietnamese temple nestled in lush tropical greenery under a soft golden hour sun. The architecture features intricate teal and gold details, surrounded by mist-covered mountains in the distance. The atmosphere is serene and majestic, reflecting a premium travel experience with vibrant natural colors and high-end photographic quality." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB-zm60769NDavzoFmkk9c3J8h5NPqK8zmqHcrZFhmp4J2zHo_up3tqN9cam2as2c27hEXkNUp1BzqOmXgLhf9ZCYYoNz4u5HO_c6ZKATqD_6L2D8JP3Eo0S3ttNRBV723EmDR5Pzz0PSXo1XZOt-Rxq-9q66pCTMYwFb3TUf-Yp4zwLVgmThkttsbddaERYdas_aTzUqM5lzX1MbPTqi9tKAFAw7IEqmRW8H4hJ38elrJriqwSPaN9E6DTsCdGdZgp6nWE4_0868I"/>
+<div class="absolute inset-0 bg-on-surface/40 backdrop-blur-sm"></div>
+</div>
+<!-- Booking Modal -->
+<main class="relative z-10 w-full max-w-[560px] glass-modal rounded-[32px] overflow-hidden shadow-premium animate-in fade-in zoom-in duration-300">
+<!-- Header -->
+<header class="flex items-center justify-between px-8 py-6 border-b border-outline-variant/20">
+<h1 class="font-headline-md text-headline-md text-on-surface">Đặt vé tham quan</h1>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-surface-variant transition-colors active:scale-90 duration-200">
+<span class="material-symbols-outlined text-on-surface-variant">close</span>
+</button>
+</header>
+<div class="px-8 py-6 max-h-[768px] overflow-y-auto custom-scrollbar">
+<!-- Date Selection -->
+<section class="mb-8">
+  <div class="flex items-center gap-2 mb-4">
+    <span class="material-symbols-outlined text-primary">calendar_today</span>
+    <h2 class="font-label-md text-label-md text-on-surface uppercase tracking-wider">Chọn ngày tham quan</h2>
+  </div>
+
+  <!-- Calendar Picker -->
+  <div class="rounded-2xl bg-surface-container-lowest border border-outline-variant/20 p-4">
+
+    <!-- Month navigation header -->
+    <div class="flex items-center justify-between mb-4">
+      <button
+        id="cal-prev"
+        onclick="changeMonth(-1)"
+        class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-container transition-colors active:scale-90 duration-150"
+        aria-label="Tháng trước"
+      >
+        <span class="material-symbols-outlined text-on-surface-variant" style="font-size:20px;">chevron_left</span>
+      </button>
+
+      <span id="cal-month-label" class="font-headline text-[15px] font-semibold text-on-surface select-none"></span>
+
+      <button
+        id="cal-next"
+        onclick="changeMonth(1)"
+        class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-container transition-colors active:scale-90 duration-150"
+        aria-label="Tháng sau"
+      >
+        <span class="material-symbols-outlined text-on-surface-variant" style="font-size:20px;">chevron_right</span>
+      </button>
+    </div>
+
+    <!-- Day-of-week labels -->
+    <div class="grid grid-cols-7 mb-1">
+      <div class="text-center font-label-sm text-label-sm text-outline-variant py-1">CN</div>
+      <div class="text-center font-label-sm text-label-sm text-outline-variant py-1">T2</div>
+      <div class="text-center font-label-sm text-label-sm text-outline-variant py-1">T3</div>
+      <div class="text-center font-label-sm text-label-sm text-outline-variant py-1">T4</div>
+      <div class="text-center font-label-sm text-label-sm text-outline-variant py-1">T5</div>
+      <div class="text-center font-label-sm text-label-sm text-outline-variant py-1">T6</div>
+      <div class="text-center font-label-sm text-label-sm text-outline-variant py-1">T7</div>
+    </div>
+
+    <!-- Calendar day grid (populated by JS) -->
+    <div id="cal-grid" class="grid grid-cols-7 gap-y-1"></div>
+
+  </div>
+</section>
+<!-- Time Slots -->
+<section class="mb-8">
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-primary">schedule</span>
+<h2 class="font-label-md text-label-md text-on-surface uppercase tracking-wider">Chọn khung giờ</h2>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+<!-- Active Slot -->
+<button class="flex flex-col p-4 rounded-2xl border-2 border-primary bg-primary/5 text-left transition-all active:scale-95">
+<span class="font-label-md text-label-md text-primary">09:00 - 11:00</span>
+<span class="font-label-sm text-label-sm text-primary/80">Còn 45 vé</span>
+</button>
+<!-- Regular Available Slot -->
+<button class="flex flex-col p-4 rounded-2xl border border-outline-variant bg-surface-container-lowest hover:border-primary/50 transition-all text-left active:scale-95">
+<span class="font-label-md text-label-md text-on-surface">11:00 - 13:00</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Sẵn sàng</span>
+</button>
+<!-- Sold Out Slot -->
+<div class="flex flex-col p-4 rounded-2xl border border-outline-variant/30 bg-surface-container-high text-left opacity-60 cursor-not-allowed">
+<span class="font-label-md text-label-md text-outline-variant">13:00 - 15:00</span>
+<span class="font-label-sm text-label-sm text-error">Hết vé</span>
+</div>
+<!-- Regular Available Slot -->
+<button class="flex flex-col p-4 rounded-2xl border border-outline-variant bg-surface-container-lowest hover:border-primary/50 transition-all text-left active:scale-95">
+<span class="font-label-md text-label-md text-on-surface">15:00 - 17:00</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Sẵn sàng</span>
+</button>
+</div>
+</section>
+<!-- Quantity Selector -->
+<section class="mb-4 space-y-4">
+<div class="flex items-center gap-2 mb-2">
+<span class="material-symbols-outlined text-primary">confirmation_number</span>
+<h2 class="font-label-md text-label-md text-on-surface uppercase tracking-wider">Số lượng vé</h2>
+</div>
+<!-- Adult Ticket -->
+<div class="flex items-center justify-between p-5 bg-surface-container-low rounded-2xl">
+<div>
+<h3 class="font-body-lg text-body-lg font-semibold text-on-surface">Vé Người lớn</h3>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Từ 13 tuổi trở lên</p>
+</div>
+<div class="flex items-center gap-4">
+<p class="font-label-md text-label-md text-primary mr-4">250.000đ</p>
+<div class="flex items-center bg-surface-container-highest rounded-full p-1 border border-outline-variant/10">
+<button class="w-8 h-8 flex items-center justify-center rounded-full bg-white shadow-sm hover:text-primary transition-colors" onclick="decrement('adult')">
+<span class="material-symbols-outlined text-[18px]">remove</span>
+</button>
+<span class="w-10 text-center font-headline-md text-headline-md text-[18px]" id="adult-count">1</span>
+<button class="w-8 h-8 flex items-center justify-center rounded-full bg-white shadow-sm hover:text-primary transition-colors" onclick="increment('adult')">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Child Ticket -->
+<div class="flex items-center justify-between p-5 bg-surface-container-low rounded-2xl">
+<div>
+<h3 class="font-body-lg text-body-lg font-semibold text-on-surface">Vé Trẻ em</h3>
+<p class="font-label-sm text-label-sm text-on-surface-variant">Dưới 12 tuổi</p>
+</div>
+<div class="flex items-center gap-4">
+<p class="font-label-md text-label-md text-primary mr-4">150.000đ</p>
+<div class="flex items-center bg-surface-container-highest rounded-full p-1 border border-outline-variant/10">
+<button class="w-8 h-8 flex items-center justify-center rounded-full bg-white shadow-sm hover:text-primary transition-colors" onclick="decrement('child')">
+<span class="material-symbols-outlined text-[18px]">remove</span>
+</button>
+<span class="w-10 text-center font-headline-md text-headline-md text-[18px]" id="child-count">0</span>
+<button class="w-8 h-8 flex items-center justify-center rounded-full bg-white shadow-sm hover:text-primary transition-colors" onclick="increment('child')">
+<span class="material-symbols-outlined text-[18px]">add</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- Footer / Price Summary & CTA -->
+<footer class="p-8 border-t border-outline-variant/20 bg-surface-container-lowest/50">
+<div class="flex items-end justify-between mb-6">
+<div>
+<span class="font-label-md text-label-md text-on-surface-variant">Tổng cộng</span>
+<div class="flex items-baseline gap-1">
+<span class="font-headline-md text-[32px] font-bold text-primary" id="total-price">250.000</span>
+<span class="font-headline-md text-headline-md text-primary">đ</span>
+</div>
+</div>
+<div class="text-right">
+<span class="font-label-sm text-label-sm text-outline">Đã bao gồm VAT &amp; phí dịch vụ</span>
+</div>
+</div>
+<button class="w-full h-14 rounded-2xl bg-gradient-to-r from-primary to-primary-container text-on-primary font-headline-md text-[18px] font-bold shadow-lg shadow-primary/20 hover:shadow-primary/40 hover:scale-[1.01] active:scale-[0.98] transition-all duration-300 flex items-center justify-center gap-2 group">
+                Tiếp tục thanh toán
+                <span class="material-symbols-outlined transition-transform group-hover:translate-x-1">arrow_forward</span>
+</button>
+</footer>
+</main>
+<script>
+        /* =====================================================================
+           TICKET QUANTITY & PRICE
+        ===================================================================== */
+        const ADULT_PRICE = 250000;
+        const CHILD_PRICE = 150000;
+
+        let counts = {
+            adult: 1,
+            child: 0
+        };
+
+        function increment(type) {
+            counts[type]++;
+            updateUI();
+        }
+
+        function decrement(type) {
+            if (counts[type] > (type === 'adult' ? 1 : 0)) {
+                counts[type]--;
+                updateUI();
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('adult-count').innerText = counts.adult;
+            document.getElementById('child-count').innerText = counts.child;
+
+            const total = (counts.adult * ADULT_PRICE) + (counts.child * CHILD_PRICE);
+            document.getElementById('total-price').innerText = total.toLocaleString('vi-VN');
+        }
+
+        // Initialize ticket UI
+        updateUI();
+
+        /* =====================================================================
+           FULL-MONTH CALENDAR PICKER
+        ===================================================================== */
+
+        // State — month is 0-indexed (5 = June)
+        let currentMonth = 5;
+        let currentYear  = 2026;
+        let selectedDate = 4;   // day number currently selected
+
+        const MONTH_NAMES_VI = [
+            'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4',
+            'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8',
+            'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
+        ];
+
+        /**
+         * Returns a Date object for "today" normalised to midnight local time.
+         */
+        function today() {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            return d;
+        }
+
+        /**
+         * Renders the calendar grid for currentMonth / currentYear.
+         */
+        function renderCalendar() {
+            const grid  = document.getElementById('cal-grid');
+            const label = document.getElementById('cal-month-label');
+            const todayDate = today();
+
+            // Update month/year label
+            label.textContent = MONTH_NAMES_VI[currentMonth] + ', ' + currentYear;
+
+            // Disable prev-month button when the displayed month is the current real month
+            // (so users cannot navigate into the past)
+            const realToday = new Date();
+            const isPastMonth =
+                currentYear < realToday.getFullYear() ||
+                (currentYear === realToday.getFullYear() && currentMonth < realToday.getMonth());
+            document.getElementById('cal-prev').disabled = isPastMonth;
+            document.getElementById('cal-prev').style.opacity = isPastMonth ? '0.3' : '';
+            document.getElementById('cal-prev').style.cursor  = isPastMonth ? 'not-allowed' : '';
+
+            // Build the grid
+            const firstDay   = new Date(currentYear, currentMonth, 1).getDay(); // 0=Sun
+            const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+            grid.innerHTML = '';
+
+            // Leading filler cells (days from previous month)
+            for (let i = 0; i < firstDay; i++) {
+                const filler = document.createElement('div');
+                filler.className = 'cal-day filler';
+                grid.appendChild(filler);
+            }
+
+            // Actual day cells
+            for (let d = 1; d <= daysInMonth; d++) {
+                const cellDate = new Date(currentYear, currentMonth, d);
+                cellDate.setHours(0, 0, 0, 0);
+
+                const isPast     = cellDate < todayDate;
+                const isToday    = cellDate.getTime() === todayDate.getTime();
+                const isSelected =
+                    d === selectedDate &&
+                    currentMonth === (function () {
+                        // track selected month/year separately if needed
+                        return _selectedMonth;
+                    }()) &&
+                    currentYear === _selectedYear;
+
+                const cell = document.createElement('div');
+                cell.textContent = d;
+
+                let classes = 'cal-day';
+
+                if (isPast) {
+                    classes += ' past';
+                } else {
+                    classes += ' available';
+                    if (isToday)    classes += ' today';
+                    if (isSelected) classes += ' selected';
+
+                    cell.addEventListener('click', () => selectDate(d));
+                }
+
+                cell.className = classes;
+                grid.appendChild(cell);
+            }
+
+            // Trailing filler cells to complete the last row (always keep 6 rows = 42 cells)
+            const totalCells = 42;
+            const filled = firstDay + daysInMonth;
+            const trailing = totalCells - filled;
+            for (let i = 0; i < trailing; i++) {
+                const filler = document.createElement('div');
+                filler.className = 'cal-day filler';
+                grid.appendChild(filler);
+            }
+        }
+
+        // Track which month/year the selection belongs to
+        let _selectedMonth = currentMonth;
+        let _selectedYear  = currentYear;
+
+        /**
+         * Called when a day cell is clicked.
+         */
+        function selectDate(day) {
+            selectedDate   = day;
+            _selectedMonth = currentMonth;
+            _selectedYear  = currentYear;
+            renderCalendar();
+        }
+
+        /**
+         * Navigate forward or backward by `delta` months.
+         * Prevents going before the current real month.
+         */
+        function changeMonth(delta) {
+            let newMonth = currentMonth + delta;
+            let newYear  = currentYear;
+
+            if (newMonth > 11) { newMonth = 0;  newYear++; }
+            if (newMonth < 0)  { newMonth = 11; newYear--; }
+
+            // Do not allow navigation before today's month
+            const realToday = new Date();
+            const minYear   = realToday.getFullYear();
+            const minMonth  = realToday.getMonth();
+            if (newYear < minYear || (newYear === minYear && newMonth < minMonth)) {
+                return;
+            }
+
+            currentMonth = newMonth;
+            currentYear  = newYear;
+            renderCalendar();
+        }
+
+        // Initial render
+        renderCalendar();
+    </script>
+</body></html>

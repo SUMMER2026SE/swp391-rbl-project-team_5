@@ -1,5 +1,14 @@
+import halongBayImg from '../assets/halong_bay.png'
+import sapaImg from '../assets/sapa.png'
+import phuQuocImg from '../assets/phu_quoc.png'
+import ninhBinhImg from '../assets/ninh_binh.png'
+import hueImg from '../assets/hue.png'
+import daLatImg from '../assets/da_lat.png'
+import phongNhaImg from '../assets/phong_nha.png'
+import muiNeImg from '../assets/mui_ne.png'
+
 export const navLinks = [
-  { label: 'Điểm tham quan', href: '#destinations', active: true },
+  { label: 'Điểm tham quan', href: '/attractions' },
   { label: 'Điểm đến', href: '#destinations' },
   { label: 'Vé', href: '#services' },
   { label: 'Đặt chỗ', href: '#steps' },
@@ -11,7 +20,7 @@ export const sliderSlides = [
     title: 'Khám Phá Vẻ Đẹp Bất Tận Của Việt Nam',
     description: 'Đặt vé tham quan các địa danh nổi tiếng với giá ưu đãi nhất. Trải nghiệm hành trình di sản cùng VietTicket Travel.',
     image: {
-      src: 'https://lh3.googleusercontent.com/aida/ADBb0uj6zoB0-xV6DuohiQZeqBagaY5y4NK_bU_UoDi2i8nrvOXvsDjCbDnz6z5AUt84ZNSzUObaPYleD_e0undQ3_PV3kbmMx0lFWq-foHVa77FSbPSPxM11LvD0uAch50nbpGrAsc2JPNRMH-oh2Wuh_e3JpfqnpfCYnkNdBRXXyJ5yAm1iRxye3eJcAY_Hs6tXm1NON0Z652VBR_gNALfro7LeMlA_4hP4lILqlblLPnQscAEVEejlVWb7A',
+      src: halongBayImg,
       alt: 'Ha Long Bay Premium Travel Banner'
     },
     primaryCta: 'Khám phá ngay'
@@ -31,6 +40,69 @@ export const sliderSlides = [
     image: {
       src: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD5Js51DTlvDrM-hiAjBsIxz_mx-T1WHuheMfI0oxoxXH-ZDhcOc4Ju3Wn3F3yVCODqtiWOAKflM7sUWUPbMmRmLngujdUZn7nZXhA8zkZFv-JEWOtU9nrU8-UD4sviGglDoRcxdVny2mqNGJ6c-pMhggNL1rsuq4-lVCh8FXmeD8di552hptStvlxg2WZrMyE9r8VSEtNc1p54_k4OugcqqAg_1aL9rBmemwR7LZ0p2lvgViZjYipya3w-MiEY3uxGHfcjCkH1PeA',
       alt: 'Hoi An Premium Travel Banner'
+    },
+    primaryCta: 'Khám phá ngay'
+  },
+  {
+    title: 'Sapa - Nấc Thang Lên Thiên Đường',
+    description: 'Chiêm ngưỡng ruộng bậc thang hùng vĩ và đỉnh Fansipan mờ sương. Đặt tour và vé cáp treo Fansipan Legend tiện lợi.',
+    image: {
+      src: sapaImg,
+      alt: 'Sapa Terraced Fields Scenic Banner'
+    },
+    primaryCta: 'Khám phá ngay'
+  },
+  {
+    title: 'Phú Quốc - Thiên Đường Đảo Ngọc',
+    description: 'Khám phá những bãi biển cát trắng mịn, hoàng hôn lãng mạn và tổ hợp giải trí VinWonders, Safari hàng đầu.',
+    image: {
+      src: phuQuocImg,
+      alt: 'Phu Quoc Island Beach Resort Banner'
+    },
+    primaryCta: 'Khám phá ngay'
+  },
+  {
+    title: 'Ninh Bình - Kỳ Quan Tràng An Tráng Lệ',
+    description: 'Khám phá quần thể di sản thế giới với những dòng sông uốn lượn qua các hang động và núi đá vôi kỳ vĩ.',
+    image: {
+      src: ninhBinhImg,
+      alt: 'Trang An Ninh Binh Landscape Banner'
+    },
+    primaryCta: 'Khám phá ngay'
+  },
+  {
+    title: 'Cố Đô Huế - Dấu Ấn Vàng Son Một Thuở',
+    description: 'Hành trình tìm về cội nguồn lịch sử với Đại Nội cổ kính, các lăng tẩm uy nghiêm và dòng sông Hương thơ mộng.',
+    image: {
+      src: hueImg,
+      alt: 'Hue Imperial City Palace Banner'
+    },
+    primaryCta: 'Khám phá ngay'
+  },
+  {
+    title: 'Đà Lạt - Thành Phố Ngàn Hoa Trong Sương',
+    description: 'Tận hưởng bầu không khí mát mẻ quanh năm, những đồi thông reo và vô vàn điểm check-in thơ mộng.',
+    image: {
+      src: daLatImg,
+      alt: 'Da Lat Pine Forest Sunrise Banner'
+    },
+    primaryCta: 'Khám phá ngay'
+  },
+  {
+    title: 'Phong Nha - Vương Quốc Hang Động Kỳ Vĩ',
+    description: 'Thám hiểm những hang động tráng lệ nhất thế giới và trải nghiệm các hoạt động thể thao mạo hiểm độc đáo.',
+    image: {
+      src: phongNhaImg,
+      alt: 'Phong Nha Cave Underworld Banner'
+    },
+    primaryCta: 'Khám phá ngay'
+  },
+  {
+    title: 'Mũi Né - Nắng Vàng Và Đồi Cát Trắng',
+    description: 'Trải nghiệm trượt cát đầy phấn khích, dạo bước trên Suối Tiên và thưởng thức hải sản tươi ngon bên bờ biển lộng gió.',
+    image: {
+      src: muiNeImg,
+      alt: 'Mui Ne Red Sand Dunes Banner'
     },
     primaryCta: 'Khám phá ngay'
   }
@@ -188,15 +260,15 @@ export const partners = [
 
 export const footerLinks = {
   company: [
-    { label: 'Về chúng tôi', href: '#' },
-    { label: 'Tuyển dụng', href: '#' },
-    { label: 'Blog', href: '#' },
+    { label: 'Về chúng tôi', href: '/#steps' },
+    { label: 'Tuyển dụng', href: '/' },
+    { label: 'Blog', href: '/' },
   ],
   support: [
-    { label: 'Liên hệ', href: '#' },
-    { label: 'FAQ', href: '#' },
-    { label: 'Điều khoản dịch vụ', href: '#' },
-    { label: 'Chính sách bảo mật', href: '#' },
+    { label: 'Liên hệ', href: '/#support' },
+    { label: 'FAQ', href: '/' },
+    { label: 'Điều khoản dịch vụ', href: '/' },
+    { label: 'Chính sách bảo mật', href: '/' },
   ],
 }
 

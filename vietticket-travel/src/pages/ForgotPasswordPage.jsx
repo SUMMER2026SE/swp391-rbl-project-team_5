@@ -15,7 +15,8 @@ function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [touched, setTouched] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [message, setMessage] = useState('')
+  const [isSent, setIsSent] = useState(false)
+  const [sentMessage, setSentMessage] = useState('')
   const emailError = useMemo(() => validateEmail(email), [email])
 
   useEffect(() => {
@@ -40,7 +41,8 @@ function ForgotPasswordPage() {
       return
     }
 
-    setMessage(result.message)
+    setSentMessage(result.message)
+    setIsSent(true)
     toast.success(result.message)
   }
 
@@ -62,24 +64,45 @@ function ForgotPasswordPage() {
           </p>
         }
       >
-        <form className="auth-form" onSubmit={handleSubmit}>
-          {message ? <p className="auth-success">{message}</p> : null}
-          <AuthFormInput
-            id="forgot-email"
-            label="Địa chỉ email"
-            icon="mail"
-            type="email"
-            placeholder="example@gmail.com"
-            value={email}
-            error={touched ? emailError : ''}
-            onBlur={() => setTouched(true)}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-          <button className="auth-submit" type="submit" disabled={isSubmitting || Boolean(emailError)}>
-            {isSubmitting ? 'Đang gửi...' : 'Gửi link đặt lại'}
-          </button>
-        </form>
+        {isSent ? (
+          <div className="auth-form auth-form--relaxed">
+            <div className="auth-success-state">
+              <span className="material-symbols-outlined filled" aria-hidden="true">
+                mark_email_read
+              </span>
+              <p>{sentMessage || 'Nếu email tồn tại, link đặt lại đã được gửi.'}</p>
+              <p className="auth-helper">Kiểm tra hộp thư đến (và thư mục Spam) của bạn.</p>
+            </div>
+            <p className="auth-helper auth-helper--note">
+              Nếu bạn đăng nhập bằng Google, vui lòng dùng nút{' '}
+              <Link className="auth-link" to="/login">
+                Đăng nhập với Google
+              </Link>{' '}
+              thay vì đặt lại mật khẩu.
+            </p>
+          </div>
+        ) : (
+          <form className="auth-form" onSubmit={handleSubmit}>
+            <AuthFormInput
+              id="forgot-email"
+              label="Địa chỉ email"
+              icon="mail"
+              type="email"
+              placeholder="example@gmail.com"
+              value={email}
+              error={touched ? emailError : ''}
+              onBlur={() => setTouched(true)}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+            <p className="auth-helper auth-helper--note">
+              Nếu bạn đăng nhập bằng Google, hãy dùng nút "Đăng nhập với Google" thay vì đặt lại mật khẩu.
+            </p>
+            <button className="auth-submit" type="submit" disabled={isSubmitting || Boolean(emailError)}>
+              {isSubmitting ? 'Đang gửi...' : 'Gửi link đặt lại'}
+            </button>
+          </form>
+        )}
       </AuthCard>
     </AuthLayout>
   )

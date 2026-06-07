@@ -29,10 +29,11 @@ function ResetPasswordPage() {
     () => ({
       token: form.token.trim() ? '' : 'Vui lòng nhập mã đặt lại mật khẩu.',
       newPassword: validatePassword(form.newPassword),
-      confirmPassword:
-        form.confirmPassword && form.confirmPassword === form.newPassword
-          ? ''
-          : 'Mật khẩu xác nhận không khớp.',
+      confirmPassword: !form.confirmPassword
+        ? 'Vui lòng xác nhận mật khẩu.'
+        : form.confirmPassword !== form.newPassword
+          ? 'Mật khẩu xác nhận không khớp.'
+          : '',
     }),
     [form],
   )
@@ -102,7 +103,7 @@ function ResetPasswordPage() {
               label="Mã đặt lại"
               icon="key"
               type="text"
-              placeholder="Dán token từ link email hoặc terminal backend"
+              placeholder="Dán mã từ link email"
               value={form.token}
               error={touched.token ? errors.token : ''}
               onBlur={() => markTouched('token')}

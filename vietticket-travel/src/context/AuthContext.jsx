@@ -157,13 +157,18 @@ export function AuthProvider({ children }) {
         body: {
           email: credentials.email,
           password: credentials.password,
+          remember: credentials.remember,
         },
       })
 
       const nextUser = persistSession(data.user)
       return { ok: true, user: nextUser, message: data.message }
     } catch (error) {
-      return getErrorResult(error)
+      // Forward error code and data so pages can handle specific cases (e.g. EMAIL_NOT_VERIFIED)
+      const result = getErrorResult(error)
+      result.code = error.data?.code || null
+      result.data = error.data || null
+      return result
     }
   }
 
@@ -194,7 +199,6 @@ export function AuthProvider({ children }) {
         },
       })
 
-      localStorage.setItem(PENDING_EMAIL_STORAGE_KEY, payload.email)
       clearSession()
       localStorage.setItem(PENDING_EMAIL_STORAGE_KEY, payload.email)
 

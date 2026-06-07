@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
 
 function Header({ links }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
   const { isAuthenticated, logout, user } = useAuth()
 
   const closeMenu = () => setIsMenuOpen(false)
@@ -18,6 +19,8 @@ function Header({ links }) {
     navigate('/')
   }
 
+  const isHomePage = location.pathname === '/'
+
   return (
     <header className="site-header">
       <nav className="site-nav container" aria-label="Điều hướng chính">
@@ -26,15 +29,30 @@ function Header({ links }) {
         </Link>
 
         <div className="desktop-nav">
-          {links.map((link) => (
-            <a
-              className={`nav-link${link.active ? ' nav-link--active' : ''}`}
-              href={link.href}
-              key={link.label}
-            >
-              {link.label}
-            </a>
-          ))}
+          {links.map((link) => {
+            const isHash = link.href.startsWith('#')
+            if (isHash && isHomePage) {
+              return (
+                <a
+                  className={`nav-link${link.active ? ' nav-link--active' : ''}`}
+                  href={link.href}
+                  key={link.label}
+                >
+                  {link.label}
+                </a>
+              )
+            }
+            const toPath = isHash ? `/${link.href}` : link.href
+            return (
+              <Link
+                className={`nav-link${link.active ? ' nav-link--active' : ''}`}
+                to={toPath}
+                key={link.label}
+              >
+                {link.label}
+              </Link>
+            )
+          })}
         </div>
 
         <div className="header-actions">
@@ -91,11 +109,22 @@ function Header({ links }) {
         id="mobile-menu"
       >
         <div className="mobile-menu__inner container">
-          {links.map((link) => (
-            <a href={link.href} key={link.label} onClick={closeMenu}>
-              {link.label}
-            </a>
-          ))}
+          {links.map((link) => {
+            const isHash = link.href.startsWith('#')
+            if (isHash && isHomePage) {
+              return (
+                <a href={link.href} key={link.label} onClick={closeMenu}>
+                  {link.label}
+                </a>
+              )
+            }
+            const toPath = isHash ? `/${link.href}` : link.href
+            return (
+              <Link to={toPath} key={link.label} onClick={closeMenu}>
+                {link.label}
+              </Link>
+            )
+          })}
           <div className="mobile-menu__actions">
             {isAuthenticated ? (
               <>

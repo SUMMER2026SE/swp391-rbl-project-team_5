@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 function PopularDestinations({ destinations }) {
   return (
     <section className="section section--muted" id="destinations">
@@ -9,7 +11,11 @@ function PopularDestinations({ destinations }) {
 
         <div className="destination-grid">
           {destinations.map((destination) => (
-            <article className="destination-card" key={destination.title}>
+            <Link
+              to={`/attractions?search=${encodeURIComponent(destination.title)}`}
+              className="destination-card block transition hover:-translate-y-1 hover:shadow-lg focus:outline-none"
+              key={destination.title}
+            >
               <div className="destination-card__media">
                 <img src={destination.image.src} alt={destination.image.alt} />
                 <span>{destination.location}</span>
@@ -27,8 +33,19 @@ function PopularDestinations({ destinations }) {
                   <span>{destination.duration}</span>
                 </div>
               </div>
-            </article>
+            </Link>
           ))}
+        </div>
+
+        <div className="text-center mt-10">
+          <Link
+            to="/attractions"
+            className="inline-flex items-center gap-2 rounded-full border-2 border-[#006068] text-[#006068] hover:bg-[#006068] hover:text-white px-8 py-3 font-bold transition-all duration-200"
+            style={{ fontFamily: "'Be Vietnam Pro', sans-serif" }}
+          >
+            Xem tất cả điểm đến
+            <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+          </Link>
         </div>
       </div>
     </section>
