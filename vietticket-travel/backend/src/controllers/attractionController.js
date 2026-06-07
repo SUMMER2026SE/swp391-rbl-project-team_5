@@ -125,25 +125,56 @@ function buildAttractionData(body) {
   return data;
 }
 
+function normalizeAttractionInput(body = {}) {
+  return {
+    ...body,
+    name: body.name ?? body.title,
+    province: body.province ?? body.city,
+    lat: body.lat ?? body.latitude,
+    lng: body.lng ?? body.longitude,
+  };
+}
+
 // POST /api/partners/attractions
 async function createAttraction(req, res, next) {
   try {
-    const validationError = validateAttraction(req.body, { partial: false });
+    const input = normalizeAttractionInput(req.body);
+    const validationError = validateAttraction(input, { partial: false });
     if (validationError) {
       return res.status(400).json({ message: validationError });
     }
 
-    const data = buildAttractionData(req.body);
-    // Mặc định hiển thị ngay khi tạo (Module 2 chưa có cổng duyệt của admin)
-    if (!data.status) data.status = 'APPROVED';
+    const data = buildAttractionData(input);
+    // Đối tác không được tự phê duyệt địa điểm khi tạo mới.
+    data.status = 'DRAFT';
     if (!data.description) data.description = '';
 
     const created = await prisma.$transaction(async (tx) => {
       const attraction = await tx.attraction.create({
         data: { ...data, partnerId: req.partner.id },
       });
-      if (req.body.category) {
-        await setCategory(tx, attraction.id, req.body.category);
+      if (input.category) {
+        await setCategory(tx, attraction.id, input.category);
+      } else if (Array.isArray(input.categoryIds) && input.categoryIds.length > 0) {
+        await tx.attractionCategory.createMany({
+          data: [...new Set(input.categoryIds)].map((categoryId) => ({
+            attractionId: attraction.id,
+            categoryId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      if (Array.isArray(input.images) && input.images.length > 0) {
+        const images = input.images
+          .filter((image) => image && String(image.imageUrl || '').trim())
+          .map((image) => ({
+            attractionId: attraction.id,
+            imageUrl: String(image.imageUrl).trim(),
+            isPrimary: Boolean(image.isPrimary),
+          }));
+        if (images.length > 0) {
+          await tx.attractionImage.createMany({ data: images });
+        }
       }
       return attraction;
     });
@@ -154,6 +185,13 @@ async function createAttraction(req, res, next) {
     });
 
     return res.status(201).json({
+      success: true,
+      data: {
+        id: full.id,
+        title: full.title,
+        status: full.status,
+        createdAt: full.createdAt,
+      },
       message: 'Tạo điểm tham quan thành công.',
       attraction: toAttractionDetail(full),
     });
@@ -176,6 +214,11 @@ async function updateAttraction(req, res, next) {
     }
 
     const data = buildAttractionData(req.body);
+    if (data.status === 'APPROVED' && existing.status !== 'APPROVED') {
+      return res.status(400).json({
+        message: 'Địa điểm phải được gửi duyệt và được admin phê duyệt trước khi hoạt động.',
+      });
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.attraction.update({ where: { id: existing.id }, data });
@@ -292,7 +335,7 @@ async function submitAttraction(req, res, next) {
 async function searchAttractions(req, res, next) {
   try {
     const page = parsePositiveInt(req.query.page, DEFAULT_PAGE);
-    const limit = parsePositiveInt(req.query.limit, DEFAULT_LIMIT);
+    const limit = Math.min(parsePositiveInt(req.query.limit, DEFAULT_LIMIT), MAX_LIMIT);
     const skip = (page - 1) * limit;
 
     const search = String(req.query.search || '').trim();
@@ -316,7 +359,14 @@ async function searchAttractions(req, res, next) {
     if (minRating) where.averageRating = { gte: minRating };
 
     if (category) {
-      where.categories = { some: { categoryId: category } };
+      where.categories = {
+        some: {
+          OR: [
+            { categoryId: category },
+            { category: { name: { equals: category, mode: 'insensitive' } } },
+          ],
+        },
+      };
     }
 
     if (minPrice != null || maxPrice != null) {

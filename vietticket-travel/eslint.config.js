@@ -25,4 +25,14 @@ export default defineConfig([
       sourceType: 'commonjs',
     },
   },
+  {
+    files: ['backend/**/__tests__/**/*.js', 'backend/src__tests__/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+      },
+      sourceType: 'commonjs',
+    },
+  },
 ])

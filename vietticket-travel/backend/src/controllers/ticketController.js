@@ -284,7 +284,7 @@ async function reserveTickets(req, res, next) {
     const { date: dateStr, quantity: qtyRaw, timeSlotId } = req.body || {};
     const quantity = Number(qtyRaw);
     if (!dateStr) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'date is required' } });
-    if (!Number.isFinite(quantity) || quantity < 1) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'quantity must be a positive integer' } });
+    if (!Number.isInteger(quantity) || quantity < 1) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'quantity must be a positive integer' } });
 
     const date = parseDateString(dateStr);
     if (!date) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid date format (YYYY-MM-DD)' } });
@@ -300,7 +300,7 @@ async function reserveTickets(req, res, next) {
       }
 
       // compute capacity
-      let totalCapacity = 0;
+      let totalCapacity;
       if (timeSlotId) {
         const slot = await tx.timeSlot.findUnique({ where: { id: timeSlotId } });
         if (!slot || slot.ticketProductId !== ticketProductId) {
@@ -355,7 +355,7 @@ async function reserveTickets(req, res, next) {
       return { reservationId: reservation.id, ticketProductId, quantity, expiresAt };
     });
 
-    return res.status(201).json({ success: true, data: result });
+    return res.status(200).json({ success: true, data: result });
   } catch (error) {
     if (error.statusCode === 404) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: error.message } });
     if (error.statusCode === 409) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: error.message } });

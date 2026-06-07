@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { apiRequest } from '../services/api.js'
 
 const formatCurrency = (value) => {
   const amount = Number(value)
@@ -156,35 +157,19 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
       setErrorMessage('')
 
       try {
-        const response = await fetch(`/api/v1/tickets/${ticketId}/availability?date=${selectedDate}`)
-        const result = await response.json()
+        const result = await apiRequest(
+          `/tickets/${ticketId}/availability?date=${selectedDate}`,
+        )
+        const slots = Array.isArray(result.data) ? result.data : []
+        setTimeSlots(slots)
 
-        if (result.success) {
-          const slots = Array.isArray(result.data) ? result.data : []
-          setTimeSlots(slots)
-
-          const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
-          setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
-        } else {
-          const mockSlots = [
-            { id: 'slot-1', label: '09:00 - 11:00', availableTickets: 45, status: 'AVAILABLE' },
-            { id: 'slot-2', label: '11:00 - 13:00', availableTickets: 25, status: 'AVAILABLE' },
-            { id: 'slot-3', label: '13:00 - 15:00', availableTickets: 0, status: 'SOLD_OUT' },
-            { id: 'slot-4', label: '15:00 - 17:00', availableTickets: 30, status: 'AVAILABLE' }
-          ]
-          setTimeSlots(mockSlots)
-          setSelectedTimeSlotId('slot-1')
-        }
+        const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
+        setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
       } catch (error) {
-        console.warn('Lỗi lấy thông tin khung giờ trống, sử dụng mock slots để demo:', error)
-        const mockSlots = [
-          { id: 'slot-1', label: '09:00 - 11:00', availableTickets: 45, status: 'AVAILABLE' },
-          { id: 'slot-2', label: '11:00 - 13:00', availableTickets: 25, status: 'AVAILABLE' },
-          { id: 'slot-3', label: '13:00 - 15:00', availableTickets: 0, status: 'SOLD_OUT' },
-          { id: 'slot-4', label: '15:00 - 17:00', availableTickets: 30, status: 'AVAILABLE' }
-        ]
-        setTimeSlots(mockSlots)
-        setSelectedTimeSlotId('slot-1')
+        console.error('Lỗi lấy thông tin khung giờ trống:', error)
+        setTimeSlots([])
+        setSelectedTimeSlotId('')
+        setErrorMessage(error.message)
       } finally {
         setIsLoadingSlots(false)
       }
@@ -216,53 +201,34 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
     }
 
     setIsSubmitting(true)
+    setErrorMessage('')
 
     try {
-      const response = await fetch(`/api/v1/tickets/${ticketId}/reserve`, {
+      const result = await apiRequest(`/tickets/${ticketId}/reserve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           attractionId,
           date: selectedDate,
           timeSlotId: selectedTimeSlotId,
           quantity: counts.adult + counts.child,
-        }),
+        },
       })
-      const result = await response.json()
-
-      if (result.success) {
-        const slot = timeSlots.find(s => getSlotId(s) === selectedTimeSlotId)
-        navigate(`/checkout/${result.data.reservationId}`, {
-          state: {
-            attractionTitle: attractionTitle || 'Sun World Bà Nà Hills',
-            ticketName: ticketProduct?.name || 'Vé tham quan',
-            date: selectedDate,
-            timeSlotLabel: getSlotLabel(slot),
-            adultCount: counts.adult,
-            childCount: counts.child,
-            adultPrice,
-            childPrice,
-          }
-        })
-      } else {
-        throw new Error(result.error?.message || 'API reserve failed')
-      }
-    } catch (error) {
-      console.warn('Lỗi khi gọi API reserve, dùng mock data để demo luồng UI:', error)
-      const mockReservationId = `VT-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
       const slot = timeSlots.find(s => getSlotId(s) === selectedTimeSlotId)
-      navigate(`/checkout/${mockReservationId}`, {
+      navigate(`/checkout/${result.data.reservationId}`, {
         state: {
           attractionTitle: attractionTitle || 'Sun World Bà Nà Hills',
           ticketName: ticketProduct?.name || 'Vé tham quan',
           date: selectedDate,
-          timeSlotLabel: getSlotLabel(slot || { label: '09:00 - 17:00' }),
+          timeSlotLabel: getSlotLabel(slot),
           adultCount: counts.adult,
           childCount: counts.child,
           adultPrice,
           childPrice,
         }
       })
+    } catch (error) {
+      console.error('Lỗi khi giữ vé:', error)
+      setErrorMessage(error.message)
     } finally {
       setIsSubmitting(false)
     }

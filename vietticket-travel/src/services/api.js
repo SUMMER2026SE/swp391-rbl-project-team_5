@@ -17,7 +17,9 @@ export async function apiRequest(path, options = {}) {
   const data = await response.json().catch(() => ({}))
 
   if (!response.ok) {
-    const error = new Error(data.message || 'Không thể kết nối đến máy chủ.')
+    const error = new Error(
+      data.message || data.error?.message || 'Không thể kết nối đến máy chủ.',
+    )
     error.status = response.status
     error.data = data
     throw error

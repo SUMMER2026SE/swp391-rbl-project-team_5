@@ -4,7 +4,7 @@ import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import { appDownloadButtons, footerLinks } from '../data/landingData.js'
-import { getMockAttractionDetail } from '../data/mockAttractions.js'
+import { apiRequest } from '../services/api.js'
 
 const detailNavLinks = [
   { label: 'Khám phá', href: '/attractions', active: true },
@@ -90,7 +90,7 @@ export default function AttractionDetailPage() {
   const handleToggleFavorite = async () => {
     setIsFavorite(prev => !prev)
     try {
-      await fetch(`/api/v1/attractions/${id}/favorite`, { method: 'POST' })
+      await apiRequest(`/attractions/${id}/favorite`, { method: 'POST' })
     } catch (error) {
       console.error('Lỗi khi thả tim:', error)
     }
@@ -102,36 +102,19 @@ export default function AttractionDetailPage() {
       setErrorMessage('')
 
       try {
-        const response = await fetch(`/api/v1/attractions/${id}`)
-        const result = await response.json()
+        const result = await apiRequest(`/attractions/${id}`)
+        const detail = result.data
+        const images = normalizeImages(detail)
+        setAttraction(detail)
+        setActiveImage(getPrimaryImageUrl(images))
 
-        if (result.success) {
-          const detail = result.data
-          const images = normalizeImages(detail)
-          setAttraction(detail)
-          setActiveImage(getPrimaryImageUrl(images))
-
-          if (Array.isArray(detail.ticketProducts) && detail.ticketProducts.length > 0) {
-            setTicketQuantities({ [detail.ticketProducts[0].id]: 1 })
-          }
-        } else {
-          const mockDetail = getMockAttractionDetail(id)
-          setAttraction(mockDetail)
-          const imgs = normalizeImages(mockDetail)
-          setActiveImage(getPrimaryImageUrl(imgs))
-          if (Array.isArray(mockDetail.ticketProducts) && mockDetail.ticketProducts.length > 0) {
-            setTicketQuantities({ [mockDetail.ticketProducts[0].id]: 1 })
-          }
+        if (Array.isArray(detail.ticketProducts) && detail.ticketProducts.length > 0) {
+          setTicketQuantities({ [detail.ticketProducts[0].id]: 1 })
         }
       } catch (error) {
-        console.warn('Lỗi khi tải chi tiết địa điểm từ API, dùng mock data để demo:', error)
-        const mockDetail = getMockAttractionDetail(id)
-        setAttraction(mockDetail)
-        const imgs = normalizeImages(mockDetail)
-        setActiveImage(getPrimaryImageUrl(imgs))
-        if (Array.isArray(mockDetail.ticketProducts) && mockDetail.ticketProducts.length > 0) {
-          setTicketQuantities({ [mockDetail.ticketProducts[0].id]: 1 })
-        }
+        console.error('Lỗi khi tải chi tiết địa điểm từ API:', error)
+        setAttraction(null)
+        setErrorMessage(error.message)
       } finally {
         setLoading(false)
       }

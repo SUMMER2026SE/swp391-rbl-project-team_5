@@ -60,8 +60,6 @@ function PartnerKycPage() {
   // Trạng thái tải lên tệp
   const [uploading, setUploading] = useState(false)
   const [uploadedFile, setUploadedFile] = useState(null)
-  const [idDocFile, setIdDocFile] = useState(null)
-  const [idDocUploading, setIdDocUploading] = useState(false)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -94,9 +92,7 @@ function PartnerKycPage() {
     
     if (step === 1) {
       if (!formData.businessName.trim()) errs.businessName = 'Tên doanh nghiệp không được để trống.'
-      if (!formData.taxCode.trim()) {
-        errs.taxCode = 'Mã số thuế không được để trống.'
-      } else if (!/^\d{10}(\d{3})?$/.test(formData.taxCode.trim())) {
+      if (formData.taxCode.trim() && !/^\d{10}(\d{3})?$/.test(formData.taxCode.trim())) {
         errs.taxCode = 'Mã số thuế phải gồm 10 hoặc 13 chữ số.'
       }
       if (!formData.registrationDate) errs.registrationDate = 'Vui lòng chọn ngày đăng ký kinh doanh.'
@@ -201,15 +197,15 @@ function PartnerKycPage() {
     window.scrollTo(0, 0)
   }
 
-  // Xử lý kéo thả và tải lên file mô phỏng
-  const handleFileChange = (e) => {
+  // Xử lý kéo thả và tải tài liệu lên server
+  const handleFileChange = async (e) => {
     const file = e.target.files[0]
     if (!file) return
 
     // Kiểm tra định dạng (chỉ cho phép ảnh hoặc pdf)
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf']
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Chỉ hỗ trợ tệp định dạng JPEG, PNG, WEBP hoặc PDF.')
+      toast.error('Chỉ hỗ trợ tệp định dạng JPEG, PNG hoặc PDF.')
       return
     }
 
@@ -220,39 +216,23 @@ function PartnerKycPage() {
     }
 
     setUploading(true)
-    setUploadedFile(file)
-
-    // Mô phỏng tải lên lên server
-    setTimeout(() => {
-      setUploading(false)
-      const mockUrl = `http://localhost:5000/uploads/licenses/license_${Date.now()}_${file.name}`
+    try {
+      const documentUrl = await partnerApi.uploadKycDocument(file)
       setFormData((prev) => ({
         ...prev,
-        businessLicenseUrl: mockUrl,
+        businessLicenseUrl: documentUrl,
       }))
+      setUploadedFile(file)
       setTouched((prev) => ({ ...prev, businessLicenseUrl: true }))
       toast.success('Tải lên giấy phép thành công!')
-    }, 1500)
-  }
-
-  const handleIdDocChange = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Chỉ hỗ trợ tệp định dạng JPEG, PNG, WEBP hoặc PDF.')
-      return
+    } catch (error) {
+      setUploadedFile(null)
+      setFormData((prev) => ({ ...prev, businessLicenseUrl: '' }))
+      toast.error(error.message)
+    } finally {
+      setUploading(false)
+      e.target.value = ''
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Dung lượng tệp tải lên phải nhỏ hơn 5MB.')
-      return
-    }
-    setIdDocUploading(true)
-    setTimeout(() => {
-      setIdDocUploading(false)
-      setIdDocFile(file)
-      toast.success('Tải lên CCCD / Hộ chiếu thành công!')
-    }, 1200)
   }
 
   const handleSubmit = async (e) => {
@@ -299,32 +279,9 @@ function PartnerKycPage() {
       await getProfile()
       navigate('/partner/pending')
     } catch (error) {
-      if (partnerApi.isNetworkError(error)) {
-        console.warn('API /partners/register chưa sẵn sàng hoặc gặp lỗi:', error)
-
-        // Chế độ Demo/Fallback: Lưu cục bộ và thông báo thành công
-        // Điều này đảm bảo giao diện frontend hoạt động hoàn hảo và có thể chạy độc lập.
-        setTimeout(async () => {
-          // Cập nhật trạng thái giả định trong localStorage
-          const partnerMockData = {
-            ...formData,
-            id: 'p-' + Math.floor(Math.random() * 9000 + 1000),
-            status: 'PENDING',
-            createdAt: new Date().toISOString()
-          }
-          localStorage.setItem('vietticket_partner_kyc_demo', JSON.stringify(partnerMockData))
-
-          toast.info('Chế độ Demo: Đã lưu thông tin xác thực đối tác thành công!')
-          toast.success('Hồ sơ đang ở trạng thái Chờ duyệt (PENDING).')
-
-          if (getProfile) await getProfile()
-          setIsSubmitting(false)
-          navigate('/partner/pending')
-        }, 1000)
-      } else {
-        toast.error(error.message)
-        setIsSubmitting(false)
-      }
+      toast.error(error.message)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -439,7 +396,7 @@ function PartnerKycPage() {
                 {/* Mã số thuế */}
                 <div className="col-span-1">
                   <label className="block text-sm font-semibold text-[#191c1d] mb-2">
-                    Mã số thuế (TIN) <span className="text-red-500">*</span>
+                    Mã số thuế (TIN) <span className="font-normal text-[#6f797a]">(Không bắt buộc)</span>
                   </label>
                   <div className={`relative rounded-lg border bg-white overflow-hidden flex items-center px-3 transition-colors duration-200 ${
                     touched.taxCode && errors.taxCode 
@@ -902,66 +859,6 @@ function PartnerKycPage() {
                   )}
                 </div>
 
-                {/* Upload 2: CCCD / Hộ chiếu */}
-                <div>
-                  <label className="block text-sm font-semibold text-[#191c1d] mb-2">
-                    CCCD / Hộ chiếu người đại diện
-                  </label>
-
-                  {idDocFile ? (
-                    /* File đã tải lên */
-                    <div className="border border-[#bec8ca] rounded-xl p-4 flex items-center justify-between bg-white hover:shadow-sm transition-shadow">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-lg bg-[#f2f4f5] flex items-center justify-center text-[#6f797a]">
-                          <span className="material-symbols-outlined">badge</span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium text-[#191c1d]">{idDocFile.name}</span>
-                          <span className="text-xs text-[#6f797a]">{(idDocFile.size / 1024 / 1024).toFixed(2)} MB</span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="hidden sm:flex items-center gap-1 bg-[#136870]/10 text-[#136870] px-2 py-1 rounded-full">
-                          <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                          <span className="text-xs font-semibold">Thành công</span>
-                        </div>
-                        <button
-                          aria-label="Xóa tệp"
-                          onClick={() => setIdDocFile(null)}
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-[#6f797a] hover:text-[#ba1a1a] hover:bg-[#ffdad6] transition-colors"
-                          type="button"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">delete</span>
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Drop zone */
-                    <div className="border-2 border-dashed border-[#bec8ca] hover:border-[#006068] rounded-xl p-8 flex flex-col items-center justify-center bg-[#f8fafb] transition-colors duration-200 cursor-pointer relative group">
-                      <input
-                        type="file"
-                        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-                        onChange={handleIdDocChange}
-                        accept=".jpg,.jpeg,.png,.pdf"
-                      />
-                      <div className="w-12 h-12 rounded-full bg-[#f2f4f5] group-hover:bg-[#006068]/10 flex items-center justify-center mb-3 transition-colors">
-                        <span className="material-symbols-outlined text-[#006068] text-3xl">cloud_upload</span>
-                      </div>
-                      {idDocUploading ? (
-                        <div className="flex flex-col items-center">
-                          <div className="w-24 h-1.5 bg-[#e1e3e4] rounded-full overflow-hidden mb-2">
-                            <div className="h-full bg-[#00474d] animate-pulse w-full"></div>
-                          </div>
-                          <p className="text-xs text-[#3f484a] font-medium">Đang xử lý tải lên...</p>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-[#6f797a] group-hover:text-[#006068] transition-colors">
-                          Nhấp để tải lên hoặc kéo thả
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
               </section>
 
               {/* Terms Checkbox */}

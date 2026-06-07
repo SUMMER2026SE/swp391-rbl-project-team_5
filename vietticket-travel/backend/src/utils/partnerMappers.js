@@ -11,7 +11,7 @@ function attractionStatusToClient(dbStatus) {
 }
 
 function attractionStatusFromClient(clientStatus) {
-  return String(clientStatus).toLowerCase() === 'active' ? 'APPROVED' : 'SUSPENDED';
+  return String(clientStatus).toLowerCase() === 'active' ? 'APPROVED' : 'DRAFT';
 }
 
 // --- Trạng thái vé ---
@@ -41,7 +41,11 @@ function refundPolicyToClient(dbPolicy) {
 }
 
 function refundPolicyFromClient(clientPolicy) {
-  return REFUND_TO_DB[String(clientPolicy).toUpperCase()] || 'NON_REFUNDABLE';
+  const normalized = String(clientPolicy).toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(REFUND_TO_CLIENT, normalized)) {
+    return normalized;
+  }
+  return REFUND_TO_DB[normalized] || 'NON_REFUNDABLE';
 }
 
 const TICKET_TYPES = ['ADULT', 'CHILD', 'FAMILY', 'GROUP'];

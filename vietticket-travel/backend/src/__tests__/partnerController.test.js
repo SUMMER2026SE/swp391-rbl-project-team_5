@@ -28,7 +28,7 @@ describe('registerPartner', () => {
 
 	test('❌ Trả 409 nếu đã có partner profile', async () => {
 		mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-existing' });
-		const { req, res, next } = mockReqRes({ businessName: 'Test', taxCode: '123' });
+		const { req, res, next } = mockReqRes({ businessName: 'Test' });
 		await registerPartner(req, res, next);
 		expect(res.status).toHaveBeenCalledWith(409);
 	});

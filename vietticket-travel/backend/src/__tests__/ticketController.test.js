@@ -36,7 +36,7 @@ describe('reserveTickets - Chống Overbooking', () => {
     const next = jest.fn();
 
     await reserveTickets(req, res, next);
-    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 
   test('❌ Trả 409 khi không đủ vé (overbooking)', async () => {
@@ -60,6 +60,15 @@ describe('reserveTickets - Chống Overbooking', () => {
 
   test('❌ Trả 400 nếu quantity <= 0', async () => {
     const req = makeReq({ quantity: 0 });
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    const next = jest.fn();
+
+    await reserveTickets(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test('❌ Trả 400 nếu quantity không phải số nguyên', async () => {
+    const req = makeReq({ quantity: 1.5 });
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
     const next = jest.fn();
 

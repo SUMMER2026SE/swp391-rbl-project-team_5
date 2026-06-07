@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth.js'
+import * as partnerApi from '../services/partnerApi.js'
 
 const NAV_ITEMS = [
   { icon: 'dashboard', label: 'Dashboard' },
@@ -12,10 +13,61 @@ const NAV_ITEMS = [
 
 function PartnerPendingPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
+  const [partner, setPartner] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState('')
 
   useEffect(() => {
     document.title = 'Hồ sơ đang xét duyệt | VietTicket B2B'
-  }, [])
+
+    let active = true
+
+    const loadPartner = async () => {
+      try {
+        const result = await partnerApi.getMyPartner()
+        if (!active) return
+
+        if (result.partner?.status === 'APPROVED') {
+          navigate('/partner/dashboard', { replace: true })
+          return
+        }
+
+        setPartner(result.partner || null)
+      } catch (error) {
+        if (!active) return
+
+        const code = error.data?.code || error.data?.error?.code
+        if (error.status === 403 && code === 'PARTNER_PROFILE_REQUIRED') {
+          navigate('/partner/kyc', { replace: true })
+          return
+        }
+
+        setErrorMessage(error.message)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    loadPartner()
+    return () => {
+      active = false
+    }
+  }, [navigate])
+
+  const status = partner?.status || 'PENDING'
+  const isRejected = status === 'REJECTED'
+  const isSuspended = status === 'SUSPENDED'
+  const title = isRejected
+    ? 'Hồ sơ đối tác chưa được phê duyệt'
+    : isSuspended
+      ? 'Tài khoản đối tác đang bị tạm ngưng'
+      : 'Hồ sơ của bạn đang được xét duyệt'
+  const description = isRejected
+    ? partner?.rejectionReason || 'Vui lòng liên hệ bộ phận hỗ trợ để được hướng dẫn bổ sung hồ sơ.'
+    : isSuspended
+      ? 'Vui lòng liên hệ bộ phận hỗ trợ để biết thêm thông tin.'
+      : 'Cảm ơn bạn đã hoàn tất thông tin xác thực! Đội ngũ của chúng tôi đang kiểm tra các tài liệu của bạn.'
 
   return (
     <div className="bg-[#f2f4f5] text-[#191c1d] h-screen flex overflow-hidden" style={{ fontFamily: "'Inter', sans-serif" }}>
@@ -28,7 +80,7 @@ function PartnerPendingPage() {
             <span className="material-symbols-outlined text-[#3f484a]">store</span>
           </div>
           <h2 className="font-semibold text-base text-[#00474d] truncate">
-            {user?.fullName || 'Đối tác VietTicket'}
+            {partner?.businessName || user?.fullName || 'Đối tác VietTicket'}
           </h2>
           <p className="text-xs text-[#3f484a] mt-1">Partner Portal</p>
         </div>
@@ -100,12 +152,22 @@ function PartnerPendingPage() {
 
           {/* Title & Description */}
           <h1 className="text-2xl md:text-3xl font-semibold text-[#191c1d] mb-4">
-            Hồ sơ của bạn đang được xét duyệt
+            {loading ? 'Đang tải trạng thái hồ sơ...' : title}
           </h1>
           <p className="text-base text-[#3f484a] max-w-lg mb-12 leading-relaxed">
-            Cảm ơn bạn đã hoàn tất thông tin xác thực! Đội ngũ của chúng tôi đang kiểm tra các tài liệu của bạn.
-            Quá trình này thường mất từ <strong>24–48 giờ làm việc</strong>. Chúng tôi sẽ thông báo cho bạn qua
-            email ngay khi tài khoản được kích hoạt.
+            {errorMessage ? (
+              errorMessage
+            ) : (
+              <>
+                {description}{' '}
+                {!isRejected && !isSuspended && (
+                  <>
+                    Quá trình này thường mất từ <strong>24–48 giờ làm việc</strong>. Chúng tôi sẽ thông báo qua email
+                    ngay khi tài khoản được kích hoạt.
+                  </>
+                )}
+              </>
+            )}
           </p>
 
           {/* Progress Stepper */}
@@ -130,9 +192,9 @@ function PartnerPendingPage() {
               />
               {/* Step 3: Active / Pulsing */}
               <StepItem
-                icon="pending"
-                label="Đang xét duyệt"
-                state="active"
+                icon={isRejected || isSuspended ? 'close' : 'pending'}
+                label={isRejected ? 'Cần bổ sung' : isSuspended ? 'Tạm ngưng' : 'Đang xét duyệt'}
+                state={isRejected || isSuspended ? 'rejected' : 'active'}
               />
               {/* Step 4: Locked */}
               <StepItem
@@ -203,6 +265,11 @@ function StepItem({ icon, label, state }) {
     pending: {
       circle: 'bg-[#e6e8e9] text-[#6f797a] border-2 border-[#e6e8e9]',
       label: 'text-[#6f797a]',
+      animate: '',
+    },
+    rejected: {
+      circle: 'bg-[#ffdad6] text-[#ba1a1a] border-2 border-[#ba1a1a]',
+      label: 'text-[#ba1a1a] font-bold',
       animate: '',
     },
   }

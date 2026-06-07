@@ -1,8 +1,50 @@
 jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 const mockPrisma = require('./helpers/mockPrisma');
-const { createAttraction, submitAttraction, searchAttractions, getAttractionDetail } = require('../controllers/attractionController');
+const { createAttraction, searchAttractions, getAttractionDetail } = require('../controllers/attractionController');
 
 afterEach(() => jest.clearAllMocks());
+
+describe('createAttraction', () => {
+  test('✅ Luôn tạo địa điểm ở trạng thái DRAFT', async () => {
+    const create = jest.fn().mockResolvedValue({ id: 'attr-001' });
+    mockPrisma.$transaction.mockImplementation((callback) => callback({
+      attraction: { create },
+    }));
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      title: 'Suối Tiên',
+      description: '',
+      address: '120 Xa lộ Hà Nội',
+      city: 'TP. HCM',
+      status: 'DRAFT',
+      images: [],
+      categories: [],
+      createdAt: new Date('2026-06-07T00:00:00.000Z'),
+    });
+
+    const req = {
+      body: {
+        name: 'Suối Tiên',
+        address: '120 Xa lộ Hà Nội',
+        province: 'TP. HCM',
+        status: 'active',
+      },
+      partner: { id: 'partner-001' },
+    };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    const next = jest.fn();
+
+    await createAttraction(req, res, next);
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        partnerId: 'partner-001',
+        status: 'DRAFT',
+      }),
+    });
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+});
 
 describe('searchAttractions', () => {
   test('✅ Trả về danh sách + pagination đúng format', async () => {

@@ -63,7 +63,22 @@ async function saveSchedule(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
 
-    const { openDays, defaultCapacity, timeSlots = [], specialDates = {} } = req.body;
+    const { openDays, defaultCapacity } = req.body;
+    const hasTimeSlots = Object.prototype.hasOwnProperty.call(req.body, 'timeSlots');
+    const hasSpecialDates = Object.prototype.hasOwnProperty.call(req.body, 'specialDates');
+    const timeSlots = hasTimeSlots ? req.body.timeSlots : [];
+    const specialDates = hasSpecialDates ? req.body.specialDates : {};
+
+    if (hasTimeSlots && !Array.isArray(timeSlots)) {
+      return res.status(400).json({ message: 'timeSlots phải là một mảng.' });
+    }
+
+    if (
+      hasSpecialDates
+      && (!specialDates || typeof specialDates !== 'object' || Array.isArray(specialDates))
+    ) {
+      return res.status(400).json({ message: 'specialDates phải là một object.' });
+    }
 
     // --- Xác thực khung giờ ---
     for (const slot of timeSlots) {
@@ -84,6 +99,20 @@ async function saveSchedule(req, res, next) {
       if (!isValidDate(dateKey)) {
         return res.status(400).json({ message: `Ngày đặc biệt không hợp lệ: ${dateKey}.` });
       }
+
+      const value = specialDates[dateKey];
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return res.status(400).json({ message: `Cấu hình ngày ${dateKey} không hợp lệ.` });
+      }
+
+      if (value.capacity !== undefined && value.capacity !== null && value.capacity !== '') {
+        const capacity = Number(value.capacity);
+        if (!Number.isFinite(capacity) || capacity < 0) {
+          return res.status(400).json({
+            message: `Sức chứa cho ngày ${dateKey} không hợp lệ.`,
+          });
+        }
+      }
     }
 
     const attractionData = {};
@@ -96,6 +125,14 @@ async function saveSchedule(req, res, next) {
       attractionData.defaultCapacity = cap;
     }
 
+    if (
+      Object.keys(attractionData).length === 0
+      && !hasTimeSlots
+      && !hasSpecialDates
+    ) {
+      return res.json({ message: 'Không có thay đổi lịch để lưu.' });
+    }
+
     await prisma.$transaction(async (tx) => {
       // Cập nhật openDays + defaultCapacity
       if (Object.keys(attractionData).length > 0) {
@@ -103,36 +140,40 @@ async function saveSchedule(req, res, next) {
       }
 
       // Thay thế toàn bộ khung giờ cấp điểm tham quan
-      await tx.timeSlot.deleteMany({
-        where: { attractionId: attraction.id, ticketProductId: null },
-      });
-      if (timeSlots.length > 0) {
-        await tx.timeSlot.createMany({
-          data: timeSlots.map((slot) => ({
-            attractionId: attraction.id,
-            startTime: slot.start,
-            endTime: slot.end,
-            maxCapacity: Number(slot.capacity),
-            isActive: slot.isActive !== false,
-          })),
+      if (hasTimeSlots) {
+        await tx.timeSlot.deleteMany({
+          where: { attractionId: attraction.id, ticketProductId: null },
         });
+        if (timeSlots.length > 0) {
+          await tx.timeSlot.createMany({
+            data: timeSlots.map((slot) => ({
+              attractionId: attraction.id,
+              startTime: slot.start,
+              endTime: slot.end,
+              maxCapacity: Number(slot.capacity),
+              isActive: slot.isActive !== false,
+            })),
+          });
+        }
       }
 
       // Thay thế toàn bộ ngày đặc biệt
-      await tx.specialDate.deleteMany({ where: { attractionId: attraction.id } });
-      const sdEntries = Object.entries(specialDates);
-      if (sdEntries.length > 0) {
-        await tx.specialDate.createMany({
-          data: sdEntries.map(([dateKey, value]) => ({
-            attractionId: attraction.id,
-            date: new Date(dateKey),
-            closed: Boolean(value.closed),
-            capacity:
-              value.capacity === undefined || value.capacity === null || value.capacity === ''
-                ? null
-                : Number(value.capacity),
-          })),
-        });
+      if (hasSpecialDates) {
+        await tx.specialDate.deleteMany({ where: { attractionId: attraction.id } });
+        const sdEntries = Object.entries(specialDates);
+        if (sdEntries.length > 0) {
+          await tx.specialDate.createMany({
+            data: sdEntries.map(([dateKey, value]) => ({
+              attractionId: attraction.id,
+              date: new Date(dateKey),
+              closed: Boolean(value.closed),
+              capacity:
+                value.capacity === undefined || value.capacity === null || value.capacity === ''
+                  ? null
+                  : Number(value.capacity),
+            })),
+          });
+        }
       }
     });
 

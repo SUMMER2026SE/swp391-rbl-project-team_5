@@ -4,6 +4,7 @@ const { sendAccountStatusEmail, sendPartnerReviewEmail, sendAttractionViolationE
 
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
+const ALLOWED_PARTNER_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
@@ -176,20 +177,42 @@ async function changeUserStatus(req, res, next) {
   }
 }
 
-module.exports = {
-  changeUserStatus,
-  getUsers,
-};
-
 // ---------- New admin functions for Partner/Attraction review ----------
 
 async function getPartners(req, res, next) {
   try {
     const status = String(req.query.status || '').trim().toUpperCase();
     const where = {};
+
+    if (status && !ALLOWED_PARTNER_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Partner status is invalid' },
+      });
+    }
+
     if (status) where.status = status;
 
-    const partners = await prisma.partnerProfile.findMany({ where, include: { user: { select: { email: true, fullName: true } } }, orderBy: { createdAt: 'desc' } });
+    const partners = await prisma.partnerProfile.findMany({
+      where,
+      select: {
+        id: true,
+        businessName: true,
+        businessLicenseUrl: true,
+        taxCode: true,
+        status: true,
+        rejectionReason: true,
+        createdAt: true,
+        user: {
+          select: {
+            email: true,
+            fullName: true,
+            profile: { select: { phoneNumber: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
 
     return res.status(200).json({ success: true, data: partners });
   } catch (error) {
@@ -220,7 +243,16 @@ async function reviewPartner(req, res, next) {
     }
 
     // REJECTED
-    await prisma.partnerProfile.update({ where: { id }, data: { status: 'REJECTED', rejectionReason } });
+    await prisma.$transaction([
+      prisma.partnerProfile.update({
+        where: { id },
+        data: { status: 'REJECTED', rejectionReason },
+      }),
+      prisma.user.update({
+        where: { id: partner.userId },
+        data: { role: 'CUSTOMER' },
+      }),
+    ]);
     sendPartnerReviewEmail({ to: partner.user.email, businessName: partner.businessName, action: 'REJECTED', rejectionReason }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
 
     return res.status(200).json({ success: true, message: `Trạng thái đối tác đã được cập nhật thành ${action}` });
@@ -270,6 +302,12 @@ async function hideAttraction(req, res, next) {
   }
 }
 
-// export new functions
-module.exports = Object.assign(module.exports, { getPartners, reviewPartner, reviewAttraction, hideAttraction });
+module.exports = {
+  changeUserStatus,
+  getUsers,
+  getPartners,
+  reviewPartner,
+  reviewAttraction,
+  hideAttraction,
+};
 
