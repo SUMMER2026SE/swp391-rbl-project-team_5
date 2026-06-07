@@ -1,119 +1,124 @@
-import { useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import Footer from '../components/Footer.jsx'
+import Header from '../components/Header.jsx'
+import bookingService from '../services/bookingService.js'
+
+const formatDate = (value) => {
+  if (!value) return 'Chưa cập nhật'
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
+}
 
 function BookingSuccessPage() {
-  const navigate = useNavigate()
-  const location = useLocation()
-
-  const bookingState = location.state || {}
-
-  // Generate a stable random booking code once on mount or read from state
-  const [bookingCode] = useState(
-    () => bookingState.reservationId || 'VT-' + Math.random().toString(36).slice(2, 8).toUpperCase(),
-  )
-
-  const attractionTitle = bookingState.attractionTitle || 'Sun World Bà Nà Hills'
-  const dateValue = bookingState.date || 'Chủ nhật, 08/06/2026'
+  const [searchParams] = useSearchParams()
+  const responseCode = searchParams.get('vnpayResponseCode')
+  const bookingId = searchParams.get('bookingId')
+  const booking = bookingService.getBookingDetails(bookingId)
+  const isSuccess = responseCode === '00'
+  const isPendingPartner = booking?.status === 'pending_partner'
 
   return (
-    <div className="min-h-screen bg-[#f9f9fc] flex items-center justify-center px-5 py-12">
-      <div className="w-full max-w-lg mx-auto bg-white rounded-3xl shadow-lg p-8 md:p-10 text-center">
-
-        {/* Animated Checkmark */}
-        <div className="w-24 h-24 rounded-full bg-[#006068] flex items-center justify-center mx-auto mb-6 animate-bounce">
-          <span
-            className="material-symbols-outlined text-white"
-            style={{ fontSize: '48px', fontVariationSettings: "'FILL' 1" }}
+    <>
+      <Header activeLink="My Tickets" />
+      <main className="flex min-h-[70vh] items-center justify-center bg-surface px-5 py-12">
+        <section className="w-full max-w-xl rounded-3xl bg-white p-8 text-center shadow-[0_20px_60px_rgba(0,71,77,0.12)] md:p-10">
+          <div
+            className={`mx-auto flex h-24 w-24 items-center justify-center rounded-full ${
+              isSuccess
+                ? isPendingPartner
+                  ? 'bg-tertiary-fixed'
+                  : 'bg-primary-container'
+                : 'bg-red-100'
+            }`}
           >
-            check_circle
-          </span>
-        </div>
-
-        {/* Title */}
-        <h1
-          className="text-3xl md:text-4xl font-extrabold text-[#006068] mb-3"
-          style={{ fontFamily: "'Be Vietnam Pro', sans-serif" }}
-        >
-          Đặt vé thành công!
-        </h1>
-
-        {/* Subtitle */}
-        <p className="text-gray-500 text-base leading-relaxed mb-6" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
-          Cảm ơn bạn đã tin tưởng VietTicket Travel. Thông tin vé đã được gửi qua email.
-        </p>
-
-        {/* Summary Box */}
-        <div className="bg-[#f9f9fc] rounded-2xl p-6 text-left mt-2 border border-gray-100">
-          <div className="flex flex-col gap-4">
-            {/* Booking Code */}
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-[#006068] mt-0.5 shrink-0 text-[22px]">
-                tag
-              </span>
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">Mã đặt chỗ</p>
-                <p
-                  className="font-mono font-bold text-[#006068] text-lg tracking-widest"
-                >
-                  {bookingCode}
-                </p>
-              </div>
-            </div>
-
-            {/* Location */}
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-[#006068] mt-0.5 shrink-0 text-[22px]">
-                location_on
-              </span>
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">Địa điểm</p>
-                <p className="font-semibold text-gray-800 text-sm">
-                  {attractionTitle}
-                </p>
-              </div>
-            </div>
-
-            {/* Date */}
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-[#006068] mt-0.5 shrink-0 text-[22px]">
-                calendar_month
-              </span>
-              <div>
-                <p className="text-xs text-gray-400 mb-0.5">Ngày</p>
-                <p className="font-semibold text-gray-800 text-sm">
-                  {dateValue}
-                </p>
-              </div>
-            </div>
+            <span
+              className={`material-symbols-outlined text-5xl ${
+                isSuccess
+                  ? isPendingPartner
+                    ? 'text-tertiary'
+                    : 'text-white'
+                  : 'text-error'
+              }`}
+              aria-hidden="true"
+            >
+              {isSuccess ? (isPendingPartner ? 'hourglass_top' : 'check_circle') : 'error'}
+            </span>
           </div>
-        </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-3 mt-8">
-          <button
-            type="button"
-            onClick={() => navigate('/profile')}
-            className="flex-1 flex items-center justify-center gap-2 bg-[#006068] hover:bg-[#004d54] active:bg-[#003a3f] text-white font-bold text-sm py-3.5 px-6 rounded-2xl transition-all duration-200 shadow-md hover:shadow-lg"
-            style={{ fontFamily: "'Be Vietnam Pro', sans-serif" }}
-          >
-            <span className="material-symbols-outlined text-[18px]">receipt_long</span>
-            Xem lịch sử đặt vé
-          </button>
+          <h1 className={`mt-6 text-3xl font-extrabold md:text-4xl ${isSuccess ? 'text-primary' : 'text-error'}`}>
+            {isSuccess
+              ? isPendingPartner
+                ? 'Đang chờ đối tác duyệt'
+                : 'Đặt vé thành công!'
+              : 'Thanh toán chưa thành công'}
+          </h1>
 
-          <button
-            type="button"
-            onClick={() => navigate('/attractions')}
-            className="flex-1 flex items-center justify-center gap-2 border-2 border-[#006068] text-[#006068] hover:bg-[#006068]/5 active:bg-[#006068]/10 font-bold text-sm py-3.5 px-6 rounded-2xl transition-all duration-200"
-            style={{ fontFamily: "'Be Vietnam Pro', sans-serif" }}
-          >
-            <span className="material-symbols-outlined text-[18px]">explore</span>
-            Khám phá thêm
-          </button>
-        </div>
+          <p className="mt-3 leading-relaxed text-on-surface-variant">
+            {isSuccess
+              ? isPendingPartner
+                ? 'Thanh toán đã được ghi nhận. VietTicket sẽ phát hành mã QR ngay khi đối tác xác nhận vé.'
+                : 'Thanh toán đã được ghi nhận và vé điện tử của bạn đã sẵn sàng.'
+              : 'Giao dịch đã bị hủy hoặc không thể hoàn tất. Đơn giữ chỗ vẫn được giữ nguyên để bạn thử lại.'}
+          </p>
 
-        {/* Brand footer note */}
-        <p className="mt-6 text-xs text-gray-400">
-          © 2026 VietTicket Travel – Hành trình của bạn, chúng tôi đồng hành.
+          {booking && (
+            <div className="mt-7 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-6 text-left">
+              <SummaryRow icon="tag" label="Mã đặt chỗ" value={booking.id} mono />
+              <SummaryRow icon="location_on" label="Địa điểm" value={booking.attractionTitle} />
+              <SummaryRow icon="calendar_month" label="Ngày tham quan" value={formatDate(booking.visitDate)} />
+            </div>
+          )}
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            {isSuccess && booking && !isPendingPartner ? (
+              <Link
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
+                to={`/tickets/${booking.id}`}
+              >
+                <span className="material-symbols-outlined text-[19px]" aria-hidden="true">qr_code_2</span>
+                Xem vé điện tử
+              </Link>
+            ) : isSuccess ? (
+              <Link
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
+                to="/my-tickets"
+              >
+                <span className="material-symbols-outlined text-[19px]" aria-hidden="true">confirmation_number</span>
+                Theo dõi trạng thái vé
+              </Link>
+            ) : (
+              <Link
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
+                to={booking ? `/checkout/${booking.id}` : '/my-tickets'}
+              >
+                <span className="material-symbols-outlined text-[19px]" aria-hidden="true">refresh</span>
+                Thử thanh toán lại
+              </Link>
+            )}
+
+            <Link
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl border-2 border-primary px-6 py-3.5 text-sm font-bold text-primary"
+              to="/attractions"
+            >
+              <span className="material-symbols-outlined text-[19px]" aria-hidden="true">explore</span>
+              Khám phá thêm
+            </Link>
+          </div>
+        </section>
+      </main>
+      <Footer />
+    </>
+  )
+}
+
+function SummaryRow({ icon, label, mono = false, value }) {
+  return (
+    <div className="flex items-start gap-3 py-2">
+      <span className="material-symbols-outlined mt-0.5 text-primary" aria-hidden="true">{icon}</span>
+      <div>
+        <p className="text-xs text-on-surface-variant">{label}</p>
+        <p className={mono ? 'font-mono font-bold tracking-wider text-primary' : 'font-semibold text-on-surface'}>
+          {value}
         </p>
       </div>
     </div>

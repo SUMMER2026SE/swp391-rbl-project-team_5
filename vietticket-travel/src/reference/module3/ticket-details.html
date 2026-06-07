@@ -1,0 +1,281 @@
+<!-- Dán source code HTML của màn hình Chi tiết vé / QR Code vào đây -->
+<!DOCTYPE html>
+
+<html lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .ticket-cutout-left, .ticket-cutout-right {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            background: #f8fafb; /* Matches surface-bright */
+            border-radius: 50%;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .ticket-cutout-left { left: -12px; }
+        .ticket-cutout-right { right: -12px; }
+        
+        .glass-background {
+            backdrop-filter: blur(16px);
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .qr-glow {
+            box-shadow: 0px 0px 30px rgba(0, 71, 77, 0.15);
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary-container": "#00a2fd",
+                      "tertiary-fixed-dim": "#ffba20",
+                      "tertiary-container": "#725000",
+                      "on-surface": "#191c1d",
+                      "on-secondary-fixed": "#001d33",
+                      "inverse-primary": "#8ad2db",
+                      "primary": "#00474d",
+                      "on-background": "#191c1d",
+                      "surface-bright": "#f8fafb",
+                      "primary-container": "#006068",
+                      "on-secondary-container": "#003558",
+                      "secondary-fixed-dim": "#98cbff",
+                      "surface-container-highest": "#e1e3e4",
+                      "surface-container-high": "#e6e8e9",
+                      "tertiary": "#543a00",
+                      "surface-container-low": "#f2f4f5",
+                      "on-primary": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "secondary": "#00629d",
+                      "error": "#ba1a1a",
+                      "on-primary-fixed-variant": "#004f56",
+                      "inverse-on-surface": "#eff1f2",
+                      "outline-variant": "#bec8ca",
+                      "surface-variant": "#e1e3e4",
+                      "on-tertiary": "#ffffff",
+                      "outline": "#6f797a",
+                      "background": "#f8fafb",
+                      "primary-fixed-dim": "#8ad2db",
+                      "surface-container": "#eceeef",
+                      "inverse-surface": "#2e3132",
+                      "surface-dim": "#d8dadb",
+                      "on-primary-container": "#90d8e1",
+                      "on-surface-variant": "#3f484a",
+                      "on-error-container": "#93000a",
+                      "primary-fixed": "#a6eff8",
+                      "on-tertiary-fixed-variant": "#5e4200",
+                      "on-tertiary-fixed": "#271900",
+                      "on-secondary-fixed-variant": "#004a77",
+                      "surface-tint": "#136870",
+                      "on-secondary": "#ffffff",
+                      "surface": "#f8fafb",
+                      "surface-container-lowest": "#ffffff",
+                      "on-error": "#ffffff",
+                      "tertiary-fixed": "#ffdea8",
+                      "on-tertiary-container": "#ffc247",
+                      "secondary-fixed": "#cfe5ff",
+                      "on-primary-fixed": "#001f23"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "unit": "8px",
+                      "margin-desktop": "64px",
+                      "container-max": "1280px",
+                      "gutter": "24px",
+                      "margin-mobile": "20px"
+              },
+              "fontFamily": {
+                      "label-sm": ["Inter"],
+                      "display-lg": ["Inter"],
+                      "headline-lg-mobile": ["Inter"],
+                      "headline-md": ["Inter"],
+                      "body-md": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "label-md": ["Inter"],
+                      "headline-lg": ["Inter"]
+              },
+              "fontSize": {
+                      "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "600"}],
+                      "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                      "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                      "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                      "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="bg-surface-bright font-body-md text-on-surface antialiased overflow-x-hidden">
+<!-- Top Navigation Bar -->
+<header class="fixed top-0 w-full z-50 bg-surface/80 backdrop-blur-md shadow-sm">
+<div class="flex justify-between items-center px-margin-desktop py-4 max-w-container-max mx-auto">
+<div class="font-headline-md text-headline-md font-bold text-primary">VoyagePremium</div>
+<nav class="hidden md:flex items-center gap-8">
+<a class="text-on-surface-variant hover:text-secondary transition-colors font-label-md text-label-md" href="#">Explore</a>
+<a class="text-secondary border-b-2 border-secondary pb-1 font-label-md text-label-md" href="#">My Bookings</a>
+<a class="text-on-surface-variant hover:text-secondary transition-colors font-label-md text-label-md" href="#">Support</a>
+</nav>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-primary p-2 hover:bg-surface-container-high rounded-full transition-colors">notifications</button>
+<button class="material-symbols-outlined text-primary p-2 hover:bg-surface-container-high rounded-full transition-colors">account_circle</button>
+</div>
+</div>
+</header>
+<!-- Sidebar Navigation (Desktop) -->
+<aside class="fixed left-0 top-0 h-full w-64 hidden lg:flex flex-col bg-surface-container-low p-4 gap-y-2 z-40 pt-24 shadow-md">
+<div class="px-4 py-6 mb-4">
+<div class="flex items-center gap-3 mb-2">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center text-on-primary">
+<span class="material-symbols-outlined">person</span>
+</div>
+<div>
+<p class="font-label-md text-label-md text-primary font-bold">Alex Morgan</p>
+<p class="text-[10px] text-outline uppercase tracking-wider">Premium Member</p>
+</div>
+</div>
+</div>
+<a class="bg-secondary-container text-on-secondary-container rounded-xl mx-2 p-3 flex items-center gap-3 transition-transform active:scale-95" href="#">
+<span class="material-symbols-outlined">confirmation_number</span>
+<span class="font-label-md text-label-md">Tickets</span>
+</a>
+<a class="text-on-surface-variant hover:bg-surface-container-high rounded-xl mx-2 p-3 flex items-center gap-3 transition-colors" href="#">
+<span class="material-symbols-outlined">favorite</span>
+<span class="font-label-md text-label-md">Favorites</span>
+</a>
+<a class="text-on-surface-variant hover:bg-surface-container-high rounded-xl mx-2 p-3 flex items-center gap-3 transition-colors" href="#">
+<span class="material-symbols-outlined">history</span>
+<span class="font-label-md text-label-md">History</span>
+</a>
+<a class="text-on-surface-variant hover:bg-surface-container-high rounded-xl mx-2 p-3 flex items-center gap-3 transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+<div class="mt-auto px-2">
+<button class="w-full bg-primary text-on-primary rounded-xl py-3 font-label-md text-label-md flex items-center justify-center gap-2 hover:opacity-90 transition-opacity">
+<span class="material-symbols-outlined">add</span>
+                Book New Trip
+            </button>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="lg:ml-64 pt-20 pb-24 min-h-screen relative flex items-center justify-center overflow-hidden">
+<!-- Background Hero with Glassmorphism -->
+<div class="absolute inset-0 z-0">
+<img class="w-full h-full object-cover filter blur-md brightness-75 scale-105" data-alt="A cinematic, wide-angle landscape shot of the Golden Bridge at Sun World Ba Na Hills, Vietnam. The famous giant stone hands emerge from the lush green mountain forest to hold the golden pedestrian bridge. The scene is bathed in soft, ethereal morning mist and warm golden hour lighting, creating a high-fidelity travel atmosphere. The color palette features vibrant emerald greens and golden yellows, with a soft, dreamy blur for depth." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC6Vo-3HRTrXvKx0yepiTeG6HMqEQPGyMrmRMdR41iP8tqPoxO6WN0BKzSYLLgoWL2-2mrWvhuKkqXBZDjQjkIjKLATVQ5jHBGhYN7vN1RvM6PcykMFUsT-tQpbM43K__b02M9_V5lZVAQKggH2Se_ctl9vhn6jlZk_wvzS7ZjhjKkizyx9_dCEqZDwhms66Y-4sdJr8jrlaD1aGLGiAReimWSPCs7LAlpLvSOxOHe09JUNvpcBlA4Q_4RS9Q52X4j-0o7JM93prV8"/>
+<div class="absolute inset-0 bg-gradient-to-b from-primary/20 via-transparent to-surface-bright"></div>
+</div>
+<!-- Ticket Container -->
+<div class="relative z-10 w-full max-w-lg px-margin-mobile md:px-0">
+<div class="animate-in fade-in slide-in-from-bottom-8 duration-700">
+<!-- Ticket Shape -->
+<div class="bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col relative transition-transform hover:scale-[1.01] duration-500">
+<!-- Top Section -->
+<div class="p-8 border-b-2 border-dashed border-outline-variant relative">
+<div class="flex justify-between items-start mb-8">
+<div class="flex flex-col">
+<span class="text-tertiary-fixed-dim uppercase tracking-[0.2em] font-bold text-[10px] mb-1">E-Ticket Pass</span>
+<h1 class="font-headline-lg text-headline-lg text-primary font-extrabold leading-tight">SUN WORLD<br/>BA NA HILLS</h1>
+</div>
+<div class="bg-primary/5 p-3 rounded-xl">
+<span class="material-symbols-outlined text-primary scale-125">cable_car</span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-y-6">
+<div>
+<p class="text-outline font-label-sm text-label-sm uppercase">Khách hàng</p>
+<p class="font-headline-md text-headline-md text-on-surface">Nguyen Hoang Anh</p>
+</div>
+<div class="text-right">
+<p class="text-outline font-label-sm text-label-sm uppercase">Ngày đi</p>
+<p class="font-body-lg text-body-lg text-on-surface font-semibold">Chủ Nhật, 08/06/2026</p>
+</div>
+<div>
+<p class="text-outline font-label-sm text-label-sm uppercase">Khung giờ</p>
+<p class="font-body-lg text-body-lg text-on-surface font-semibold">09:00 - 11:00</p>
+</div>
+<div class="text-right">
+<p class="text-outline font-label-sm text-label-sm uppercase">Mã đặt chỗ</p>
+<p class="font-body-lg text-body-lg text-primary font-mono font-bold">VT-9938-A</p>
+</div>
+</div>
+<!-- Ticket Cutouts -->
+<div class="ticket-cutout-left"></div>
+<div class="ticket-cutout-right"></div>
+</div>
+<!-- Bottom Section -->
+<div class="p-10 flex flex-col items-center bg-surface-container-lowest">
+<div class="bg-white p-4 rounded-2xl qr-glow border border-surface-container-high mb-6 group transition-all cursor-pointer">
+<img alt="QR Code Ticket" class="w-48 h-48 group-hover:scale-105 transition-transform duration-300" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCGm8iuvp4CtqQhjDFa2Isx4Tkx4OQm8AsHGc5lc8-a2zop3eX4F45WF0o7k9B_IQ2y3QcT5rfreCIhzMMb_OPBcUdfS4QD3Qv9cyAbdFtLLkzxuFkT-D-dnGCebpXf62vLwHPOXylRv_uNggy5x1yLNkxOpKXw4qqCpfC1tx_SibTmTsIpgq4XSL6eWxL_KDaGYgoNGh2mdrVjKcn0ri6CE7XkaY8HK4xGIZVgEIsPrdvV8bjIUTsacJ4qYqPjhT4m2RnTQdWgfVs"/>
+</div>
+<p class="text-outline font-label-md text-label-md mb-2">Vui lòng quét mã tại cổng kiểm soát</p>
+<div class="flex items-center gap-2 text-primary font-semibold">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">verified</span>
+<span class="font-label-md text-label-md">Vé hợp lệ • Hạng Thương Gia</span>
+</div>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="mt-8 flex gap-4 justify-center">
+<button class="flex-1 bg-white/20 backdrop-blur-md border border-white/30 text-white py-4 rounded-xl font-label-md text-label-md flex items-center justify-center gap-2 hover:bg-white/30 transition-all">
+<span class="material-symbols-outlined">download</span>
+                        Tải vé PDF
+                    </button>
+<button class="flex-1 bg-primary text-on-primary py-4 rounded-xl font-label-md text-label-md flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:opacity-90 transition-all">
+<span class="material-symbols-outlined">share</span>
+                        Chia sẻ vé
+                    </button>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar (Mobile) -->
+<nav class="fixed bottom-0 w-full lg:hidden bg-surface/90 backdrop-blur-lg shadow-lg z-50 flex justify-around items-center px-margin-mobile py-3 rounded-t-xl">
+<button class="flex flex-col items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined">home</span>
+<span class="font-label-sm text-label-sm-mobile">Home</span>
+</button>
+<button class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">confirmation_number</span>
+<span class="font-label-sm text-label-sm-mobile">Tickets</span>
+</button>
+<button class="flex flex-col items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined">bookmark</span>
+<span class="font-label-sm text-label-sm-mobile">Saved</span>
+</button>
+<button class="flex flex-col items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined">person</span>
+<span class="font-label-sm text-label-sm-mobile">Profile</span>
+</button>
+</nav>
+<script>
+        // Simple atmospheric effect: slight parallax movement of background on mouse move
+        document.addEventListener('mousemove', (e) => {
+            const hero = document.querySelector('main img');
+            if (hero) {
+                const moveX = (e.clientX - window.innerWidth / 2) * 0.01;
+                const moveY = (e.clientY - window.innerHeight / 2) * 0.01;
+                hero.style.transform = `scale(1.1) translate(${moveX}px, ${moveY}px)`;
+            }
+        });
+    </script>
+</body></html>

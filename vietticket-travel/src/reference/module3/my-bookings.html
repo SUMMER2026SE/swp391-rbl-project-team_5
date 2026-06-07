@@ -1,0 +1,373 @@
+<!-- Dán source code HTML của màn hình Lịch sử/Vé của tôi vào đây -->
+<!DOCTYPE html>
+
+<html class="light" lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>My Tickets - VietTicket Travel</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-primary-fixed": "#001f23",
+                    "inverse-surface": "#2e3132",
+                    "background": "#f8fafb",
+                    "surface-container-high": "#e6e8e9",
+                    "on-secondary-fixed-variant": "#004a77",
+                    "on-error": "#ffffff",
+                    "inverse-on-surface": "#eff1f2",
+                    "secondary-container": "#00a2fd",
+                    "inverse-primary": "#8ad2db",
+                    "tertiary-fixed-dim": "#ffba20",
+                    "error-container": "#ffdad6",
+                    "surface-bright": "#f8fafb",
+                    "primary-container": "#006068",
+                    "on-primary-fixed-variant": "#004f56",
+                    "on-background": "#191c1d",
+                    "outline": "#6f797a",
+                    "tertiary": "#543a00",
+                    "surface-dim": "#d8dadb",
+                    "error": "#ba1a1a",
+                    "secondary-fixed-dim": "#98cbff",
+                    "secondary": "#00629d",
+                    "on-surface": "#191c1d",
+                    "on-primary-container": "#90d8e1",
+                    "tertiary-fixed": "#ffdea8",
+                    "tertiary-container": "#725000",
+                    "surface-tint": "#136870",
+                    "surface-container": "#eceeef",
+                    "on-primary": "#ffffff",
+                    "secondary-fixed": "#cfe5ff",
+                    "on-tertiary-fixed-variant": "#5e4200",
+                    "on-tertiary": "#ffffff",
+                    "surface-container-low": "#f2f4f5",
+                    "outline-variant": "#bec8ca",
+                    "surface-container-highest": "#e1e3e4",
+                    "on-tertiary-fixed": "#271900",
+                    "primary": "#00474d",
+                    "on-secondary": "#ffffff",
+                    "surface-container-lowest": "#ffffff",
+                    "primary-fixed": "#a6eff8",
+                    "primary-fixed-dim": "#8ad2db",
+                    "on-tertiary-container": "#ffc247",
+                    "on-surface-variant": "#3f484a",
+                    "surface-variant": "#e1e3e4",
+                    "on-secondary-fixed": "#001d33",
+                    "on-secondary-container": "#003558",
+                    "surface": "#f8fafb",
+                    "on-error-container": "#93000a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "gutter": "24px",
+                    "margin-desktop": "64px",
+                    "container-max": "1280px",
+                    "margin-mobile": "20px",
+                    "unit": "8px"
+            },
+            "fontFamily": {
+                    "headline-md": ["Inter"],
+                    "label-sm": ["Inter"],
+                    "label-md": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "headline-lg-mobile": ["Inter"],
+                    "body-md": ["Inter"],
+                    "body-lg": ["Inter"],
+                    "display-lg": ["Inter"]
+            },
+            "fontSize": {
+                    "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "600"}],
+                    "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                    "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafb; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen">
+<!-- Top Navigation (Shell Implementation) -->
+<header class="flex justify-between items-center px-margin-desktop py-4 w-full sticky top-0 z-50 bg-white/80 backdrop-blur-md shadow-[0px_4px_20px_rgba(0,40,50,0.05)]">
+<div class="flex items-center gap-8">
+<span class="font-headline-md text-headline-md font-bold text-primary">VietTicket Travel</span>
+<div class="hidden md:flex gap-6">
+<a class="text-on-surface-variant hover:bg-surface-container-low transition-colors px-3 py-2 rounded-lg" href="#">Home</a>
+<a class="text-on-surface-variant hover:bg-surface-container-low transition-colors px-3 py-2 rounded-lg" href="#">Destinations</a>
+<a class="text-secondary font-bold border-b-2 border-secondary px-3 py-2" href="#">My Tickets</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined p-2 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-all">notifications</button>
+<button class="material-symbols-outlined p-2 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-all">help</button>
+<div class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant">
+<img alt="User profile avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDPA-lczyW813wlxWaatn-63WnrP73X3P1BJQsDHZeBI30ShgnqXxpx5JBQI7T5wl-wX2eb-ePKoCylsVKvZJnQLvzmGWgpeXsbG64eDnMoi7FgRzCNNxxcwaM9IUApND0OOHTIzHemsw5pwQHAczQwqJ5WwDdhOqebcwSSozbxmdm5XycXMzy0QyCwWHSLEI8HSFAFk_BNJDaIXk1XXPseF235bbLA-NJ57D1kRUwUvtr1sJaR-JDhmq79hYuG7_zijtf8Tmpxc6s"/>
+</div>
+</div>
+</header>
+<div class="flex max-w-[1440px] mx-auto min-h-[calc(100vh-72px)]">
+<!-- Side Navigation (Shared Component) -->
+<aside class="hidden md:flex flex-col h-full w-64 p-6 border-r border-outline-variant/30 bg-surface-container-lowest sticky top-[72px]">
+<div class="mb-8">
+<h2 class="font-headline-md text-headline-md text-primary mb-1">Welcome back</h2>
+<p class="font-label-md text-label-md text-on-surface-variant">Plan your next journey</p>
+</div>
+<nav class="flex flex-col gap-2 flex-grow">
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high rounded-lg transition-all active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">person</span>
+<span class="font-label-md text-label-md">Profile</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 bg-secondary-fixed text-on-secondary-fixed rounded-lg font-semibold shadow-sm active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">confirmation_number</span>
+<span class="font-label-md text-label-md">My Tickets</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high rounded-lg transition-all active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">favorite</span>
+<span class="font-label-md text-label-md">Favorites</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-on-surface-variant hover:bg-surface-container-high rounded-lg transition-all active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+<button class="mt-8 mb-6 py-3 bg-gradient-to-r from-primary to-secondary text-on-primary rounded-xl font-semibold shadow-md active:scale-95 transition-all">
+                Book New Trip
+            </button>
+<div class="pt-6 border-t border-outline-variant/30">
+<a class="flex items-center gap-3 px-4 py-3 text-error hover:bg-error-container/20 rounded-lg transition-all" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-label-md text-label-md">Logout</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-grow p-6 md:p-gutter lg:px-margin-desktop bg-surface">
+<!-- Header & Filters -->
+<div class="mb-8">
+<h1 class="font-headline-lg text-headline-lg text-primary mb-6">Vé của tôi</h1>
+<div class="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+<button class="px-6 py-2.5 rounded-full font-label-md text-label-md bg-primary text-on-primary shadow-sm whitespace-nowrap transition-all">Tất cả</button>
+<button class="px-6 py-2.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high transition-all whitespace-nowrap">Chưa thanh toán</button>
+<button class="px-6 py-2.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high transition-all whitespace-nowrap">Đang sử dụng</button>
+<button class="px-6 py-2.5 rounded-full font-label-md text-label-md text-on-surface-variant hover:bg-surface-container-high transition-all whitespace-nowrap">Lịch sử</button>
+</div>
+</div>
+<!-- Tickets List -->
+<div class="flex flex-col gap-6 max-w-4xl">
+<!-- Card 1: Halong Bay -->
+<div class="group bg-surface-container-lowest rounded-2xl overflow-hidden shadow-[0px_4px_20px_rgba(0,40,50,0.05)] hover:shadow-[0px_8px_30px_rgba(0,40,50,0.08)] transition-all duration-300 flex flex-col md:flex-row border border-outline-variant/10">
+<div class="md:w-64 h-48 md:h-auto overflow-hidden">
+<img alt="Vịnh Hạ Long" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="https://lh3.googleusercontent.com/aida/AP1WRLstfCp-TcO_X_-cVoH9ASzAkoOO3xOgTqfel_3GEV0IWWFytl3f9GxTUzPHa73Qtc-3E_JzLys9Jdmns5Rcu0Cyg-MFBvisZHDTVEr7ZoBCJpvwGSQgA5AztQNi9achnRLfxhdSO4uch0EV9jSjz0jRfd216gHpIwERzBXFyXRmTfJ44d8w4-tVSzgyXoZHvtOFUACV98lgLvZK2f_qdGt6RTBitPYQ8MNl8woUbfn1hoQ2YLJgjMLlCg"/>
+</div>
+<div class="flex-grow p-6 flex flex-col justify-between">
+<div>
+<div class="flex flex-wrap justify-between items-start gap-4 mb-3">
+<div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-1">Vịnh Hạ Long</h3>
+<p class="font-label-md text-label-md text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[18px]">location_on</span> Quảng Ninh, Việt Nam
+                                    </p>
+</div>
+<div class="flex flex-col items-end gap-2">
+<span class="px-3 py-1 bg-tertiary-fixed text-on-tertiary-fixed rounded-full font-label-sm text-label-sm flex items-center gap-1.5 shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary animate-pulse"></span>
+                                        Chờ thanh toán
+                                    </span>
+<span class="text-error font-label-sm text-label-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">timer</span> 08:14 còn lại
+                                    </span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-y-3 gap-x-8 mb-6">
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Mã đặt chỗ</p>
+<p class="font-body-md text-body-md font-semibold">VT-8821</p>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Ngày</p>
+<p class="font-body-md text-body-md font-semibold">12/06/2024</p>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Số lượng</p>
+<p class="font-body-md text-body-md font-semibold">2 Người lớn</p>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Giá</p>
+<p class="font-headline-md text-headline-md text-primary">1.700.000đ</p>
+</div>
+</div>
+</div>
+<div class="flex justify-end pt-4 border-t border-outline-variant/30">
+<button class="px-8 py-2.5 bg-primary text-on-primary rounded-xl font-semibold shadow-sm hover:brightness-110 active:scale-95 transition-all">
+                                Thanh toán ngay
+                            </button>
+</div>
+</div>
+</div>
+<!-- Card 2: Ba Na Hills -->
+<div class="group bg-surface-container-lowest rounded-2xl overflow-hidden shadow-[0px_4px_20px_rgba(0,40,50,0.05)] hover:shadow-[0px_8px_30px_rgba(0,40,50,0.08)] transition-all duration-300 flex flex-col md:flex-row border border-outline-variant/10">
+<div class="md:w-64 h-48 md:h-auto overflow-hidden">
+<img alt="Ba Na Hills" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src="https://lh3.googleusercontent.com/aida/AP1WRLvqJKxwVV-Lk8BUIp_yZVRrgZEsu-BiZHBWe67fvBxKCgi3px1zeqz9ALSTtTjKmfSNH6uE_2I1ow73Z4jC6fTxXn4QOQ6BOneUX8yZ89gZ5uA0MDE3g1pyrTlmfNFW_vV28H6i1hcOm0Cyg_MgpwYZLNXcAYp8b6XDDyHaK9nMZoHwciAg-V54qC97Cyk4-YmyejGRyqlRz2wF_p_aybYObjkqxqjGUhmGiS4rqx8d-EB94lJbEKdpmcY"/>
+</div>
+<div class="flex-grow p-6 flex flex-col justify-between">
+<div>
+<div class="flex flex-wrap justify-between items-start gap-4 mb-3">
+<div>
+<h3 class="font-headline-md text-headline-md text-on-surface mb-1">Ba Na Hills</h3>
+<p class="font-label-md text-label-md text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[18px]">location_on</span> Đà Nẵng, Việt Nam
+                                    </p>
+</div>
+<span class="px-3 py-1 bg-primary-container text-on-primary-container rounded-full font-label-sm text-label-sm flex items-center gap-1.5 shadow-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-on-primary-container"></span>
+                                    Đã xác nhận
+                                </span>
+</div>
+<div class="grid grid-cols-2 gap-y-3 gap-x-8 mb-6">
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Mã đặt chỗ</p>
+<p class="font-body-md text-body-md font-semibold">VT-9938</p>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Ngày</p>
+<p class="font-body-md text-body-md font-semibold">08/06/2026</p>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Số lượng</p>
+<p class="font-body-md text-body-md font-semibold">1 Người lớn</p>
+</div>
+<div>
+<p class="text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider mb-1">Giá</p>
+<p class="font-headline-md text-headline-md text-primary">850.000đ</p>
+</div>
+</div>
+</div>
+<div class="flex justify-end pt-4 border-t border-outline-variant/30">
+<button class="px-8 py-2.5 border border-primary text-primary hover:bg-primary-fixed rounded-xl font-semibold active:scale-95 transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]">qr_code_2</span>
+                                Xem mã QR
+                            </button>
+</div>
+</div>
+</div>
+<!-- Card 3: Hoi An -->
+<div class="group bg-surface-container-lowest/70 rounded-2xl overflow-hidden shadow-sm hover:shadow-[0px_4px_15px_rgba(0,0,0,0.05)] transition-all duration-300 flex flex-col md:flex-row border border-outline-variant/10 opacity-90">
+<div class="md:w-64 h-48 md:h-auto overflow-hidden grayscale-[40%] group-hover:grayscale-0 transition-all duration-500">
+<img alt="Phố cổ Hội An" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida/AP1WRLu89yLM5Afw2OkdJd8VpDxfkC_7UlaPIFetWVUxPS2gAk1YkuiIiIitcQuJIGVnO5GTP0xHcDlIqEMCWs3DO7IbyVwO5hfnqb7-fuZzuYZYKPGdL7BoPJLcSx2LuInFBp4jnXlAoCFwuc0yIte1VNZX_cfbF3cdb2WrbTVlD7lmw7-KVwm6jFBNInP_b5FNnV8lPVYudoYYs6vfHG9xay0mPnkNBLttPyMT5G_SIbRiwjDR0qazdIe-S0Y"/>
+</div>
+<div class="flex-grow p-6 flex flex-col justify-between">
+<div>
+<div class="flex flex-wrap justify-between items-start gap-4 mb-3">
+<div>
+<h3 class="font-headline-md text-headline-md text-on-surface-variant mb-1">Phố cổ Hội An</h3>
+<p class="font-label-md text-label-md text-on-surface-variant/70 flex items-center gap-1">
+<span class="material-symbols-outlined text-[18px]">location_on</span> Quảng Nam, Việt Nam
+                                    </p>
+</div>
+<span class="px-3 py-1 bg-surface-container-highest text-on-surface-variant rounded-full font-label-sm text-label-sm flex items-center gap-1.5">
+                                    Hoàn thành
+                                </span>
+</div>
+<div class="grid grid-cols-2 gap-y-3 gap-x-8 mb-6">
+<div>
+<p class="text-on-surface-variant/70 font-label-sm text-label-sm uppercase tracking-wider mb-1">Mã đặt chỗ</p>
+<p class="font-body-md text-body-md">VT-7712</p>
+</div>
+<div>
+<p class="text-on-surface-variant/70 font-label-sm text-label-sm uppercase tracking-wider mb-1">Ngày</p>
+<p class="font-body-md text-body-md">20/05/2024</p>
+</div>
+<div>
+<p class="text-on-surface-variant/70 font-label-sm text-label-sm uppercase tracking-wider mb-1">Số lượng</p>
+<p class="font-body-md text-body-md">4 Người lớn</p>
+</div>
+<div>
+<p class="text-on-surface-variant/70 font-label-sm text-label-sm uppercase tracking-wider mb-1">Giá</p>
+<p class="font-body-md text-body-md font-semibold">480.000đ</p>
+</div>
+</div>
+</div>
+<div class="flex justify-end pt-4 border-t border-outline-variant/30">
+<button class="px-8 py-2.5 text-on-surface-variant hover:bg-surface-container-high rounded-xl font-semibold transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]">rate_review</span>
+                                Viết đánh giá
+                            </button>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Mobile Navigation (Shell Implementation) -->
+<nav class="md:hidden fixed bottom-0 left-0 right-0 bg-white shadow-[0px_-4px_20px_rgba(0,40,50,0.05)] px-6 py-3 flex justify-between items-center z-50">
+<a class="flex flex-col items-center gap-1 text-on-surface-variant" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="text-[10px] font-semibold">Home</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-on-surface-variant" href="#">
+<span class="material-symbols-outlined">explore</span>
+<span class="text-[10px] font-semibold">Explore</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-secondary" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">confirmation_number</span>
+<span class="text-[10px] font-semibold">Tickets</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-on-surface-variant" href="#">
+<span class="material-symbols-outlined">favorite</span>
+<span class="text-[10px] font-semibold">Saved</span>
+</a>
+<a class="flex flex-col items-center gap-1 text-on-surface-variant" href="#">
+<span class="material-symbols-outlined">person</span>
+<span class="text-[10px] font-semibold">Profile</span>
+</a>
+</nav>
+<script>
+        // Simple countdown logic simulation
+        let timeLeft = 8 * 60 + 14;
+        const countdownEl = document.querySelector('.text-error.font-label-sm span + span') || { innerText: '' };
+        
+        function updateTimer() {
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = timeLeft % 60;
+            const timerStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')} còn lại`;
+            
+            const timerContainer = document.querySelector('.text-error.font-label-sm');
+            if (timerContainer) {
+                timerContainer.innerHTML = `<span class="material-symbols-outlined text-[16px]">timer</span> ${timerStr}`;
+            }
+            
+            if (timeLeft > 0) {
+                timeLeft--;
+            }
+        }
+        
+        setInterval(updateTimer, 1000);
+    </script>
+</body></html>

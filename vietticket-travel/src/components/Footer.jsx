@@ -1,4 +1,6 @@
-function Footer({ links, appButtons }) {
+import { appDownloadButtons, footerLinks } from '../data/landingData.js'
+
+function Footer({ links = footerLinks, appButtons = appDownloadButtons }) {
   return (
     <footer className="site-footer" id="support">
       <div className="container footer-grid">
