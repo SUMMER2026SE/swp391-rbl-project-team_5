@@ -62,6 +62,16 @@ function PartnerEditAttractionPage() {
         lng: data.lng ?? '',
         status: data.status ?? 'active',
       }))
+      if (Array.isArray(data.images)) {
+        setImages(
+          data.images.map((img) => ({
+            id: img.id,
+            previewUrl: img.url,
+            file: null,
+            isThumbnail: img.isPrimary,
+          })),
+        )
+      }
       if (descRef.current) descRef.current.innerHTML = data.description || ''
       setIsLoading(false)
     }
@@ -134,6 +144,12 @@ function PartnerEditAttractionPage() {
 
     try {
       await partnerApi.updateAttraction(id, payload)
+
+      const newFiles = images.map((img) => img.file).filter(Boolean)
+      if (newFiles.length > 0) {
+        await partnerApi.uploadAttractionImages(id, newFiles)
+      }
+
       toast.success('Đã cập nhật điểm tham quan thành công!')
       navigate('/partner/attractions')
     } catch (err) {
