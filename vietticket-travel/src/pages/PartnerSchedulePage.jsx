@@ -2,7 +2,7 @@
  * PartnerSchedulePage — Cấu hình lịch mở cửa, sức chứa và time slots.
  * Route: /partner/attractions/:id/schedule
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
@@ -51,7 +51,7 @@ function PartnerSchedulePage() {
   const { id } = useParams()
   const navigate = useNavigate()
 
-  const [attractionName, setAttractionName] = useState('')
+  const attractionName = MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan'
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('slots') // 'slots' | 'calendar'
@@ -75,8 +75,8 @@ function PartnerSchedulePage() {
 
   useEffect(() => {
     document.title = 'Cấu hình lịch | VietTicket B2B'
-    setAttractionName(MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan')
     let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true)
     ;(async () => {
       try {

@@ -46,11 +46,16 @@ function PartnerAddAttractionPage() {
   const fileInputRef = useRef(null)
   const addMoreRef = useRef(null)
 
+  const imagesRef = useRef(images)
+  useEffect(() => {
+    imagesRef.current = images
+  }, [images])
+
   useEffect(() => {
     document.title = 'Thêm điểm tham quan | VietTicket B2B'
     return () => {
       // cleanup preview URLs
-      images.forEach((img) => URL.revokeObjectURL(img.previewUrl))
+      imagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl))
     }
   }, [])
 

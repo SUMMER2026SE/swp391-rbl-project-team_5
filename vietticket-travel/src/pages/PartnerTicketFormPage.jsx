@@ -35,7 +35,7 @@ function PartnerTicketFormPage() {
   const navigate = useNavigate()
   const isEdit = Boolean(ticketId)
 
-  const [attractionName, setAttractionName] = useState('')
+  const attractionName = MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan'
   const [isLoading, setIsLoading] = useState(isEdit)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [touched, setTouched] = useState({})
@@ -47,9 +47,9 @@ function PartnerTicketFormPage() {
 
   useEffect(() => {
     document.title = `${isEdit ? 'Chỉnh sửa' : 'Thêm'} gói vé | VietTicket B2B`
-    setAttractionName(MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan')
     if (!isEdit) return
     let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true)
     ;(async () => {
       try {
@@ -78,7 +78,7 @@ function PartnerTicketFormPage() {
       }
     })()
     return () => { active = false }
-  }, [id, ticketId])
+  }, [isEdit, ticketId])
 
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))
   const touch = (field) => setTouched((prev) => ({ ...prev, [field]: true }))

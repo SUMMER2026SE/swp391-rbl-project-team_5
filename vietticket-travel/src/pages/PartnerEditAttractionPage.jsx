@@ -84,7 +84,7 @@ function PartnerEditAttractionPage() {
       }
     })()
     return () => { active = false }
-  }, [id])
+  }, [id, navigate])
 
   const updateForm = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))
 

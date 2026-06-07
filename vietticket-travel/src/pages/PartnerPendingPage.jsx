@@ -11,7 +11,6 @@ const NAV_ITEMS = [
 ]
 
 function PartnerPendingPage() {
-  const navigate = useNavigate()
   const { user } = useAuth()
 
   useEffect(() => {
