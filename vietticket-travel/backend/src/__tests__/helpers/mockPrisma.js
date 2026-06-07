@@ -18,6 +18,12 @@ const mockPrisma = {
     update: jest.fn(),
     count: jest.fn(),
   },
+  favoriteAttraction: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn(),
+  },
   ticketProduct: {
     findUnique: jest.fn(),
     findMany: jest.fn(),

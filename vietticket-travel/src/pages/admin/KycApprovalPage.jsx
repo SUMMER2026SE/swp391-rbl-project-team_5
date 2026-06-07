@@ -132,8 +132,6 @@ export default function KycApprovalPage() {
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm hồ sơ...">
-      <Toast toast={toast} />
-
       {/* Page Header */}
       <div className="admin-page-header">
         <div>
