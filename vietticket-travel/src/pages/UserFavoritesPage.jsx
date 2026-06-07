@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Header from '../components/Header.jsx'
 import Footer from '../components/Footer.jsx'
 import { appDownloadButtons, footerLinks } from '../data/landingData.js'
+import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 
 const regionFilters = ['Tất cả', 'Miền Bắc', 'Miền Trung', 'Miền Nam']
 
@@ -76,20 +77,12 @@ export default function UserFavoritesPage() {
       setErrorMessage('')
 
       try {
-        const response = await fetch('/api/v1/favorites')
-        const result = await response.json()
-
-        if (result.success) {
-          const data = Array.isArray(result.data) ? result.data : result.data?.favorites || []
-          setFavorites(data)
-        } else {
-          setFavorites([])
-          setErrorMessage(result.error?.message || 'Không thể tải danh sách yêu thích.')
-        }
+        const result = await getFavorites()
+        setFavorites(getFavoriteItems(result))
       } catch (error) {
         console.error('Lỗi tải danh sách yêu thích:', error)
         setFavorites([])
-        setErrorMessage('Không thể kết nối tới máy chủ để tải danh sách yêu thích.')
+        setErrorMessage(error.message)
       } finally {
         setLoading(false)
       }
@@ -99,27 +92,23 @@ export default function UserFavoritesPage() {
   }, [])
 
   const handleRemoveFavorite = async (attractionId) => {
+    setErrorMessage('')
     setRemovingIds((current) => [...current, attractionId])
 
     try {
-      const response = await fetch(`/api/v1/attractions/${attractionId}/favorite`, {
-        method: 'POST',
-      })
-      const result = await response.json()
+      const result = await toggleFavorite(attractionId)
 
-      if (result.success) {
+      if (result.data?.isFavorite === false) {
         setFavorites((prev) =>
           prev.filter((item) => {
             const attraction = getAttraction(item)
-            return item.id !== attractionId && attraction.id !== attractionId
+            return item.attractionId !== attractionId && attraction.id !== attractionId
           }),
         )
-      } else {
-        setErrorMessage(result.error?.message || 'Không thể bỏ yêu thích địa điểm này.')
       }
     } catch (error) {
       console.error('Lỗi khi bỏ yêu thích địa điểm:', error)
-      setErrorMessage('Không thể kết nối tới máy chủ để bỏ yêu thích.')
+      setErrorMessage(error.message)
     } finally {
       setRemovingIds((current) => current.filter((id) => id !== attractionId))
     }

@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
+import { useAuth } from '../context/useAuth.js'
 import { appDownloadButtons, footerLinks } from '../data/landingData.js'
 import { apiRequest } from '../services/api.js'
+import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 
 const categoryFilters = [
   { value: 'All', text: 'Tất cả', icon: 'auto_awesome' },
@@ -79,23 +82,70 @@ const getPageNumbers = (currentPage, totalPages) => {
 export default function SearchAttractionsPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { isAuthenticated, isAuthLoading, user } = useAuth()
 
   const [favoriteIds, setFavoriteIds] = useState(new Set())
+  const [favoriteUserId, setFavoriteUserId] = useState('')
+  const [favoriteActionIds, setFavoriteActionIds] = useState(new Set())
 
   const handleToggleFavorite = async (e, attractionId) => {
     e.stopPropagation()
-    setFavoriteIds(prev => {
-      const next = new Set(prev)
-      if (next.has(attractionId)) next.delete(attractionId)
-      else next.add(attractionId)
-      return next
-    })
+
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: location } })
+      return
+    }
+
+    if (favoriteActionIds.has(attractionId)) return
+
+    setFavoriteActionIds((current) => new Set(current).add(attractionId))
     try {
-      await apiRequest(`/attractions/${attractionId}/favorite`, { method: 'POST' })
+      const result = await toggleFavorite(attractionId)
+      setFavoriteIds((current) => {
+        const next = new Set(current)
+        if (result.data?.isFavorite) next.add(attractionId)
+        else next.delete(attractionId)
+        return next
+      })
+      setFavoriteUserId(user?.id || '')
     } catch (error) {
       console.error('Lỗi khi thả tim:', error)
+      toast.error(error.message)
+    } finally {
+      setFavoriteActionIds((current) => {
+        const next = new Set(current)
+        next.delete(attractionId)
+        return next
+      })
     }
   }
+
+  useEffect(() => {
+    let active = true
+
+    if (isAuthLoading) return undefined
+    if (!isAuthenticated) return undefined
+
+    getFavorites()
+      .then((result) => {
+        if (!active) return
+        setFavoriteIds(
+          new Set(
+            getFavoriteItems(result)
+              .map((item) => item.attractionId || item.attraction?.id || item.id)
+            .filter(Boolean),
+          ),
+        )
+        setFavoriteUserId(user?.id || '')
+      })
+      .catch((error) => {
+        if (active && error.status !== 401) toast.error(error.message)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [isAuthenticated, isAuthLoading, user?.id])
 
   // 1. Quản lý các bộ lọc - đọc từ URL params nếu có
   const [searchQuery, setSearchQuery] = useState(() => {
@@ -355,7 +405,10 @@ export default function SearchAttractionsPage() {
                   attractions.map((attraction, index) => (
                     <AttractionCard
                       attraction={attraction}
-                      isFavorite={favoriteIds.has(attraction.id)}
+                      isFavoritePending={favoriteActionIds.has(attraction.id)}
+                      isFavorite={
+                        favoriteUserId === user?.id && favoriteIds.has(attraction.id)
+                      }
                       key={attraction.id || `${attraction.title || attraction.name}-${index}`}
                       navigate={navigate}
                       onToggleFavorite={handleToggleFavorite}
@@ -430,7 +483,7 @@ function FilterSection({ icon, title, children }) {
   )
 }
 
-function AttractionCard({ attraction, isFavorite, navigate, onToggleFavorite }) {
+function AttractionCard({ attraction, isFavorite, isFavoritePending, navigate, onToggleFavorite }) {
   const title = attraction.title || attraction.name || 'Điểm tham quan'
   const location = attraction.city ? `${attraction.city}, Việt Nam` : attraction.address || 'Việt Nam'
   const rating = Number(attraction.averageRating || attraction.rating || 0)
@@ -447,6 +500,7 @@ function AttractionCard({ attraction, isFavorite, navigate, onToggleFavorite }) 
         <button
           aria-label={isFavorite ? `Bỏ yêu thích ${title}` : `Lưu yêu thích ${title}`}
           className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 backdrop-blur-md shadow-sm transition hover:scale-110 active:scale-95"
+          disabled={isFavoritePending}
           onClick={(e) => onToggleFavorite && onToggleFavorite(e, attraction.id)}
           type="button"
         >
