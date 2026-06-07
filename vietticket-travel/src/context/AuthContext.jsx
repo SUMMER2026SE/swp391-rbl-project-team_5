@@ -35,7 +35,16 @@ function normalizeApiUser(apiUser) {
     phone: profile.phoneNumber || '',
     avatar: profile.avatarUrl || defaultUser.avatar,
     emailVerified: Boolean(apiUser.isEmailVerified),
-    roleLabel: apiUser.role === 'CUSTOMER' ? 'Khách hàng' : apiUser.role,
+    roleLabel:
+      apiUser.role === 'CUSTOMER'
+        ? 'Khách hàng'
+        : apiUser.role === 'ADMIN'
+        ? 'Quản trị viên'
+        : apiUser.role === 'PARTNER'
+        ? 'Đối tác'
+        : apiUser.role === 'STAFF'
+        ? 'Nhân viên'
+        : apiUser.role,
     statusLabel: apiUser.status === 'ACTIVE' ? 'Hoạt động' : 'Bị khóa',
     dateOfBirth: profile.dateOfBirth ? profile.dateOfBirth.slice(0, 10) : '',
     gender: profile.gender || '',
@@ -93,7 +102,14 @@ export function AuthProvider({ children }) {
     let isMounted = true
 
     async function hydrateSession() {
-      // If there's cached auth in localStorage, use it immediately while we verify with the server.
+      // Chế độ demo (vd: đăng nhập admin demo) — bỏ qua việc gọi server.
+      if (localStorage.getItem('vietticket_demo_mode') === 'true') {
+        setIsAuthLoading(false)
+        return
+      }
+
+      // Nếu đã có phiên đăng nhập lưu trong localStorage, giữ lại khi server
+      // tạm thời không phản hồi (tránh đăng xuất ngoài ý muốn).
       const cachedAuth = readStorage(AUTH_STORAGE_KEY, null)
       const cachedUser = readStorage(USER_STORAGE_KEY, null)
       const hasCachedSession = cachedAuth?.authenticated && cachedUser
@@ -126,6 +142,26 @@ export function AuthProvider({ children }) {
   }, [clearSession, persistSession])
 
   const login = async (credentials) => {
+    // Demo Mode Bypass
+    if (credentials.email === 'admin@vietticket.com' && credentials.password === 'AdminPassword123@') {
+      localStorage.setItem('vietticket_demo_mode', 'true')
+      const mockAdminUser = {
+        id: 'mock-admin-id',
+        email: 'admin@vietticket.com',
+        fullName: 'Admin',
+        role: 'ADMIN',
+        roleLabel: 'Quản trị viên',
+        status: 'ACTIVE',
+        statusLabel: 'Hoạt động',
+        provider: 'LOCAL',
+        emailVerified: true,
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=128&h=128&q=80',
+        phone: '0123 456 789',
+      }
+      const nextUser = persistSession(mockAdminUser)
+      return { ok: true, user: nextUser, message: 'Đăng nhập Admin (Chế độ Demo) thành công!' }
+    }
+
     try {
       const data = await apiRequest('/auth/login', {
         method: 'POST',
@@ -348,10 +384,13 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await apiRequest('/auth/logout', { method: 'POST' })
+      if (localStorage.getItem('vietticket_demo_mode') !== 'true') {
+        await apiRequest('/auth/logout', { method: 'POST' })
+      }
     } catch {
       // Local cleanup still matters if the network is unavailable.
     } finally {
+      localStorage.removeItem('vietticket_demo_mode')
       clearSession()
     }
   }

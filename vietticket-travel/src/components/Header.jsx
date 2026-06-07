@@ -145,7 +145,7 @@ function Header({ links }) {
             {isAuthenticated ? (
               <>
                 {user?.role === 'ADMIN' && (
-                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: 8 }}>
                     Trang quản trị
                   </Link>
                 )}
