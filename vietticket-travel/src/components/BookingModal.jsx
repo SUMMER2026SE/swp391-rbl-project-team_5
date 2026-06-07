@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/useAuth.js'
 import bookingService from '../services/bookingService.js'
+import { apiRequest } from '../services/api.js'
 
 const formatCurrency = (value) => {
   const amount = Number(value)
@@ -167,35 +168,19 @@ export default function BookingModal({
       setErrorMessage('')
 
       try {
-        const response = await fetch(`/api/v1/tickets/${ticketId}/availability?date=${selectedDate}`)
-        const result = await response.json()
+        const result = await apiRequest(
+          `/tickets/${ticketId}/availability?date=${selectedDate}`,
+        )
+        const slots = Array.isArray(result.data) ? result.data : []
+        setTimeSlots(slots)
 
-        if (result.success) {
-          const slots = Array.isArray(result.data) ? result.data : []
-          setTimeSlots(slots)
-
-          const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
-          setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
-        } else {
-          const mockSlots = [
-            { id: 'slot-1', label: '09:00 - 11:00', availableTickets: 45, status: 'AVAILABLE' },
-            { id: 'slot-2', label: '11:00 - 13:00', availableTickets: 25, status: 'AVAILABLE' },
-            { id: 'slot-3', label: '13:00 - 15:00', availableTickets: 0, status: 'SOLD_OUT' },
-            { id: 'slot-4', label: '15:00 - 17:00', availableTickets: 30, status: 'AVAILABLE' }
-          ]
-          setTimeSlots(mockSlots)
-          setSelectedTimeSlotId('slot-1')
-        }
+        const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
+        setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
       } catch (error) {
-        console.warn('Lỗi lấy thông tin khung giờ trống, sử dụng mock slots để demo:', error)
-        const mockSlots = [
-          { id: 'slot-1', label: '09:00 - 11:00', availableTickets: 45, status: 'AVAILABLE' },
-          { id: 'slot-2', label: '11:00 - 13:00', availableTickets: 25, status: 'AVAILABLE' },
-          { id: 'slot-3', label: '13:00 - 15:00', availableTickets: 0, status: 'SOLD_OUT' },
-          { id: 'slot-4', label: '15:00 - 17:00', availableTickets: 30, status: 'AVAILABLE' }
-        ]
-        setTimeSlots(mockSlots)
-        setSelectedTimeSlotId('slot-1')
+        console.error('Lỗi lấy thông tin khung giờ trống:', error)
+        setTimeSlots([])
+        setSelectedTimeSlotId('')
+        setErrorMessage(error.message)
       } finally {
         setIsLoadingSlots(false)
       }
@@ -229,10 +214,21 @@ export default function BookingModal({
     }
 
     setIsSubmitting(true)
+    setErrorMessage('')
 
     try {
+      const result = await apiRequest(`/tickets/${ticketId}/reserve`, {
+        method: 'POST',
+        body: {
+          attractionId,
+          date: selectedDate,
+          timeSlotId: selectedTimeSlotId,
+          quantity: counts.adult + counts.child,
+        },
+      })
       const slot = timeSlots.find(s => getSlotId(s) === selectedTimeSlotId)
-      const booking = bookingService.reserveTicket({
+      bookingService.reserveTicket({
+        bookingId: result.data?.reservationId || result.data?.id,
         attractionId,
         attractionTitle: attractionTitle || 'Điểm tham quan',
         attractionLocation: attractionLocation || 'Việt Nam',
@@ -255,12 +251,11 @@ export default function BookingModal({
           phone: user?.phone,
         },
       })
-
       onClose()
-      navigate(`/checkout/${booking.id}`)
+      navigate(`/checkout/${result.data?.reservationId || result.data?.id}`)
     } catch (error) {
-      console.error('Không thể tạo đơn giữ vé:', error)
-      setErrorMessage('Không thể tạo đơn giữ vé. Vui lòng thử lại.')
+      console.error('Lỗi khi giữ vé:', error)
+      setErrorMessage(error.message)
     } finally {
       setIsSubmitting(false)
     }

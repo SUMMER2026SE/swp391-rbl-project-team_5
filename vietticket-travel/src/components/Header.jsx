@@ -79,8 +79,17 @@ function Header({ links = defaultLinks, activeLink = '' }) {
           {isAuthenticated ? (
             <>
               {user?.role === 'ADMIN' && (
-                <Link className="text-button" to="/admin/users" style={{ marginRight: '16px', color: 'var(--color-primary)', fontWeight: 'bold' }}>
+                <Link className="text-button" to="/admin/users" style={{ marginRight: '4px', color: 'var(--color-primary)', fontWeight: 'bold' }}>
                   Trang quản trị
+                </Link>
+              )}
+              {user?.role === 'PARTNER' && (
+                <Link
+                  className="text-button"
+                  to="/partner/dashboard"
+                  style={{ marginRight: '4px', color: 'var(--color-primary)', fontWeight: 'bold' }}
+                >
+                  Cổng đối tác
                 </Link>
               )}
               <Link className="header-profile-link" to="/profile">
@@ -95,6 +104,13 @@ function Header({ links = defaultLinks, activeLink = '' }) {
             </>
           ) : (
             <>
+              <Link
+                className="text-button"
+                to="/partner/register"
+                style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}
+              >
+                Đối tác
+              </Link>
               <Link className="text-button" to="/login">
                 Đăng nhập
               </Link>
@@ -144,8 +160,13 @@ function Header({ links = defaultLinks, activeLink = '' }) {
             {isAuthenticated ? (
               <>
                 {user?.role === 'ADMIN' && (
-                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: 8 }}>
                     Trang quản trị
+                  </Link>
+                )}
+                {user?.role === 'PARTNER' && (
+                  <Link className="button button--secondary" to="/partner/dashboard" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                    Cổng đối tác
                   </Link>
                 )}
                 <Link className="button button--primary" to="/profile" onClick={closeMenu}>
@@ -157,6 +178,9 @@ function Header({ links = defaultLinks, activeLink = '' }) {
               </>
             ) : (
               <>
+                <Link className="button button--secondary" to="/partner/register" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                  Trở thành đối tác
+                </Link>
                 <Link className="text-button" to="/login" onClick={closeMenu}>
                   Đăng nhập
                 </Link>

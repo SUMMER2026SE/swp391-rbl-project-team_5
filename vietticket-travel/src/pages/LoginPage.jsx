@@ -15,7 +15,7 @@ const loginVisual =
 function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { isAuthenticated, isAuthLoading, login, loginWithGoogle } = useAuth()
+  const { isAuthenticated, isAuthLoading, login, loginWithGoogle, demoLogin } = useAuth()
   const redirectFrom = location.state?.from
   const redirectTo = redirectFrom
     ? `${redirectFrom.pathname}${redirectFrom.search || ''}${redirectFrom.hash || ''}`
@@ -68,6 +68,14 @@ function LoginPage() {
     setIsSubmitting(true)
     const result = await login(form)
     setIsSubmitting(false)
+
+    // Network error (backend chưa chạy) — dùng demo fallback
+    if (!result.status) {
+      demoLogin({ fullName: form.email.split('@')[0], email: form.email })
+      toast.info('Chạy ở chế độ demo (không có server). Đăng nhập thành công!')
+      navigate(redirectTo || '/', { replace: true })
+      return
+    }
 
     if (!result.ok) {
       if (result.code === 'EMAIL_NOT_VERIFIED') {

@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="vi" style="">
+
+<head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap"
+        rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet">
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #bec8ca;
+            border-radius: 10px;
+        }
+    </style>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-surface-variant": "#3f484a",
+                        "primary": "#00474d",
+                        "error": "#ba1a1a",
+                        "inverse-on-surface": "#f0f0f3",
+                        "tertiary-fixed": "#ffdcc5",
+                        "on-primary": "#ffffff",
+                        "tertiary-fixed-dim": "#fdb784",
+                        "surface-container-highest": "#e2e2e5",
+                        "on-error-container": "#93000a",
+                        "on-primary-container": "#90d8e1",
+                        "on-primary-fixed-variant": "#004f56",
+                        "error-container": "#ffdad6",
+                        "on-background": "#1a1c1e",
+                        "primary-fixed-dim": "#8ad2db",
+                        "tertiary-container": "#7d4a20",
+                        "surface-container-high": "#e8e8eb",
+                        "surface-bright": "#f9f9fc",
+                        "surface-container-low": "#f3f3f6",
+                        "on-error": "#ffffff",
+                        "inverse-primary": "#8ad2db",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary-container": "#ffbf90",
+                        "surface-container": "#edeef1",
+                        "on-tertiary-fixed-variant": "#6a3b12",
+                        "surface-dim": "#d9dadd",
+                        "background": "#f9f9fc",
+                        "tertiary": "#61330a",
+                        "on-tertiary": "#ffffff",
+                        "on-primary-fixed": "#001f23",
+                        "surface-variant": "#e2e2e5",
+                        "on-secondary": "#ffffff",
+                        "secondary-container": "#feb700",
+                        "secondary": "#7c5800",
+                        "secondary-fixed-dim": "#ffba22",
+                        "primary-container": "#006068",
+                        "on-secondary-fixed": "#271900",
+                        "secondary-fixed": "#ffdea8",
+                        "on-surface": "#1a1c1e",
+                        "inverse-surface": "#2f3133",
+                        "surface-tint": "#136870",
+                        "surface": "#f9f9fc",
+                        "on-tertiary-fixed": "#301400",
+                        "primary-fixed": "#a6eff8",
+                        "outline-variant": "#bec8ca",
+                        "outline": "#6f797a",
+                        "on-secondary-fixed-variant": "#5e4200",
+                        "on-secondary-container": "#6b4b00"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "unit": "8px",
+                        "margin-mobile": "20px",
+                        "gutter": "24px",
+                        "container-max": "1280px",
+                        "margin-desktop": "48px",
+                        "stack-sm": "8px",
+                        "section-gap": "64px",
+                        "stack-lg": "32px",
+                        "stack-md": "16px"
+                    },
+                    "fontFamily": {
+                        "headline-md": ["Be Vietnam Pro"],
+                        "display-lg": ["Be Vietnam Pro"],
+                        "body-md": ["Plus Jakarta Sans"],
+                        "label-md": ["Plus Jakarta Sans"],
+                        "display-lg-mobile": ["Be Vietnam Pro"],
+                        "headline-sm": ["Be Vietnam Pro"],
+                        "label-sm": ["Plus Jakarta Sans"],
+                        "body-lg": ["Plus Jakarta Sans"]
+                    },
+                    "fontSize": {
+                        "headline-md": ["24px", { "lineHeight": "1.3", "fontWeight": "600" }],
+                        "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "label-md": ["14px", { "lineHeight": "1.2", "letterSpacing": "0.01em", "fontWeight": "600" }],
+                        "display-lg-mobile": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.01em", "fontWeight": "700" }],
+                        "headline-sm": ["20px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                        "label-sm": ["12px", { "lineHeight": "1.2", "fontWeight": "500" }],
+                        "body-lg": ["18px", { "lineHeight": "1.6", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+
+<body class="bg-background text-on-surface font-body-md overflow-hidden">
+    <!-- SideNavBar -->
+    <aside
+        class="h-screen w-64 fixed left-0 top-0 overflow-y-auto bg-primary shadow-[4px_0px_20px_rgba(0,0,0,0.1)] flex flex-col z-50">
+        <div class="p-stack-lg flex flex-col items-start px-6">
+            <h1 class="font-headline-md text-headline-md font-bold text-on-primary mb-1">VietTicket Admin</h1>
+            <p class="font-label-md text-label-md text-on-primary/70">Management Portal</p>
+        </div>
+        <nav class="flex-1 px-stack-md mt-stack-lg">
+            <ul class="space-y-1">
+                <li
+                    class="cursor-pointer active:scale-95 transition-transform hover:bg-white/10 transition-colors duration-200 rounded-lg group">
+                    <a class="flex items-center gap-3 px-4 py-3 text-on-primary font-label-md" href="#">
+                        <span class="material-symbols-outlined text-[24px]" data-icon="dashboard">dashboard</span>
+                        <span class="">Overview</span>
+                    </a>
+                </li>
+                <li
+                    class="cursor-pointer active:scale-95 transition-transform hover:bg-white/10 transition-colors duration-200 rounded-lg group">
+                    <a class="flex items-center gap-3 px-4 py-3 text-on-primary font-label-md" href="#">
+                        <span class="material-symbols-outlined text-[24px]"
+                            data-icon="verified_user">verified_user</span>
+                        <span class="">KYC Approval</span>
+                    </a>
+                </li>
+                <!-- ACTIVE STATE: Attraction Approval -->
+                <li
+                    class="cursor-pointer active:scale-95 transition-transform text-on-primary font-bold bg-white/20 rounded-lg">
+                    <a class="flex items-center gap-3 px-4 py-3 font-label-md" href="#">
+                        <span class="material-symbols-outlined text-[24px]" data-icon="location_on"
+                            style="font-variation-settings: 'FILL' 1;">location_on</span>
+                        <span class="">Attraction Approval</span>
+                    </a>
+                </li>
+                <li
+                    class="cursor-pointer active:scale-95 transition-transform hover:bg-white/10 transition-colors duration-200 rounded-lg group">
+                    <a class="flex items-center gap-3 px-4 py-3 text-on-primary font-label-md" href="#">
+                        <span class="material-symbols-outlined text-[24px]"
+                            data-icon="report_problem">report_problem</span>
+                        <span class="">Violation Management</span>
+                    </a>
+                </li>
+                <li
+                    class="cursor-pointer active:scale-95 transition-transform hover:bg-white/10 transition-colors duration-200 rounded-lg group">
+                    <a class="flex items-center gap-3 px-4 py-3 text-on-primary font-label-md" href="#">
+                        <span class="material-symbols-outlined text-[24px]" data-icon="category">category</span>
+                        <span class="">Category Management</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        <div class="p-stack-md">
+            <ul class="space-y-1">
+                <li
+                    class="cursor-pointer active:scale-95 transition-transform hover:bg-white/10 transition-colors duration-200 rounded-lg">
+                    <a class="flex items-center gap-3 px-4 py-3 text-on-primary font-label-md" href="#">
+                        <span class="material-symbols-outlined text-[24px]" data-icon="settings">settings</span>
+                        <span class="">Settings</span>
+                    </a>
+                </li>
+                <li
+                    class="cursor-pointer active:scale-95 transition-transform hover:bg-white/10 transition-colors duration-200 rounded-lg">
+                    <a class="flex items-center gap-3 px-4 py-3 text-on-primary font-label-md" href="#">
+                        <span class="material-symbols-outlined text-[24px]" data-icon="logout">logout</span>
+                        <span class="">Logout</span>
+                    </a>
+                </li>
+            </ul>
+            <div class="mt-stack-md pt-stack-md border-t border-white/10 flex items-center gap-3 px-4">
+                <div class="w-10 h-10 rounded-full overflow-hidden border-2 border-white/20 flex-shrink-0">
+                    <img alt="Admin User Avatar" class="w-full h-full object-cover"
+                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCifIzxN0voLHieJwItRsks1ga7hdHwpBKF_OFxMaA4Q7vZPzEoFQyaDoyztxamoSlBpuZX2LVA-SidtVsM9BV57VGKlG2wG6mAbAqcDEcX4fLEZ4G54oUdy6L3HuUWe1GwHCNLfQ20T5iPsg5pKrkxkWEXLDBWEFzpi0RESkaGzKb8RPfnZKmS_5vasli8CFxxU2PRf5_HBChmSYeRfJuNUjM3VtXBW4QLV08LvJqBk1oQeTGxomzhUnKxuuQy4-xTfWdgnKe6Wpl_">
+                </div>
+                <div class="overflow-hidden">
+                    <p class="font-label-md text-on-primary truncate">Admin</p>
+                    <p class="font-label-sm text-on-primary/60 truncate">Quản trị viên</p>
+                </div>
+            </div>
+        </div>
+    </aside>
+    <!-- TopNavBar -->
+    <header
+        class="fixed top-0 right-0 left-64 h-16 backdrop-blur-md bg-surface-bright/80 border-b border-outline-variant/20 flex justify-between items-center px-margin-desktop z-40 shadow-sm">
+        <div class="flex items-center gap-stack-md flex-1">
+            <div class="relative w-96">
+                <span
+                    class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-body-md"
+                    data-icon="search">search</span>
+                <input
+                    class="w-full bg-surface-container-low border-none rounded-full py-2 pl-10 pr-4 text-body-md focus:ring-2 focus:ring-primary/20 transition-all outline-none"
+                    placeholder="Tìm kiếm địa điểm, đối tác..." type="text">
+            </div>
+        </div>
+        <div class="flex items-center gap-stack-md">
+            <button class="hover:bg-surface-container-high rounded-full p-2 transition-all relative active:opacity-70">
+                <span class="material-symbols-outlined text-on-surface-variant"
+                    data-icon="notifications">notifications</span>
+                <span
+                    class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-surface-bright"></span>
+            </button>
+            <button class="hover:bg-surface-container-high rounded-full p-2 transition-all active:opacity-70">
+                <span class="material-symbols-outlined text-on-surface-variant"
+                    data-icon="help_outline">help_outline</span>
+            </button>
+            <div class="h-8 w-px bg-outline-variant/30 mx-2"></div>
+            <div class="flex items-center gap-3 cursor-pointer group">
+                <div class="text-right">
+                    <p class="font-label-md text-on-surface group-hover:text-primary transition-colors">Admin</p>
+                    <p class="font-label-sm text-on-surface-variant">Quản trị viên</p>
+                </div>
+                <div class="w-10 h-10 rounded-full overflow-hidden border-2 border-primary/10">
+                    <img alt="Admin User Avatar" class="w-full h-full object-cover"
+                        data-alt="A professional close-up portrait of a Southeast Asian male administrator in a clean office environment. He wears a professional navy blue shirt and has a friendly yet authoritative expression. The lighting is bright and modern, utilizing a soft-focus background that reflects a high-end corporate travel technology office. The color palette is clean with whites and professional blues."
+                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuCifIzxN0voLHieJwItRsks1ga7hdHwpBKF_OFxMaA4Q7vZPzEoFQyaDoyztxamoSlBpuZX2LVA-SidtVsM9BV57VGKlG2wG6mAbAqcDEcX4fLEZ4G54oUdy6L3HuUWe1GwHCNLfQ20T5iPsg5pKrkxkWEXLDBWEFzpi0RESkaGzKb8RPfnZKmS_5vasli8CFxxU2PRf5_HBChmSYeRfJuNUjM3VtXBW4QLV08LvJqBk1oQeTGxomzhUnKxuuQy4-xTfWdgnKe6Wpl_">
+                </div>
+            </div>
+        </div>
+    </header>
+    <!-- Main Content Canvas -->
+    <main class="ml-64 pt-16 h-screen overflow-y-auto px-margin-desktop py-stack-lg">
+        <!-- Header Section -->
+        <div class="flex justify-between items-end mb-stack-lg">
+            <div>
+
+                <h2 class="font-headline-md text-headline-md text-on-surface">Phê duyệt địa điểm du lịch</h2>
+                <p class="font-body-md text-on-surface-variant mt-1">Danh sách các địa điểm mới đang chờ được kiểm duyệt
+                    trước khi hiển thị công khai.</p>
+            </div>
+            <div class="flex gap-stack-sm">
+                <button
+                    class="flex items-center gap-2 bg-surface-container-high px-4 py-2 rounded-lg text-label-md text-on-surface-variant hover:bg-surface-container-highest transition-all active:scale-95">
+                    <span class="material-symbols-outlined text-[20px]" data-icon="filter_list">filter_list</span>
+                    <span class="">Bộ lọc</span>
+                </button>
+            </div>
+        </div>
+        <!-- Table Container -->
+        <div
+            class="bg-surface-container-lowest rounded-xl shadow-[0px_4px_20px_rgba(0,96,104,0.04)] border border-outline-variant/20 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-surface-container-low/50">
+                        <tr>
+                            <th
+                                class="px-6 py-4 text-label-md text-on-surface-variant border-b border-outline-variant/20">
+                                Ảnh &amp; Tên địa điểm</th>
+                            <th
+                                class="px-6 py-4 text-label-md text-on-surface-variant border-b border-outline-variant/20">
+                                Đối tác đăng</th>
+                            <th
+                                class="px-6 py-4 text-label-md text-on-surface-variant border-b border-outline-variant/20">
+                                Danh mục</th>
+                            <th
+                                class="px-6 py-4 text-label-md text-on-surface-variant border-b border-outline-variant/20">
+                                Ngày gửi</th>
+                            <th
+                                class="px-6 py-4 text-label-md text-on-surface-variant border-b border-outline-variant/20">
+                                Trạng thái</th>
+                            <th
+                                class="px-6 py-4 text-label-md text-on-surface-variant border-b border-outline-variant/20 text-right">
+                                Thao tác</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-outline-variant/10">
+                        <!-- Row 1 -->
+                        <tr class="hover:bg-surface-container-low/30 transition-colors group">
+                            <td class="px-6 py-4">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-16 h-12 rounded-lg overflow-hidden flex-shrink-0 shadow-sm">
+                                        <img alt="Tháp Chăm Phan Thiết" class="w-full h-full object-cover"
+                                            data-alt="A breathtaking cinematic wide shot of an ancient Cham temple complex in Phan Thiet, Vietnam during the golden hour. The weathered terracotta bricks of the towers glow under the warm orange sunset. The surrounding landscape is lush and green, creating a historical yet vibrant atmosphere. Professional travel photography style with soft ambient lighting and rich textures."
+                                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuDzLaGiNFQ4onKXV-TwK-n2mw5PllY6RyxnCc6FqtnY0w7Hggjic9x2K4mZXnQzEKC1mNH2kj5ziXz7LeZKI4rWFWW6O7bYK7c_Azx94UPxxQcuTv1teYVpTnAfDkPYs6FdVUqPS1j-_3nHAmnq7CPvpHSlDx4jzH0gcNgpB2J-2TqEmPtl0Eo4ThR9zKl5crc7SBpSsRftcu0-H1kiEqOKQ5N_LBBjuy27pRSGkSCskopCVVD2Nzn0lUeBI3efGSMyc81Ch46oI7jM"
+                                            style="transform: scale(1); transition: transform 0.4s;">
+                                    </div>
+                                    <div>
+                                        <p
+                                            class="font-label-md text-on-surface group-hover:text-primary transition-colors">
+                                            Tháp Chăm Po Sah Inư</p>
+                                        <p class="text-[12px] text-on-surface-variant flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px]"
+                                                data-icon="location_on">location_on</span> Phan Thiết, Bình Thuận
+                                        </p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="flex flex-col">
+                                    <span class="font-label-md text-on-surface">Vietnam Travel Corp</span>
+                                    <span class="text-[12px] text-on-surface-variant">ID: PARTNER-882</span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="bg-primary/10 text-primary px-3 py-1 rounded-full text-label-sm">Di tích
+                                    lịch sử</span>
+                            </td>
+                            <td class="px-6 py-4 text-body-md text-on-surface">14/10/2023</td>
+                            <td class="px-6 py-4">
+                                <span class="flex items-center gap-1.5 text-secondary font-bold text-label-sm">
+                                    <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+                                    Đang chờ duyệt
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button
+                                        class="bg-primary text-on-primary px-3 py-1.5 rounded-lg text-label-sm hover:opacity-90 active:scale-95 transition-all"
+                                        onclick="handleAction('approve', 'Tháp Chăm Po Sah Inư')">Phê duyệt</button>
+                                    <button
+                                        class="border border-error text-error px-3 py-1.5 rounded-lg text-label-sm hover:bg-error/5 active:scale-95 transition-all"
+                                        onclick="handleAction('reject', 'Tháp Chăm Po Sah Inư')">Từ chối</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <!-- Row 2 -->
+                        <tr class="hover:bg-surface-container-low/30 transition-colors group">
+                            <td class="px-6 py-4">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-16 h-12 rounded-lg overflow-hidden flex-shrink-0 shadow-sm">
+                                        <img alt="Hang Sơn Đoòng" class="w-full h-full object-cover"
+                                            data-alt="A monumental interior view of Son Doong cave in Vietnam, featuring a massive sunbeam piercing through a doline aperture. The cavernous space is filled with mist and prehistoric-looking vegetation. The lighting is ethereal and high-contrast, with deep teals and brilliant whites. This professional landscape photography captures the vastness and mystery of the world's largest cave."
+                                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCd6BnoNJuywYvs_1h87_LPGxAmFKmIX0y3wT1hQQjd1ub9nMAHO1wmrrgZLp-aVNhkM7-1KTS-PfjGyrYPYqsFwZeuH78UkTdEn7I7ntAxokkylHgy7feurS9X18W6mfJWL97B4A_yo6XUAp_FCJozHHhUKnUQPi_XTdILDfLio7S8VlgXWIGTGj6d3POUofRkVBm_e6NkwwebiitKiaXWBkZ8oZOYSQw9CcWdSSsBSS6m1k_9lsxzTfJuoHdpRhOGLMXt0DEqgX1U"
+                                            style="transform: scale(1); transition: transform 0.4s;">
+                                    </div>
+                                    <div>
+                                        <p
+                                            class="font-label-md text-on-surface group-hover:text-primary transition-colors">
+                                            Khám phá Hang Sơn Đoòng</p>
+                                        <p class="text-[12px] text-on-surface-variant flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px]"
+                                                data-icon="location_on">location_on</span> Quảng Bình
+                                        </p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="flex flex-col">
+                                    <span class="font-label-md text-on-surface">Oxalis Adventure</span>
+                                    <span class="text-[12px] text-on-surface-variant">ID: PARTNER-042</span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="bg-primary/10 text-primary px-3 py-1 rounded-full text-label-sm">Thám
+                                    hiểm</span>
+                            </td>
+                            <td class="px-6 py-4 text-body-md text-on-surface">15/10/2023</td>
+                            <td class="px-6 py-4">
+                                <span class="flex items-center gap-1.5 text-secondary font-bold text-label-sm">
+                                    <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+                                    Đang chờ duyệt
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button
+                                        class="bg-primary text-on-primary px-3 py-1.5 rounded-lg text-label-sm hover:opacity-90 active:scale-95 transition-all"
+                                        onclick="handleAction('approve', 'Hang Sơn Đoòng')">Phê duyệt</button>
+                                    <button
+                                        class="border border-error text-error px-3 py-1.5 rounded-lg text-label-sm hover:bg-error/5 active:scale-95 transition-all"
+                                        onclick="handleAction('reject', 'Hang Sơn Đoòng')">Từ chối</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <!-- Row 3 -->
+                        <tr class="hover:bg-surface-container-low/30 transition-colors group">
+                            <td class="px-6 py-4">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-16 h-12 rounded-lg overflow-hidden flex-shrink-0 shadow-sm">
+                                        <img alt="Phố cổ Hội An" class="w-full h-full object-cover"
+                                            data-alt="A charming night scene in Hoi An Ancient Town, Vietnam, with hundreds of colorful silk lanterns reflecting in the calm river water. Ancient yellow houses line the street. The lighting is warm and festive, creating a magical atmospheric glow. High-quality travel imagery focusing on cultural heritage and vibrant nighttime aesthetics."
+                                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBk3LtobHEiqzoiu99Z3q55nHQHjaCw9_GeW72C2hoH2X0rjMOpDHBWibqYO4vhM_zy38fQEEVukk5BXtIuMmChCSjKjTzWFyCvLY5SHzHQr1uJjmXttx0KLW6vlpJexlb6wGD1sfmz5DG9QzT6UTPm1qpGw0518vbv9jkCkY_MqEqbk03Fs_-cuRrMZRrX9mN3CD1RskZPA0LMWddhRekHdGsbwx8UYNPM-iH7Z5TVWq583HftkqJP33QGvk0Xi9KNPIXtiMacS5IM"
+                                            style="transform: scale(1); transition: transform 0.4s;">
+                                    </div>
+                                    <div>
+                                        <p
+                                            class="font-label-md text-on-surface group-hover:text-primary transition-colors">
+                                            Show Ký Ức Hội An</p>
+                                        <p class="text-[12px] text-on-surface-variant flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px]"
+                                                data-icon="location_on">location_on</span> Hội An, Quảng Nam
+                                        </p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="flex flex-col">
+                                    <span class="font-label-md text-on-surface">Gami Group</span>
+                                    <span class="text-[12px] text-on-surface-variant">ID: PARTNER-115</span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="bg-primary/10 text-primary px-3 py-1 rounded-full text-label-sm">Nghệ
+                                    thuật</span>
+                            </td>
+                            <td class="px-6 py-4 text-body-md text-on-surface">15/10/2023</td>
+                            <td class="px-6 py-4">
+                                <span class="flex items-center gap-1.5 text-secondary font-bold text-label-sm">
+                                    <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+                                    Đang chờ duyệt
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button
+                                        class="bg-primary text-on-primary px-3 py-1.5 rounded-lg text-label-sm hover:opacity-90 active:scale-95 transition-all"
+                                        onclick="handleAction('approve', 'Show Ký Ức Hội An')">Phê duyệt</button>
+                                    <button
+                                        class="border border-error text-error px-3 py-1.5 rounded-lg text-label-sm hover:bg-error/5 active:scale-95 transition-all"
+                                        onclick="handleAction('reject', 'Show Ký Ức Hội An')">Từ chối</button>
+                                </div>
+                            </td>
+                        </tr>
+                        <!-- Row 4 -->
+                        <tr class="hover:bg-surface-container-low/30 transition-colors group">
+                            <td class="px-6 py-4">
+                                <div class="flex items-center gap-4">
+                                    <div class="w-16 h-12 rounded-lg overflow-hidden flex-shrink-0 shadow-sm">
+                                        <img alt="Vinpearl Safari" class="w-full h-full object-cover"
+                                            data-alt="A wide angle photo of a luxury open-air safari bus driving through a savannah-like enclosure in Phu Quoc, Vietnam. Zebras and giraffes are visible in the foreground under a bright blue tropical sky. The scene is sun-drenched and vibrant, emphasizing a family-friendly luxury adventure. Clean, commercial-quality travel photography with high saturation and sharp details."
+                                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBEvyqBTa-_c-ZL7nFeOF1IoqRx_PyBa0qWPr1RYRc--L0MrU2uvL8jzn11L2EJU3xxh6xmlDxXjpHk3YkJmlfsmH_izPVsx3WfnfJRP603ZQtLU1vLPq2hVuKZVgDZZtKIDTkTCoPisbROfjV9h13PmTU0FPFHGMLuJ3wl1EBpzUEC9zZwyMJLw-sGPCp60lRs95r0ROPv0en4i_Xg3SOX097esoEU32DFeSNeWcuW9P7QSb7p4ZXTcJQHyHm66hlQqGRKqKZo98VH"
+                                            style="transform: scale(1); transition: transform 0.4s;">
+                                    </div>
+                                    <div>
+                                        <p
+                                            class="font-label-md text-on-surface group-hover:text-primary transition-colors">
+                                            Vinpearl Safari Phú Quốc</p>
+                                        <p class="text-[12px] text-on-surface-variant flex items-center gap-1">
+                                            <span class="material-symbols-outlined text-[14px]"
+                                                data-icon="location_on">location_on</span> Phú Quốc, Kiên Giang
+                                        </p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <div class="flex flex-col">
+                                    <span class="font-label-md text-on-surface">VinWonders</span>
+                                    <span class="text-[12px] text-on-surface-variant">ID: PARTNER-999</span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="bg-primary/10 text-primary px-3 py-1 rounded-full text-label-sm">Giải
+                                    trí</span>
+                            </td>
+                            <td class="px-6 py-4 text-body-md text-on-surface">16/10/2023</td>
+                            <td class="px-6 py-4">
+                                <span class="flex items-center gap-1.5 text-secondary font-bold text-label-sm">
+                                    <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
+                                    Đang chờ duyệt
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button
+                                        class="bg-primary text-on-primary px-3 py-1.5 rounded-lg text-label-sm hover:opacity-90 active:scale-95 transition-all"
+                                        onclick="handleAction('approve', 'Vinpearl Safari')">Phê duyệt</button>
+                                    <button
+                                        class="border border-error text-error px-3 py-1.5 rounded-lg text-label-sm hover:bg-error/5 active:scale-95 transition-all"
+                                        onclick="handleAction('reject', 'Vinpearl Safari')">Từ chối</button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div
+                class="px-6 py-4 border-t border-outline-variant/20 flex items-center justify-between bg-surface-container-lowest">
+                <span class="text-label-sm text-on-surface-variant">Hiển thị 1-4 trong số 24 địa điểm</span>
+                <div class="flex items-center gap-1">
+                    <button class="p-2 rounded-lg hover:bg-surface-container-high transition-colors disabled:opacity-30"
+                        disabled="">
+                        <span class="material-symbols-outlined" data-icon="first_page">first_page</span>
+                    </button>
+                    <button class="p-2 rounded-lg hover:bg-surface-container-high transition-colors disabled:opacity-30"
+                        disabled="">
+                        <span class="material-symbols-outlined" data-icon="chevron_left">chevron_left</span>
+                    </button>
+                    <div class="flex items-center mx-2 gap-1">
+                        <button class="w-8 h-8 rounded-lg bg-primary text-on-primary text-label-sm font-bold">1</button>
+                        <button
+                            class="w-8 h-8 rounded-lg hover:bg-surface-container-high text-on-surface text-label-sm transition-colors">2</button>
+                        <button
+                            class="w-8 h-8 rounded-lg hover:bg-surface-container-high text-on-surface text-label-sm transition-colors">3</button>
+                        <span class="mx-1 text-on-surface-variant">...</span>
+                        <button
+                            class="w-8 h-8 rounded-lg hover:bg-surface-container-high text-on-surface text-label-sm transition-colors">6</button>
+                    </div>
+                    <button class="p-2 rounded-lg hover:bg-surface-container-high transition-colors">
+                        <span class="material-symbols-outlined" data-icon="chevron_right">chevron_right</span>
+                    </button>
+                    <button class="p-2 rounded-lg hover:bg-surface-container-high transition-colors">
+                        <span class="material-symbols-outlined" data-icon="last_page">last_page</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <!-- System Stats Bar -->
+        <div class="mt-stack-lg grid grid-cols-1 md:grid-cols-4 gap-gutter">
+            <div
+                class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant/20 flex items-center gap-4">
+                <div class="w-12 h-12 rounded-full bg-secondary/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-secondary"
+                        data-icon="pending_actions">pending_actions</span>
+                </div>
+                <div>
+                    <p class="text-label-sm text-on-surface-variant">Tổng chờ duyệt</p>
+                    <p class="text-headline-sm font-bold text-on-surface">24</p>
+                </div>
+            </div>
+            <div
+                class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant/20 flex items-center gap-4">
+                <div class="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-primary" data-icon="check_circle">check_circle</span>
+                </div>
+                <div>
+                    <p class="text-label-sm text-on-surface-variant">Đã duyệt (Hôm nay)</p>
+                    <p class="text-headline-sm font-bold text-on-surface">12</p>
+                </div>
+            </div>
+            <div
+                class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant/20 flex items-center gap-4">
+                <div class="w-12 h-12 rounded-full bg-error/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-error" data-icon="cancel">cancel</span>
+                </div>
+                <div>
+                    <p class="text-label-sm text-on-surface-variant">Đã từ chối</p>
+                    <p class="text-headline-sm font-bold text-on-surface">03</p>
+                </div>
+            </div>
+            <div
+                class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant/20 flex items-center gap-4">
+                <div class="w-12 h-12 rounded-full bg-on-surface-variant/10 flex items-center justify-center">
+                    <span class="material-symbols-outlined text-on-surface-variant" data-icon="schedule">schedule</span>
+                </div>
+                <div>
+                    <p class="text-label-sm text-on-surface-variant">TG phản hồi TB</p>
+                    <p class="text-headline-sm font-bold text-on-surface">4.5h</p>
+                </div>
+            </div>
+        </div>
+    </main>
+    <!-- Notification Toast (Hidden by default) -->
+    <div class="fixed bottom-8 right-8 translate-y-20 opacity-0 bg-primary text-on-primary px-6 py-4 rounded-xl shadow-2xl transition-all duration-300 z-[100] flex items-center gap-3"
+        id="toast">
+        <span class="material-symbols-outlined" data-icon="info">info</span>
+        <span class="" id="toast-message">Đã phê duyệt thành công!</span>
+    </div>
+    <script>
+        function handleAction(type, name) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+
+            if (type === 'approve') {
+                toast.classList.replace('bg-error', 'bg-primary');
+                toastMsg.innerText = `Đã phê duyệt địa điểm: ${name}`;
+            } else {
+                toast.classList.replace('bg-primary', 'bg-error');
+                toastMsg.innerText = `Đã từ chối địa điểm: ${name}`;
+            }
+
+            // Show Toast
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            // Hide after 3 seconds
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        // Add some atmospheric micro-interactions
+        document.querySelectorAll('tr').forEach(row => {
+            row.addEventListener('mouseenter', () => {
+                const img = row.querySelector('img');
+                if (img) {
+                    img.style.transform = 'scale(1.05)';
+                    img.style.transition = 'transform 0.4s ease';
+                }
+            });
+            row.addEventListener('mouseleave', () => {
+                const img = row.querySelector('img');
+                if (img) img.style.transform = 'scale(1)';
+            });
+        });
+    </script>
+
+
+</body>
+
+</html>
