@@ -1,155 +1,163 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { toast } from 'react-toastify';
 import AdminLayout from '../../layouts/AdminLayout';
+import * as adminApi from '../../services/adminApi.js';
 import '../../styles/admin.css';
 
-// ── Static Mock Data ──────────────────────────────────────────────────────────
+const FALLBACK_IMAGE =
+  'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=400&q=80';
 
-const INITIAL_ATTRACTIONS = [
-  {
-    id: 1,
-    name: 'Tháp Chăm Po Sah Inư',
-    location: 'Phan Thiết, Bình Thuận',
-    partner: 'Vietnam Travel Corp',
-    partnerId: 'PARTNER-882',
-    category: 'Di tích lịch sử',
-    date: '14/10/2023',
-    description: 'Quần thể tháp Chăm cổ xưa nằm trên đồi Bà Nài, mang đậm nét kiến trúc Chăm Pa đặc trưng.',
-    price: '50.000 ₫',
-    status: 'pending',
-    image: 'https://images.unsplash.com/photo-1568402102990-bc541580b59f?auto=format&fit=crop&w=400&q=80',
-  },
-  {
-    id: 2,
-    name: 'Khám phá Hang Sơn Đoòng',
-    location: 'Quảng Bình',
-    partner: 'Oxalis Adventure',
-    partnerId: 'PARTNER-042',
-    category: 'Thám hiểm',
-    date: '15/10/2023',
-    description: 'Hang động lớn nhất thế giới, tour thám hiểm 6 ngày 5 đêm với trải nghiệm độc đáo.',
-    price: '70.000.000 ₫',
-    status: 'pending',
-    image: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=400&q=80',
-  },
-  {
-    id: 3,
-    name: 'Show Ký Ức Hội An',
-    location: 'Hội An, Quảng Nam',
-    partner: 'Gami Group',
-    partnerId: 'PARTNER-115',
-    category: 'Nghệ thuật',
-    date: '15/10/2023',
-    description: 'Đại nhạc cảnh nghệ thuật tái hiện lịch sử 400 năm hình thành phố cổ Hội An.',
-    price: '600.000 ₫',
-    status: 'pending',
-    image: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=400&q=80',
-  },
-  {
-    id: 4,
-    name: 'Vinpearl Safari Phú Quốc',
-    location: 'Phú Quốc, Kiên Giang',
-    partner: 'VinWonders',
-    partnerId: 'PARTNER-999',
-    category: 'Giải trí',
-    date: '16/10/2023',
-    description: 'Vườn thú bán hoang dã lớn nhất Đông Nam Á với hơn 3.000 động vật quý hiếm.',
-    price: '850.000 ₫',
-    status: 'approved',
-    image: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=400&q=80',
-  },
-];
+const STATUS_LABEL = {
+  draft: 'DRAFT',
+  pending: 'PENDING',
+  approved: 'APPROVED',
+  rejected: 'REJECTED',
+  suspended: 'SUSPENDED',
+};
 
-const STATUS_LABEL = { pending: 'PENDING', approved: 'APPROVED', rejected: 'REJECTED' };
-
-const SYSTEM_STATS = [
-  { id: 'pending',  icon: 'pending_actions', variant: 'pending',  label: 'Tổng chờ duyệt',    getter: list => list.filter(a => a.status === 'pending').length },
-  { id: 'approved', icon: 'check_circle',    variant: 'approved', label: 'Đã duyệt (hôm nay)', getter: list => list.filter(a => a.status === 'approved').length },
-  { id: 'rejected', icon: 'cancel',          variant: 'rejected', label: 'Đã từ chối',          getter: list => list.filter(a => a.status === 'rejected').length },
-  { id: 'time',     icon: 'schedule',        variant: 'time',     label: 'TG phản hồi TB',      getter: () => '4.5h' },
-];
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function Toast({ toast }) {
-  if (!toast) return null;
-  return (
-    <div className={`admin-toast admin-toast--visible admin-toast--${toast.type}`}>
-      <span className="material-symbols-outlined">info</span>
-      {toast.msg}
-    </div>
-  );
+function formatDate(value) {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('vi-VN').format(new Date(value));
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+function formatCurrency(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return 'Chưa có giá';
+  return `${new Intl.NumberFormat('vi-VN').format(amount)} ₫`;
+}
+
+function mapAttraction(attraction) {
+  return {
+    id: attraction.id,
+    name: attraction.title,
+    location: [attraction.address, attraction.city].filter(Boolean).join(', '),
+    partner: attraction.partner?.businessName || 'Không rõ đối tác',
+    partnerId: attraction.partner?.id || '—',
+    category: attraction.category?.name || 'Chưa phân loại',
+    date: formatDate(attraction.createdAt),
+    description: attraction.description || 'Chưa có mô tả.',
+    price: formatCurrency(attraction.minPrice),
+    status: String(attraction.status || 'DRAFT').toLowerCase(),
+    rejectReason: attraction.rejectionReason || '',
+    image: attraction.primaryImage || FALLBACK_IMAGE,
+  };
+}
+
+const SYSTEM_STATS = [
+  { id: 'pending', icon: 'pending_actions', variant: 'pending', label: 'Tổng chờ duyệt', getter: (list) => list.filter((item) => item.status === 'pending').length },
+  { id: 'approved', icon: 'check_circle', variant: 'approved', label: 'Đã duyệt', getter: (list) => list.filter((item) => item.status === 'approved').length },
+  { id: 'rejected', icon: 'cancel', variant: 'rejected', label: 'Đã từ chối', getter: (list) => list.filter((item) => item.status === 'rejected').length },
+  { id: 'time', icon: 'database', variant: 'time', label: 'Tổng địa điểm', getter: (list) => list.length },
+];
 
 export default function AttractionApprovalPage() {
-  const [attractions, setAttractions] = useState(INITIAL_ATTRACTIONS);
-  const [toast, setToast] = useState(null);
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [attractions, setAttractions] = useState([]);
+  const [filterStatus, setFilterStatus] = useState('pending');
+  const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState('');
 
-  // ── Actions ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let active = true;
 
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    async function loadAttractions() {
+      setLoading(true);
+      try {
+        const result = await adminApi.listAttractions();
+        if (active) setAttractions((result.data || []).map(mapAttraction));
+      } catch (error) {
+        if (active) toast.error(error.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadAttractions();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleApprove(id) {
+    const name = attractions.find((item) => item.id === id)?.name;
+    setActionId(id);
+    try {
+      await adminApi.reviewAttraction(id, 'APPROVED');
+      setAttractions((current) =>
+        current.map((item) =>
+          item.id === id ? { ...item, status: 'approved', rejectReason: '' } : item,
+        ),
+      );
+      toast.success(`Đã phê duyệt địa điểm: ${name}`);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setActionId('');
+    }
   }
 
-  function handleApprove(id) {
-    setAttractions(prev => prev.map(a => a.id === id ? { ...a, status: 'approved' } : a));
-    const name = attractions.find(a => a.id === id)?.name;
-    showToast(`Đã phê duyệt địa điểm: ${name}`, 'success');
-  }
-
-  function handleReject(id) {
-    const name = attractions.find(a => a.id === id)?.name;
+  async function handleReject(id) {
+    const name = attractions.find((item) => item.id === id)?.name;
     const reason = window.prompt(`Lý do từ chối địa điểm "${name}":`, '');
-    if (reason === null) return; // cancelled
-    const trimmed = reason.trim() || 'Không có lý do cụ thể';
-    setAttractions(prev =>
-      prev.map(a => a.id === id ? { ...a, status: 'rejected', rejectReason: trimmed } : a),
-    );
-    showToast(`Đã từ chối địa điểm: ${name}`, 'error');
+    if (reason === null) return;
+
+    const rejectionReason = reason.trim();
+    if (!rejectionReason) {
+      toast.error('Vui lòng nhập lý do từ chối.');
+      return;
+    }
+
+    setActionId(id);
+    try {
+      await adminApi.reviewAttraction(id, 'REJECTED', rejectionReason);
+      setAttractions((current) =>
+        current.map((item) =>
+          item.id === id
+            ? { ...item, status: 'rejected', rejectReason: rejectionReason }
+            : item,
+        ),
+      );
+      toast.error(`Đã từ chối địa điểm: ${name}`);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setActionId('');
+    }
   }
 
   function handleViewDetail(attraction) {
     window.alert(
-      `📍 ${attraction.name}\n` +
+      `${attraction.name}\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Vị trí   : ${attraction.location}\n` +
-      `Đối tác  : ${attraction.partner} (${attraction.partnerId})\n` +
-      `Danh mục : ${attraction.category}\n` +
-      `Giá      : ${attraction.price}\n` +
-      `Ngày gửi : ${attraction.date}\n` +
-      `Trạng thái: ${STATUS_LABEL[attraction.status]}\n` +
-      (attraction.status === 'rejected' ? `Lý do từ chối: ${attraction.rejectReason || 'Không rõ'}\n` : '') +
+      `Vị trí: ${attraction.location}\n` +
+      `Đối tác: ${attraction.partner} (${attraction.partnerId})\n` +
+      `Danh mục: ${attraction.category}\n` +
+      `Giá: ${attraction.price}\n` +
+      `Ngày gửi: ${attraction.date}\n` +
+      `Trạng thái: ${STATUS_LABEL[attraction.status] || attraction.status.toUpperCase()}\n` +
+      (attraction.status === 'rejected'
+        ? `Lý do từ chối: ${attraction.rejectReason || 'Không rõ'}\n`
+        : '') +
       `\nMô tả:\n${attraction.description}`,
     );
   }
 
-  // ── Derived ────────────────────────────────────────────────────────────────
-
   const displayed = filterStatus === 'all'
     ? attractions
-    : attractions.filter(a => a.status === filterStatus);
-
-  // ── Render ─────────────────────────────────────────────────────────────────
+    : attractions.filter((item) => item.status === filterStatus);
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm địa điểm, đối tác...">
-
-      {/* Page Header */}
       <div className="admin-page-header">
         <div>
           <h2>Phê duyệt địa điểm du lịch</h2>
-          <p>Danh sách các địa điểm mới đang chờ được kiểm duyệt trước khi hiển thị công khai.</p>
+          <p>Danh sách các địa điểm đang chờ kiểm duyệt trước khi hiển thị công khai.</p>
         </div>
 
-        {/* Status filter buttons */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          {['all', 'pending', 'approved', 'rejected'].map(s => (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {['all', 'pending', 'approved', 'rejected', 'suspended'].map((status) => (
             <button
-              key={s}
-              onClick={() => setFilterStatus(s)}
+              key={status}
+              onClick={() => setFilterStatus(status)}
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
@@ -158,18 +166,17 @@ export default function AttractionApprovalPage() {
                 fontSize: 13,
                 fontWeight: 600,
                 transition: 'all 150ms',
-                borderColor: filterStatus === s ? 'var(--adm-primary-dark)' : 'rgba(190,200,202,0.5)',
-                background: filterStatus === s ? 'var(--adm-primary-dark)' : 'transparent',
-                color: filterStatus === s ? '#fff' : 'var(--adm-on-surface-variant)',
+                borderColor: filterStatus === status ? 'var(--adm-primary-dark)' : 'rgba(190,200,202,0.5)',
+                background: filterStatus === status ? 'var(--adm-primary-dark)' : 'transparent',
+                color: filterStatus === status ? '#fff' : 'var(--adm-on-surface-variant)',
               }}
             >
-              {s === 'all' ? 'Tất cả' : STATUS_LABEL[s]}
+              {status === 'all' ? 'Tất cả' : STATUS_LABEL[status]}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Table */}
       <div className="admin-page-section">
         <div className="admin-table-wrap">
           <table className="admin-table">
@@ -184,16 +191,25 @@ export default function AttractionApprovalPage() {
               </tr>
             </thead>
             <tbody>
-              {displayed.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--adm-on-surface-variant)' }}>
+                    <span className="material-symbols-outlined animate-spin" style={{ fontSize: 28 }}>progress_activity</span>
+                    <div>Đang tải danh sách địa điểm...</div>
+                  </td>
+                </tr>
+              )}
+
+              {!loading && displayed.length === 0 && (
                 <tr>
                   <td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--adm-on-surface-variant)' }}>
                     Không có địa điểm nào.
                   </td>
                 </tr>
               )}
-              {displayed.map(a => (
-                <tr key={a.id}>
-                  {/* Thumbnail + name */}
+
+              {!loading && displayed.map((attraction) => (
+                <tr key={attraction.id}>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                       <div
@@ -207,105 +223,47 @@ export default function AttractionApprovalPage() {
                         }}
                       >
                         <img
-                          src={a.image}
-                          alt={a.name}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                            transition: 'transform 0.4s ease',
-                          }}
-                          onMouseEnter={e => { e.target.style.transform = 'scale(1.08)'; }}
-                          onMouseLeave={e => { e.target.style.transform = 'scale(1)'; }}
+                          src={attraction.image}
+                          alt={attraction.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                         />
                       </div>
                       <div>
-                        <p style={{ fontWeight: 600, fontSize: 14, margin: 0 }}>{a.name}</p>
-                        <p
-                          style={{
-                            fontSize: 12,
-                            color: 'var(--adm-on-surface-variant)',
-                            margin: '2px 0 0',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 2,
-                          }}
-                        >
+                        <p style={{ fontWeight: 600, fontSize: 14, margin: 0 }}>{attraction.name}</p>
+                        <p style={{ fontSize: 12, color: 'var(--adm-on-surface-variant)', margin: '2px 0 0', display: 'flex', alignItems: 'center', gap: 2 }}>
                           <span className="material-symbols-outlined" style={{ fontSize: 14 }}>location_on</span>
-                          {a.location}
+                          {attraction.location}
                         </p>
                       </div>
                     </div>
                   </td>
-
-                  {/* Partner */}
                   <td>
-                    <div style={{ fontWeight: 600 }}>{a.partner}</div>
-                    <div style={{ fontSize: 12, color: 'var(--adm-on-surface-variant)' }}>ID: {a.partnerId}</div>
+                    <div style={{ fontWeight: 600 }}>{attraction.partner}</div>
+                    <div style={{ fontSize: 12, color: 'var(--adm-on-surface-variant)' }}>ID: {attraction.partnerId}</div>
                   </td>
-
-                  {/* Category */}
                   <td>
-                    <span
-                      style={{
-                        background: 'rgba(0,96,104,0.1)',
-                        color: 'var(--adm-primary-dark)',
-                        padding: '4px 12px',
-                        borderRadius: 9999,
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {a.category}
+                    <span style={{ background: 'rgba(0,96,104,0.1)', color: 'var(--adm-primary-dark)', padding: '4px 12px', borderRadius: 9999, fontSize: 12, fontWeight: 600 }}>
+                      {attraction.category}
                     </span>
                   </td>
-
-                  <td>{a.date}</td>
-
-                  {/* Status */}
+                  <td>{attraction.date}</td>
                   <td>
-                    {a.status === 'pending' ? (
-                      <span
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          color: 'var(--adm-secondary)',
-                          fontWeight: 700,
-                          fontSize: 12,
-                        }}
-                      >
-                        <span
-                          style={{
-                            width: 8,
-                            height: 8,
-                            borderRadius: '50%',
-                            background: 'var(--adm-secondary)',
-                          }}
-                        />
-                        Đang chờ duyệt
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span className={`badge badge--${attraction.status}`}>
+                        <span className="badge__dot" />
+                        {STATUS_LABEL[attraction.status] || attraction.status.toUpperCase()}
                       </span>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <span className={`badge badge--${a.status}`}>
-                          <span className="badge__dot" />
-                          {STATUS_LABEL[a.status]}
+                      {attraction.status === 'rejected' && attraction.rejectReason && (
+                        <span style={{ fontSize: 11, color: 'var(--adm-error)', maxWidth: 180, wordBreak: 'break-word' }}>
+                          Lý do: {attraction.rejectReason}
                         </span>
-                        {a.status === 'rejected' && a.rejectReason && (
-                          <span style={{ fontSize: 11, color: 'var(--adm-error)', maxWidth: 150, wordBreak: 'break-word' }}>
-                            Lý do: {a.rejectReason}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </td>
-
-                  {/* Actions */}
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-                      {/* View detail always visible */}
                       <button
-                        onClick={() => handleViewDetail(a)}
+                        onClick={() => handleViewDetail(attraction)}
                         title="Xem chi tiết"
                         style={{
                           padding: '6px 10px',
@@ -319,22 +277,26 @@ export default function AttractionApprovalPage() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: 4,
-                          transition: 'background 150ms',
                         }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--adm-surface-container-high)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
                       >
                         <span className="material-symbols-outlined" style={{ fontSize: 16 }}>info</span>
                         Chi tiết
                       </button>
 
-                      {/* Approve / Reject only for pending */}
-                      {a.status === 'pending' && (
+                      {attraction.status === 'pending' && (
                         <>
-                          <button className="btn-approve" onClick={() => handleApprove(a.id)}>
-                            Phê duyệt
+                          <button
+                            className="btn-approve"
+                            disabled={actionId === attraction.id}
+                            onClick={() => handleApprove(attraction.id)}
+                          >
+                            {actionId === attraction.id ? 'Đang xử lý...' : 'Phê duyệt'}
                           </button>
-                          <button className="btn-reject" onClick={() => handleReject(a.id)}>
+                          <button
+                            className="btn-reject"
+                            disabled={actionId === attraction.id}
+                            onClick={() => handleReject(attraction.id)}
+                          >
                             Từ chối
                           </button>
                         </>
@@ -347,45 +309,35 @@ export default function AttractionApprovalPage() {
           </table>
         </div>
 
-        {/* Pagination */}
         <div className="admin-pagination">
           <span className="admin-pagination__info">
             Hiển thị <strong>{displayed.length}</strong> / <strong>{attractions.length}</strong> địa điểm
           </span>
           <div className="admin-pagination__controls">
             <button className="admin-pagination__btn" disabled>
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>first_page</span>
-            </button>
-            <button className="admin-pagination__btn" disabled>
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_left</span>
             </button>
             <button className="admin-pagination__btn active">1</button>
-            <button className="admin-pagination__btn">
+            <button className="admin-pagination__btn" disabled>
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_right</span>
-            </button>
-            <button className="admin-pagination__btn">
-              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>last_page</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* System Stats */}
       <div className="admin-mini-stats-grid" style={{ marginTop: 32, marginBottom: 0 }}>
-        {SYSTEM_STATS.map(s => (
-          <div className="admin-mini-stat" key={s.id}>
-            <div className={`admin-mini-stat__icon admin-mini-stat__icon--${s.variant}`}>
-              <span className="material-symbols-outlined">{s.icon}</span>
+        {SYSTEM_STATS.map((stat) => (
+          <div className="admin-mini-stat" key={stat.id}>
+            <div className={`admin-mini-stat__icon admin-mini-stat__icon--${stat.variant}`}>
+              <span className="material-symbols-outlined">{stat.icon}</span>
             </div>
             <div>
-              <p className="admin-mini-stat__label">{s.label}</p>
-              <p className="admin-mini-stat__value">{s.getter(attractions)}</p>
+              <p className="admin-mini-stat__label">{stat.label}</p>
+              <p className="admin-mini-stat__value">{stat.getter(attractions)}</p>
             </div>
           </div>
         ))}
       </div>
-
-      <Toast toast={toast} />
     </AdminLayout>
   );
 }

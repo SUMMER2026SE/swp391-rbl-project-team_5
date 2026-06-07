@@ -5,6 +5,7 @@ const { sendAccountStatusEmail, sendPartnerReviewEmail, sendAttractionViolationE
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
 const ALLOWED_PARTNER_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
+const ALLOWED_ATTRACTION_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
@@ -220,6 +221,97 @@ async function getPartners(req, res, next) {
   }
 }
 
+async function getAttractions(req, res, next) {
+  try {
+    const status = String(req.query.status || '').trim().toUpperCase();
+    const search = String(req.query.search || '').trim();
+    const where = {};
+
+    if (status && !ALLOWED_ATTRACTION_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Attraction status is invalid' },
+      });
+    }
+
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { city: { contains: search, mode: 'insensitive' } },
+        {
+          partner: {
+            businessName: { contains: search, mode: 'insensitive' },
+          },
+        },
+      ];
+    }
+
+    const attractions = await prisma.attraction.findMany({
+      where,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        address: true,
+        city: true,
+        status: true,
+        rejectionReason: true,
+        averageRating: true,
+        totalReviews: true,
+        createdAt: true,
+        partner: {
+          select: {
+            id: true,
+            businessName: true,
+          },
+        },
+        images: {
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+          take: 1,
+          select: { imageUrl: true },
+        },
+        categories: {
+          take: 1,
+          select: {
+            category: { select: { id: true, name: true } },
+          },
+        },
+        ticketProducts: {
+          where: { status: 'ACTIVE' },
+          orderBy: { sellingPrice: 'asc' },
+          take: 1,
+          select: { sellingPrice: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const data = attractions.map((attraction) => ({
+      id: attraction.id,
+      title: attraction.title,
+      description: attraction.description,
+      address: attraction.address,
+      city: attraction.city,
+      status: attraction.status,
+      rejectionReason: attraction.rejectionReason,
+      averageRating: attraction.averageRating,
+      totalReviews: attraction.totalReviews,
+      createdAt: attraction.createdAt,
+      partner: attraction.partner,
+      primaryImage: attraction.images[0]?.imageUrl || null,
+      category: attraction.categories[0]?.category || null,
+      minPrice: attraction.ticketProducts[0]
+        ? Number(attraction.ticketProducts[0].sellingPrice)
+        : null,
+    }));
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function reviewPartner(req, res, next) {
   try {
     const id = req.params.id;
@@ -306,6 +398,7 @@ module.exports = {
   changeUserStatus,
   getUsers,
   getPartners,
+  getAttractions,
   reviewPartner,
   reviewAttraction,
   hideAttraction,
