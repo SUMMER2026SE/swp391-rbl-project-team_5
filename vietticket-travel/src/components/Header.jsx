@@ -64,7 +64,7 @@ function Header({ links }) {
           {isAuthenticated ? (
             <>
               {user?.role === 'ADMIN' && (
-                <Link className="text-button" to="/admin/users" style={{ marginRight: '16px', color: 'var(--color-primary)', fontWeight: 'bold' }}>
+                <Link className="text-button" to="/admin" style={{ marginRight: 12 }}>
                   Trang quản trị
                 </Link>
               )}
@@ -129,7 +129,7 @@ function Header({ links }) {
             {isAuthenticated ? (
               <>
                 {user?.role === 'ADMIN' && (
-                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                  <Link className="button button--secondary" to="/admin" onClick={closeMenu} style={{ marginBottom: 8 }}>
                     Trang quản trị
                   </Link>
                 )}
