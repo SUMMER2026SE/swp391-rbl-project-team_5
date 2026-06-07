@@ -493,6 +493,7 @@
 .admin-user-table {
   width: 100%;
   min-width: 900px;
+}
 /* ============================================================
    Admin Panel – Design Tokens & Utilities
    Mirrors the Google Stitch / Material-3 color scheme used
@@ -1878,6 +1879,7 @@
 .admin-pagination p {
   color: var(--color-text-muted);
   font-size: 14px;
+}
 .admin-table thead tr {
   background: rgba(243, 243, 246, 0.5);
   border-bottom: 1px solid rgba(190, 200, 202, 0.2);
@@ -2380,9 +2382,10 @@
     width: auto;
     flex: 0 0 auto;
     white-space: nowrap;
-  padding: 16px;
-  background: rgba(47, 49, 51, 0.4);
-  backdrop-filter: blur(4px);
+    padding: 16px;
+    background: rgba(47, 49, 51, 0.4);
+    backdrop-filter: blur(4px);
+  }
 }
 
 .admin-modal {
