@@ -4,6 +4,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    count: jest.fn(),
   },
   partnerProfile: {
     findUnique: jest.fn(),
@@ -16,7 +17,22 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
     count: jest.fn(),
+  },
+  attractionCategory: {
+    deleteMany: jest.fn(),
+    create: jest.fn(),
+    createMany: jest.fn(),
+  },
+  attractionImage: {
+    create: jest.fn(),
+    createMany: jest.fn(),
+  },
+  category: {
+    findMany: jest.fn(),
+    upsert: jest.fn(),
+    create: jest.fn(),
   },
   favoriteAttraction: {
     findUnique: jest.fn(),
@@ -29,6 +45,8 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
+    count: jest.fn(),
   },
   timeSlot: {
     findMany: jest.fn(),
@@ -36,6 +54,10 @@ const mockPrisma = {
     createMany: jest.fn(),
     findUnique: jest.fn(),
     aggregate: jest.fn(),
+  },
+  specialDate: {
+    deleteMany: jest.fn(),
+    createMany: jest.fn(),
   },
   dailyStock: {
     findUnique: jest.fn(),
