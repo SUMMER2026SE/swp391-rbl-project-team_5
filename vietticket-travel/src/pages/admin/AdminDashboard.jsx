@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import AdminLayout from '../../layouts/AdminLayout';
 import '../../styles/admin.css';
 
@@ -52,7 +52,6 @@ const CHART_DATA = {
   ]
 };
 
-const CHART_BARS = [];
 
 const KYC_ITEMS = [
   {
@@ -228,7 +227,6 @@ function AttractionCard({ title, location, price, photoCount, status, reviewers,
 export default function AdminDashboard() {
   const [activePeriod, setActivePeriod] = useState('Tuần');
   const [selectedBar, setSelectedBar] = useState(null);
-  const navigate = useNavigate();
 
   const periods = ['Tuần', 'Tháng', 'Năm'];
 

@@ -42,7 +42,8 @@ function PartnerTicketsPage() {
   useEffect(() => {
     document.title = 'Quản lý Gói vé | VietTicket B2B'
     let active = true
-    setIsLoading(true)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsLoading(prev => prev ? prev : true)
     ;(async () => {
       try {
         const data = await partnerApi.listTickets(id)

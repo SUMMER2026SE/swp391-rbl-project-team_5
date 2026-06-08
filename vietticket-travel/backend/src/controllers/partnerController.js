@@ -34,7 +34,7 @@ function toPartnerResponse(partner, user) {
   };
 }
 
-// POST /api/partners/register — Nộp hồ sơ KYC, tạo PartnerProfile, nâng role lên PARTNER
+// POST /api/partners/register — Nộp hồ sơ KYC, tạo PartnerProfile ở trạng thái PENDING
 async function submitKyc(req, res, next) {
   try {
     const validationError = validateKyc(req.body);
@@ -67,13 +67,7 @@ async function submitKyc(req, res, next) {
       status: 'PENDING',
     };
 
-    const [partner] = await prisma.$transaction([
-      prisma.partnerProfile.create({ data }),
-      prisma.user.update({
-        where: { id: req.user.id },
-        data: { role: 'PARTNER' },
-      }),
-    ]);
+    const partner = await prisma.partnerProfile.create({ data });
 
     const refreshedUser = await prisma.user.findUnique({
       where: { id: req.user.id },
@@ -81,6 +75,8 @@ async function submitKyc(req, res, next) {
     });
 
     return res.status(201).json({
+      success: true,
+      data: toPartnerResponse(partner, refreshedUser),
       message: 'Nộp hồ sơ đối tác thành công. Hồ sơ của bạn đang được xét duyệt.',
       partner: toPartnerResponse(partner, refreshedUser),
       user: sanitizeUser(refreshedUser),
@@ -93,12 +89,24 @@ async function submitKyc(req, res, next) {
 // GET /api/partners/me — Lấy hồ sơ đối tác hiện tại
 async function getMyPartner(req, res, next) {
   try {
+    const partner = req.partner || await prisma.partnerProfile.findUnique({
+      where: { userId: req.user.id },
+    });
+
+    if (!partner) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Không tìm thấy hồ sơ đối tác.' },
+      });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: { profile: true },
     });
 
-    return res.json({ partner: toPartnerResponse(req.partner, user) });
+    const data = toPartnerResponse(partner, user);
+    return res.status(200).json({ success: true, data, partner: data });
   } catch (error) {
     next(error);
   }
@@ -219,4 +227,8 @@ module.exports = {
   getMyPartner,
   updateSettings,
   getDashboard,
+  // Aliases để tương thích với MPhu
+  registerPartner: submitKyc,
+  getMyPartnerProfile: getMyPartner,
 };
+

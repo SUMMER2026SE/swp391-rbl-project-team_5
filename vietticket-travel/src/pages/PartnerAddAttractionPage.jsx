@@ -46,11 +46,16 @@ function PartnerAddAttractionPage() {
   const fileInputRef = useRef(null)
   const addMoreRef = useRef(null)
 
+  const imagesRef = useRef(images)
+  useEffect(() => {
+    imagesRef.current = images
+  }, [images])
+
   useEffect(() => {
     document.title = 'Thêm điểm tham quan | VietTicket B2B'
     return () => {
       // cleanup preview URLs
-      images.forEach((img) => URL.revokeObjectURL(img.previewUrl))
+      imagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl))
     }
   }, [])
 
@@ -145,24 +150,19 @@ function PartnerAddAttractionPage() {
     try {
       const created = await partnerApi.createAttraction(payload)
       const newId = created?.attraction?.id
-      // Tải ảnh lên nếu có (bỏ qua lỗi upload một cách nhẹ nhàng)
-      const files = images.map((img) => img.file).filter(Boolean)
-      if (newId && files.length > 0) {
-        try {
-          await partnerApi.uploadAttractionImages(newId, files)
-        } catch {
-          // ignore upload failure gracefully
-        }
+      if (!newId) {
+        throw new Error('Máy chủ không trả về mã điểm tham quan vừa tạo.')
       }
-      toast.success('Đã đăng điểm tham quan thành công!')
+
+      const files = images.map((img) => img.file).filter(Boolean)
+      if (files.length > 0) {
+        await partnerApi.uploadAttractionImages(newId, files)
+      }
+      await partnerApi.submitAttraction(newId)
+      toast.success('Đã gửi điểm tham quan để admin xét duyệt!')
       navigate('/partner/attractions')
     } catch (err) {
-      if (partnerApi.isNetworkError(err)) {
-        toast.info('Chế độ demo (không có server) — thao tác được mô phỏng.')
-        navigate('/partner/attractions')
-      } else {
-        toast.error(err.message)
-      }
+      toast.error(err.message)
     } finally {
       setIsSubmitting(false)
     }

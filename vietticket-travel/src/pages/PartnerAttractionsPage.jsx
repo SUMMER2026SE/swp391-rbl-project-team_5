@@ -73,7 +73,6 @@ function PartnerAttractionsPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [viewMode, setViewMode] = useState('table') // 'table' | 'grid'
   const [deleteTarget, setDeleteTarget] = useState(null) // { id, name }
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     document.title = 'Quản lý Điểm tham quan | VietTicket B2B'
@@ -91,8 +90,6 @@ function PartnerAttractionsPage() {
         } else {
           toast.error(err.message)
         }
-      } finally {
-        if (active) setLoading(false)
       }
     })()
     return () => { active = false }

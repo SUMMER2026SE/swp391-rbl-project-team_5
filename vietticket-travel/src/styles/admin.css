@@ -1924,6 +1924,8 @@
 .badge--pending  { background: rgba(251, 191, 36, 0.15); color: #b45309; }
 .badge--approved { background: rgba(16, 185, 129, 0.12); color: #065f46; }
 .badge--rejected { background: rgba(186, 26, 26, 0.1);  color: var(--adm-error); }
+.badge--suspended { background: rgba(124, 88, 0, 0.12); color: var(--adm-secondary); }
+.badge--draft     { background: rgba(190, 200, 202, 0.2); color: var(--adm-outline); }
 .badge--active   { background: rgba(0, 96, 104, 0.1);   color: var(--adm-primary-dark); }
 .badge--hidden   { background: rgba(190, 200, 202, 0.2); color: var(--adm-outline); }
 
@@ -1936,6 +1938,8 @@
 .badge--pending .badge__dot  { background: #f59e0b; }
 .badge--approved .badge__dot { background: #10b981; }
 .badge--rejected .badge__dot { background: var(--adm-error); }
+.badge--suspended .badge__dot { background: var(--adm-secondary); }
+.badge--draft .badge__dot     { background: var(--adm-outline); }
 
 /* ── Approve / Reject Buttons ────────────────────────────── */
 .btn-approve {
@@ -1951,6 +1955,14 @@
 }
 .btn-approve:hover  { opacity: 0.9; }
 .btn-approve:active { transform: scale(0.95); }
+.btn-approve:disabled,
+.btn-reject:disabled,
+.btn-warn:disabled,
+.admin-modal__confirm:disabled,
+.admin-modal__cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 
 .btn-reject {
   padding: 6px 14px;

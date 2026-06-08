@@ -1,16 +1,19 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
+import { useAuth } from '../context/useAuth.js'
 import { appDownloadButtons, footerLinks } from '../data/landingData.js'
-import { mockAttractions } from '../data/mockAttractions.js'
+import { apiRequest } from '../services/api.js'
+import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 
 const categoryFilters = [
-  { label: 'All', text: 'Tất cả', icon: 'auto_awesome' },
-  { label: 'Theme Parks', text: 'Công viên chủ đề', icon: 'fort' },
-  { label: 'Museums', text: 'Bảo tàng', icon: 'museum' },
-  { label: 'Nature', text: 'Thiên nhiên', icon: 'forest' },
-  { label: 'Water Parks', text: 'Công viên nước', icon: 'pool' },
+  { value: 'All', text: 'Tất cả', icon: 'auto_awesome' },
+  { value: 'Theme Park & Resort', text: 'Công viên chủ đề', icon: 'fort' },
+  { value: 'Museum', text: 'Bảo tàng', icon: 'museum' },
+  { value: 'Nature & Sightseeing', text: 'Thiên nhiên', icon: 'forest' },
+  { value: 'Water Park', text: 'Công viên nước', icon: 'pool' },
 ]
 
 const cityOptions = [
@@ -79,23 +82,70 @@ const getPageNumbers = (currentPage, totalPages) => {
 export default function SearchAttractionsPage() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { isAuthenticated, isAuthLoading, user } = useAuth()
 
   const [favoriteIds, setFavoriteIds] = useState(new Set())
+  const [favoriteUserId, setFavoriteUserId] = useState('')
+  const [favoriteActionIds, setFavoriteActionIds] = useState(new Set())
 
   const handleToggleFavorite = async (e, attractionId) => {
     e.stopPropagation()
-    setFavoriteIds(prev => {
-      const next = new Set(prev)
-      if (next.has(attractionId)) next.delete(attractionId)
-      else next.add(attractionId)
-      return next
-    })
+
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: location } })
+      return
+    }
+
+    if (favoriteActionIds.has(attractionId)) return
+
+    setFavoriteActionIds((current) => new Set(current).add(attractionId))
     try {
-      await fetch(`/api/v1/attractions/${attractionId}/favorite`, { method: 'POST' })
+      const result = await toggleFavorite(attractionId)
+      setFavoriteIds((current) => {
+        const next = new Set(current)
+        if (result.data?.isFavorite) next.add(attractionId)
+        else next.delete(attractionId)
+        return next
+      })
+      setFavoriteUserId(user?.id || '')
     } catch (error) {
       console.error('Lỗi khi thả tim:', error)
+      toast.error(error.message)
+    } finally {
+      setFavoriteActionIds((current) => {
+        const next = new Set(current)
+        next.delete(attractionId)
+        return next
+      })
     }
   }
+
+  useEffect(() => {
+    let active = true
+
+    if (isAuthLoading) return undefined
+    if (!isAuthenticated) return undefined
+
+    getFavorites()
+      .then((result) => {
+        if (!active) return
+        setFavoriteIds(
+          new Set(
+            getFavoriteItems(result)
+              .map((item) => item.attractionId || item.attraction?.id || item.id)
+            .filter(Boolean),
+          ),
+        )
+        setFavoriteUserId(user?.id || '')
+      })
+      .catch((error) => {
+        if (active && error.status !== 401) toast.error(error.message)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [isAuthenticated, isAuthLoading, user?.id])
 
   // 1. Quản lý các bộ lọc - đọc từ URL params nếu có
   const [searchQuery, setSearchQuery] = useState(() => {
@@ -122,32 +172,6 @@ export default function SearchAttractionsPage() {
 
   // 3. Gọi API fetch danh sách địa điểm
   useEffect(() => {
-    // Fallback client-side filter
-    const filterMockAttractions = () => {
-      return mockAttractions.filter(item => {
-        if (selectedCity !== 'Tất cả thành phố' && item.city !== selectedCity) return false
-        if (selectedCategory !== 'All' && item.category !== selectedCategory) return false
-        if (item.minPrice > priceRange) return false
-        if (selectedStars.length > 0) {
-          const matchStars = selectedStars.some(star => {
-            if (star === 5) return item.averageRating >= 5
-            if (star === 4) return item.averageRating >= 4
-            if (star === 3) return item.averageRating >= 3
-            return true
-          })
-          if (!matchStars) return false
-        }
-        if (searchQuery) {
-          const query = searchQuery.toLowerCase().trim()
-          const matchTitle = item.title.toLowerCase().includes(query)
-          const matchCity = item.city.toLowerCase().includes(query)
-          const matchDesc = item.description?.toLowerCase().includes(query)
-          if (!matchTitle && !matchCity && !matchDesc) return false
-        }
-        return true
-      })
-    }
-
     const fetchAttractions = async () => {
       setLoading(true)
       setErrorMessage('')
@@ -160,32 +184,18 @@ export default function SearchAttractionsPage() {
           city: selectedCity !== 'Tất cả thành phố' ? selectedCity : '',
           category: selectedCategory !== 'All' ? selectedCategory : '',
           maxPrice: priceRange,
-          stars: selectedStars.join(','),
+          minRating: selectedStars.length > 0 ? Math.min(...selectedStars) : '',
           search: searchQuery,
         })
 
-        const response = await fetch(`/api/v1/attractions?${params.toString()}`)
-        const result = await response.json()
-
-        if (result.success) {
-          setAttractions(result.data.attractions || [])
-          setTotalPages(Math.max(result.data.pagination?.totalPages || 1, 1))
-        } else {
-          const filtered = filterMockAttractions()
-          const itemsPerPage = 9
-          const startIndex = (currentPage - 1) * itemsPerPage
-          const paginated = filtered.slice(startIndex, startIndex + itemsPerPage)
-          setAttractions(paginated)
-          setTotalPages(Math.max(Math.ceil(filtered.length / itemsPerPage), 1))
-        }
+        const result = await apiRequest(`/attractions?${params.toString()}`)
+        setAttractions(result.data?.attractions || [])
+        setTotalPages(Math.max(result.data?.pagination?.totalPages || 1, 1))
       } catch (error) {
-        console.warn('Lỗi khi tải danh sách địa điểm từ API, sử dụng mock data để demo:', error)
-        const filtered = filterMockAttractions()
-        const itemsPerPage = 9
-        const startIndex = (currentPage - 1) * itemsPerPage
-        const paginated = filtered.slice(startIndex, startIndex + itemsPerPage)
-        setAttractions(paginated)
-        setTotalPages(Math.max(Math.ceil(filtered.length / itemsPerPage), 1))
+        console.error('Lỗi khi tải danh sách địa điểm từ API:', error)
+        setAttractions([])
+        setTotalPages(1)
+        setErrorMessage(error.message)
       } finally {
         setLoading(false)
       }
@@ -257,7 +267,7 @@ export default function SearchAttractionsPage() {
 
               <div className="flex flex-wrap gap-2">
                 {categoryFilters.map((category) => {
-                  const isActive = selectedCategory === category.label
+                  const isActive = selectedCategory === category.value
 
                   return (
                     <button
@@ -266,8 +276,8 @@ export default function SearchAttractionsPage() {
                           ? 'border-transparent bg-gradient-to-r from-[#00474d] to-[#00629d] text-white shadow-sm'
                           : 'border-[#bec8ca] bg-white text-[#191c1d] hover:bg-[#eceeef]'
                       }`}
-                      key={category.label}
-                      onClick={() => handleCategoryChange(category.label)}
+                      key={category.value}
+                      onClick={() => handleCategoryChange(category.value)}
                       type="button"
                     >
                       <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
@@ -395,7 +405,10 @@ export default function SearchAttractionsPage() {
                   attractions.map((attraction, index) => (
                     <AttractionCard
                       attraction={attraction}
-                      isFavorite={favoriteIds.has(attraction.id)}
+                      isFavoritePending={favoriteActionIds.has(attraction.id)}
+                      isFavorite={
+                        favoriteUserId === user?.id && favoriteIds.has(attraction.id)
+                      }
                       key={attraction.id || `${attraction.title || attraction.name}-${index}`}
                       navigate={navigate}
                       onToggleFavorite={handleToggleFavorite}
@@ -470,7 +483,7 @@ function FilterSection({ icon, title, children }) {
   )
 }
 
-function AttractionCard({ attraction, isFavorite, navigate, onToggleFavorite }) {
+function AttractionCard({ attraction, isFavorite, isFavoritePending, navigate, onToggleFavorite }) {
   const title = attraction.title || attraction.name || 'Điểm tham quan'
   const location = attraction.city ? `${attraction.city}, Việt Nam` : attraction.address || 'Việt Nam'
   const rating = Number(attraction.averageRating || attraction.rating || 0)
@@ -487,6 +500,7 @@ function AttractionCard({ attraction, isFavorite, navigate, onToggleFavorite }) 
         <button
           aria-label={isFavorite ? `Bỏ yêu thích ${title}` : `Lưu yêu thích ${title}`}
           className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/80 backdrop-blur-md shadow-sm transition hover:scale-110 active:scale-95"
+          disabled={isFavoritePending}
           onClick={(e) => onToggleFavorite && onToggleFavorite(e, attraction.id)}
           type="button"
         >

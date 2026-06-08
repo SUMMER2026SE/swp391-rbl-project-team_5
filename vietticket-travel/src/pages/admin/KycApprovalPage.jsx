@@ -1,108 +1,116 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { toast } from 'react-toastify';
 import AdminLayout from '../../layouts/AdminLayout';
+import * as adminApi from '../../services/adminApi.js';
 import '../../styles/admin.css';
 
-// ── Static Mock Data ──────────────────────────────────────────────────────────
+const STATUS_LABEL = {
+  pending: 'PENDING',
+  approved: 'APPROVED',
+  rejected: 'REJECTED',
+  suspended: 'SUSPENDED',
+};
 
-const INITIAL_PARTNERS = [
-  {
-    id: 1,
-    name: 'Đà Nẵng Discovery Tours',
-    email: 'contact@dndiscovery.vn',
-    phone: '0905 123 456',
-    date: '24/10/2023',
-    status: 'pending',
-    rejectReason: '',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=128&h=128&q=80',
-  },
-  {
-    id: 2,
-    name: 'Hạ Long Cruise Co.',
-    email: 'info@halongcruise.vn',
-    phone: '0203 999 888',
-    date: '23/10/2023',
-    status: 'pending',
-    rejectReason: '',
-    avatar: 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=128&h=128&q=80',
-  },
-  {
-    id: 3,
-    name: 'Bảo tàng Cố đô Huế',
-    email: 'admin@hue-heritage.gov.vn',
-    phone: '0234 555 666',
-    date: '22/10/2023',
-    status: 'pending',
-    rejectReason: '',
-    avatar: 'https://images.unsplash.com/photo-1568402102990-bc541580b59f?auto=format&fit=crop&w=128&h=128&q=80',
-  },
-  {
-    id: 4,
-    name: 'Sài Gòn Heritage Tours',
-    email: 'hello@sgheritage.vn',
-    phone: '0281 234 567',
-    date: '21/10/2023',
-    status: 'approved',
-    rejectReason: '',
-    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=128&h=128&q=80',
-  },
-];
+function formatDate(value) {
+  if (!value) return '—';
+  return new Intl.DateTimeFormat('vi-VN').format(new Date(value));
+}
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-const STATUS_LABEL = { pending: 'PENDING', approved: 'APPROVED', rejected: 'REJECTED' };
-
-function computeStats(partners) {
+function mapPartner(partner) {
   return {
-    pending:  partners.filter(p => p.status === 'pending').length,
-    approved: partners.filter(p => p.status === 'approved').length,
-    rejected: partners.filter(p => p.status === 'rejected').length,
-    total:    partners.length,
+    id: partner.id,
+    name: partner.businessName,
+    representative: partner.user?.fullName || '',
+    email: partner.user?.email || '—',
+    phone: partner.user?.profile?.phoneNumber || 'Chưa cập nhật',
+    date: formatDate(partner.createdAt),
+    status: String(partner.status || 'PENDING').toLowerCase(),
+    rejectReason: partner.rejectionReason || '',
+    businessLicenseUrl: partner.businessLicenseUrl || '',
   };
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function Toast({ toast }) {
-  if (!toast) return null;
-  return (
-    <div className={`admin-toast admin-toast--visible admin-toast--${toast.type}`}>
-      <span className="material-symbols-outlined">
-        {toast.type === 'success' ? 'check_circle' : 'info'}
-      </span>
-      {toast.msg}
-    </div>
-  );
+function computeStats(partners) {
+  return {
+    pending: partners.filter((partner) => partner.status === 'pending').length,
+    approved: partners.filter((partner) => partner.status === 'approved').length,
+    rejected: partners.filter((partner) => partner.status === 'rejected').length,
+    total: partners.length,
+  };
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
 export default function KycApprovalPage() {
-  const [partners, setPartners] = useState(INITIAL_PARTNERS);
-  const [toast, setToast] = useState(null);
+  const [partners, setPartners] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState('');
 
-  // ── Actions ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let active = true;
 
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    async function loadPartners() {
+      setLoading(true);
+      try {
+        const result = await adminApi.listPartners();
+        if (active) setPartners((result.data || []).map(mapPartner));
+      } catch (error) {
+        if (active) toast.error(error.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadPartners();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleApprove(id) {
+    setActionId(id);
+    try {
+      await adminApi.reviewPartner(id, 'APPROVED');
+      setPartners((current) =>
+        current.map((partner) =>
+          partner.id === id
+            ? { ...partner, status: 'approved', rejectReason: '' }
+            : partner,
+        ),
+      );
+      toast.success('Đã phê duyệt hồ sơ thành công!');
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setActionId('');
+    }
   }
 
-  function handleApprove(id) {
-    setPartners(prev =>
-      prev.map(p => p.id === id ? { ...p, status: 'approved', rejectReason: '' } : p),
-    );
-    showToast('Đã phê duyệt hồ sơ thành công!', 'success');
-  }
-
-  function handleReject(id, name) {
+  async function handleReject(id, name) {
     const reason = window.prompt(`Lý do từ chối hồ sơ của "${name}":`, '');
-    if (reason === null) return; // cancelled
-    const trimmed = reason.trim() || 'Không rõ lý do';
-    setPartners(prev =>
-      prev.map(p => p.id === id ? { ...p, status: 'rejected', rejectReason: trimmed } : p),
-    );
-    showToast(`Đã từ chối hồ sơ: ${name}`, 'error');
+    if (reason === null) return;
+
+    const rejectionReason = reason.trim();
+    if (!rejectionReason) {
+      toast.error('Vui lòng nhập lý do từ chối.');
+      return;
+    }
+
+    setActionId(id);
+    try {
+      await adminApi.reviewPartner(id, 'REJECTED', rejectionReason);
+      setPartners((current) =>
+        current.map((partner) =>
+          partner.id === id
+            ? { ...partner, status: 'rejected', rejectReason: rejectionReason }
+            : partner,
+        ),
+      );
+      toast.error(`Đã từ chối hồ sơ của: ${name}`);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setActionId('');
+    }
   }
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -124,7 +132,6 @@ export default function KycApprovalPage() {
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm hồ sơ...">
-
       {/* Page Header */}
       <div className="admin-page-header">
         <div>
@@ -194,58 +201,86 @@ export default function KycApprovalPage() {
                   </td>
                 </tr>
               )}
-              {displayed.map(p => (
-                <tr key={p.id}>
-                  {/* Partner name + avatar */}
+              {displayed.map((partner) => (
+                <tr key={partner.id}>
+                  {/* Partner name */}
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <div style={{ width: 48, height: 48, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
-                        <img
-                          src={p.avatar}
-                          alt={p.name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
+                      <div
+                        style={{
+                          width: 48,
+                          height: 48,
+                          borderRadius: 8,
+                          flexShrink: 0,
+                          background: 'rgba(0,96,104,0.1)',
+                          color: 'var(--adm-primary-dark)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {partner.name?.charAt(0)?.toUpperCase() || 'P'}
                       </div>
-                      <span style={{ fontWeight: 600 }}>{p.name}</span>
+                      <div>
+                        {partner.businessLicenseUrl ? (
+                          <a
+                            href={partner.businessLicenseUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ fontWeight: 600, color: 'var(--adm-primary-dark)' }}
+                          >
+                            {partner.name}
+                          </a>
+                        ) : (
+                          <span style={{ fontWeight: 600 }}>{partner.name}</span>
+                        )}
+                        {partner.representative && (
+                          <div style={{ fontSize: 12, color: 'var(--adm-on-surface-variant)', marginTop: 2 }}>
+                            Đại diện: {partner.representative}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
-
-                  {/* Contact */}
                   <td>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontWeight: 500 }}>{p.email}</span>
-                      <span style={{ fontSize: 12, color: 'var(--adm-on-surface-variant)' }}>{p.phone}</span>
+                      <span style={{ fontWeight: 500 }}>{partner.email}</span>
+                      <span style={{ fontSize: 12, color: 'var(--adm-on-surface-variant)' }}>{partner.phone}</span>
                     </div>
                   </td>
-
-                  <td>{p.date}</td>
-
-                  {/* Status badge */}
+                  <td>{partner.date}</td>
                   <td>
-                    <span className={`badge badge--${p.status}`}>
+                    <span className={`badge badge--${partner.status}`}>
                       <span className="badge__dot" />
-                      {STATUS_LABEL[p.status]}
+                      {STATUS_LABEL[partner.status] || partner.status.toUpperCase()}
                     </span>
                   </td>
-
-                  {/* Reject reason */}
                   <td style={{ fontSize: 12, color: 'var(--adm-error)', maxWidth: 200, wordBreak: 'break-word' }}>
-                    {p.status === 'rejected' ? p.rejectReason : '—'}
+                    {partner.status === 'rejected' ? partner.rejectReason : '—'}
                   </td>
-
-                  {/* Actions */}
                   <td style={{ textAlign: 'right' }}>
-                    {p.status === 'pending' ? (
+                    {partner.status === 'pending' ? (
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                        <button className="btn-approve" onClick={() => handleApprove(p.id)}>
-                          Phê duyệt
+                        <button
+                          className="btn-approve"
+                          disabled={actionId === partner.id}
+                          onClick={() => handleApprove(partner.id)}
+                        >
+                          {actionId === partner.id ? 'Đang xử lý...' : 'Phê duyệt'}
                         </button>
-                        <button className="btn-reject" onClick={() => handleReject(p.id, p.name)}>
+                        <button
+                          className="btn-reject"
+                          disabled={actionId === partner.id}
+                          onClick={() => handleReject(partner.id, partner.name)}
+                        >
                           Từ chối
                         </button>
                       </div>
                     ) : (
-                      <span className={`badge badge--${p.status}`}>{STATUS_LABEL[p.status]}</span>
+                      <span className={`badge badge--${partner.status}`}>
+                        {STATUS_LABEL[partner.status] || partner.status.toUpperCase()}
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -254,7 +289,6 @@ export default function KycApprovalPage() {
           </table>
         </div>
 
-        {/* Pagination */}
         <div className="admin-pagination">
           <p className="admin-pagination__info">
             Hiển thị <strong>{displayed.length}</strong> / <strong>{partners.length}</strong> hồ sơ
@@ -264,16 +298,14 @@ export default function KycApprovalPage() {
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_left</span>
             </button>
             <button className="admin-pagination__btn active">1</button>
-            <button className="admin-pagination__btn">
+            <button className="admin-pagination__btn" disabled>
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_right</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Info cards */}
-      <div style={{ marginTop: 32, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-        {/* Guide */}
+      <div style={{ marginTop: 32, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
         <div
           style={{
             background: 'rgba(0,71,77,0.05)',
@@ -285,59 +317,32 @@ export default function KycApprovalPage() {
           }}
         >
           <div style={{ position: 'relative', zIndex: 1 }}>
-            <h4
-              style={{
-                fontFamily: "'Be Vietnam Pro', sans-serif",
-                fontSize: 18,
-                fontWeight: 600,
-                color: 'var(--adm-primary-dark)',
-                marginBottom: 8,
-              }}
-            >
+            <h4 style={{ fontFamily: "'Be Vietnam Pro', sans-serif", fontSize: 18, fontWeight: 600, color: 'var(--adm-primary-dark)', marginBottom: 8 }}>
               Hướng dẫn phê duyệt
             </h4>
             <p style={{ fontSize: 14, color: 'var(--adm-on-surface-variant)', lineHeight: 1.6 }}>
-              Đảm bảo kiểm tra kỹ các giấy tờ pháp lý và giấy phép kinh doanh lữ hành trước khi
-              nhấn nút phê duyệt hồ sơ đối tác.
+              Kiểm tra giấy phép kinh doanh, mã số thuế và thông tin liên hệ trước khi phê duyệt hồ sơ.
             </p>
-            <button
-              style={{
-                marginTop: 16,
-                background: 'none',
-                border: 'none',
-                color: 'var(--adm-primary-dark)',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: 14,
-              }}
-            >
-              Xem quy trình chuẩn KYC
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>open_in_new</span>
-            </button>
           </div>
           <div style={{ position: 'absolute', right: -40, bottom: -40, opacity: 0.08 }}>
             <span className="material-symbols-outlined" style={{ fontSize: 160 }}>verified_user</span>
           </div>
         </div>
 
-        {/* Recent activity */}
         <div className="admin-page-section" style={{ padding: 24 }}>
           <h4 style={{ fontFamily: "'Be Vietnam Pro', sans-serif", fontSize: 16, fontWeight: 600, marginBottom: 16 }}>
             Tóm tắt trạng thái
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {partners.filter(p => p.status !== 'pending').map(p => (
-              <div key={p.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            {partners.filter((partner) => partner.status !== 'pending').slice(0, 5).map((partner) => (
+              <div key={partner.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                 <div
                   style={{
                     width: 32,
                     height: 32,
                     borderRadius: '50%',
-                    background: p.status === 'approved' ? 'rgba(16,185,129,0.1)' : 'rgba(186,26,26,0.1)',
-                    color: p.status === 'approved' ? '#10b981' : 'var(--adm-error)',
+                    background: partner.status === 'approved' ? 'rgba(16,185,129,0.1)' : 'rgba(186,26,26,0.1)',
+                    color: partner.status === 'approved' ? '#10b981' : 'var(--adm-error)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -345,25 +350,25 @@ export default function KycApprovalPage() {
                   }}
                 >
                   <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
-                    {p.status === 'approved' ? 'check' : 'close'}
+                    {partner.status === 'approved' ? 'check' : 'close'}
                   </span>
                 </div>
                 <div>
-                  <p style={{ fontSize: 13, margin: 0, fontWeight: 500 }}>{p.name}</p>
+                  <p style={{ fontSize: 13, margin: 0, fontWeight: 500 }}>{partner.name}</p>
                   <p style={{ fontSize: 11, color: 'var(--adm-on-surface-variant)', margin: '2px 0 0' }}>
-                    {p.status === 'approved' ? 'Đã phê duyệt' : `Từ chối: ${p.rejectReason}`}
+                    {partner.status === 'approved'
+                      ? 'Đã phê duyệt'
+                      : partner.rejectReason || STATUS_LABEL[partner.status]}
                   </p>
                 </div>
               </div>
             ))}
-            {partners.filter(p => p.status !== 'pending').length === 0 && (
+            {!loading && partners.filter((partner) => partner.status !== 'pending').length === 0 && (
               <p style={{ fontSize: 13, color: 'var(--adm-on-surface-variant)' }}>Chưa có hành động nào.</p>
             )}
           </div>
         </div>
       </div>
-
-      <Toast toast={toast} />
     </AdminLayout>
   );
 }

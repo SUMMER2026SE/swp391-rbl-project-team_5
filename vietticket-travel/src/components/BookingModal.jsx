@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/useAuth.js'
+import bookingService from '../services/bookingService.js'
+import { apiRequest } from '../services/api.js'
 
 const formatCurrency = (value) => {
   const amount = Number(value)
@@ -35,8 +38,17 @@ const isSlotUnavailable = (slot) =>
   slot.available === false ||
   ['UNAVAILABLE', 'SOLD_OUT', 'DISABLED'].includes(slot.status)
 
-export default function BookingModal({ isOpen, onClose, ticketProduct, attractionId, attractionTitle }) {
+export default function BookingModal({
+  isOpen,
+  onClose,
+  ticketProduct,
+  attractionId,
+  attractionTitle,
+  attractionLocation,
+  attractionImage,
+}) {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const todayStr = toDateInputValue(new Date())
   const [selectedDate, setSelectedDate] = useState(todayStr)
   const [selectedTimeSlotId, setSelectedTimeSlotId] = useState('')
@@ -156,35 +168,19 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
       setErrorMessage('')
 
       try {
-        const response = await fetch(`/api/v1/tickets/${ticketId}/availability?date=${selectedDate}`)
-        const result = await response.json()
+        const result = await apiRequest(
+          `/tickets/${ticketId}/availability?date=${selectedDate}`,
+        )
+        const slots = Array.isArray(result.data) ? result.data : []
+        setTimeSlots(slots)
 
-        if (result.success) {
-          const slots = Array.isArray(result.data) ? result.data : []
-          setTimeSlots(slots)
-
-          const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
-          setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
-        } else {
-          const mockSlots = [
-            { id: 'slot-1', label: '09:00 - 11:00', availableTickets: 45, status: 'AVAILABLE' },
-            { id: 'slot-2', label: '11:00 - 13:00', availableTickets: 25, status: 'AVAILABLE' },
-            { id: 'slot-3', label: '13:00 - 15:00', availableTickets: 0, status: 'SOLD_OUT' },
-            { id: 'slot-4', label: '15:00 - 17:00', availableTickets: 30, status: 'AVAILABLE' }
-          ]
-          setTimeSlots(mockSlots)
-          setSelectedTimeSlotId('slot-1')
-        }
+        const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
+        setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
       } catch (error) {
-        console.warn('Lỗi lấy thông tin khung giờ trống, sử dụng mock slots để demo:', error)
-        const mockSlots = [
-          { id: 'slot-1', label: '09:00 - 11:00', availableTickets: 45, status: 'AVAILABLE' },
-          { id: 'slot-2', label: '11:00 - 13:00', availableTickets: 25, status: 'AVAILABLE' },
-          { id: 'slot-3', label: '13:00 - 15:00', availableTickets: 0, status: 'SOLD_OUT' },
-          { id: 'slot-4', label: '15:00 - 17:00', availableTickets: 30, status: 'AVAILABLE' }
-        ]
-        setTimeSlots(mockSlots)
-        setSelectedTimeSlotId('slot-1')
+        console.error('Lỗi lấy thông tin khung giờ trống:', error)
+        setTimeSlots([])
+        setSelectedTimeSlotId('')
+        setErrorMessage(error.message)
       } finally {
         setIsLoadingSlots(false)
       }
@@ -205,64 +201,61 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
   }
 
   const handleCheckout = async () => {
+    setErrorMessage('')
+
     if (!ticketId) {
-      alert('Không tìm thấy loại vé cần đặt.')
+      setErrorMessage('Không tìm thấy loại vé cần đặt. Vui lòng thử lại.')
       return
     }
 
     if (!selectedTimeSlotId) {
-      alert('Vui lòng chọn khung giờ tham quan!')
+      setErrorMessage('Vui lòng chọn khung giờ tham quan trước khi tiếp tục.')
       return
     }
 
     setIsSubmitting(true)
+    setErrorMessage('')
 
     try {
-      const response = await fetch(`/api/v1/tickets/${ticketId}/reserve`, {
+      const result = await apiRequest(`/tickets/${ticketId}/reserve`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: {
           attractionId,
           date: selectedDate,
           timeSlotId: selectedTimeSlotId,
           quantity: counts.adult + counts.child,
-        }),
+        },
       })
-      const result = await response.json()
-
-      if (result.success) {
-        const slot = timeSlots.find(s => getSlotId(s) === selectedTimeSlotId)
-        navigate(`/checkout/${result.data.reservationId}`, {
-          state: {
-            attractionTitle: attractionTitle || 'Sun World Bà Nà Hills',
-            ticketName: ticketProduct?.name || 'Vé tham quan',
-            date: selectedDate,
-            timeSlotLabel: getSlotLabel(slot),
-            adultCount: counts.adult,
-            childCount: counts.child,
-            adultPrice,
-            childPrice,
-          }
-        })
-      } else {
-        throw new Error(result.error?.message || 'API reserve failed')
-      }
-    } catch (error) {
-      console.warn('Lỗi khi gọi API reserve, dùng mock data để demo luồng UI:', error)
-      const mockReservationId = `VT-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
       const slot = timeSlots.find(s => getSlotId(s) === selectedTimeSlotId)
-      navigate(`/checkout/${mockReservationId}`, {
-        state: {
-          attractionTitle: attractionTitle || 'Sun World Bà Nà Hills',
-          ticketName: ticketProduct?.name || 'Vé tham quan',
-          date: selectedDate,
-          timeSlotLabel: getSlotLabel(slot || { label: '09:00 - 17:00' }),
-          adultCount: counts.adult,
-          childCount: counts.child,
-          adultPrice,
-          childPrice,
-        }
+      bookingService.reserveTicket({
+        bookingId: result.data?.reservationId || result.data?.id,
+        attractionId,
+        attractionTitle: attractionTitle || 'Điểm tham quan',
+        attractionLocation: attractionLocation || 'Việt Nam',
+        attractionImage,
+        ticketId,
+        ticketName: ticketProduct?.name || 'Vé tham quan',
+        visitDate: selectedDate,
+        timeSlotId: selectedTimeSlotId,
+        timeSlotLabel: getSlotLabel(slot || { label: '09:00 - 17:00' }),
+        adultCount: counts.adult,
+        childCount: counts.child,
+        adultPrice,
+        childPrice,
+        requiresPartnerApproval: Boolean(
+          ticketProduct?.requiresPartnerApproval || ticketProduct?.approvalRequired,
+        ),
+        customer: {
+          fullName: user?.fullName,
+          email: user?.email,
+          phone: user?.phone,
+        },
       })
+      onClose()
+      navigate(`/checkout/${result.data?.reservationId || result.data?.id}`)
+    } catch (error) {
+      console.error('Lỗi khi giữ vé:', error)
+      setErrorMessage(error.message)
     } finally {
       setIsSubmitting(false)
     }
@@ -455,6 +448,14 @@ export default function BookingModal({ isOpen, onClose, ticketProduct, attractio
                 Đã bao gồm VAT & phí dịch vụ
               </span>
             </div>
+
+            {errorMessage && (
+              <div className="mb-4 flex items-start gap-2 rounded-2xl border border-[#ba1a1a]/20 bg-[#ffedea] px-4 py-3 text-sm font-semibold text-[#ba1a1a]">
+                <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px]" aria-hidden="true">error</span>
+                {errorMessage}
+              </div>
+            )}
+
             <button
               className="group flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#006068] to-[#007b85] text-lg font-bold text-white shadow-lg shadow-[#006068]/20 transition hover:scale-[1.01] hover:shadow-[#006068]/40 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
               disabled={isSubmitting || !ticketId}

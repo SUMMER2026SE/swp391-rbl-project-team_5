@@ -1079,6 +1079,49 @@ h3 {
   font-size: 14px;
 }
 
+.ticket-divider::before,
+.ticket-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--color-background);
+  transform: translateY(-50%);
+}
+
+.ticket-divider::before {
+  left: -14px;
+}
+
+.ticket-divider::after {
+  right: -14px;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .ticket-print-area {
+    width: 100%;
+    max-width: none !important;
+    box-shadow: none !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
 /* Hero Slider Styles */
 .hero-slider {
   position: relative;

@@ -6,10 +6,12 @@ import AttractionDetailPage from '../pages/AttractionDetailPage.jsx'
 import BookingSuccessPage from '../pages/BookingSuccessPage.jsx'
 import ChangePasswordPage from '../pages/ChangePasswordPage.jsx'
 import CheckoutPage from '../pages/CheckoutPage.jsx'
+import ETicketPage from '../pages/ETicketPage.jsx'
 import EditProfilePage from '../pages/EditProfilePage.jsx'
 import ForgotPasswordPage from '../pages/ForgotPasswordPage.jsx'
 import HomePage from '../pages/HomePage.jsx'
 import LoginPage from '../pages/LoginPage.jsx'
+import MyTicketsPage from '../pages/MyTicketsPage.jsx'
 import PartnerAddAttractionPage from '../pages/PartnerAddAttractionPage.jsx'
 import PartnerAttractionsPage from '../pages/PartnerAttractionsPage.jsx'
 import PartnerBookingsPage from '../pages/PartnerBookingsPage.jsx'
@@ -28,6 +30,7 @@ import RegisterPage from '../pages/RegisterPage.jsx'
 import ResetPasswordPage from '../pages/ResetPasswordPage.jsx'
 import SearchAttractionsPage from '../pages/SearchAttractionsPage.jsx'
 import UserFavoritesPage from '../pages/UserFavoritesPage.jsx'
+import VNPaySimulatorPage from '../pages/VNPaySimulatorPage.jsx'
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx'
 import AdminDashboard from '../pages/admin/AdminDashboard.jsx'
 import KycApprovalPage from '../pages/admin/KycApprovalPage.jsx'
@@ -246,6 +249,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <BookingSuccessPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/my-tickets"
+        element={
+          <ProtectedRoute>
+            <MyTicketsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tickets/:bookingId"
+        element={
+          <ProtectedRoute>
+            <ETicketPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payment/vnpay-mock/:bookingId"
+        element={
+          <ProtectedRoute>
+            <VNPaySimulatorPage />
           </ProtectedRoute>
         }
       />

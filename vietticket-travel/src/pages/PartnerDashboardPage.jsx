@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import { useAuth } from '../context/useAuth.js'
@@ -20,7 +20,7 @@ const MOCK_RECENT_BOOKINGS = [
   { id: 'B002', attraction: 'Sun World Ba Na Hills', ticket: 'Vé trẻ em', customer: 'Trần Thị B', date: '2026-06-05', amount: 550000, status: 'confirmed' },
   { id: 'B003', attraction: 'Vịnh Hạ Long Cruise', ticket: 'Vé du thuyền 1 ngày', customer: 'Lê Văn C', date: '2026-06-04', amount: 1100000, status: 'pending' },
   { id: 'B004', attraction: 'Hội An Lantern Festival', ticket: 'Vé tham quan đêm', customer: 'Phạm Thị D', date: '2026-06-04', amount: 120000, status: 'cancelled' },
-  { id: 'B005', attraction: 'Sun World Ba Na Hills', ticket: 'Vé gia đình', customer: 'Hoàng Văn E', date: '2026-06-03', amount: 2500000, status: 'confirmed' },
+  { id: 'B005', attraction: 'Sun World Ba Na Hills', ticket: 'Vé gia định', customer: 'Hoàng Văn E', date: '2026-06-03', amount: 2500000, status: 'confirmed' },
 ]
 
 const BOOKING_STATUS = {
@@ -35,6 +35,7 @@ function formatVND(n) {
 
 function PartnerDashboardPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [isLoading, setIsLoading] = useState(true)
   const [stats, setStats] = useState(null)
   const [bookings, setBookings] = useState([])
@@ -55,12 +56,26 @@ function PartnerDashboardPage() {
             : MOCK_RECENT_BOOKINGS
         )
       } catch (err) {
+        if (cancelled) return
+        const code = err.data?.code || err.data?.error?.code
+        if (err.status === 403) {
+          if (code === 'PARTNER_PROFILE_REQUIRED') {
+            navigate('/partner/kyc', { replace: true })
+            return
+          }
+          if (code === 'PARTNER_APPROVAL_REQUIRED') {
+            navigate('/partner/pending', { replace: true })
+            return
+          }
+        }
+
         if (partnerApi.isNetworkError(err)) {
-          if (cancelled) return
           setStats(MOCK_STATS)
           setBookings(MOCK_RECENT_BOOKINGS)
         } else {
-          toast.error(err.message)
+          toast.error(err.message || 'Có lỗi xảy ra khi tải thông tin dashboard.')
+          setStats(MOCK_STATS)
+          setBookings(MOCK_RECENT_BOOKINGS)
         }
       } finally {
         if (!cancelled) setIsLoading(false)
@@ -68,7 +83,7 @@ function PartnerDashboardPage() {
     })()
 
     return () => { cancelled = true }
-  }, [])
+  }, [navigate])
 
   const displayName = user?.fullName || user?.username || 'Đối tác'
 
@@ -99,12 +114,12 @@ function PartnerDashboardPage() {
           {/* Stat cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
             {[
-              { label: 'Điểm tham quan', value: stats.totalAttractions, icon: 'local_activity', color: 'text-[#00474d]', bg: 'bg-[#e0f4f5]', link: '/partner/attractions' },
-              { label: 'Đang hoạt động', value: stats.activeAttractions, icon: 'check_circle', color: 'text-[#137333]', bg: 'bg-[#E6F4EA]', link: '/partner/attractions' },
-              { label: 'Gói vé', value: stats.totalTickets, icon: 'confirmation_number', color: 'text-[#00629d]', bg: 'bg-[#cfe5ff]', link: null },
-              { label: 'Đặt vé tháng này', value: stats.totalBookingsThisMonth, icon: 'event_available', color: 'text-[#725000]', bg: 'bg-[#ffdea8]', link: '/partner/bookings' },
-              { label: 'Chờ xử lý', value: stats.pendingBookings, icon: 'pending', color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]', link: '/partner/bookings' },
-              { label: 'Doanh thu tháng', value: formatVND(stats.revenueThisMonth), icon: 'payments', color: 'text-[#4a3800]', bg: 'bg-[#ffefc6]', link: '/partner/reports' },
+              { label: 'Điểm tham quan', value: stats?.totalAttractions ?? 0, icon: 'local_activity', color: 'text-[#00474d]', bg: 'bg-[#e0f4f5]', link: '/partner/attractions' },
+              { label: 'Đang hoạt động', value: stats?.activeAttractions ?? 0, icon: 'check_circle', color: 'text-[#137333]', bg: 'bg-[#E6F4EA]', link: '/partner/attractions' },
+              { label: 'Gói vé', value: stats?.totalTickets ?? 0, icon: 'confirmation_number', color: 'text-[#00629d]', bg: 'bg-[#cfe5ff]', link: null },
+              { label: 'Đặt vé tháng này', value: stats?.totalBookingsThisMonth ?? 0, icon: 'event_available', color: 'text-[#725000]', bg: 'bg-[#ffdea8]', link: '/partner/bookings' },
+              { label: 'Chờ xử lý', value: stats?.pendingBookings ?? 0, icon: 'pending', color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]', link: '/partner/bookings' },
+              { label: 'Doanh thu tháng', value: formatVND(stats?.revenueThisMonth ?? 0), icon: 'payments', color: 'text-[#4a3800]', bg: 'bg-[#ffefc6]', link: '/partner/reports' },
             ].map((s) => (
               <StatCard key={s.label} {...s} />
             ))}

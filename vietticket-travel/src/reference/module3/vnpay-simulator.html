@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+
+<html lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>VNPay Simulator | VietTicket Travel</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "inverse-surface": "#2e3132",
+                    "tertiary-fixed": "#ffdea8",
+                    "surface-bright": "#f8fafb",
+                    "on-error": "#ffffff",
+                    "on-secondary-container": "#003558",
+                    "tertiary-container": "#725000",
+                    "on-secondary-fixed": "#001d33",
+                    "outline": "#6f797a",
+                    "on-secondary": "#ffffff",
+                    "surface-tint": "#136870",
+                    "on-surface": "#191c1d",
+                    "primary-fixed-dim": "#8ad2db",
+                    "surface-container-lowest": "#ffffff",
+                    "surface": "#f8fafb",
+                    "on-primary": "#ffffff",
+                    "on-primary-fixed-variant": "#004f56",
+                    "inverse-on-surface": "#eff1f2",
+                    "secondary": "#00629d",
+                    "surface-variant": "#e1e3e4",
+                    "on-error-container": "#93000a",
+                    "surface-container": "#eceeef",
+                    "primary-container": "#006068",
+                    "outline-variant": "#bec8ca",
+                    "on-tertiary-fixed": "#271900",
+                    "on-tertiary": "#ffffff",
+                    "primary": "#00474d",
+                    "inverse-primary": "#8ad2db",
+                    "on-primary-fixed": "#001f23",
+                    "tertiary-fixed-dim": "#ffba20",
+                    "background": "#f8fafb",
+                    "on-tertiary-fixed-variant": "#5e4200",
+                    "surface-dim": "#d8dadb",
+                    "secondary-fixed": "#cfe5ff",
+                    "on-surface-variant": "#3f484a",
+                    "on-primary-container": "#90d8e1",
+                    "tertiary": "#543a00",
+                    "on-secondary-fixed-variant": "#004a77",
+                    "secondary-container": "#00a2fd",
+                    "secondary-fixed-dim": "#98cbff",
+                    "on-background": "#191c1d",
+                    "error": "#ba1a1a",
+                    "surface-container-low": "#f2f4f5",
+                    "primary-fixed": "#a6eff8",
+                    "on-tertiary-container": "#ffc247",
+                    "surface-container-high": "#e6e8e9",
+                    "surface-container-highest": "#e1e3e4",
+                    "error-container": "#ffdad6"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin-mobile": "20px",
+                    "gutter": "24px",
+                    "margin-desktop": "64px",
+                    "unit": "8px",
+                    "container-max": "1280px"
+            },
+            "fontFamily": {
+                    "headline-md": ["Inter"],
+                    "display-lg": ["Inter"],
+                    "body-md": ["Inter"],
+                    "label-sm": ["Inter"],
+                    "headline-lg-mobile": ["Inter"],
+                    "label-md": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "body-lg": ["Inter"]
+            },
+            "fontSize": {
+                    "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "600"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            background-color: #F8FAFB;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        .bank-logo-grid img {
+            filter: grayscale(100%);
+            transition: filter 0.3s ease, transform 0.2s ease;
+        }
+        .bank-logo-grid img:hover {
+            filter: grayscale(0%);
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body class="font-body-md text-on-surface">
+<!-- TopAppBar Simulator Header -->
+<header class="fixed top-0 w-full z-50 shadow-[0px_4px_20px_rgba(0,123,133,0.05)] bg-primary dark:bg-primary-container h-24">
+<div class="flex justify-between items-center h-full px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto">
+<!-- Brand Logo -->
+<div class="flex items-center gap-4">
+<div class="p-2 bg-white rounded-lg">
+<span class="material-symbols-outlined text-primary text-3xl" style="font-variation-settings: 'FILL' 1;">account_balance_wallet</span>
+</div>
+<div class="flex flex-col">
+<span class="font-display-lg text-headline-md font-bold text-on-primary">VNPay Simulator</span>
+<span class="font-label-sm text-on-primary/70">Môi trường thử nghiệm thanh toán</span>
+</div>
+</div>
+<!-- Transaction Info -->
+<div class="hidden md:flex items-center gap-x-8 text-on-primary">
+<div class="flex flex-col items-end">
+<span class="font-label-sm opacity-80">Đơn vị thụ hưởng</span>
+<span class="font-headline-md">VietTicket Travel</span>
+</div>
+<div class="w-px h-10 bg-on-primary/20"></div>
+<div class="flex flex-col items-end">
+<span class="font-label-sm opacity-80">Mã đơn hàng</span>
+<span class="font-headline-md">VT-123456</span>
+</div>
+<div class="w-px h-10 bg-on-primary/20"></div>
+<div class="flex flex-col items-end">
+<span class="font-label-sm opacity-80">Số tiền thanh toán</span>
+<span class="font-headline-lg text-secondary-fixed">1.700.000đ</span>
+</div>
+</div>
+<!-- Mobile Info Icon -->
+<button class="md:hidden text-on-primary">
+<span class="material-symbols-outlined">info</span>
+</button>
+</div>
+</header>
+<!-- Main Content -->
+<main class="mt-32 pb-12 px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter">
+<!-- Left Panel: QR Code -->
+<div class="lg:col-span-5 flex flex-col gap-y-6">
+<div class="bg-surface-container-lowest rounded-xl p-10 shadow-[0px_4px_20px_rgba(0,40,50,0.05)] flex flex-col items-center text-center">
+<h2 class="font-headline-lg text-primary mb-2">Quét mã để thanh toán</h2>
+<p class="font-body-md text-on-surface-variant mb-8">Sử dụng ứng dụng ngân hàng hoặc ví VNPay để quét</p>
+<div class="relative p-6 bg-white border-2 border-outline-variant/30 rounded-2xl shadow-inner">
+<img alt="Payment QR Code" class="w-60 h-60" data-alt="A clean, high-contrast QR code centered on a crisp white square background with rounded corners. The setting is a minimalist professional interface with soft studio lighting. The style is flat and modern, using the primary brand colors of emerald teal and sky blue for the UI elements surrounding the QR code. The mood is secure and efficient." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBvyumo1FLqmiSaFnbElju2YA3FiXM4yOdjXTT1CbP0-ehH7VCPT2JSa6O8XnXotCBTJry_YjoptZm1PWcjMlnZFRktBeMhQYRkDxjJa1q8nGToV8-M2nSwc5whrMsPlYwSwRzMUKk8-tzOF_Qd4hxNG7oCCB6mporiI_tf7hNshRwlYBDj3DnaCN99mb18rSVRizcNt6bEU0uG9cUoZLavVMAZODFU5TyrMr_H23KrgQayaJBUL0OBJ_3n2rBk-CC3RCgOQ38eEg8"/>
+<div class="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
+<span class="material-symbols-outlined text-8xl">qr_code_2</span>
+</div>
+</div>
+<div class="mt-8 flex items-center gap-2 text-secondary font-headline-md">
+<span class="material-symbols-outlined animate-pulse">timer</span>
+<span>09:59</span>
+</div>
+<p class="font-label-sm text-on-surface-variant mt-2 uppercase tracking-wider">Hiệu lực giao dịch</p>
+</div>
+<!-- Guidance Note -->
+<div class="bg-surface-container-low rounded-xl p-6 border-l-4 border-secondary">
+<div class="flex gap-4">
+<span class="material-symbols-outlined text-secondary">security</span>
+<div>
+<h4 class="font-headline-md text-secondary">Giao dịch an toàn</h4>
+<p class="font-body-md text-on-surface-variant">Thông tin của bạn được bảo mật theo tiêu chuẩn quốc tế PCI DSS.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Panel: Bank Selection -->
+<div class="lg:col-span-7 flex flex-col gap-y-6">
+<div class="bg-surface-container-lowest rounded-xl p-8 shadow-[0px_4px_20px_rgba(0,40,50,0.05)] h-full">
+<div class="flex justify-between items-end mb-8">
+<div>
+<h2 class="font-headline-lg text-on-surface">Thanh toán qua ngân hàng</h2>
+<p class="font-body-md text-on-surface-variant">Chọn ngân hàng nội địa để tiếp tục</p>
+</div>
+<div class="hidden md:block relative">
+<input class="pl-10 pr-4 py-2 bg-surface-container-low border-none rounded-full text-body-md focus:ring-2 focus:ring-secondary/20 w-64" placeholder="Tìm tên ngân hàng..." type="text"/>
+<span class="material-symbols-outlined absolute left-3 top-2 text-on-surface-variant">search</span>
+</div>
+</div>
+<!-- Bank Grid -->
+<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 bank-logo-grid">
+<!-- Each bank button -->
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden">
+<img alt="Vietcombank" class="h-8 object-contain" data-alt="A clean, professional minimalist logo for a major Vietnamese bank, Vietcombank, displayed on a neutral light background. The lighting is bright and even, emphasizing digital clarity. The style is flat and corporate, fitting a high-end fintech UI. The composition is centered and balanced." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDxsIBwGrUJUtiqKhgLQpUCjPgx-ywJ4aRKanczR1JCGML7z36tkbvga2toPj4YS4TTv1HWagjpCgpBjw-c9_AcSpJt7LVDhZVNnCieiuiaYhhoKlyT1rq7x6p4QNVdOgDJltarQgFN-vy4wsZ5RtHNpjg6Lc2Q1GGuWpYFPjw8YXQU3ujErpUn-44jQxeJ6Kl5HiboaK9Lymja9xyNMiXoHCie5rJn0mL5kQr64Kzk-wuLZL8Mg_LlTOqP99aZhr6TxtgfmCBg1zk"/>
+</div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">Vietcombank</span>
+</button>
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden">
+<img alt="BIDV" class="h-8 object-contain" data-alt="A professional bank logo for BIDV, styled with clean lines and high-fidelity digital rendering. The background is a soft off-white, part of a premium financial application interface. The lighting is high-key and modern, reflecting a sense of security and trust. The overall aesthetic is minimalist and functional." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCqMTdyNLX2-MqMLNFSfpbCYcl2Fbr6nON9pdeFpxHKe_11NtePprXWHAxrL7lm-lEm3lm-eisT12Ic0oWM9WbWeYkZXofaWQ3lxGQlM7eKrHeXDhRBqyU652r3cLgKp5tEjaWGHORyHx9pbtBan6lI79eb5R3nWUxkkWeG_XYfh_dvFaIFeDiyDIzMwYqqvysbfBFK4-DBJiJ06j_WPgHTlPxYeDAsaJ1F8Qmgv99OfvvxnAU-tOem5Jgu3XKe0F4dHg0jHh_Oe34"/>
+</div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">BIDV</span>
+</button>
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden">
+<img alt="Techcombank" class="h-8 object-contain" data-alt="A minimalist logo representing Techcombank, rendered for a high-end banking application. The visual style is crisp and flat, using a palette of white and neutral grays. The mood is technologically advanced and reliable. The lighting is diffused and bright, creating a premium digital feel." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC6MUQw6UVeVRUg0zU4O-Rsf4DxdtxlE22-4VvuuGrCOIwdghKmvEy6EeFlJKIs-vfMUVKK9QxHW7A0HZ5U5Yvljd_m2z00bXiEE8ENaGfcjvZdHNvicJPWmlafKfVUMvYI3zzh8bIRyUtqcbNVIuZBeJUoQLmmtSpoCjZUHw5nEPTI86MuvCoKoDMTs8PnHViLrb4tcswhSP290A_PkN3JofYoq34-AgutTMIt9nyZuIzBzrIgNUTkN5AbsRL7EdLNlmyHY5AVxSI"/>
+</div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">Techcombank</span>
+</button>
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden">
+<img alt="Agribank" class="h-8 object-contain" data-alt="A simplified, professional representation of the Agribank logo on a clean white digital card. The setting is a modern financial dashboard with heavy whitespace. The style is minimalist flat design with subtle shadows for depth. The lighting is bright and modern, conveying efficiency." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAbc1YG04Q4vAC5q-_sEuIPQonwRU3EQJv3BYWNxUDY8DTFvRoXXLE00v0urv_EELAUUOGDghGx47ztP5jfkrC0qwk4BapHtt0qsLtsdUs8SRhiJMf2i1j45CMn9-A7ILg-PpgMWg6PC7KLG4krljw_gzGn3dleBvHDM1dUvfdbORUBtkfmqp_PAlbCljxr2pRnFcgrGjFE8p1kUffYpWigi-GPGEPzfyu-Nm2HvQwE44EaB00TJ4DcoGtn9jjtnKqf190nJocQZFc"/>
+</div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">Agribank</span>
+</button>
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden">
+<img alt="MB Bank" class="h-8 object-contain" data-alt="A digital logo for MB Bank, displayed within a sleek, modern UI component. The design is minimalist, focusing on clarity and brand recognition within a financial simulator. The background is a crisp white with soft ambient shadows. The mood is professional and trustworthy." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCffWO4pY5MjP7dQTffscOwkPBoU-ikdGpRZJSKjqnvg2LHLO6B1q8DCdae6oxIijY1wDDrBP5rkTDayuMtF76dW2pUR8vr4cemBhXYY7JnGTM_T2NvWJ6REz4WV1q9ltYcEYxMUmqjPq4ximBB8qqjoXoOSVmnzmJMUUccHuaArDZADfnltvxIdgiwcQvDBDgNwDPBOtZVmxr5IHp2t-6lRI4cLWwMA-T4sAsD8UpAwVgRCyOPRZ47ad6UlTbrjNE-t8Sz_pyhbZg"/>
+</div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">MB Bank</span>
+</button>
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden">
+<img alt="Vietinbank" class="h-8 object-contain" data-alt="A clean, high-resolution logo for Vietinbank on a neutral background. The lighting is bright and high-key, highlighting the professional fintech aesthetic. The style is minimalist and precise, designed for easy identification in a digital payment grid. The composition is simple and effective." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAwHIAGd45DhCRHszs_mbHWBhF3Gn5b9JXMP0qkRJGAn4AGD5XjEoLn8srLPee0DjF0E7qBalbVcZ5cMkBwZmRdV6MVwu6rve_i_yesxv5eD1BeM6M344rxBx29sOPgbI0QGLLd_5Iolw419Sjrc9NrfzvfpCDT3SnEKQqJq_7xYTLqdX8OTd5K83nhzpcf_SJ4dv_puQ8vZ7OY4UZnDZaTHVg7mtmavScnHNwFjBK3p6ZGwKxMZUibw-xl41TR2g6Ve5cxCPpYPLU"/>
+</div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">Vietinbank</span>
+</button>
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden text-on-surface-variant font-bold text-xs">
+                                VPBANK
+                            </div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">VPBank</span>
+</button>
+<button class="flex flex-col items-center justify-center p-4 rounded-xl border border-outline-variant/30 hover:border-secondary hover:bg-secondary/5 transition-all group">
+<div class="h-12 w-24 bg-surface-container-high rounded flex items-center justify-center mb-2 overflow-hidden text-on-surface-variant font-bold text-xs">
+                                ACB
+                            </div>
+<span class="font-label-md text-on-surface-variant group-hover:text-secondary">ACB</span>
+</button>
+</div>
+<div class="mt-8 pt-8 border-t border-outline-variant/20 flex justify-center">
+<button class="text-secondary font-label-md flex items-center gap-2 hover:underline">
+                            Xem thêm ngân hàng
+                            <span class="material-symbols-outlined text-sm">expand_more</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Developer Sandbox Section -->
+<section class="mt-section-gap bg-tertiary-fixed/20 border-2 border-tertiary-fixed-dim border-dashed rounded-3xl p-8 relative overflow-hidden">
+<div class="absolute top-0 right-0 p-4 opacity-10">
+<span class="material-symbols-outlined text-8xl">terminal</span>
+</div>
+<div class="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
+<div class="flex flex-col">
+<div class="flex items-center gap-3 mb-2">
+<div class="w-10 h-10 rounded-full bg-tertiary-fixed-dim flex items-center justify-center">
+<span class="material-symbols-outlined text-on-tertiary-fixed">code</span>
+</div>
+<h3 class="font-headline-lg text-on-tertiary-fixed">Môi trường thử nghiệm cho Nhà phát triển</h3>
+</div>
+<p class="font-body-md text-on-tertiary-fixed-variant max-w-xl">
+                        Sử dụng các công cụ giả lập dưới đây để kiểm tra phản hồi Webhook và Redirect URL từ hệ thống thanh toán VNPay về ứng dụng VietTicket của bạn.
+                    </p>
+</div>
+<div class="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+<!-- Success Button -->
+<button class="group relative flex-1 md:flex-initial bg-[#2E7D32] hover:bg-[#1B5E20] text-white px-8 py-4 rounded-xl font-headline-md flex items-center justify-center gap-3 transition-all shadow-lg active:scale-95" onclick="simulate('success')">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+                        Giả lập Thành công
+                        <div class="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl"></div>
+</button>
+<!-- Failure Button -->
+<button class="group relative flex-1 md:flex-initial bg-[#C62828] hover:bg-[#B71C1C] text-white px-8 py-4 rounded-xl font-headline-md flex items-center justify-center gap-3 transition-all shadow-lg active:scale-95" onclick="simulate('failure')">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">cancel</span>
+                        Giả lập Thất bại
+                        <div class="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl"></div>
+</button>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full mt-12 bg-primary dark:bg-primary-container">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-gutter px-margin-desktop py-12 max-w-container-max mx-auto">
+<div class="md:col-span-2">
+<h2 class="font-display-lg text-headline-lg text-on-primary mb-4">VietTicket Travel</h2>
+<p class="text-on-primary/80 font-body-md max-w-sm mb-6">Hệ thống phân phối vé tham quan hàng đầu Việt Nam. Kết nối bạn với những trải nghiệm tuyệt vời nhất.</p>
+<p class="font-label-sm text-on-primary/60">© 2024 VietTicket Travel. Exploring Vietnam's Beauty.</p>
+</div>
+<div class="flex flex-col gap-4">
+<h4 class="font-headline-md text-on-primary">Dịch vụ</h4>
+<a class="text-on-primary/80 hover:text-on-primary font-label-sm transition-colors" href="#">Điều khoản dịch vụ</a>
+<a class="text-on-primary/80 hover:text-on-primary font-label-sm transition-colors" href="#">Chính sách bảo mật</a>
+<a class="text-on-primary/80 hover:text-on-primary font-label-sm transition-colors" href="#">Quy trình hoàn tiền</a>
+</div>
+<div class="flex flex-col gap-4">
+<h4 class="font-headline-md text-on-primary">Liên hệ</h4>
+<div class="flex items-center gap-2 text-on-primary/80 font-label-sm">
+<span class="material-symbols-outlined text-sm">call</span>
+                    1900 1234
+                </div>
+<div class="flex items-center gap-2 text-on-primary/80 font-label-sm">
+<span class="material-symbols-outlined text-sm">mail</span>
+                    support@vietticket.vn
+                </div>
+<div class="mt-4 flex gap-4">
+<div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 cursor-pointer">
+<span class="material-symbols-outlined text-on-primary text-lg">public</span>
+</div>
+<div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 cursor-pointer">
+<span class="material-symbols-outlined text-on-primary text-lg">share</span>
+</div>
+</div>
+</div>
+</div>
+</footer>
+<!-- Simple Interaction Script -->
+<script>
+        function simulate(type) {
+            const body = document.body;
+            const overlay = document.createElement('div');
+            overlay.className = 'fixed inset-0 z-[100] flex items-center justify-center glass-panel';
+            
+            const content = document.createElement('div');
+            content.className = 'bg-white p-12 rounded-3xl shadow-2xl flex flex-col items-center max-w-md text-center scale-90 transition-transform duration-300';
+            
+            if(type === 'success') {
+                content.innerHTML = `
+                    <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
+                        <span class="material-symbols-outlined text-green-600 text-5xl">check_circle</span>
+                    </div>
+                    <h2 class="text-3xl font-bold text-gray-900 mb-2">Thanh toán thành công!</h2>
+                    <p class="text-gray-600 mb-8">Giao dịch đã được ghi nhận. Hệ thống sẽ tự động chuyển về trang VietTicket sau 3 giây.</p>
+                    <div class="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                        <div class="h-full bg-green-500 animate-[progress_3s_linear]"></div>
+                    </div>
+                `;
+            } else {
+                content.innerHTML = `
+                    <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6">
+                        <span class="material-symbols-outlined text-red-600 text-5xl">error</span>
+                    </div>
+                    <h2 class="text-3xl font-bold text-gray-900 mb-2">Giao dịch thất bại</h2>
+                    <p class="text-gray-600 mb-8">Rất tiếc, đã có lỗi xảy ra trong quá trình thanh toán. Vui lòng thử lại hoặc chọn phương thức khác.</p>
+                    <button onclick="location.reload()" class="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold">Quay lại trang thanh toán</button>
+                `;
+            }
+            
+            overlay.appendChild(content);
+            body.appendChild(overlay);
+            
+            setTimeout(() => {
+                content.style.transform = 'scale(1)';
+            }, 50);
+
+            if(type === 'success') {
+                setTimeout(() => {
+                    location.reload();
+                }, 3000);
+            }
+        }
+
+        // Simple progress bar animation style
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes progress {
+                from { width: 0%; }
+                to { width: 100%; }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body></html>

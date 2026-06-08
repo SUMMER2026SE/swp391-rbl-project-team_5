@@ -1,9 +1,11 @@
 const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
-const { sendAccountStatusEmail } = require('../utils/mailer');
+const { sendAccountStatusEmail, sendPartnerReviewEmail, sendAttractionViolationEmail } = require('../utils/mailer');
 
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
+const ALLOWED_PARTNER_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
+const ALLOWED_ATTRACTION_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
@@ -176,7 +178,229 @@ async function changeUserStatus(req, res, next) {
   }
 }
 
+// ---------- New admin functions for Partner/Attraction review ----------
+
+async function getPartners(req, res, next) {
+  try {
+    const status = String(req.query.status || '').trim().toUpperCase();
+    const where = {};
+
+    if (status && !ALLOWED_PARTNER_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Partner status is invalid' },
+      });
+    }
+
+    if (status) where.status = status;
+
+    const partners = await prisma.partnerProfile.findMany({
+      where,
+      select: {
+        id: true,
+        businessName: true,
+        businessLicenseUrl: true,
+        taxCode: true,
+        status: true,
+        rejectionReason: true,
+        createdAt: true,
+        user: {
+          select: {
+            email: true,
+            fullName: true,
+            profile: { select: { phoneNumber: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.status(200).json({ success: true, data: partners });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getAttractions(req, res, next) {
+  try {
+    const status = String(req.query.status || '').trim().toUpperCase();
+    const search = String(req.query.search || '').trim();
+    const where = {};
+
+    if (status && !ALLOWED_ATTRACTION_STATUSES.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Attraction status is invalid' },
+      });
+    }
+
+    if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { city: { contains: search, mode: 'insensitive' } },
+        {
+          partner: {
+            businessName: { contains: search, mode: 'insensitive' },
+          },
+        },
+      ];
+    }
+
+    const attractions = await prisma.attraction.findMany({
+      where,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        address: true,
+        city: true,
+        status: true,
+        rejectionReason: true,
+        averageRating: true,
+        totalReviews: true,
+        createdAt: true,
+        partner: {
+          select: {
+            id: true,
+            businessName: true,
+          },
+        },
+        images: {
+          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+          take: 1,
+          select: { imageUrl: true },
+        },
+        categories: {
+          take: 1,
+          select: {
+            category: { select: { id: true, name: true } },
+          },
+        },
+        ticketProducts: {
+          where: { status: 'ACTIVE' },
+          orderBy: { sellingPrice: 'asc' },
+          take: 1,
+          select: { sellingPrice: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const data = attractions.map((attraction) => ({
+      id: attraction.id,
+      title: attraction.title,
+      description: attraction.description,
+      address: attraction.address,
+      city: attraction.city,
+      status: attraction.status,
+      rejectionReason: attraction.rejectionReason,
+      averageRating: attraction.averageRating,
+      totalReviews: attraction.totalReviews,
+      createdAt: attraction.createdAt,
+      partner: attraction.partner,
+      primaryImage: attraction.images[0]?.imageUrl || null,
+      category: attraction.categories[0]?.category || null,
+      minPrice: attraction.ticketProducts[0]
+        ? Number(attraction.ticketProducts[0].sellingPrice)
+        : null,
+    }));
+
+    return res.status(200).json({ success: true, data });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function reviewPartner(req, res, next) {
+  try {
+    const id = req.params.id;
+    const { action, rejectionReason } = req.body || {};
+    if (!['APPROVED', 'REJECTED'].includes(action)) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'action must be APPROVED or REJECTED' } });
+    if (action === 'REJECTED' && (!rejectionReason || String(rejectionReason).trim() === '')) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'rejectionReason is required when rejecting' } });
+
+    const partner = await prisma.partnerProfile.findUnique({ where: { id }, include: { user: true } });
+    if (!partner) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Partner profile not found' } });
+
+    if (action === 'APPROVED') {
+      await prisma.$transaction([
+        prisma.partnerProfile.update({ where: { id }, data: { status: 'APPROVED', rejectionReason: null } }),
+        prisma.user.update({ where: { id: partner.userId }, data: { role: 'PARTNER' } }),
+      ]);
+
+      // send email async
+      sendPartnerReviewEmail({ to: partner.user.email, businessName: partner.businessName, action: 'APPROVED' }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
+
+      return res.status(200).json({ success: true, message: `Trạng thái đối tác đã được cập nhật thành ${action}` });
+    }
+
+    // REJECTED
+    await prisma.$transaction([
+      prisma.partnerProfile.update({
+        where: { id },
+        data: { status: 'REJECTED', rejectionReason },
+      }),
+      prisma.user.update({
+        where: { id: partner.userId },
+        data: { role: 'CUSTOMER' },
+      }),
+    ]);
+    sendPartnerReviewEmail({ to: partner.user.email, businessName: partner.businessName, action: 'REJECTED', rejectionReason }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
+
+    return res.status(200).json({ success: true, message: `Trạng thái đối tác đã được cập nhật thành ${action}` });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function reviewAttraction(req, res, next) {
+  try {
+    const id = req.params.id;
+    const { action, rejectionReason } = req.body || {};
+    if (!['APPROVED', 'REJECTED'].includes(action)) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'action must be APPROVED or REJECTED' } });
+    if (action === 'REJECTED' && (!rejectionReason || String(rejectionReason).trim() === '')) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'rejectionReason is required when rejecting' } });
+
+    const attraction = await prisma.attraction.findUnique({ where: { id } });
+    if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
+
+    const status = action === 'APPROVED' ? 'APPROVED' : 'REJECTED';
+    await prisma.attraction.update({ where: { id }, data: { status, rejectionReason: action === 'REJECTED' ? rejectionReason : null } });
+
+    return res.status(200).json({ success: true, message: `Trạng thái địa điểm được cập nhật thành ${action}` });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function hideAttraction(req, res, next) {
+  try {
+    const id = req.params.id;
+    const { reason } = req.body || {};
+    if (!reason || String(reason).trim() === '') return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } });
+
+    const attraction = await prisma.attraction.findUnique({ where: { id }, include: { partner: { include: { user: true } } } });
+    if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
+
+    await prisma.attraction.update({ where: { id }, data: { status: 'SUSPENDED' } });
+
+    // send email but don't block
+    if (attraction.partner && attraction.partner.user && attraction.partner.user.email) {
+      sendAttractionViolationEmail({ to: attraction.partner.user.email, partnerName: attraction.partner.businessName, attractionTitle: attraction.title, reason }).catch((err) => console.error('[Admin] Lỗi gửi email vi phạm:', err));
+    }
+
+    return res.status(200).json({ success: true, message: 'Địa điểm đã bị ẩn thành công và email cảnh báo đã gửi tới đối tác.' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   changeUserStatus,
   getUsers,
+  getPartners,
+  getAttractions,
+  reviewPartner,
+  reviewAttraction,
+  hideAttraction,
 };
+

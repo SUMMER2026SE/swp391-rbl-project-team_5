@@ -22,4 +22,23 @@ async function requirePartner(req, res, next) {
   }
 }
 
-module.exports = { requirePartner };
+function requireApprovedPartner(req, res, next) {
+  if (!req.partner) {
+    return res.status(403).json({
+      message: 'Bạn chưa hoàn tất đăng ký đối tác.',
+      code: 'PARTNER_PROFILE_REQUIRED',
+    });
+  }
+
+  if (req.partner.status !== 'APPROVED') {
+    return res.status(403).json({
+      message: 'Hồ sơ đối tác chưa được phê duyệt.',
+      code: 'PARTNER_APPROVAL_REQUIRED',
+      partnerStatus: req.partner.status,
+    });
+  }
+
+  return next();
+}
+
+module.exports = { requirePartner, requireApprovedPartner };

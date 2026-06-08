@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
+import { useAuth } from '../context/useAuth.js'
 import { appDownloadButtons, footerLinks } from '../data/landingData.js'
-import { getMockAttractionDetail } from '../data/mockAttractions.js'
+import { apiRequest } from '../services/api.js'
+import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 
 const detailNavLinks = [
   { label: 'Khám phá', href: '/attractions', active: true },
@@ -73,6 +76,9 @@ const getAddress = (attraction) => {
 
 export default function AttractionDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { isAuthenticated, isAuthLoading, user } = useAuth()
   const [attraction, setAttraction] = useState(null)
   const [loading, setLoading] = useState(true)
   const [activeImage, setActiveImage] = useState('')
@@ -86,15 +92,57 @@ export default function AttractionDetailPage() {
   const [ticketQuantities, setTicketQuantities] = useState({})
   const [errorMessage, setErrorMessage] = useState('')
   const [isFavorite, setIsFavorite] = useState(false)
+  const [favoriteUserId, setFavoriteUserId] = useState('')
+  const [isFavoriteUpdating, setIsFavoriteUpdating] = useState(false)
 
   const handleToggleFavorite = async () => {
-    setIsFavorite(prev => !prev)
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: location } })
+      return
+    }
+
+    if (isFavoriteUpdating) return
+
+    setIsFavoriteUpdating(true)
     try {
-      await fetch(`/api/v1/attractions/${id}/favorite`, { method: 'POST' })
+      const result = await toggleFavorite(id)
+      setIsFavorite(Boolean(result.data?.isFavorite))
+      setFavoriteUserId(user?.id || '')
     } catch (error) {
       console.error('Lỗi khi thả tim:', error)
+      toast.error(error.message)
+    } finally {
+      setIsFavoriteUpdating(false)
     }
   }
+
+  useEffect(() => {
+    let active = true
+
+    if (isAuthLoading) return undefined
+    if (!isAuthenticated) return undefined
+
+    getFavorites()
+      .then((result) => {
+        if (!active) return
+        setIsFavorite(
+          getFavoriteItems(result).some(
+            (item) => (item.attractionId || item.attraction?.id || item.id) === id,
+          ),
+        )
+        setFavoriteUserId(user?.id || '')
+      })
+      .catch((error) => {
+        if (active && error.status !== 401) toast.error(error.message)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [id, isAuthenticated, isAuthLoading, user?.id])
+
+  const displayedIsFavorite =
+    isAuthenticated && favoriteUserId === user?.id && isFavorite
 
   useEffect(() => {
     const fetchDetail = async () => {
@@ -102,36 +150,19 @@ export default function AttractionDetailPage() {
       setErrorMessage('')
 
       try {
-        const response = await fetch(`/api/v1/attractions/${id}`)
-        const result = await response.json()
+        const result = await apiRequest(`/attractions/${id}`)
+        const detail = result.data
+        const images = normalizeImages(detail)
+        setAttraction(detail)
+        setActiveImage(getPrimaryImageUrl(images))
 
-        if (result.success) {
-          const detail = result.data
-          const images = normalizeImages(detail)
-          setAttraction(detail)
-          setActiveImage(getPrimaryImageUrl(images))
-
-          if (Array.isArray(detail.ticketProducts) && detail.ticketProducts.length > 0) {
-            setTicketQuantities({ [detail.ticketProducts[0].id]: 1 })
-          }
-        } else {
-          const mockDetail = getMockAttractionDetail(id)
-          setAttraction(mockDetail)
-          const imgs = normalizeImages(mockDetail)
-          setActiveImage(getPrimaryImageUrl(imgs))
-          if (Array.isArray(mockDetail.ticketProducts) && mockDetail.ticketProducts.length > 0) {
-            setTicketQuantities({ [mockDetail.ticketProducts[0].id]: 1 })
-          }
+        if (Array.isArray(detail.ticketProducts) && detail.ticketProducts.length > 0) {
+          setTicketQuantities({ [detail.ticketProducts[0].id]: 1 })
         }
       } catch (error) {
-        console.warn('Lỗi khi tải chi tiết địa điểm từ API, dùng mock data để demo:', error)
-        const mockDetail = getMockAttractionDetail(id)
-        setAttraction(mockDetail)
-        const imgs = normalizeImages(mockDetail)
-        setActiveImage(getPrimaryImageUrl(imgs))
-        if (Array.isArray(mockDetail.ticketProducts) && mockDetail.ticketProducts.length > 0) {
-          setTicketQuantities({ [mockDetail.ticketProducts[0].id]: 1 })
-        }
+        console.error('Lỗi khi tải chi tiết địa điểm từ API:', error)
+        setAttraction(null)
+        setErrorMessage(error.message)
       } finally {
         setLoading(false)
       }
@@ -382,16 +413,17 @@ export default function AttractionDetailPage() {
                   <h2 className="text-2xl font-bold text-[#00474d]">Đặt vé ngay</h2>
                   <div className="flex items-center gap-2">
                     <button
-                      aria-label={isFavorite ? 'Bỏ yêu thích' : 'Lưu yêu thích'}
+                      aria-label={displayedIsFavorite ? 'Bỏ yêu thích' : 'Lưu yêu thích'}
                       className="flex h-10 w-10 items-center justify-center rounded-full border border-[#bec8ca] transition hover:border-[#ba1a1a] hover:text-[#ba1a1a] active:scale-95"
+                      disabled={isFavoriteUpdating}
                       onClick={handleToggleFavorite}
                       type="button"
                     >
                       <span
                         className={`material-symbols-outlined text-[20px] transition ${
-                          isFavorite ? 'text-[#ba1a1a]' : 'text-[#3f484a]'
+                          displayedIsFavorite ? 'text-[#ba1a1a]' : 'text-[#3f484a]'
                         }`}
-                        style={{ fontVariationSettings: isFavorite ? "'FILL' 1" : "'FILL' 0" }}
+                        style={{ fontVariationSettings: displayedIsFavorite ? "'FILL' 1" : "'FILL' 0" }}
                         aria-hidden="true"
                       >
                         favorite
@@ -475,6 +507,8 @@ export default function AttractionDetailPage() {
       {isBookingOpen && selectedTicketProduct && (
         <BookingModal
           attractionId={id}
+          attractionImage={activeImage || getPrimaryImageUrl(images)}
+          attractionLocation={getAddress(attraction)}
           attractionTitle={attraction.title}
           isOpen={isBookingOpen}
           onClose={() => setIsBookingOpen(false)}

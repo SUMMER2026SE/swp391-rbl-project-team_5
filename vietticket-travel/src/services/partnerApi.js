@@ -15,6 +15,29 @@ export function getMyPartner() {
   return apiRequest('/partners/me', { method: 'GET' })
 }
 
+export async function uploadKycDocument(file) {
+  const formData = new FormData()
+  formData.append('document', file)
+
+  const response = await fetch(`${API_BASE_URL}/upload/document`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  })
+  const data = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    const error = new Error(
+      data.message || data.error?.message || 'Không thể tải tài liệu lên.',
+    )
+    error.status = response.status
+    error.data = data
+    throw error
+  }
+
+  return data.data?.url
+}
+
 export function updatePartnerSettings(payload) {
   return apiRequest('/partners/settings', { method: 'PUT', body: payload })
 }
@@ -45,6 +68,10 @@ export function getAttraction(id) {
 
 export function createAttraction(payload) {
   return apiRequest('/partners/attractions', { method: 'POST', body: payload })
+}
+
+export function submitAttraction(id) {
+  return apiRequest(`/attractions/${id}/submit`, { method: 'PUT' })
 }
 
 export function updateAttraction(id, payload) {

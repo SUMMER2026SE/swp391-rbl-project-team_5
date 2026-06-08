@@ -111,7 +111,15 @@ function validateTicket(body, { partial = false } = {}) {
 
   if (has('refundPolicy')) {
     const policy = String(body.refundPolicy).toUpperCase();
-    if (!['NONE', 'PARTIAL', 'FULL'].includes(policy)) {
+    const validPolicies = [
+      'NONE',
+      'PARTIAL',
+      'FULL',
+      'NON_REFUNDABLE',
+      'FREE_CANCELLATION',
+      'REFUND_WITH_FEE',
+    ];
+    if (!validPolicies.includes(policy)) {
       return 'Chính sách hoàn/hủy không hợp lệ.';
     }
   }
