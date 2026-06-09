@@ -17,11 +17,51 @@ const CATEGORIES = [
   'Adventure',
 ];
 
+const VOUCHERS = [
+  {
+    code: 'GIAM20',
+    discountType: 'FIXED',
+    discountValue: 20000,
+    maxDiscount: null,
+    minSpend: 100000,
+  },
+  {
+    code: 'VIETTICKET10',
+    discountType: 'PERCENTAGE',
+    discountValue: 10,
+    maxDiscount: 50000,
+    minSpend: 150000,
+  },
+];
+
 async function seedCategories() {
   for (const name of CATEGORIES) {
     await prisma.category.upsert({ where: { name }, update: {}, create: { name } });
   }
   console.log(`✓ Đã seed ${CATEGORIES.length} danh mục.`);
+}
+
+async function seedVouchers() {
+  const expiryDate = new Date();
+  expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+
+  for (const voucher of VOUCHERS) {
+    await prisma.voucher.upsert({
+      where: { code: voucher.code },
+      update: {
+        ...voucher,
+        expiryDate,
+        isActive: true,
+      },
+      create: {
+        ...voucher,
+        expiryDate,
+        isActive: true,
+      },
+    });
+  }
+
+  console.log(`✓ Đã seed ${VOUCHERS.length} voucher Module 3.`);
 }
 
 async function seedPartner() {
@@ -146,6 +186,7 @@ async function main() {
     await prisma.$connect();
     console.log('Đang seed dữ liệu Module 2...');
     await seedCategories();
+    await seedVouchers();
     const partner = await seedPartner();
     await seedAttractions(partner);
     console.log('==================================================');

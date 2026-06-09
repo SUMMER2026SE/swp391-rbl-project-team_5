@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/useAuth.js'
 import bookingService from '../services/bookingService.js'
 import { apiRequest } from '../services/api.js'
 
@@ -43,12 +42,8 @@ export default function BookingModal({
   onClose,
   ticketProduct,
   attractionId,
-  attractionTitle,
-  attractionLocation,
-  attractionImage,
 }) {
   const navigate = useNavigate()
-  const { user } = useAuth()
   const todayStr = toDateInputValue(new Date())
   const [selectedDate, setSelectedDate] = useState(todayStr)
   const [selectedTimeSlotId, setSelectedTimeSlotId] = useState('')
@@ -68,7 +63,7 @@ export default function BookingModal({
   ]
 
   const adultPrice = Number(ticketProduct?.sellingPrice || ticketProduct?.price || 0)
-  const childPrice = Number(ticketProduct?.childSellingPrice || ticketProduct?.childPrice || adultPrice * 0.7)
+  const childPrice = adultPrice
   const totalPrice = counts.adult * adultPrice + counts.child * childPrice
   const ticketId = ticketProduct?.id
 
@@ -226,31 +221,7 @@ export default function BookingModal({
           quantity: counts.adult + counts.child,
         },
       })
-      const slot = timeSlots.find(s => getSlotId(s) === selectedTimeSlotId)
-      bookingService.reserveTicket({
-        bookingId: result.data?.reservationId || result.data?.id,
-        attractionId,
-        attractionTitle: attractionTitle || 'Điểm tham quan',
-        attractionLocation: attractionLocation || 'Việt Nam',
-        attractionImage,
-        ticketId,
-        ticketName: ticketProduct?.name || 'Vé tham quan',
-        visitDate: selectedDate,
-        timeSlotId: selectedTimeSlotId,
-        timeSlotLabel: getSlotLabel(slot || { label: '09:00 - 17:00' }),
-        adultCount: counts.adult,
-        childCount: counts.child,
-        adultPrice,
-        childPrice,
-        requiresPartnerApproval: Boolean(
-          ticketProduct?.requiresPartnerApproval || ticketProduct?.approvalRequired,
-        ),
-        customer: {
-          fullName: user?.fullName,
-          email: user?.email,
-          phone: user?.phone,
-        },
-      })
+      bookingService.reserveTicket(result.data?.reservationId || result.data?.id)
       onClose()
       navigate(`/checkout/${result.data?.reservationId || result.data?.id}`)
     } catch (error) {

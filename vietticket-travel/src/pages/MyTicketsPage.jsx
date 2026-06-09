@@ -36,8 +36,10 @@ const formatCountdown = (milliseconds) => {
 function MyTicketsPage() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('all')
-  const [bookings, setBookings] = useState(() => bookingService.getBookings())
+  const [bookings, setBookings] = useState([])
   const [now, setNow] = useState(0)
+  const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState('')
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -45,13 +47,22 @@ function MyTicketsPage() {
   }, [])
 
   useEffect(() => {
-    const refreshBookings = () => setBookings(bookingService.getBookings())
-    window.addEventListener('storage', refreshBookings)
-    window.addEventListener('vietticket:bookings-updated', refreshBookings)
+    let active = true
+
+    bookingService
+      .getBookings()
+      .then((data) => {
+        if (active) setBookings(data)
+      })
+      .catch((error) => {
+        if (active) setErrorMessage(error.message)
+      })
+      .finally(() => {
+        if (active) setIsLoading(false)
+      })
 
     return () => {
-      window.removeEventListener('storage', refreshBookings)
-      window.removeEventListener('vietticket:bookings-updated', refreshBookings)
+      active = false
     }
   }, [])
 
@@ -130,7 +141,15 @@ function MyTicketsPage() {
           </div>
 
           <div className="flex max-w-4xl flex-col gap-6">
-            {filteredBookings.length === 0 ? (
+            {isLoading ? (
+              <p className="py-12 text-center font-semibold text-primary">
+                Đang tải danh sách vé...
+              </p>
+            ) : errorMessage ? (
+              <p className="rounded-xl bg-red-50 p-4 text-center font-semibold text-error">
+                {errorMessage}
+              </p>
+            ) : filteredBookings.length === 0 ? (
               <EmptyTickets activeTab={activeTab} />
             ) : (
               filteredBookings.map((booking) => (
@@ -164,12 +183,7 @@ function SidebarLink({ active = false, href, icon, label }) {
 function TicketCard({ booking, now }) {
   const remainingTime = getRemainingTime(booking.expiresAt, now)
   const isExpired = booking.status === 'unpaid' && remainingTime === 0
-  const quantityText = [
-    booking.adultCount > 0 ? `${booking.adultCount} người lớn` : '',
-    booking.childCount > 0 ? `${booking.childCount} trẻ em` : '',
-  ]
-    .filter(Boolean)
-    .join(', ')
+  const quantityText = `${booking.quantity || 1} vé`
 
   return (
     <article className="group overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-[0_4px_20px_rgba(0,40,50,0.05)] transition hover:shadow-[0_8px_30px_rgba(0,40,50,0.08)] md:flex">
@@ -200,7 +214,7 @@ function TicketCard({ booking, now }) {
           <div className="mb-6 grid grid-cols-2 gap-x-8 gap-y-4">
             <TicketFact label="Mã đặt chỗ" value={booking.id} />
             <TicketFact label="Ngày" value={formatDate(booking.visitDate)} />
-            <TicketFact label="Số lượng" value={quantityText || `${booking.quantity || 1} vé`} />
+            <TicketFact label="Số lượng" value={quantityText} />
             <TicketFact
               emphasized
               label="Giá"
@@ -220,7 +234,7 @@ function TicketCard({ booking, now }) {
               </span>
               <Link
                 className="rounded-xl bg-primary px-7 py-2.5 font-bold text-on-primary transition hover:brightness-110 active:scale-95"
-                to={`/checkout/${booking.id}`}
+                to={`/checkout/${booking.reservationId}`}
               >
                 Thanh toán ngay
               </Link>
