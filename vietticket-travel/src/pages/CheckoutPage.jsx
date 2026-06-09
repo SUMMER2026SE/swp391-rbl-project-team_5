@@ -42,31 +42,176 @@ const formatDate = (value) => {
 function CheckoutPage() {
   const { reservationId } = useParams()
   const navigate = useNavigate()
-  const [booking, setBooking] = useState(() =>
-    bookingService.getBookingDetails(reservationId),
-  )
-  const [selectedPayment, setSelectedPayment] = useState(
-    booking?.paymentMethod || 'vnpay',
-  )
-  const [voucherCode, setVoucherCode] = useState(booking?.voucherCode || '')
+  const [booking, setBooking] = useState(null)
+  const [contact, setContact] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+  })
+  const [selectedPayment, setSelectedPayment] = useState('vnpay')
+  const [voucherCode, setVoucherCode] = useState('')
+  const [appliedVoucherCode, setAppliedVoucherCode] = useState('')
   const [voucherMessage, setVoucherMessage] = useState('')
-  const [voucherSuccess, setVoucherSuccess] = useState(Boolean(booking?.voucherCode))
-  const [note, setNote] = useState(booking?.note || '')
+  const [voucherSuccess, setVoucherSuccess] = useState(false)
+  const [note, setNote] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [isApplyingVoucher, setIsApplyingVoucher] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [now, setNow] = useState(0)
 
   useEffect(() => {
-    const refreshTime = () => setNow(Date.now())
-    refreshTime()
-    const timer = window.setInterval(refreshTime, 1000)
+    let active = true
+
+    const loadReservation = async () => {
+      try {
+        const reservation = await bookingService.getReservationDetails(
+          reservationId,
+        )
+        if (!active) return
+
+        setBooking(reservation)
+        setContact({
+          fullName: reservation.customer?.fullName || '',
+          email: reservation.customer?.email || '',
+          phone: reservation.customer?.phone || '',
+        })
+      } catch (error) {
+        if (active) setErrorMessage(error.message)
+      } finally {
+        if (active) setIsLoading(false)
+      }
+    }
+
+    loadReservation()
+    return () => {
+      active = false
+    }
+  }, [reservationId])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
 
-  // Bug #2 fix: tính thời gian còn lại TRƯỚC early return (rules-of-hooks)
-  // 'now === 0' nghĩa là interval chưa kịp chạy lần đầu → dùng expiresAt để tính lượng còn lại
   const expiresAtMs = booking ? new Date(booking.expiresAt).getTime() : 0
-  const remainingMs = Math.max(0, expiresAtMs - (now > 0 ? now : expiresAtMs - 10 * 60 * 1000))
+  const remainingMs = booking
+    ? Math.max(0, expiresAtMs - (now || expiresAtMs))
+    : 0
+  const isExpired = Boolean(
+    booking && now > 0 && booking.status === 'held' && expiresAtMs <= now,
+  )
+
+  const handleContactChange = (field) => (event) => {
+    setContact((current) => ({ ...current, [field]: event.target.value }))
+  }
+
+  const handleVoucherChange = (event) => {
+    const nextCode = event.target.value
+    setVoucherCode(nextCode)
+    setVoucherMessage('')
+    setVoucherSuccess(false)
+
+    if (appliedVoucherCode) {
+      setAppliedVoucherCode('')
+      setBooking((current) =>
+        current
+          ? {
+              ...current,
+              voucherCode: '',
+              discountAmount: 0,
+              totalAmount: current.subtotalAmount,
+            }
+          : current,
+      )
+    }
+  }
+
+  const handleApplyVoucher = async (event) => {
+    event.preventDefault()
+    if (!booking || isApplyingVoucher) return
+
+    setIsApplyingVoucher(true)
+    setVoucherMessage('')
+
+    try {
+      const result = await bookingService.applyVoucher(
+        booking.id,
+        voucherCode,
+        booking.subtotalAmount,
+      )
+      const normalizedCode = result.data.voucher.code
+
+      setBooking((current) => ({
+        ...current,
+        voucherCode: normalizedCode,
+        discountAmount: result.data.discountAmount,
+        totalAmount: result.data.totalAmount,
+      }))
+      setVoucherCode(normalizedCode)
+      setAppliedVoucherCode(normalizedCode)
+      setVoucherMessage(result.message)
+      setVoucherSuccess(true)
+    } catch (error) {
+      setVoucherMessage(error.message)
+      setVoucherSuccess(false)
+    } finally {
+      setIsApplyingVoucher(false)
+    }
+  }
+
+  const handleConfirm = async () => {
+    if (!booking || isSubmitting) return
+
+    setErrorMessage('')
+    if (isExpired) {
+      setErrorMessage('Thời gian giữ vé đã hết. Vui lòng tạo đơn đặt vé mới.')
+      return
+    }
+    if (!contact.fullName.trim() || !contact.email.trim()) {
+      setErrorMessage('Vui lòng nhập đầy đủ họ tên và email.')
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const createdBooking = await bookingService.createBooking({
+        reservationId: booking.id,
+        fullName: contact.fullName.trim(),
+        email: contact.email.trim(),
+        phone: contact.phone.trim(),
+        note: note.trim(),
+        voucherCode: appliedVoucherCode || undefined,
+        paymentMethod: selectedPayment,
+      })
+
+      if (selectedPayment === 'onsite') {
+        navigate(
+          `/booking-success?vnpayResponseCode=00&bookingId=${createdBooking.id}`,
+        )
+        return
+      }
+
+      navigate(
+        `/payment/vnpay-mock/${createdBooking.id}?amount=${createdBooking.totalAmount}`,
+      )
+    } catch (error) {
+      setErrorMessage(error.message)
+      setIsSubmitting(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <>
+        <Header links={checkoutNavLinks} />
+        <main className="flex min-h-[65vh] items-center justify-center bg-surface">
+          <p className="font-semibold text-primary">Đang tải đơn giữ chỗ...</p>
+        </main>
+        <Footer />
+      </>
+    )
+  }
 
   if (!booking) {
     return (
@@ -78,10 +223,10 @@ function CheckoutPage() {
               error
             </span>
             <h1 className="mt-4 text-3xl font-bold text-primary">
-              Không tìm thấy đơn đặt vé
+              Không tìm thấy đơn giữ chỗ
             </h1>
             <p className="mt-3 text-on-surface-variant">
-              Đơn giữ chỗ không tồn tại hoặc đã bị xóa khỏi trình duyệt.
+              {errorMessage || 'Đơn giữ chỗ không tồn tại hoặc bạn không có quyền truy cập.'}
             </p>
             <Link
               className="mt-6 inline-flex rounded-xl bg-primary px-6 py-3 font-bold text-white"
@@ -95,70 +240,6 @@ function CheckoutPage() {
       </>
     )
   }
-
-  const isExpired =
-    booking.status === 'unpaid' &&
-    now > 0 &&
-    expiresAtMs <= now
-
-  const handleApplyVoucher = (event) => {
-    event.preventDefault()
-    const result = bookingService.applyVoucher(booking.id, voucherCode)
-    setVoucherMessage(result.message)
-    setVoucherSuccess(result.success)
-
-    if (result.booking) {
-      setBooking(result.booking)
-    }
-  }
-
-  const handleConfirm = () => {
-    setErrorMessage('')
-
-    if (isExpired) {
-      setErrorMessage('Thời gian giữ vé đã hết. Vui lòng tạo đơn đặt vé mới.')
-      return
-    }
-
-    // Bug #3 fix: lưu ghi chú trước khi xử lý thanh toán
-    if (note.trim()) {
-      bookingService.updateNote(booking.id, note.trim())
-    }
-
-    setIsSubmitting(true)
-    const processingBooking = bookingService.processPayment(
-      booking.id,
-      selectedPayment,
-    )
-
-    if (!processingBooking) {
-      setErrorMessage('Không thể cập nhật phương thức thanh toán.')
-      setIsSubmitting(false)
-      return
-    }
-
-    if (selectedPayment === 'vnpay') {
-      navigate(
-        `/payment/vnpay-mock/${booking.id}?amount=${processingBooking.totalAmount}`,
-      )
-      return
-    }
-
-    // Bug #4 fix: onsite không đồng nghĩa pending_partner
-    // pending_partner chỉ khi ticket cần đối tác duyệt thủ công
-    const successStatus = booking.requiresPartnerApproval
-      ? 'pending_partner'
-      : 'confirmed'
-    bookingService.confirmPayment(booking.id, successStatus)
-    navigate(`/booking-success?vnpayResponseCode=00&bookingId=${booking.id}`)
-  }
-
-  const quantityLabel = [
-    booking.adultCount ? `Người lớn x${booking.adultCount}` : '',
-    booking.childCount ? `Trẻ em x${booking.childCount}` : '',
-  ]
-    .filter(Boolean)
-    .join(', ')
 
   return (
     <>
@@ -186,8 +267,8 @@ function CheckoutPage() {
                 <BookingRow icon="location_on" label="Tên địa điểm" value={booking.attractionTitle} />
                 <BookingRow icon="calendar_month" label="Ngày tham quan" value={formatDate(booking.visitDate)} />
                 <BookingRow icon="schedule" label="Khung giờ" value={booking.timeSlotLabel} />
-                <BookingRow icon="confirmation_number" label="Loại vé" value={`${booking.ticketName} (${quantityLabel || `${booking.quantity} vé`})`} />
-                <BookingRow icon="tag" label="Mã đặt chỗ" value={booking.id} mono />
+                <BookingRow icon="confirmation_number" label="Loại vé" value={`${booking.ticketName} (${booking.quantity} vé)`} />
+                <BookingRow icon="tag" label="Mã giữ chỗ" value={booking.id} mono />
               </div>
             </section>
 
@@ -196,15 +277,30 @@ function CheckoutPage() {
                 Thông tin liên hệ
               </h2>
               <div className="grid gap-4 sm:grid-cols-2">
-                <ReadOnlyField
+                <ContactField
+                  autoComplete="name"
                   icon="person"
                   label="Họ tên"
-                  value={booking.customer?.fullName || 'Khách hàng VietTicket'}
+                  onChange={handleContactChange('fullName')}
+                  required
+                  value={contact.fullName}
                 />
-                <ReadOnlyField
+                <ContactField
+                  autoComplete="email"
                   icon="mail"
                   label="Email"
-                  value={booking.customer?.email || 'Chưa cập nhật'}
+                  onChange={handleContactChange('email')}
+                  required
+                  type="email"
+                  value={contact.email}
+                />
+                <ContactField
+                  autoComplete="tel"
+                  icon="phone"
+                  label="Số điện thoại"
+                  onChange={handleContactChange('phone')}
+                  type="tel"
+                  value={contact.phone}
                 />
               </div>
             </section>
@@ -263,15 +359,16 @@ function CheckoutPage() {
                   <input
                     className="min-w-0 flex-1 rounded-xl border border-outline-variant px-4 py-3 uppercase outline-none focus:border-primary"
                     id="voucher"
-                    onChange={(event) => setVoucherCode(event.target.value)}
+                    onChange={handleVoucherChange}
                     placeholder="GIAM20"
                     value={voucherCode}
                   />
                   <button
-                    className="rounded-xl bg-secondary px-5 py-3 font-bold text-white"
+                    className="rounded-xl bg-secondary px-5 py-3 font-bold text-white disabled:opacity-60"
+                    disabled={isApplyingVoucher}
                     type="submit"
                   >
-                    Áp dụng
+                    {isApplyingVoucher ? 'Đang kiểm tra...' : 'Áp dụng'}
                   </button>
                 </div>
                 {voucherMessage && (
@@ -285,15 +382,16 @@ function CheckoutPage() {
               </form>
 
               <section className="flex flex-col gap-3 border-t border-outline-variant/20 pt-5">
-                {/* Bug #6 fix: chỉ hiển thị nếu adultCount > 0 */}
-                {booking.adultCount > 0 && (
-                  <PriceRow label={`Vé người lớn (x${booking.adultCount})`} value={booking.adultCount * booking.adultPrice} />
-                )}
-                {booking.childCount > 0 && (
-                  <PriceRow label={`Vé trẻ em (x${booking.childCount})`} value={booking.childCount * booking.childPrice} />
-                )}
+                <PriceRow
+                  label={`${booking.ticketName} (x${booking.quantity})`}
+                  value={booking.subtotalAmount}
+                />
                 {booking.discountAmount > 0 && (
-                  <PriceRow discount label={`Ưu đãi ${booking.voucherCode}`} value={booking.discountAmount} />
+                  <PriceRow
+                    discount
+                    label={`Ưu đãi ${booking.voucherCode}`}
+                    value={booking.discountAmount}
+                  />
                 )}
                 <div className="mt-1 flex items-center justify-between border-t border-outline-variant/30 pt-4">
                   <span className="font-bold text-on-surface">Tổng cộng</span>
@@ -303,8 +401,7 @@ function CheckoutPage() {
                 </div>
               </section>
 
-              {/* Bug #2 fix: countdown timer hiển thị thời gian còn lại */}
-              {booking.status === 'unpaid' && !isExpired && (
+              {!isExpired && (
                 <div className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
                   remainingMs < 2 * 60 * 1000
                     ? 'bg-red-50 text-error'
@@ -339,7 +436,7 @@ function CheckoutPage() {
                 </span>
               </button>
               <p className="text-center text-xs text-on-surface-variant">
-                Không mất phí đặt vé • Thanh toán được mô phỏng trong môi trường demo
+                Giá và ưu đãi được xác nhận lại tại máy chủ trước khi tạo đơn.
               </p>
             </div>
           </aside>
@@ -366,7 +463,15 @@ function BookingRow({ icon, label, mono = false, value }) {
   )
 }
 
-function ReadOnlyField({ icon, label, value }) {
+function ContactField({
+  autoComplete,
+  icon,
+  label,
+  onChange,
+  required = false,
+  type = 'text',
+  value,
+}) {
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-sm font-medium text-on-surface-variant">{label}</span>
@@ -375,8 +480,11 @@ function ReadOnlyField({ icon, label, value }) {
           {icon}
         </span>
         <input
-          className="w-full cursor-not-allowed rounded-xl border border-outline-variant/50 bg-surface-container-low py-2.5 pl-10 pr-4 text-sm font-medium text-on-surface"
-          readOnly
+          autoComplete={autoComplete}
+          className="w-full rounded-xl border border-outline-variant/50 bg-surface-container-low py-2.5 pl-10 pr-4 text-sm font-medium text-on-surface outline-none focus:border-primary"
+          onChange={onChange}
+          required={required}
+          type={type}
           value={value}
         />
       </span>

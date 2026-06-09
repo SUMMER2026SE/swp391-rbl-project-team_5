@@ -63,14 +63,35 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   timeSlotStock: {
     findUnique: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     create: jest.fn(),
   },
   reservation: {
     create: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  booking: {
+    create: jest.fn(),
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
+  voucher: {
+    findUnique: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  payment: {
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  ticketInstance: {
+    createMany: jest.fn(),
   },
   $transaction: jest.fn(),
 };

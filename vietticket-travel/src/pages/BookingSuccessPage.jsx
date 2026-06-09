@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
@@ -13,9 +14,28 @@ function BookingSuccessPage() {
   const [searchParams] = useSearchParams()
   const responseCode = searchParams.get('vnpayResponseCode')
   const bookingId = searchParams.get('bookingId')
-  const booking = bookingService.getBookingDetails(bookingId)
+  const [booking, setBooking] = useState(null)
   const isSuccess = responseCode === '00'
   const isPendingPartner = booking?.status === 'pending_partner'
+
+  useEffect(() => {
+    let active = true
+
+    if (bookingId) {
+      bookingService
+        .getBookingDetails(bookingId)
+        .then((data) => {
+          if (active) setBooking(data)
+        })
+        .catch(() => {
+          if (active) setBooking(null)
+        })
+    }
+
+    return () => {
+      active = false
+    }
+  }, [bookingId])
 
   return (
     <>
@@ -89,7 +109,7 @@ function BookingSuccessPage() {
             ) : (
               <Link
                 className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
-                to={booking ? `/checkout/${booking.id}` : '/my-tickets'}
+                to={booking ? `/checkout/${booking.reservationId}` : '/my-tickets'}
               >
                 <span className="material-symbols-outlined text-[19px]" aria-hidden="true">refresh</span>
                 Thử thanh toán lại
