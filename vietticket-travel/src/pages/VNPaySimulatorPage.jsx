@@ -27,16 +27,38 @@ const formatCountdown = (milliseconds) => {
 function VNPaySimulatorPage() {
   const { bookingId } = useParams()
   const navigate = useNavigate()
-  const booking = bookingService.getBookingDetails(bookingId)
+  const [booking, setBooking] = useState(null)
   const [selectedBank, setSelectedBank] = useState('vcb')
   const [searchTerm, setSearchTerm] = useState('')
   const [now, setNow] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState('')
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    let active = true
+
+    bookingService
+      .getBookingDetails(bookingId)
+      .then((data) => {
+        if (active) setBooking(data)
+      })
+      .catch((error) => {
+        if (active) setErrorMessage(error.message)
+      })
+      .finally(() => {
+        if (active) setIsLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [bookingId])
 
   const filteredBanks = useMemo(
     () =>
@@ -46,6 +68,14 @@ function VNPaySimulatorPage() {
     [searchTerm],
   )
 
+  if (isLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface">
+        <p className="font-semibold text-primary">Đang tải giao dịch...</p>
+      </main>
+    )
+  }
+
   if (!booking) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-surface px-5">
@@ -54,6 +84,7 @@ function VNPaySimulatorPage() {
             error
           </span>
           <h1 className="mt-4 text-3xl font-bold text-primary">Không tìm thấy giao dịch</h1>
+          {errorMessage && <p className="mt-3 text-error">{errorMessage}</p>}
           <button
             className="mt-6 rounded-xl bg-primary px-6 py-3 font-bold text-white"
             onClick={() => navigate('/my-tickets')}
@@ -72,21 +103,29 @@ function VNPaySimulatorPage() {
     new Date(booking.expiresAt).getTime() - effectiveNow,
   )
 
-  const simulatePayment = (result) => {
+  const simulatePayment = async (result) => {
     if (isProcessing) return
     setIsProcessing(true)
+    setErrorMessage('')
 
-    if (result === 'success') {
-      bookingService.confirmPayment(
-        bookingId,
-        booking.requiresPartnerApproval ? 'pending_partner' : 'confirmed',
-      )
-      navigate(`/booking-success?vnpayResponseCode=00&bookingId=${bookingId}`)
-      return
+    try {
+      if (result === 'success') {
+        await bookingService.confirmPayment(bookingId, 'SUCCESS', {
+          transactionId: `VNPAY-${Date.now()}`,
+          rawResponse: { simulator: true, bank: selectedBank, responseCode: '00' },
+        })
+        navigate(`/booking-success?vnpayResponseCode=00&bookingId=${bookingId}`)
+        return
+      }
+
+      await bookingService.confirmPayment(bookingId, 'FAILED', {
+        rawResponse: { simulator: true, bank: selectedBank, responseCode: '24' },
+      })
+      navigate(`/booking-success?vnpayResponseCode=24&bookingId=${bookingId}`)
+    } catch (error) {
+      setErrorMessage(error.message)
+      setIsProcessing(false)
     }
-
-    bookingService.confirmPayment(bookingId, 'failed')
-    navigate(`/booking-success?vnpayResponseCode=24&bookingId=${bookingId}`)
   }
 
   return (
@@ -255,6 +294,11 @@ function VNPaySimulatorPage() {
               </button>
             </div>
           </div>
+          {errorMessage && (
+            <p className="relative z-10 mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-error">
+              {errorMessage}
+            </p>
+          )}
         </section>
       </main>
     </div>

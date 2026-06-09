@@ -1,4 +1,5 @@
 import { QRCodeSVG } from 'qrcode.react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
@@ -22,7 +23,37 @@ const formatDate = (value) => {
 
 function ETicketPage() {
   const { bookingId } = useParams()
-  const booking = bookingService.getBookingDetails(bookingId)
+  const [booking, setBooking] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  useEffect(() => {
+    let active = true
+
+    bookingService
+      .getBookingDetails(bookingId)
+      .then((data) => {
+        if (active) setBooking(data)
+      })
+      .catch((error) => {
+        if (active) setErrorMessage(error.message)
+      })
+      .finally(() => {
+        if (active) setIsLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [bookingId])
+
+  if (isLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-surface">
+        <p className="font-semibold text-primary">Đang tải vé điện tử...</p>
+      </main>
+    )
+  }
 
   if (!booking) {
     return (
@@ -35,7 +66,7 @@ function ETicketPage() {
             </span>
             <h1 className="mt-4 text-3xl font-bold text-primary">Không tìm thấy vé</h1>
             <p className="mt-3 text-on-surface-variant">
-              Mã đặt chỗ không tồn tại hoặc dữ liệu vé đã bị xóa khỏi trình duyệt.
+              {errorMessage || 'Mã đặt chỗ không tồn tại hoặc bạn không có quyền truy cập.'}
             </p>
             <Link className="mt-6 inline-flex rounded-xl bg-primary px-6 py-3 font-bold text-white" to="/my-tickets">
               Về vé của tôi
@@ -48,12 +79,7 @@ function ETicketPage() {
   }
 
   const canShowQr = ['confirmed', 'completed'].includes(booking.status)
-  const quantityText = [
-    booking.adultCount ? `${booking.adultCount} người lớn` : '',
-    booking.childCount ? `${booking.childCount} trẻ em` : '',
-  ]
-    .filter(Boolean)
-    .join(', ')
+  const quantityText = `${booking.quantity || 1} vé`
 
   return (
     <>
@@ -132,7 +158,7 @@ function ETicketPage() {
                   <TicketInfo label="Khách hàng" value={booking.customer?.fullName || 'Khách hàng'} />
                   <TicketInfo label="Ngày đi" value={formatDate(booking.visitDate)} />
                   <TicketInfo label="Khung giờ" value={booking.timeSlotLabel} />
-                  <TicketInfo label="Số lượng" value={quantityText || `${booking.quantity || 1} vé`} />
+                  <TicketInfo label="Số lượng" value={quantityText} />
                 </div>
               </div>
             </section>
@@ -164,7 +190,7 @@ function ETicketPage() {
                     marginSize={1}
                     size={210}
                     title={`Vé ${booking.id}`}
-                    value={`VIETTICKET:${booking.id}`}
+                    value={`VIETTICKET:${booking.ticketInstances[0]?.qrCodeToken || booking.id}`}
                   />
                 ) : (
                   <div className="flex h-[210px] w-[210px] flex-col items-center justify-center bg-surface-container-low text-center text-on-surface-variant">
