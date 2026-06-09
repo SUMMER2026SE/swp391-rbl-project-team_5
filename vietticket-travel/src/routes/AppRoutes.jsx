@@ -30,7 +30,6 @@ import RegisterPage from '../pages/RegisterPage.jsx'
 import ResetPasswordPage from '../pages/ResetPasswordPage.jsx'
 import SearchAttractionsPage from '../pages/SearchAttractionsPage.jsx'
 import UserFavoritesPage from '../pages/UserFavoritesPage.jsx'
-import VNPaySimulatorPage from '../pages/VNPaySimulatorPage.jsx'
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx'
 import AdminDashboard from '../pages/admin/AdminDashboard.jsx'
 import KycApprovalPage from '../pages/admin/KycApprovalPage.jsx'
@@ -265,14 +264,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ETicketPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/payment/vnpay-mock/:bookingId"
-        element={
-          <ProtectedRoute>
-            <VNPaySimulatorPage />
           </ProtectedRoute>
         }
       />

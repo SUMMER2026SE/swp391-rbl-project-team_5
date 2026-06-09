@@ -95,6 +95,7 @@ describe('createBooking', () => {
       ticketProduct: {
         id: 'ticket-1',
         sellingPrice: new Decimal(120000),
+        attraction: { requiresManualApproval: false },
       },
     };
     const voucher = {

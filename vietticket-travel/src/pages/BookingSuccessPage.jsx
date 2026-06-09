@@ -12,11 +12,30 @@ const formatDate = (value) => {
 
 function BookingSuccessPage() {
   const [searchParams] = useSearchParams()
-  const responseCode = searchParams.get('vnpayResponseCode')
+  // Backend /vnpay-return redirect về với ?status=...&vnp_ResponseCode=...
+  const statusParam = searchParams.get('status')
+  const responseCode =
+    searchParams.get('vnp_ResponseCode') || searchParams.get('vnpayResponseCode')
   const bookingId = searchParams.get('bookingId')
   const [booking, setBooking] = useState(null)
-  const isSuccess = responseCode === '00'
+  const [retrying, setRetrying] = useState(false)
+  const [retryError, setRetryError] = useState('')
+  const isSuccess = statusParam ? statusParam === 'success' : responseCode === '00'
   const isPendingPartner = booking?.status === 'pending_partner'
+
+  const handleRetry = async () => {
+    if (!bookingId || retrying) return
+    setRetrying(true)
+    setRetryError('')
+    try {
+      const paymentUrl = await bookingService.createVNPayUrl(bookingId)
+      if (!paymentUrl) throw new Error('Không tạo được liên kết thanh toán.')
+      window.location.href = paymentUrl
+    } catch (error) {
+      setRetryError(error.message)
+      setRetrying(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -89,6 +108,12 @@ function BookingSuccessPage() {
             </div>
           )}
 
+          {retryError && (
+            <p className="mt-6 rounded-xl bg-red-50 p-3 text-sm font-semibold text-error">
+              {retryError}
+            </p>
+          )}
+
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             {isSuccess && booking && !isPendingPartner ? (
               <Link
@@ -107,13 +132,15 @@ function BookingSuccessPage() {
                 Theo dõi trạng thái vé
               </Link>
             ) : (
-              <Link
-                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
-                to={booking ? `/checkout/${booking.reservationId}` : '/my-tickets'}
+              <button
+                type="button"
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={retrying || !bookingId}
+                onClick={handleRetry}
               >
                 <span className="material-symbols-outlined text-[19px]" aria-hidden="true">refresh</span>
-                Thử thanh toán lại
-              </Link>
+                {retrying ? 'Đang chuyển tới VNPay...' : 'Thử thanh toán lại'}
+              </button>
             )}
 
             <Link
