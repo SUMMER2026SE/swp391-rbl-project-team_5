@@ -1,6 +1,7 @@
 const express = require('express');
 const protect = require('../middleware/authMiddleware');
 const { requirePartner, requireApprovedPartner } = require('../middleware/partnerMiddleware');
+const { restrictTo } = require('../middleware/roleMiddleware');
 const { uploadAttractionImages } = require('../middleware/uploadMiddleware');
 const partnerController = require('../controllers/partnerController');
 const attractionController = require('../controllers/attractionController');
@@ -48,6 +49,11 @@ router.delete('/tickets/:ticketId', ticketController.deleteTicket);
 // Lịch & sức chứa
 router.get('/attractions/:id/schedule', scheduleController.getSchedule);
 router.put('/attractions/:id/schedule', scheduleController.saveSchedule);
+
+// Đặt vé (quản lý phía đối tác)
+router.get('/bookings', restrictTo('PARTNER'), partnerController.getPartnerBookings);
+router.patch('/bookings/:id/approve', restrictTo('PARTNER'), partnerController.approveBooking);
+router.patch('/bookings/:id/reject', restrictTo('PARTNER'), partnerController.rejectBooking);
 
 module.exports = router;
 

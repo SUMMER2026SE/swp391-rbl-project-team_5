@@ -142,6 +142,25 @@ export function saveSchedule(attractionId, payload) {
   })
 }
 
+// ----- Đặt vé (quản lý phía đối tác) -----
+export function getPartnerBookings(params = {}) {
+  const query = new URLSearchParams()
+  if (params.page) query.set('page', params.page)
+  if (params.limit) query.set('limit', params.limit)
+  if (params.status && params.status !== 'all') query.set('status', params.status)
+  if (params.search) query.set('search', params.search)
+  const qs = query.toString()
+  return apiRequest(`/partners/bookings${qs ? `?${qs}` : ''}`, { method: 'GET' })
+}
+
+export function approveBooking(id) {
+  return apiRequest(`/partners/bookings/${id}/approve`, { method: 'PATCH' })
+}
+
+export function rejectBooking(id) {
+  return apiRequest(`/partners/bookings/${id}/reject`, { method: 'PATCH' })
+}
+
 // Tiện ích: xác định lỗi mạng (backend không chạy) để fallback demo.
 // apiRequest ném lỗi có .status khi server trả lỗi HTTP; lỗi mạng thì không.
 export function isNetworkError(error) {

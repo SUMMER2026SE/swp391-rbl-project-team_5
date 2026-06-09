@@ -61,6 +61,7 @@ const mockPrisma = {
   },
   dailyStock: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -74,6 +75,7 @@ const mockPrisma = {
   reservation: {
     create: jest.fn(),
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     update: jest.fn(),
   },
   booking: {
@@ -81,6 +83,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
+    count: jest.fn(),
   },
   voucher: {
     findUnique: jest.fn(),
