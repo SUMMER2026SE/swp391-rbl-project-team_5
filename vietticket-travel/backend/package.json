@@ -13,6 +13,8 @@
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",
+    "db:seed:real": "node prisma/seed-real.js",
+    "db:seed:images": "node prisma/seed-images.js",
     "create-admin": "node create-admin.js"
   },
   "keywords": [],

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'react-toastify'
+import AttractionsMap from '../components/AttractionsMap.jsx'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import { useAuth } from '../context/useAuth.js'
@@ -169,6 +170,29 @@ export default function SearchAttractionsPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [errorMessage, setErrorMessage] = useState('')
+  const [showMap, setShowMap] = useState(false)
+  const [mapPoints, setMapPoints] = useState([])
+  const [mapLoading, setMapLoading] = useState(false)
+
+  // Tải toàn bộ điểm có toạ độ (1 lần) khi mở bản đồ.
+  useEffect(() => {
+    if (!showMap || mapPoints.length > 0) return
+    let active = true
+    setMapLoading(true)
+    apiRequest('/attractions/map-points')
+      .then((result) => {
+        if (active) setMapPoints(result.data?.points || [])
+      })
+      .catch(() => {
+        if (active) toast.error('Không tải được dữ liệu bản đồ.')
+      })
+      .finally(() => {
+        if (active) setMapLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [showMap, mapPoints.length])
 
   // 3. Gọi API fetch danh sách địa điểm
   useEffect(() => {
@@ -398,6 +422,23 @@ export default function SearchAttractionsPage() {
                 </div>
               </div>
 
+              {showMap && (
+                <div className="mb-6">
+                  {mapLoading ? (
+                    <div className="flex h-[480px] items-center justify-center rounded-xl border border-[#bec8ca]/60 bg-white text-sm font-semibold text-[#3f484a]">
+                      Đang tải bản đồ...
+                    </div>
+                  ) : (
+                    <>
+                      <AttractionsMap attractions={mapPoints} navigate={navigate} />
+                      <p className="mt-2 text-xs font-medium text-[#3f484a]">
+                        Hiển thị {mapPoints.length} địa điểm bán vé trên toàn quốc.
+                      </p>
+                    </>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
                 {loading ? (
                   <SkeletonCards />
@@ -456,11 +497,12 @@ export default function SearchAttractionsPage() {
         <button
           className="flex items-center gap-2 rounded-full bg-[#00629d] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:scale-105 active:scale-95"
           type="button"
+          onClick={() => setShowMap((value) => !value)}
         >
           <span className="material-symbols-outlined" aria-hidden="true">
-            map
+            {showMap ? 'list' : 'map'}
           </span>
-          Xem bản đồ
+          {showMap ? 'Ẩn bản đồ' : 'Xem bản đồ'}
         </button>
       </div>
 

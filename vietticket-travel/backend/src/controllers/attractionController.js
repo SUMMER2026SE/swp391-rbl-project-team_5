@@ -396,6 +396,8 @@ async function searchAttractions(req, res, next) {
       title: a.title,
       address: a.address,
       city: a.city,
+      latitude: a.latitude,
+      longitude: a.longitude,
       primaryImage: a.images && a.images[0] ? a.images[0].imageUrl : null,
       averageRating: a.averageRating,
       totalReviews: a.totalReviews,
@@ -403,6 +405,47 @@ async function searchAttractions(req, res, next) {
     }));
 
     return res.status(200).json({ success: true, data: { attractions: mapped, pagination: { totalItems: total, totalPages: Math.ceil(total / limit), currentPage: page, limit } } });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// GET /api/attractions/map-points — toàn bộ điểm có toạ độ (cho bản đồ)
+async function getMapPoints(req, res, next) {
+  try {
+    const items = await prisma.attraction.findMany({
+      where: {
+        status: 'APPROVED',
+        latitude: { not: null },
+        longitude: { not: null },
+      },
+      select: {
+        id: true,
+        title: true,
+        city: true,
+        latitude: true,
+        longitude: true,
+        images: { where: { isPrimary: true }, take: 1, select: { imageUrl: true } },
+        ticketProducts: {
+          where: { status: 'ACTIVE' },
+          orderBy: { sellingPrice: 'asc' },
+          take: 1,
+          select: { sellingPrice: true },
+        },
+      },
+    });
+
+    const points = items.map((a) => ({
+      id: a.id,
+      title: a.title,
+      city: a.city,
+      latitude: a.latitude,
+      longitude: a.longitude,
+      primaryImage: a.images[0] ? a.images[0].imageUrl : null,
+      minPrice: a.ticketProducts[0] ? a.ticketProducts[0].sellingPrice : null,
+    }));
+
+    return res.status(200).json({ success: true, data: { points, total: points.length } });
   } catch (error) {
     return next(error);
   }
@@ -463,5 +506,6 @@ module.exports = {
   submitAttraction,
   searchAttractions,
   getAttractionDetail,
+  getMapPoints,
 };
 
