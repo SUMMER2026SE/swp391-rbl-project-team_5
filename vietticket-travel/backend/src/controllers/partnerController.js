@@ -1,3 +1,4 @@
+const { randomUUID } = require('crypto');
 const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
 const { validateKyc } = require('../utils/partnerValidators');
@@ -183,12 +184,12 @@ async function updateSettings(req, res, next) {
   }
 }
 
-// GET /api/partners/dashboard — Thống kê tổng quan (số liệu thật từ CRUD Module 2)
-// Lưu ý: số liệu đặt vé/doanh thu thuộc module đặt vé (chưa có model Booking)
-// nên tạm trả về 0; FE sẽ hiển thị "—" hoặc dữ liệu mẫu cho các ô đó.
+// GET /api/partners/dashboard — Thống kê tổng quan (số liệu thật từ DB)
+// GET /api/partners/dashboard — Thống kê tổng quan (số liệu thật từ DB)
 async function getDashboard(req, res, next) {
   try {
     const partnerId = req.partner.id;
+    const commissionRate = req.partner.commissionRate ? Number(req.partner.commissionRate) : 0.10;
 
     const attractions = await prisma.attraction.findMany({
       where: { partnerId },
@@ -201,20 +202,492 @@ async function getDashboard(req, res, next) {
       ? await prisma.ticketProduct.count({ where: { attractionId: { in: attractionIds } } })
       : 0;
 
+    // Tính số liệu booking thật từ DB
+    let totalBookingsThisMonth = 0;
+    let revenueThisMonth = 0;
+    let ticketsSoldThisMonth = 0;
+    let totalRevenue = 0;
+    let totalTicketsSold = 0;
+    let pendingBookings = 0;
+    let occupancyRate = 0;
+    let recentBookings = [];
+
+    if (attractionIds.length > 0) {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+      // Lấy tất cả bookings liên quan đến partner này qua reservation -> ticketProduct -> attraction
+      const ticketProducts = await prisma.ticketProduct.findMany({
+        where: { attractionId: { in: attractionIds } },
+        select: { id: true },
+      });
+      const ticketProductIds = ticketProducts ? ticketProducts.map((r) => r.id) : [];
+
+      if (ticketProductIds.length > 0) {
+        // Lấy reservationIds có ticketProductId thuộc partner
+        const reservations = await prisma.reservation.findMany({
+          where: { ticketProductId: { in: ticketProductIds } },
+          select: { id: true },
+        });
+        const reservationIds = reservations ? reservations.map((r) => r.id) : [];
+
+        if (reservationIds.length > 0) {
+          // Lấy tất cả Booking có trạng thái CONFIRMED hoặc COMPLETED thuộc partner
+          const bookings = await prisma.booking.findMany({
+            where: {
+              reservationId: { in: reservationIds },
+              status: { in: ['CONFIRMED', 'COMPLETED'] },
+            },
+            select: {
+              createdAt: true,
+              totalAmount: true,
+              reservation: {
+                select: { quantity: true },
+              },
+            },
+          });
+
+          bookings.forEach((b) => {
+            const amount = Number(b.totalAmount);
+            const qty = b.reservation ? b.reservation.quantity : 0;
+            totalRevenue += amount;
+            totalTicketsSold += qty;
+
+            const createdAtDate = b.createdAt ? new Date(b.createdAt) : now;
+            if (createdAtDate >= startOfMonth) {
+              revenueThisMonth += amount;
+              ticketsSoldThisMonth += qty;
+              totalBookingsThisMonth += 1;
+            }
+          });
+
+          // Đơn chờ duyệt (PENDING_PAYMENT)
+          pendingBookings = await prisma.booking.count({
+            where: {
+              reservationId: { in: reservationIds },
+              status: 'PENDING_PAYMENT',
+            },
+          });
+
+          // Tỷ lệ lấp đầy kho vé: sum(DailyStock.bookedQuantity) / sum(DailyStock.capacity) trên các ticketProduct của partner trong tháng hiện tại
+          const dailyStocks = (await prisma.dailyStock.findMany({
+            where: {
+              ticketProductId: { in: ticketProductIds },
+              date: {
+                gte: startOfMonth,
+                lte: endOfMonth,
+              },
+            },
+            select: {
+              bookedQuantity: true,
+              capacity: true,
+            },
+          })) || [];
+
+          let totalBookedQty = 0;
+          let totalCapacity = 0;
+          dailyStocks.forEach((ds) => {
+            totalBookedQty += ds.bookedQuantity || 0;
+            totalCapacity += ds.capacity || 0;
+          });
+          occupancyRate = totalCapacity > 0 ? (totalBookedQty / totalCapacity) : 0;
+
+          // Đặt vé gần đây (5 mục mới nhất)
+          const recentRaw = await prisma.booking.findMany({
+            where: { reservationId: { in: reservationIds } },
+            orderBy: { createdAt: 'desc' },
+            take: 5,
+            include: {
+              reservation: {
+                include: {
+                  ticketProduct: {
+                    include: { attraction: { select: { title: true } } },
+                  },
+                },
+              },
+            },
+          });
+
+          recentBookings = recentRaw.map((b) => ({
+            id: b.id,
+            attraction: b.reservation.ticketProduct.attraction.title,
+            ticket: b.reservation.ticketProduct.name,
+            customer: b.fullName,
+            date: b.createdAt.toISOString().slice(0, 10),
+            amount: Number(b.totalAmount),
+            status: b.status.toLowerCase().replace('pending_payment', 'pending'),
+          }));
+        }
+      }
+    }
+
     const stats = {
       totalAttractions: attractions.length,
       activeAttractions: attractions.filter((a) => a.status === 'APPROVED').length,
       totalTickets,
-      // Phần đặt vé — chờ module đặt vé cung cấp model Booking
-      totalBookingsThisMonth: 0,
-      revenueThisMonth: 0,
-      pendingBookings: 0,
+      totalBookingsThisMonth,
+      revenueThisMonth,
+      ticketsSoldThisMonth,
+      totalRevenue,
+      totalTicketsSold,
+      netRevenueThisMonth: revenueThisMonth * (1 - commissionRate),
+      netTotalRevenue: totalRevenue * (1 - commissionRate),
+      occupancyRate,
+      pendingBookings,
     };
 
     return res.json({
       stats,
-      recentBookings: [], // chờ module đặt vé
+      recentBookings,
       partnerStatus: req.partner.status,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// GET /api/partners/bookings — Danh sách đặt vé của partner (có phân trang + lọc)
+async function getPartnerBookings(req, res, next) {
+  try {
+    const partnerId = req.partner.id;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+    const skip = (page - 1) * limit;
+    const statusFilter = req.query.status;
+    const search = (req.query.search || '').trim().toLowerCase();
+
+    // Lấy tất cả attractionIds của partner
+    const attractions = await prisma.attraction.findMany({
+      where: { partnerId },
+      select: { id: true },
+    });
+    const attractionIds = attractions.map((a) => a.id);
+
+    if (attractionIds.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page, limit, total: 0, totalPages: 0 },
+      });
+    }
+
+    const ticketProductIds = await prisma.ticketProduct.findMany({
+      where: { attractionId: { in: attractionIds } },
+      select: { id: true },
+    }).then((rows) => rows.map((r) => r.id));
+
+    if (ticketProductIds.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page, limit, total: 0, totalPages: 0 },
+      });
+    }
+
+    const reservationIds = await prisma.reservation.findMany({
+      where: { ticketProductId: { in: ticketProductIds } },
+      select: { id: true },
+    }).then((rows) => rows.map((r) => r.id));
+
+    if (reservationIds.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page, limit, total: 0, totalPages: 0 },
+      });
+    }
+
+    // Map status filter từ FE sang DB enum
+    const STATUS_MAP = {
+      confirmed: 'CONFIRMED',
+      pending: 'PENDING_PAYMENT',
+      pending_partner: 'PENDING_PAYMENT',
+      cancelled: 'CANCELLED',
+      completed: 'COMPLETED',
+    };
+
+    const where = {
+      reservationId: { in: reservationIds },
+      ...(statusFilter && statusFilter !== 'all' && STATUS_MAP[statusFilter]
+        ? { status: STATUS_MAP[statusFilter] }
+        : {}),
+    };
+
+    const [total, bookings] = await Promise.all([
+      prisma.booking.count({ where }),
+      prisma.booking.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          reservation: {
+            include: {
+              timeSlot: true,
+              ticketProduct: {
+                include: { attraction: { select: { title: true } } },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    // Lọc theo search nếu có (client-side vì search đa trường)
+    let data = bookings.map((b) => ({
+      id: b.id,
+      attraction: b.reservation.ticketProduct.attraction.title,
+      ticket: b.reservation.ticketProduct.name,
+      customer: b.fullName,
+      phone: b.phone || '',
+      date: b.createdAt.toISOString().slice(0, 10),
+      visitDate: b.reservation.date instanceof Date
+        ? b.reservation.date.toISOString().slice(0, 10)
+        : String(b.reservation.date).slice(0, 10),
+      slot: b.reservation.timeSlot
+        ? `${b.reservation.timeSlot.startTime} – ${b.reservation.timeSlot.endTime}`
+        : 'Cả ngày',
+      qty: b.reservation.quantity,
+      amount: Number(b.totalAmount),
+      status: b.status.toLowerCase().replace('pending_payment', 'pending_partner'),
+    }));
+
+    if (search) {
+      data = data.filter(
+        (b) =>
+          b.id.toLowerCase().includes(search) ||
+          b.customer.toLowerCase().includes(search) ||
+          b.attraction.toLowerCase().includes(search),
+      );
+    }
+
+    return res.json({
+      success: true,
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// PATCH /api/partners/bookings/:id/approve — Partner duyệt đơn đặt vé
+// Khi duyệt: CONFIRMED booking + tạo TicketInstance (QR) + xác nhận stock
+async function approveBooking(req, res, next) {
+  try {
+    const partnerId = req.partner.id;
+    const bookingId = req.params.id;
+
+    // Kiểm tra booking tồn tại và lấy đủ thông tin cần thiết
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        ticketInstances: { select: { id: true } },
+        reservation: {
+          include: {
+            ticketProduct: {
+              include: { attraction: { select: { partnerId: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt vé.' });
+    }
+
+    if (booking.reservation.ticketProduct.attraction.partnerId !== partnerId) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền duyệt đơn này.' });
+    }
+
+    if (booking.status === 'CONFIRMED') {
+      return res.status(400).json({ success: false, message: 'Đơn đặt vé này đã được xác nhận trước đó.' });
+    }
+
+    if (!['PENDING_PAYMENT'].includes(booking.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Chỉ có thể duyệt đơn ở trạng thái chờ xử lý.',
+      });
+    }
+
+    const reservation = booking.reservation;
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Xác nhận DailyStock: heldQuantity -> bookedQuantity
+      if (reservation.status !== 'CONFIRMED') {
+        await tx.dailyStock.updateMany({
+          where: {
+            ticketProductId: reservation.ticketProductId,
+            date: reservation.date,
+          },
+          data: {
+            heldQuantity: { decrement: reservation.quantity },
+            bookedQuantity: { increment: reservation.quantity },
+          },
+        });
+
+        // 2. Xác nhận TimeSlotStock nếu có
+        if (reservation.timeSlotId) {
+          await tx.timeSlotStock.updateMany({
+            where: {
+              timeSlotId: reservation.timeSlotId,
+              date: reservation.date,
+            },
+            data: {
+              heldQty: { decrement: reservation.quantity },
+              bookedQty: { increment: reservation.quantity },
+            },
+          });
+        }
+
+        // 3. Cập nhật Reservation -> CONFIRMED
+        await tx.reservation.update({
+          where: { id: reservation.id },
+          data: { status: 'CONFIRMED' },
+        });
+      }
+
+      // 4. Cập nhật Booking -> CONFIRMED
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: { status: 'CONFIRMED' },
+      });
+
+      // 5. Tạo TicketInstance (QR code) nếu chưa có
+      if (booking.ticketInstances.length === 0) {
+        await tx.ticketInstance.createMany({
+          data: Array.from({ length: reservation.quantity }, () => ({
+            bookingId,
+            ticketProductId: reservation.ticketProductId,
+            qrCodeToken: randomUUID(),
+          })),
+        });
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'Đã xác nhận đơn đặt vé và tạo mã QR thành công.',
+      data: { id: bookingId, status: 'confirmed' },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// PATCH /api/partners/bookings/:id/reject — Partner từ chối đơn đặt vé
+// Khi từ chối: CANCELLED booking + hoàn trả DailyStock & TimeSlotStock
+async function rejectBooking(req, res, next) {
+  try {
+    const partnerId = req.partner.id;
+    const bookingId = req.params.id;
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        reservation: {
+          include: {
+            ticketProduct: {
+              include: { attraction: { select: { partnerId: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt vé.' });
+    }
+
+    if (booking.reservation.ticketProduct.attraction.partnerId !== partnerId) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền từ chối đơn này.' });
+    }
+
+    if (booking.status === 'CANCELLED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Đơn đặt vé đã bị hủy trước đó.',
+      });
+    }
+
+    const reservation = booking.reservation;
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Hoàn trả DailyStock: bookedQuantity -> giảm, giải phóng lại slot
+      //    Chỉ hoàn nếu reservation đã CONFIRMED (tức đã từng chuyển held -> booked)
+      if (reservation.status === 'CONFIRMED') {
+        await tx.dailyStock.updateMany({
+          where: {
+            ticketProductId: reservation.ticketProductId,
+            date: reservation.date,
+          },
+          data: {
+            bookedQuantity: { decrement: reservation.quantity },
+          },
+        });
+
+        // 2. Hoàn trả TimeSlotStock nếu có
+        if (reservation.timeSlotId) {
+          await tx.timeSlotStock.updateMany({
+            where: {
+              timeSlotId: reservation.timeSlotId,
+              date: reservation.date,
+            },
+            data: {
+              bookedQty: { decrement: reservation.quantity },
+            },
+          });
+        }
+      } else if (reservation.status === 'HELD') {
+        // Nếu còn HELD thì hoàn lại heldQuantity
+        await tx.dailyStock.updateMany({
+          where: {
+            ticketProductId: reservation.ticketProductId,
+            date: reservation.date,
+          },
+          data: {
+            heldQuantity: { decrement: reservation.quantity },
+          },
+        });
+
+        if (reservation.timeSlotId) {
+          await tx.timeSlotStock.updateMany({
+            where: {
+              timeSlotId: reservation.timeSlotId,
+              date: reservation.date,
+            },
+            data: {
+              heldQty: { decrement: reservation.quantity },
+            },
+          });
+        }
+      }
+
+      // 3. Cập nhật Reservation -> CANCELLED
+      await tx.reservation.update({
+        where: { id: reservation.id },
+        data: { status: 'CANCELLED' },
+      });
+
+      // 4. Cập nhật Booking -> CANCELLED
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: { status: 'CANCELLED' },
+      });
+    });
+
+    return res.json({
+      success: true,
+      message: 'Đã từ chối đơn đặt vé và hoàn trả kho vé.',
+      data: { id: bookingId, status: 'cancelled' },
     });
   } catch (error) {
     next(error);
@@ -227,6 +700,9 @@ module.exports = {
   getMyPartner,
   updateSettings,
   getDashboard,
+  getPartnerBookings,
+  approveBooking,
+  rejectBooking,
   // Aliases để tương thích với MPhu
   registerPartner: submitKyc,
   getMyPartnerProfile: getMyPartner,
