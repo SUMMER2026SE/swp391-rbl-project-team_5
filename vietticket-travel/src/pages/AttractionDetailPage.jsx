@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'
+import LocationMap from '../components/LocationMap.jsx'
 import Header from '../components/Header.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { appDownloadButtons, footerLinks } from '../data/landingData.js'
@@ -363,19 +364,20 @@ export default function AttractionDetailPage() {
                 </div>
               </header>
 
-              <div className="relative h-[240px] cursor-pointer overflow-hidden rounded-xl shadow-[0_4px_20px_rgba(0,96,104,0.04)]">
-                <img
-                  alt={`Bản đồ ${attraction.title}`}
-                  className="h-full w-full object-cover transition-transform duration-700 hover:scale-105"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuD4SQfZEiMvqJFA8JXu1XSAVXVbQC3saek2qaqrSTQnpEZl6Yt2UY26pnGFeGhs2TxKfl9ubg5G9d6PEfAualT8Y5KUNo8M66zKkH4wOABLefNgiYPja3eqgjT-7zOI34hJRwqJwCIhWjZwR6riy2St1eQkzw2u3jz1DgPd_lztB7tcP9tPPGppkXgYZI9yINIvgmhdcUQZq4SUhu3XpcVh5VlU9dECTRW_mm-ZU8ztcy3DCh6axjQDrtCJzWYLSvpBkqOIVSpwuXM"
+              {attraction.latitude != null && attraction.longitude != null ? (
+                <LocationMap
+                  latitude={attraction.latitude}
+                  longitude={attraction.longitude}
+                  title={attraction.title}
                 />
-                <div className="absolute left-4 top-4 flex items-center gap-2 rounded-lg border border-white/20 bg-white/75 px-4 py-2 text-sm font-bold text-[#00474d] backdrop-blur-md">
+              ) : (
+                <div className="flex h-[140px] items-center justify-center gap-2 rounded-xl border border-dashed border-[#bec8ca] bg-[#f8fafb] text-sm font-semibold text-[#3f484a]">
                   <span className="material-symbols-outlined" aria-hidden="true">
-                    map
+                    location_off
                   </span>
-                  Xem bản đồ chi tiết
+                  Chưa có toạ độ bản đồ cho địa điểm này
                 </div>
-              </div>
+              )}
 
               <section className="space-y-4">
                 <div className="flex overflow-x-auto border-b border-[#bec8ca]">
