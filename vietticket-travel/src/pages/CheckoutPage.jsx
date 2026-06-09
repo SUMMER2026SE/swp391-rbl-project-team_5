@@ -6,7 +6,6 @@ import bookingService from '../services/bookingService.js'
 
 const paymentMethods = [
   { id: 'vnpay', label: 'Ví VNPay', icon: 'account_balance_wallet' },
-  { id: 'card', label: 'Thẻ tín dụng / Ghi nợ', icon: 'credit_card' },
   { id: 'onsite', label: 'Thanh toán khi đến nơi', icon: 'store' },
 ]
 
@@ -187,14 +186,17 @@ function CheckoutPage() {
 
       if (selectedPayment === 'onsite') {
         navigate(
-          `/booking-success?vnpayResponseCode=00&bookingId=${createdBooking.id}`,
+          `/booking-success?status=success&bookingId=${createdBooking.id}`,
         )
         return
       }
 
-      navigate(
-        `/payment/vnpay-mock/${createdBooking.id}?amount=${createdBooking.totalAmount}`,
-      )
+      // VNPay: lấy URL thanh toán thật rồi chuyển hướng trình duyệt sang cổng.
+      const paymentUrl = await bookingService.createVNPayUrl(createdBooking.id)
+      if (!paymentUrl) {
+        throw new Error('Không tạo được liên kết thanh toán VNPay. Vui lòng thử lại.')
+      }
+      window.location.href = paymentUrl
     } catch (error) {
       setErrorMessage(error.message)
       setIsSubmitting(false)

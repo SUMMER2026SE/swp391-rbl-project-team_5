@@ -6,7 +6,6 @@ const {
   getBooking,
   getReservation,
   listBookings,
-  updatePaymentStatus,
   validateAndApplyVoucher,
 } = require('../controllers/bookingController');
 
@@ -22,11 +21,5 @@ router.get(
   getReservation,
 );
 router.get('/:bookingId', protect, restrictTo('CUSTOMER'), getBooking);
-router.patch(
-  '/:bookingId/payment-status',
-  protect,
-  restrictTo('CUSTOMER'),
-  updatePaymentStatus,
-);
 
 module.exports = router;

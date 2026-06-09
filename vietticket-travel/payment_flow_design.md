@@ -70,7 +70,7 @@ Lệnh: `npx prisma migrate dev --name add_manual_approval_and_refund`
 2. Tiền điều kiện: `Booking.status === 'PENDING_PAYMENT'` và `paymentMethod === 'vnpay'`.
 3. **Reset cửa sổ thanh toán**: `reservation.expiresAt = now + 10 phút` (hỗ trợ retry — xem QĐ2).
 4. `vnp_Amount = Math.round(Number(booking.totalAmount) * 100)` (×100, số nguyên).
-5. `vnp_TxnRef` duy nhất mỗi lần thử: `${bookingId}-${Date.now()}`. **Update** bản `Payment` PENDING có sẵn, lưu TxnRef vào `Payment.transactionId` (`@unique`). **IPN tra ngược bookingId bằng cách tách phần đầu TxnRef** (không lookup theo transactionId, để retry không lạc đơn).
+5. `vnp_TxnRef` duy nhất mỗi lần thử: `${bookingId_bỏ_dấu_gạch}${Date.now()}` (chỉ [a-z0-9], vì VNPay giới hạn charset). **Update** bản `Payment` PENDING có sẵn, lưu TxnRef vào `Payment.transactionId` (`@unique`). **IPN/Return tra ngược booking bằng lookup `Payment.transactionId === vnp_TxnRef`** (uuid chứa `-` nên không parse tiền tố).
 6. `vnp_CreateDate` = now, `vnp_ExpireDate` = `reservation.expiresAt` (vừa reset), format `yyyyMMddHHmmss` theo GMT+7.
 6. `vnp_IpAddr` từ `x-forwarded-for` fallback `req.socket.remoteAddress`.
 7. Ký: sort tham số alphabet → `qs.stringify({ encode:true })` → HMAC-SHA512 (`VNP_HASHSECRET`) → gắn `vnp_SecureHash`.

@@ -399,7 +399,11 @@ async function createBooking(req, res, next) {
         const now = new Date();
         const reservation = await tx.reservation.findUnique({
           where: { id: reservationId },
-          include: { ticketProduct: true },
+          include: {
+            ticketProduct: {
+              include: { attraction: { select: { requiresManualApproval: true } } },
+            },
+          },
         });
 
         if (!reservation || reservation.userId !== userId) {
@@ -460,6 +464,18 @@ async function createBooking(req, res, next) {
           }
         }
 
+        // Địa điểm yêu cầu đối tác duyệt thủ công?
+        const needsApproval =
+          reservation.ticketProduct.attraction.requiresManualApproval === true;
+
+        // onsite: chốt kho ngay. Nếu cần duyệt -> PENDING_PARTNER (chưa phát vé), ngược lại CONFIRMED.
+        let bookingStatus;
+        if (paymentMethod === 'onsite') {
+          bookingStatus = needsApproval ? 'PENDING_PARTNER' : 'CONFIRMED';
+        } else {
+          bookingStatus = 'PENDING_PAYMENT';
+        }
+
         const created = await tx.booking.create({
           data: {
             userId,
@@ -468,7 +484,7 @@ async function createBooking(req, res, next) {
             subtotalAmount,
             discountAmount,
             totalAmount,
-            status: paymentMethod === 'onsite' ? 'CONFIRMED' : 'PENDING_PAYMENT',
+            status: bookingStatus,
             paymentMethod,
             fullName,
             email,
@@ -486,12 +502,15 @@ async function createBooking(req, res, next) {
 
         if (paymentMethod === 'onsite') {
           await confirmReservationAndStock(tx, reservation);
-          await createTicketInstances(
-            tx,
-            created.id,
-            reservation.ticketProductId,
-            reservation.quantity,
-          );
+          // Chỉ phát vé ngay khi KHÔNG cần đối tác duyệt; nếu cần duyệt, vé tạo ở bước approve (N2).
+          if (!needsApproval) {
+            await createTicketInstances(
+              tx,
+              created.id,
+              reservation.ticketProductId,
+              reservation.quantity,
+            );
+          }
         }
 
         return tx.booking.findUnique({
@@ -518,113 +537,13 @@ async function createBooking(req, res, next) {
   }
 }
 
-async function updatePaymentStatus(req, res, next) {
-  try {
-    const status = String(req.body?.status || '').trim().toUpperCase();
-    if (!['SUCCESS', 'FAILED'].includes(status)) {
-      return res.status(400).json({ message: 'Trạng thái thanh toán không hợp lệ.' });
-    }
-
-    const booking = await prisma.$transaction(
-      async (tx) => {
-        const current = await tx.booking.findUnique({
-          where: { id: req.params.bookingId },
-          include: {
-            reservation: true,
-            payments: { orderBy: { createdAt: 'desc' }, take: 1 },
-            ticketInstances: { select: { id: true } },
-          },
-        });
-
-        if (!current || current.userId !== req.user.id) {
-          const error = new Error('Không tìm thấy đơn đặt vé.');
-          error.statusCode = 404;
-          throw error;
-        }
-        if (status === 'FAILED' && current.status === 'CONFIRMED') {
-          const error = new Error('Không thể đánh dấu thất bại cho booking đã xác nhận.');
-          error.statusCode = 409;
-          throw error;
-        }
-
-        const paymentData = {
-          status,
-          transactionId: req.body?.transactionId || undefined,
-          rawResponse: req.body?.rawResponse || undefined,
-        };
-        const payment = current.payments[0];
-
-        if (payment) {
-          await tx.payment.update({
-            where: { id: payment.id },
-            data: paymentData,
-          });
-        } else {
-          await tx.payment.create({
-            data: {
-              bookingId: current.id,
-              amount: current.totalAmount,
-              paymentGateway: (current.paymentMethod || 'VNPAY').toUpperCase(),
-              ...paymentData,
-            },
-          });
-        }
-
-        if (status === 'SUCCESS' && current.status !== 'CONFIRMED') {
-          if (
-            current.reservation.status !== 'HELD' ||
-            current.reservation.expiresAt <= new Date()
-          ) {
-            const error = new Error('Đơn giữ chỗ đã hết hạn hoặc không còn hợp lệ.');
-            error.statusCode = 409;
-            throw error;
-          }
-
-          await confirmReservationAndStock(tx, current.reservation);
-          await tx.booking.update({
-            where: { id: current.id },
-            data: { status: 'CONFIRMED' },
-          });
-
-          if (current.ticketInstances.length === 0) {
-            await createTicketInstances(
-              tx,
-              current.id,
-              current.reservation.ticketProductId,
-              current.reservation.quantity,
-            );
-          }
-        }
-
-        return tx.booking.findUnique({
-          where: { id: current.id },
-          include: bookingInclude,
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
-
-    return res.json({
-      success: true,
-      message:
-        status === 'SUCCESS'
-          ? 'Thanh toán đã được xác nhận.'
-          : 'Thanh toán chưa thành công.',
-      data: toBookingResponse(booking),
-    });
-  } catch (error) {
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({ message: error.message });
-    }
-    return next(error);
-  }
-}
-
 module.exports = {
   createBooking,
   getBooking,
   getReservation,
   listBookings,
-  updatePaymentStatus,
   validateAndApplyVoucher,
+  // Helper dùng chung cho luồng thanh toán VNPay (L2) & duyệt vé đối tác (N2)
+  confirmReservationAndStock,
+  createTicketInstances,
 };

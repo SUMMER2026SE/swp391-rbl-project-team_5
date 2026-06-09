@@ -11,6 +11,7 @@ const favoriteRoutes = require('./routes/favoriteRoutes');
 const { router: attractionTicketRouter, ticketRouter } = require('./routes/ticketRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const bookingRoutes = require('./routes/bookingRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -66,6 +67,7 @@ app.use('/api/attractions/:attractionId/tickets', attractionTicketRouter);
 app.use('/api/tickets', ticketRouter);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/bookings', bookingRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -68,21 +68,19 @@ export const applyVoucher = async (
   return result
 }
 
-export const confirmPayment = async (bookingId, status, details = {}) => {
-  const result = await apiRequest(`/bookings/${bookingId}/payment-status`, {
-    method: 'PATCH',
-    body: {
-      status,
-      ...details,
-    },
+// Tạo URL thanh toán VNPay thật; trả về paymentUrl để redirect trình duyệt.
+export const createVNPayUrl = async (bookingId) => {
+  const result = await apiRequest('/payments/create-vnpay-url', {
+    method: 'POST',
+    body: { bookingId },
   })
-  return result.data
+  return result.data?.paymentUrl
 }
 
 const bookingService = {
   applyVoucher,
-  confirmPayment,
   createBooking,
+  createVNPayUrl,
   getBookingDetails,
   getBookings,
   getLastReservationId,
