@@ -7,6 +7,7 @@ const partnerController = require('../controllers/partnerController');
 const attractionController = require('../controllers/attractionController');
 const ticketController = require('../controllers/ticketController');
 const scheduleController = require('../controllers/scheduleController');
+const reviewController = require('../controllers/reviewController');
 
 const router = express.Router();
 
@@ -54,6 +55,10 @@ router.put('/attractions/:id/schedule', scheduleController.saveSchedule);
 router.get('/bookings', restrictTo('PARTNER'), partnerController.getPartnerBookings);
 router.patch('/bookings/:id/approve', restrictTo('PARTNER'), partnerController.approveBooking);
 router.patch('/bookings/:id/reject', restrictTo('PARTNER'), partnerController.rejectBooking);
+
+// Đánh giá (phản hồi & thống kê phía đối tác)
+router.get('/reviews', restrictTo('PARTNER'), reviewController.listPartnerReviews);
+router.get('/reviews/stats', restrictTo('PARTNER'), reviewController.getPartnerReviewStats);
 
 module.exports = router;
 

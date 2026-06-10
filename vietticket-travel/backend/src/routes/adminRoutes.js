@@ -10,6 +10,7 @@ const {
 } = require('../controllers/adminController');
 const protect = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
+const reviewController = require('../controllers/reviewController');
 
 const router = express.Router();
 
@@ -22,5 +23,8 @@ router.get('/attractions', getAttractions);
 router.put('/partners/:id/review', reviewPartner);
 router.put('/attractions/:id/review', reviewAttraction);
 router.put('/attractions/:id/hide', hideAttraction);
+
+// Kiểm duyệt Đánh giá
+router.get('/reviews', reviewController.listAdminReviews);
 
 module.exports = router;

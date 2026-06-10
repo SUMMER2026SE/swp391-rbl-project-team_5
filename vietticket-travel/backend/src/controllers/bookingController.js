@@ -26,6 +26,7 @@ const reservationInclude = {
 };
 
 const bookingInclude = {
+  review: true,
   voucher: true,
   payments: { orderBy: { createdAt: 'desc' } },
   ticketInstances: true,
@@ -146,6 +147,8 @@ function toBookingResponse(booking) {
     expiresAt: reservation.expiresAt,
     createdAt: booking.createdAt,
     updatedAt: booking.updatedAt,
+    reviewed: !!booking.review,
+    rating: booking.review?.rating || 0,
     ticketInstances: booking.ticketInstances.map((ticket) => ({
       id: ticket.id,
       qrCodeToken: ticket.qrCodeToken,

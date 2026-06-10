@@ -9,6 +9,7 @@ import { useAuth } from '../context/useAuth.js'
 import { appDownloadButtons, footerLinks } from '../data/landingData.js'
 import { apiRequest } from '../services/api.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
+import reviewService from '../services/reviewService.js'
 
 const detailNavLinks = [
   { label: 'Khám phá', href: '/attractions', active: true },
@@ -595,67 +596,229 @@ function AmenityTab({ attraction }) {
 }
 
 function ReviewTab({ attraction }) {
+  const [reviews, setReviews] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [filterType, setFilterType] = useState('all') // 'all', 'newest', '5', '4', '3', '2', '1'
+
+  useEffect(() => {
+    let active = true
+    reviewService.getReviews(attraction.id)
+      .then((data) => {
+        if (active) {
+          setReviews(data)
+        }
+      })
+      .catch((err) => {
+        console.error('Lỗi khi tải đánh giá:', err)
+      })
+      .finally(() => {
+        if (active) {
+          setIsLoading(false)
+        }
+      })
+    return () => { active = false }
+  }, [attraction.id])
+
   const rating = Number(attraction.averageRating || 0)
   const totalReviews = Number(attraction.totalReviews || 0)
 
-  const mockReviews = [
-    { initials: 'NT', name: 'Nguyễn Thị Thu', date: '05/2026', stars: 5, text: 'Trải nghiệm tuyệt vời! Cáp treo dài nhất thế giới thực sự ấn tượng. Cầu Vàng đẹp hơn trong ảnh nhiều lần. Nhân viên phục vụ nhiệt tình và chuyên nghiệp.' },
-    { initials: 'TH', name: 'Trần Hoàng', date: '04/2026', stars: 4, text: 'Rất xứng đáng với số tiền bỏ ra. Khu Làng Pháp cực đẹp, nhà thờ cổ kính rất photogenic. Thức ăn ở đây hơi đắt nhưng chất lượng ổn. Nên đặt vé trực tuyến để bỏ qua hàng chờ.' },
-    { initials: 'LM', name: 'Lê Minh', date: '03/2026', stars: 5, text: 'Đây là lần thứ 3 tôi đến Bà Nà Hills và lần nào cũng không thất vọng. VietTicket giúp tôi đặt vé nhanh, không cần xếp hàng. Cực kỳ tiện lợi!' },
-  ]
+  const formatReviewDate = (dateStr) => {
+    if (!dateStr) return ''
+    const date = new Date(dateStr)
+    if (isNaN(date.getTime())) return dateStr
+    return `Tháng ${date.getMonth() + 1}, ${date.getFullYear()}`
+  }
 
-  const displayRating = rating > 0 ? rating : 4.9
-  const displayReviews = totalReviews > 0 ? totalReviews : 2540
-  const ratingBars = [{ pct: 78 }, { pct: 15 }, { pct: 5 }, { pct: 1 }, { pct: 1 }]
+  const maskName = (name) => {
+    if (!name) return 'Khách hàng'
+    const parts = name.trim().split(/\s+/)
+    if (parts.length === 1) {
+      const first = parts[0][0] || ''
+      const last = parts[0][parts[0].length - 1] || ''
+      return `${first}***${last}`
+    }
+    return parts
+      .map((part) => {
+        if (part.length <= 1) return part
+        return `${part[0]}***`
+      })
+      .join(' ')
+  }
+
+  const formatTimeAgo = (dateStr) => {
+    if (!dateStr) return ''
+    const date = new Date(dateStr)
+    if (isNaN(date.getTime())) return dateStr
+    const diffMs = Date.now() - date.getTime()
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    if (diffDays <= 0) return 'Hôm nay'
+    if (diffDays === 1) return 'Hôm qua'
+    if (diffDays < 7) return `${diffDays} ngày trước`
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)} tuần trước`
+    return `${Math.floor(diffDays / 30)} tháng trước`
+  }
+
+  // Filter & sort logic
+  const filteredReviews = useMemo(() => {
+    let list = [...reviews]
+    if (filterType === 'newest') {
+      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    } else if (['5', '4', '3', '2', '1'].includes(filterType)) {
+      const star = parseInt(filterType)
+      list = list.filter((r) => r.rating === star)
+    }
+    return list
+  }, [reviews, filterType])
+
+  if (isLoading) {
+    return <div className="py-6 text-center text-sm font-semibold text-[#3f484a]">Đang tải đánh giá...</div>
+  }
+
+  const getStarFilterCount = (star) => {
+    return reviews.filter((r) => r.rating === star).length
+  }
 
   return (
     <div className="space-y-6">
-      {/* Rating summary */}
-      <div className="flex flex-col sm:flex-row gap-6 p-6 bg-[#006068]/5 rounded-2xl">
-        <div className="text-center flex-shrink-0">
-          <div className="text-[56px] font-bold text-[#006068] leading-none">{displayRating.toFixed(1)}</div>
-          <div className="flex justify-center gap-0.5 my-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <span key={i} className="material-symbols-outlined text-[#feb700]" style={{ fontVariationSettings: "'FILL' 1", fontSize: '18px' }}>star</span>
-            ))}
-          </div>
-          <p className="text-sm font-semibold text-[#3f484a]">{displayReviews.toLocaleString('vi-VN')} đánh giá</p>
+      {/* Section Header with Rating Summary Card */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b border-[#bec8ca]/30 pb-8">
+        <div>
+          <h2 className="text-2xl font-bold text-[#00474d] mb-2">Đánh giá từ du khách</h2>
+          <p className="text-sm text-[#3f484a]">Khám phá những trải nghiệm thực tế từ cộng đồng Modern Explorer.</p>
         </div>
-        <div className="flex-1 space-y-2">
-          {ratingBars.map((bar, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <span className="text-xs font-bold text-[#3f484a] w-4">{5 - i}</span>
-              <span className="material-symbols-outlined text-[#feb700]" style={{ fontVariationSettings: "'FILL' 1", fontSize: '12px' }}>star</span>
-              <div className="flex-1 h-2 bg-[#e2e2e5] rounded-full overflow-hidden">
-                <div className="h-full bg-[#feb700] rounded-full transition-all" style={{ width: `${bar.pct}%` }} />
-              </div>
-              <span className="text-xs font-semibold text-[#3f484a] w-8">{bar.pct}%</span>
+
+        {/* Rating Summary Card */}
+        <div className="bg-white p-6 rounded-xl shadow-[0px_4px_20px_rgba(0,123,133,0.05)] border border-[#bec8ca]/30 flex items-center gap-x-6 self-start lg:self-auto">
+          <div className="text-center">
+            <div className="text-4xl font-bold text-[#00474d] leading-none">{rating > 0 ? rating.toFixed(1) : '0.0'}</div>
+            <div className="text-[11px] text-[#3f484a] mt-1 font-semibold">trên 5.0</div>
+          </div>
+          <div className="h-12 w-px bg-[#bec8ca]/30"></div>
+          <div>
+            <div className="flex gap-x-0.5 mb-1">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span 
+                  key={i} 
+                  className="material-symbols-outlined text-[#feb700] text-[20px]"
+                  style={{ fontVariationSettings: rating >= i + 1 ? "'FILL' 1" : rating > i ? "'FILL' 0.5" : "'FILL' 0" }}
+                >
+                  star
+                </span>
+              ))}
             </div>
-          ))}
+            <div className="text-sm font-bold text-[#00474d]">{totalReviews.toLocaleString('vi-VN')} đánh giá</div>
+          </div>
         </div>
       </div>
 
-      {/* Individual reviews */}
-      <div className="space-y-5">
-        {mockReviews.map((review, i) => (
-          <div key={i} className={`flex gap-4 ${i < mockReviews.length - 1 ? 'pb-5 border-b border-[#bec8ca]/40' : ''}`}>
-            <div className="w-11 h-11 rounded-full bg-[#006068]/10 flex items-center justify-center flex-shrink-0 font-bold text-sm text-[#006068]">
-              {review.initials}
-            </div>
-            <div className="flex-1">
-              <div className="flex items-center justify-between mb-1">
-                <h4 className="font-bold text-sm text-[#1a1c1e]">{review.name}</h4>
-                <span className="text-xs font-semibold text-[#3f484a]">{review.date}</span>
+      {/* Filter Chips */}
+      <div className="flex flex-wrap gap-2 py-2">
+        <button 
+          className={`px-5 py-2 rounded-full text-xs font-semibold transition-all ${
+            filterType === 'all' 
+              ? 'bg-[#00474d] text-white shadow-sm' 
+              : 'bg-[#f3f3f6] text-[#3f484a] hover:bg-[#bec8ca]/20'
+          }`}
+          onClick={() => setFilterType('all')}
+        >
+          Tất cả
+        </button>
+        <button 
+          className={`px-5 py-2 rounded-full text-xs font-semibold transition-all ${
+            filterType === 'newest' 
+              ? 'bg-[#00474d] text-white shadow-sm' 
+              : 'bg-[#f3f3f6] text-[#3f484a] hover:bg-[#bec8ca]/20'
+          }`}
+          onClick={() => setFilterType('newest')}
+        >
+          Mới nhất
+        </button>
+        {[5, 4, 3, 2, 1].map((star) => {
+          const count = getStarFilterCount(star)
+          if (count === 0 && filterType !== String(star)) return null
+          return (
+            <button 
+              key={star}
+              className={`px-5 py-2 rounded-full text-xs font-semibold transition-all ${
+                filterType === String(star) 
+                  ? 'bg-[#00474d] text-white shadow-sm' 
+                  : 'bg-[#f3f3f6] text-[#3f484a] hover:bg-[#bec8ca]/20'
+              }`}
+              onClick={() => setFilterType(String(star))}
+            >
+              {star} sao ({count})
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Review List */}
+      <div className="space-y-6 pt-2">
+        {filteredReviews.length === 0 ? (
+          <p className="text-center py-12 text-[#6f797a] bg-white rounded-xl border border-[#bec8ca]/20">
+            Không tìm thấy đánh giá phù hợp.
+          </p>
+        ) : (
+          filteredReviews.map((review) => (
+            <div 
+              key={review.id} 
+              className="bg-white p-6 rounded-xl border border-[#bec8ca]/20 shadow-[0px_4px_20px_rgba(0,96,104,0.04)] transition hover:shadow-[0px_12px_32px_rgba(0,96,104,0.08)] duration-200"
+            >
+              {/* Reviewer and Stars Row */}
+              <div className="flex justify-between items-start mb-4">
+                <div className="flex items-center gap-x-4">
+                  {review.user?.profile?.avatarUrl ? (
+                    <img
+                      alt="User Profile"
+                      className="w-12 h-12 rounded-full object-cover border border-[#bec8ca]/20"
+                      src={review.user.profile.avatarUrl}
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-[#006068]/10 text-[#006068] flex items-center justify-center font-bold text-sm">
+                      {review.user?.fullName ? review.user.fullName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() : 'KH'}
+                    </div>
+                  )}
+                  <div>
+                    <div className="text-base font-bold text-[#00474d]">{maskName(review.user?.fullName)}</div>
+                    <div className="text-xs text-[#3f484a] font-semibold mt-0.5">
+                      Đã trải nghiệm vào {formatReviewDate(review.createdAt)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex gap-x-0.5">
+                  {Array.from({ length: 5 }).map((_, j) => (
+                    <span 
+                      key={j} 
+                      className={`material-symbols-outlined text-[20px] ${j < review.rating ? 'text-[#feb700]' : 'text-[#bec8ca]'}`}
+                      style={{ fontVariationSettings: j < review.rating ? "'FILL' 1" : "'FILL' 0" }}
+                    >
+                      star
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className="flex gap-0.5 mb-2">
-                {Array.from({ length: review.stars }).map((_, j) => (
-                  <span key={j} className="material-symbols-outlined text-[#feb700]" style={{ fontVariationSettings: "'FILL' 1", fontSize: '14px' }}>star</span>
-                ))}
-              </div>
-              <p className="text-sm text-[#3f484a] leading-6">{review.text}</p>
+
+              {/* Comment Content */}
+              <p className="text-sm text-[#1a1c1e] mb-6 leading-relaxed">
+                {review.comment || 'Khách hàng không để lại bình luận chi tiết.'}
+              </p>
+
+              {/* Partner Response */}
+              {review.replyComment && (
+                <div className="ml-4 md:ml-12 p-5 bg-[#f3f3f6] rounded-lg border-l-4 border-[#00474d]/30">
+                  <div className="flex items-center gap-x-2 mb-2">
+                    <span className="material-symbols-outlined text-[#00474d] text-[18px]">verified_user</span>
+                    <span className="text-xs font-bold text-[#00474d]">Phản hồi từ Đối tác</span>
+                    <span className="text-xs text-[#3f484a] ml-auto">{formatTimeAgo(review.repliedAt || review.updatedAt)}</span>
+                  </div>
+                  <p className="text-sm text-[#3f484a] italic">
+                    "{review.replyComment}"
+                  </p>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   )

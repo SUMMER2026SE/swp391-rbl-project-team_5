@@ -1,13 +1,22 @@
-// TODO: Như sẽ triển khai file này.
 'use strict';
 
 const express = require('express');
+const protect = require('../middleware/authMiddleware');
+const { restrictTo } = require('../middleware/roleMiddleware');
+const reviewController = require('../controllers/reviewController');
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
-  void req;
-  return res.json({});
-});
+// Public routes
+router.get('/', reviewController.listPublicReviews);
+
+// Protected customer routes
+router.post('/', protect, restrictTo('CUSTOMER'), reviewController.createReview);
+
+// Partner routes
+router.post('/:reviewId/reply', protect, restrictTo('PARTNER'), reviewController.replyReview);
+
+// Admin/Staff moderation routes
+router.patch('/:reviewId/moderate', protect, restrictTo('ADMIN', 'STAFF'), reviewController.moderateReview);
 
 module.exports = router;

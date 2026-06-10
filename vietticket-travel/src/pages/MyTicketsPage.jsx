@@ -4,6 +4,7 @@ import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import RefundModal from '../components/tickets/RefundModal.jsx'
+import ReviewModal from '../components/tickets/ReviewModal.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 
@@ -44,6 +45,7 @@ function MyTicketsPage() {
   const [now, setNow] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
+  const [selectedReviewBooking, setSelectedReviewBooking] = useState(null)
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -214,6 +216,7 @@ function MyTicketsPage() {
                   key={booking.id}
                   now={now}
                   onRefetch={refetchBookings}
+                  onOpenReview={setSelectedReviewBooking}
                 />
               ))
             )}
@@ -221,6 +224,13 @@ function MyTicketsPage() {
         </main>
       </div>
       <Footer />
+      {selectedReviewBooking && (
+        <ReviewModal
+          booking={selectedReviewBooking}
+          onClose={() => setSelectedReviewBooking(null)}
+          onSuccess={refetchBookings}
+        />
+      )}
     </>
   )
 }
@@ -241,7 +251,7 @@ function SidebarLink({ active = false, href, icon, label }) {
   )
 }
 
-function TicketCard({ booking, now, onRefetch }) {
+function TicketCard({ booking, now, onRefetch, onOpenReview }) {
   const [showRefund, setShowRefund] = useState(false)
   const remainingTime = getRemainingTime(booking.expiresAt, now)
   const isExpired = booking.status === 'unpaid' && remainingTime === 0
@@ -334,16 +344,42 @@ function TicketCard({ booking, now, onRefetch }) {
               Đang chờ duyệt hoàn tiền
             </span>
           )}
-          {booking.status === 'completed' && (
+          {booking.status === 'completed' && !(booking.reviewed || booking.review) && (
             <button
-              className="flex items-center gap-2 rounded-xl px-7 py-2.5 font-bold text-on-surface-variant transition hover:bg-surface-container-high"
+              className="flex items-center gap-2 rounded-xl bg-secondary-container text-on-secondary-container px-7 py-2.5 font-bold hover:scale-[1.02] active:scale-95 transition-all shadow-sm"
+              onClick={() => onOpenReview(booking)}
               type="button"
             >
               <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
                 rate_review
               </span>
-              Viết đánh giá
+              Đánh giá ngay
             </button>
+          )}
+          {booking.status === 'completed' && (booking.reviewed || booking.review) && (
+            <>
+              <div className="flex gap-0.5 text-[#feb700] mr-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="material-symbols-outlined text-[18px]"
+                    style={{ fontVariationSettings: i < (booking.rating || booking.review?.rating || 5) ? "'FILL' 1" : "'FILL' 0" }}
+                  >
+                    star
+                  </span>
+                ))}
+              </div>
+              <button
+                className="flex items-center gap-2 rounded-xl bg-surface-container text-on-surface-variant px-7 py-2.5 font-bold cursor-default"
+                disabled
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                  check_circle
+                </span>
+                Đã gửi đánh giá
+              </button>
+            </>
           )}
           {isExpired && (
             <span className="text-sm font-semibold text-on-surface-variant">
@@ -381,8 +417,10 @@ function StatusBadge({ booking, isExpired }) {
           className: 'bg-tertiary-fixed text-on-tertiary-fixed-variant',
         },
         completed: {
-          label: 'Hoàn thành',
-          className: 'bg-surface-container-high text-on-surface-variant',
+          label: (booking.reviewed || booking.review) ? 'Đã xong & Đánh giá' : 'Đã hoàn thành',
+          className: (booking.reviewed || booking.review)
+            ? 'bg-outline text-white'
+            : 'bg-primary-container text-on-primary',
         },
         refund_requested: {
           label: 'Chờ hoàn tiền',

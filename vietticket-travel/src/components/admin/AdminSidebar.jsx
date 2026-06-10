@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/admin/attraction-approval', icon: 'location_on',    label: 'Duyệt địa điểm' },
   { to: '/admin/violations',          icon: 'report_problem', label: 'Quản lý vi phạm' },
   { to: '/admin/categories',          icon: 'category',       label: 'Quản lý danh mục' },
+  { to: '/admin/reviews',             icon: 'rate_review',    label: 'Kiểm duyệt Đánh giá' },
 ];
 
 
