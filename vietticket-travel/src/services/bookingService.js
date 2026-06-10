@@ -77,13 +77,32 @@ export const createVNPayUrl = async (bookingId) => {
   return result.data?.paymentUrl
 }
 
+// Xem trước số tiền hoàn (chính sách, phí, thực nhận) cho modal hoàn tiền.
+export const getRefundPreview = async (bookingId) => {
+  const result = await apiRequest(`/payments/refund-preview/${bookingId}`, {
+    method: 'GET',
+  })
+  return result.data
+}
+
+// Gửi yêu cầu hoàn tiền -> đơn chuyển sang REFUND_REQUESTED, Staff sẽ duyệt.
+export const createRefundRequest = async (bookingId, reason) => {
+  const result = await apiRequest('/payments/refund-request', {
+    method: 'POST',
+    body: { bookingId, reason },
+  })
+  return result.data
+}
+
 const bookingService = {
   applyVoucher,
   createBooking,
+  createRefundRequest,
   createVNPayUrl,
   getBookingDetails,
   getBookings,
   getLastReservationId,
+  getRefundPreview,
   getReservationDetails,
   reserveTicket,
 }

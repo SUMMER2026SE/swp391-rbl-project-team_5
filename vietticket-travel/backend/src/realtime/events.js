@@ -54,6 +54,24 @@ function emitBookingStatusUpdated({ customerId, bookingId, status, message }) {
   return true;
 }
 
+// --- Support ticket (Module 5) ---
+// Phát tin nhắn mới tới phòng chat của ticket. Quyền vào phòng được kiểm soát
+// ở socketServer.js (handler JOIN_SUPPORT_TICKET), nên ở đây chỉ cần broadcast.
+function emitSupportMessage(ticketId, message) {
+  if (!socketServer || !ticketId) return false;
+
+  socketServer.to(`ticket:${ticketId}`).emit('SUPPORT_MESSAGE', message);
+  return true;
+}
+
+// Phát thay đổi trạng thái ticket (OPEN -> IN_PROGRESS -> RESOLVED) tới phòng chat.
+function emitSupportTicketUpdated(ticketId, payload) {
+  if (!socketServer || !ticketId) return false;
+
+  socketServer.to(`ticket:${ticketId}`).emit('SUPPORT_TICKET_UPDATED', payload);
+  return true;
+}
+
 async function publishNewBookingById(bookingId) {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -78,6 +96,8 @@ function queueNewBookingNotification(bookingId) {
 module.exports = {
   emitBookingStatusUpdated,
   emitNewBooking,
+  emitSupportMessage,
+  emitSupportTicketUpdated,
   publishNewBookingById,
   queueNewBookingNotification,
   setSocketServer,

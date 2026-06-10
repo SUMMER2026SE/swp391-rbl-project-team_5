@@ -29,6 +29,8 @@ import ProfilePage from '../pages/ProfilePage.jsx'
 import RegisterPage from '../pages/RegisterPage.jsx'
 import ResetPasswordPage from '../pages/ResetPasswordPage.jsx'
 import SearchAttractionsPage from '../pages/SearchAttractionsPage.jsx'
+import SupportCenterPage from '../pages/SupportCenterPage.jsx'
+import MySupportTicketsPage from '../pages/MySupportTicketsPage.jsx'
 import UserFavoritesPage from '../pages/UserFavoritesPage.jsx'
 import VerifyEmailPage from '../pages/VerifyEmailPage.jsx'
 import AdminDashboard from '../pages/admin/AdminDashboard.jsx'
@@ -268,6 +270,23 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ETicketPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Module 5 - Customer Support */}
+      <Route
+        path="/support"
+        element={
+          <ProtectedRoute>
+            <SupportCenterPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/my-support"
+        element={
+          <ProtectedRoute>
+            <MySupportTicketsPage />
           </ProtectedRoute>
         }
       />

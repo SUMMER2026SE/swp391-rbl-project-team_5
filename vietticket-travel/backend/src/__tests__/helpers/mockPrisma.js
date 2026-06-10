@@ -103,6 +103,15 @@ const mockPrisma = {
     createMany: jest.fn(),
     updateMany: jest.fn(),
   },
+  supportTicket: {
+    create: jest.fn(),
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    update: jest.fn(),
+  },
+  supportMessage: {
+    create: jest.fn(),
+  },
   $transaction: jest.fn(),
 };
 
