@@ -5,11 +5,10 @@ import { useAuth } from '../../context/useAuth.js'
 const navItems = [
   { label: 'Hồ sơ của tôi', icon: 'person', to: '/profile', active: 'profile' },
   {
-    label: 'Đặt chỗ gần đây',
+    label: 'Vé của tôi',
     icon: 'confirmation_number',
-    to: null,
+    to: '/my-tickets',
     active: 'bookings',
-    comingSoon: true,
   },
   {
     label: 'Điểm đã lưu',

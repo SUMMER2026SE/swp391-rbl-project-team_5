@@ -1,6 +1,9 @@
 const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
+const { emitNewBooking } = require('../realtime/events');
+const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
+
 
 const { Decimal } = Prisma;
 const PAYMENT_METHODS = new Set(['vnpay', 'card', 'onsite']);
@@ -520,6 +523,15 @@ async function createBooking(req, res, next) {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    if (['PENDING_PARTNER', 'CONFIRMED'].includes(booking.status)) {
+      emitNewBooking(booking);
+    }
+
+    // Đơn onsite không cần duyệt -> CONFIRMED ngay: gửi email vé PDF luôn.
+    if (booking.status === 'CONFIRMED') {
+      queueConfirmedTicketEmail(booking.id);
+    }
 
     return res.status(201).json({
       success: true,

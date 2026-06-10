@@ -55,7 +55,7 @@ function createEmailTemplate({ title, preview, buttonText, link }) {
   `;
 }
 
-async function sendMail({ to, subject, html, text, fallbackLink }) {
+async function sendMail({ to, subject, html, text, fallbackLink, attachments = [] }) {
   if (!hasSmtpConfig()) {
     console.log(`[VietTicket Travel] SMTP chưa cấu hình. Link demo cho ${to}: ${fallbackLink}`);
     return { sent: false, reason: 'SMTP_NOT_CONFIGURED' };
@@ -69,6 +69,7 @@ async function sendMail({ to, subject, html, text, fallbackLink }) {
     subject,
     text,
     html,
+    attachments,
   });
 
   return { sent: true };
@@ -149,15 +150,10 @@ async function sendAccountStatusEmail({ to, fullName, status, reason }) {
   return { sent: false, reason: 'UNSUPPORTED_ACCOUNT_STATUS' };
 }
 
-module.exports = {
-  sendAccountStatusEmail,
-  sendPasswordResetEmail,
-  sendVerificationEmail,
-};
-
 async function sendPartnerReviewEmail({ to, businessName, action, rejectionReason }) {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const safeBusiness = escapeHtml(businessName || 'Đối tác');
+
   if (action === 'APPROVED') {
     const link = `${frontendUrl}/partner/dashboard`;
     return sendMail({
@@ -215,10 +211,53 @@ async function sendAttractionViolationEmail({ to, partnerName, attractionTitle, 
   });
 }
 
+async function sendTicketConfirmationEmail({ booking, pdfBuffer }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const ticketLink = `${frontendUrl}/tickets/${booking.id}`;
+  const attraction = booking.reservation.ticketProduct.attraction;
+  const visitDate = new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(booking.reservation.date));
+  const safeName = escapeHtml(booking.fullName || 'quý khách');
+  const safeAttraction = escapeHtml(attraction.title);
+  const safeVisitDate = escapeHtml(visitDate);
+  const fileName = `VietTicket_VeDienTu_${booking.id.slice(0, 8)}.pdf`;
+
+  return sendMail({
+    to: booking.email,
+    subject: `Vé điện tử đã sẵn sàng - ${attraction.title}`,
+    text:
+      `Xin chào ${booking.fullName}, đơn đặt vé ${booking.id} đã được xác nhận. ` +
+      `Địa điểm: ${attraction.title}. Ngày tham quan: ${visitDate}. ` +
+      'Vé PDF được đính kèm trong email này.',
+    fallbackLink: ticketLink,
+    html: createEmailTemplate({
+      title: 'Đặt vé của bạn đã được xác nhận',
+      preview:
+        `Xin chào ${safeName}, chúc mừng bạn đã đặt vé thành công tại ` +
+        `<strong>${safeAttraction}</strong> vào ngày <strong>${safeVisitDate}</strong>. ` +
+        'Vé điện tử PDF đã được đính kèm. Vui lòng lưu vé trên điện thoại hoặc in ra để xuất trình tại quầy soát vé.',
+      buttonText: 'Xem vé điện tử',
+      link: ticketLink,
+    }),
+    attachments: [
+      {
+        filename: fileName,
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+      },
+    ],
+  });
+}
+
 module.exports = {
   sendAccountStatusEmail,
   sendPasswordResetEmail,
   sendVerificationEmail,
   sendPartnerReviewEmail,
   sendAttractionViolationEmail,
+  sendTicketConfirmationEmail,
 };

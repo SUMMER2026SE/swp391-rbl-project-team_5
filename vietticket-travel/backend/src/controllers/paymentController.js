@@ -1,5 +1,8 @@
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
+const { queueNewBookingNotification, emitBookingStatusUpdated } = require('../realtime/events');
+const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
+
 const { buildVnpayUrl, verifyVnpaySignature, formatVnpDate } = require('../utils/vnpay');
 const {
   confirmReservationAndStock,
@@ -156,10 +159,11 @@ async function vnpayIpn(req, res) {
 
         // Idempotency theo Payment SUCCESS (KHÔNG theo Booking.status).
         if (current.payments.some((p) => p.status === 'SUCCESS')) {
-          return { code: '02', msg: 'Order already confirmed' };
+          return { code: '02', msg: 'Order already confirmed', bookingStatus: null };
         }
 
         const reservation = current.reservation;
+        let bookingStatus = null;
 
         if (isSuccess) {
           await tx.payment.update({
@@ -176,6 +180,7 @@ async function vnpayIpn(req, res) {
                 where: { id: current.id },
                 data: { status: 'PENDING_PARTNER' },
               });
+              bookingStatus = 'PENDING_PARTNER';
             } else {
               await tx.booking.update({
                 where: { id: current.id },
@@ -187,6 +192,7 @@ async function vnpayIpn(req, res) {
                 reservation.ticketProductId,
                 reservation.quantity,
               );
+              bookingStatus = 'CONFIRMED';
             }
           } else {
             // Đã thu tiền nhưng vé đã bị thu hồi/đơn đã hủy -> cần hoàn tiền thủ công.
@@ -204,10 +210,35 @@ async function vnpayIpn(req, res) {
           });
         }
 
-        return { code: '00', msg: 'Confirm success' };
+        return {
+          code: '00',
+          msg: 'Confirm success',
+          bookingStatus,
+        };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    if (['PENDING_PARTNER', 'CONFIRMED'].includes(result.bookingStatus)) {
+      // Thông báo cho Partner có đơn mới
+      queueNewBookingNotification(booking.id);
+
+      // Đẩy WebSocket ngay tới Customer để UI cập nhật status không cần F5
+      emitBookingStatusUpdated({
+        customerId: booking.userId,
+        bookingId: booking.id,
+        status: result.bookingStatus,
+        message:
+          result.bookingStatus === 'CONFIRMED'
+            ? `Đặt vé ${booking.id.slice(0, 8).toUpperCase()} của bạn đã được thanh toán và xác nhận thành công!`
+            : `Đơn hàng ${booking.id.slice(0, 8).toUpperCase()} đã thanh toán thành công và đang chờ đối tác phê duyệt.`,
+      });
+
+      // Nếu địa điểm không cần duyệt thủ công -> CONFIRMED ngay: gửi email vé PDF luôn
+      if (result.bookingStatus === 'CONFIRMED') {
+        queueConfirmedTicketEmail(booking.id);
+      }
+    }
 
     return res.status(200).json({ RspCode: result.code, Message: result.msg });
   } catch (error) {
