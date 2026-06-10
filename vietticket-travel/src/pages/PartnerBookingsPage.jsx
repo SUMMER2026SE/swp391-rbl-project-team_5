@@ -37,14 +37,12 @@ function PartnerBookingsPage() {
 
   // Debounce search input
   useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput), 400)
+    const t = setTimeout(() => {
+      setSearch(searchInput)
+      setPage(1)
+    }, 400)
     return () => clearTimeout(t)
   }, [searchInput])
-
-  // Reset to page 1 when filter/search changes
-  useEffect(() => {
-    setPage(1)
-  }, [statusFilter, search])
 
   const fetchBookings = useCallback(async () => {
     setIsLoading(true)
@@ -66,6 +64,7 @@ function PartnerBookingsPage() {
   }, [page, statusFilter, search])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBookings()
   }, [fetchBookings])
 
@@ -139,7 +138,10 @@ function PartnerBookingsPage() {
         </div>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setPage(1)
+          }}
           className="px-3 py-2.5 rounded-lg border border-[#bec8ca] text-sm outline-none focus:border-[#00474d] bg-white"
         >
           <option value="all">Tất cả trạng thái</option>

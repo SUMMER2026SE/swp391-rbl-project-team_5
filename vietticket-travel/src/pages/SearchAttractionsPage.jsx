@@ -174,10 +174,21 @@ export default function SearchAttractionsPage() {
   const [mapPoints, setMapPoints] = useState([])
   const [mapLoading, setMapLoading] = useState(false)
 
+  // Sync URL query params with local state when location.search changes
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSearchQuery(params.get('search') || '')
+    setSelectedCategory(params.get('category') || 'All')
+    setSelectedCity(params.get('city') || 'Tất cả thành phố')
+    setCurrentPage(1)
+  }, [location.search])
+
   // Tải toàn bộ điểm có toạ độ (1 lần) khi mở bản đồ.
   useEffect(() => {
     if (!showMap || mapPoints.length > 0) return
     let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMapLoading(true)
     apiRequest('/attractions/map-points')
       .then((result) => {
