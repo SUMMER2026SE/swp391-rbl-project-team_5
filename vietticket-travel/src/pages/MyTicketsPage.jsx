@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
+import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 
 const tabs = [
@@ -35,6 +37,7 @@ const formatCountdown = (milliseconds) => {
 
 function MyTicketsPage() {
   const navigate = useNavigate()
+  const socket = useSocket()
   const [activeTab, setActiveTab] = useState('all')
   const [bookings, setBookings] = useState([])
   const [now, setNow] = useState(0)
@@ -65,6 +68,49 @@ function MyTicketsPage() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    function handleBookingStatusUpdated(payload) {
+      const status = String(payload.status || '').toLowerCase()
+      const shortCode = String(payload.bookingId || '').slice(0, 8).toUpperCase()
+
+      let message = payload.message
+      if (!message) {
+        if (status === 'confirmed' || status === 'completed') {
+          message = `Đặt vé ${shortCode} của bạn đã được phê duyệt thành công!`
+        } else if (status === 'pending_partner') {
+          message = `Đơn hàng ${shortCode} đã thanh toán thành công và đang chờ đối tác phê duyệt.`
+        } else {
+          message = `Rất tiếc, yêu cầu đặt vé ${shortCode} đã bị từ chối.`
+        }
+      }
+
+      if (status === 'confirmed' || status === 'completed') toast.success(message)
+      else if (status === 'pending_partner') toast.info(message)
+      else toast.error(message)
+
+      setBookings((current) =>
+        current.map((booking) =>
+          booking.id === payload.bookingId ? { ...booking, status } : booking,
+        ),
+      )
+
+      void bookingService
+        .getBookings()
+        .then((data) => {
+          setBookings(data)
+          setErrorMessage('')
+        })
+        .catch(() => {
+          // The optimistic status update remains visible until the next normal fetch.
+        })
+    }
+
+    socket.on('BOOKING_STATUS_UPDATED', handleBookingStatusUpdated)
+    return () => {
+      socket.off('BOOKING_STATUS_UPDATED', handleBookingStatusUpdated)
+    }
+  }, [socket])
 
   const filteredBookings = useMemo(
     () =>

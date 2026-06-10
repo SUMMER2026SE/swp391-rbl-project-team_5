@@ -1,8 +1,10 @@
 import { QRCodeSVG } from 'qrcode.react'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
+import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 
 const fallbackImage =
@@ -23,6 +25,7 @@ const formatDate = (value) => {
 
 function ETicketPage() {
   const { bookingId } = useParams()
+  const socket = useSocket()
   const [booking, setBooking] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
@@ -46,6 +49,47 @@ function ETicketPage() {
       active = false
     }
   }, [bookingId])
+
+  useEffect(() => {
+    function handleBookingStatusUpdated(payload) {
+      if (payload.bookingId !== bookingId) return
+
+      const status = String(payload.status || '').toLowerCase()
+      const shortCode = bookingId.slice(0, 8).toUpperCase()
+
+      let message = payload.message
+      if (!message) {
+        if (status === 'confirmed' || status === 'completed') {
+          message = `Đặt vé ${shortCode} của bạn đã được phê duyệt thành công!`
+        } else if (status === 'pending_partner') {
+          message = `Đơn hàng ${shortCode} đã thanh toán thành công và đang chờ đối tác phê duyệt.`
+        } else {
+          message = `Rất tiếc, yêu cầu đặt vé ${shortCode} đã bị từ chối.`
+        }
+      }
+
+      if (status === 'confirmed' || status === 'completed') toast.success(message)
+      else if (status === 'pending_partner') toast.info(message)
+      else toast.error(message)
+
+      setBooking((current) => (current ? { ...current, status } : current))
+
+      void bookingService
+        .getBookingDetails(bookingId)
+        .then((data) => {
+          setBooking(data)
+          setErrorMessage('')
+        })
+        .catch(() => {
+          // Keep the event status visible; a manual reload still uses the REST fallback.
+        })
+    }
+
+    socket.on('BOOKING_STATUS_UPDATED', handleBookingStatusUpdated)
+    return () => {
+      socket.off('BOOKING_STATUS_UPDATED', handleBookingStatusUpdated)
+    }
+  }, [bookingId, socket])
 
   if (isLoading) {
     return (
@@ -78,7 +122,9 @@ function ETicketPage() {
     )
   }
 
-  const canShowQr = ['confirmed', 'completed'].includes(booking.status)
+  const canShowQr =
+    ['confirmed', 'completed'].includes(booking.status) &&
+    booking.ticketInstances?.length > 0
   const quantityText = `${booking.quantity || 1} vé`
 
   return (
