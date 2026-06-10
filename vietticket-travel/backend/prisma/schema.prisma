@@ -370,6 +370,7 @@ model Review {
   id           String    @id @default(uuid())
   userId       String
   attractionId String
+  bookingId    String?   @unique
   rating       Int
   comment      String?   @db.Text
   isHidden     Boolean   @default(false)
@@ -380,6 +381,7 @@ model Review {
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  booking    Booking?   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 }
 
 model Booking {
@@ -406,6 +408,7 @@ model Booking {
   payments        Payment[]
   ticketInstances TicketInstance[]
   refundRequests  RefundRequest[]
+  review          Review?
 
   @@index([userId])
   @@index([voucherId])

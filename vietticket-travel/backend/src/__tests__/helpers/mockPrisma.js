@@ -112,6 +112,14 @@ const mockPrisma = {
   supportMessage: {
     create: jest.fn(),
   },
+  review: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+    count: jest.fn(),
+  },
   $transaction: jest.fn(),
 };
 

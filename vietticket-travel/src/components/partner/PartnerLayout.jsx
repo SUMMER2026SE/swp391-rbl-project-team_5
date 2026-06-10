@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: '/partner/dashboard', icon: 'dashboard', label: 'Dashboard' },
   { to: '/partner/attractions', icon: 'local_activity', label: 'Điểm tham quan', fillIcon: true },
   { to: '/partner/bookings', icon: 'confirmation_number', label: 'Đặt vé' },
+  { to: '/partner/reviews', icon: 'rate_review', label: 'Đánh giá' },
   { to: '/partner/reports', icon: 'assessment', label: 'Báo cáo' },
   { to: '/partner/settings', icon: 'settings', label: 'Cài đặt' },
 ]

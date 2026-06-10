@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+
+<html lang="vi"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Vé của tôi - VietTicket Travel</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&amp;family=Plus+Jakarta+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-container": "#6b4b00",
+                        "surface-variant": "#e2e2e5",
+                        "on-background": "#1a1c1e",
+                        "surface-tint": "#136870",
+                        "surface-container-high": "#e8e8eb",
+                        "tertiary": "#61330a",
+                        "on-surface-variant": "#3f484a",
+                        "tertiary-fixed-dim": "#fdb784",
+                        "tertiary-container": "#7d4a20",
+                        "secondary": "#7c5800",
+                        "on-primary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "on-tertiary-fixed-variant": "#6a3b12",
+                        "on-secondary": "#ffffff",
+                        "primary-container": "#006068",
+                        "surface-dim": "#d9dadd",
+                        "surface-bright": "#f9f9fc",
+                        "outline-variant": "#bec8ca",
+                        "inverse-primary": "#8ad2db",
+                        "error-container": "#ffdad6",
+                        "inverse-surface": "#2f3133",
+                        
+                        /* [TRUNCATED - ORIGINAL GOOGLE STITCH HTML CODE WAS 20KB+ AND TRUNCATED BY CHAT SYSTEM LOGS] */
+                        
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.body.style.overflow = 'auto';
+        resetStars();
+    }
+
+    // Star Rating Logic
+    const stars = document.querySelectorAll('.star');
+    stars.forEach(star => {
+        star.addEventListener('click', function() {
+            const val = parseInt(this.getAttribute('data-value'));
+            stars.forEach((s, idx) => {
+                if (idx < val) {
+                    s.classList.add('active');
+                    s.classList.remove('text-outline-variant');
+                    s.classList.add('text-secondary');
+                } else {
+                    s.classList.remove('active');
+                    s.classList.add('text-outline-variant');
+                    s.classList.remove('text-secondary');
+                }
+            });
+        });
+        
+        star.addEventListener('mouseover', function() {
+            const val = parseInt(this.getAttribute('data-value'));
+            stars.forEach((s, idx) => {
+                if (idx < val) {
+                    s.style.color = '#feb700';
+                }
+            });
+        });
+        
+        star.addEventListener('mouseout', function() {
+            stars.forEach(s => {
+                if (!s.classList.contains('active')) {
+                    s.style.color = '';
+                }
+            });
+        });
+    });
+
+    function resetStars() {
+        stars.forEach(s => {
+            s.classList.remove('active');
+            s.classList.add('text-outline-variant');
+            s.classList.remove('text-secondary');
+            s.style.color = '';
+        });
+    }
+</script>
+</body></html>
