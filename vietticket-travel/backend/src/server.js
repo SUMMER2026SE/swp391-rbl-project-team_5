@@ -8,6 +8,7 @@ const {
   initializeSocketServer,
 } = require('./realtime/socketServer');
 const { startCleanupWorker } = require('./utils/cleanupWorker');
+const { startCompletionWorker } = require('./utils/completionWorker');
 
 const PORT = process.env.PORT || 5000;
 
@@ -20,6 +21,9 @@ server.listen(PORT, () => {
 
 // Worker dọn giữ chỗ quá hạn (chỉ chạy ở server thật, không chạy trong test).
 const cleanupHandle = startCleanupWorker();
+
+// Worker chuyển đơn đã qua ngày tham quan sang COMPLETED (mở khoá luồng đánh giá).
+const completionHandle = startCompletionWorker();
 
 let shutdownPromise = null;
 
@@ -38,6 +42,7 @@ function shutdown({ exit = true } = {}) {
   if (shutdownPromise) return shutdownPromise;
 
   clearInterval(cleanupHandle);
+  clearInterval(completionHandle);
 
   shutdownPromise = (async () => {
     await closeSocketServer();
