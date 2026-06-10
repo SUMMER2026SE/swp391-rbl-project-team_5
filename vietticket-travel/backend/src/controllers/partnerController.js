@@ -403,17 +403,17 @@ async function getPartnerBookings(req, res, next) {
     // Map status filter từ FE sang DB enum
     const STATUS_MAP = {
       confirmed: 'CONFIRMED',
-      pending: 'PENDING_PAYMENT',
-      pending_partner: 'PENDING_PAYMENT',
+      pending_partner: 'PENDING_PARTNER',
       cancelled: 'CANCELLED',
       completed: 'COMPLETED',
     };
 
     const where = {
       reservationId: { in: reservationIds },
-      ...(statusFilter && statusFilter !== 'all' && STATUS_MAP[statusFilter]
-        ? { status: STATUS_MAP[statusFilter] }
-        : {}),
+      status:
+        statusFilter && statusFilter !== 'all' && STATUS_MAP[statusFilter]
+          ? STATUS_MAP[statusFilter]
+          : { not: 'PENDING_PAYMENT' },
     };
 
     const [total, bookings] = await Promise.all([
@@ -513,10 +513,10 @@ async function approveBooking(req, res, next) {
       return res.status(400).json({ success: false, message: 'Đơn đặt vé này đã được xác nhận trước đó.' });
     }
 
-    if (!['PENDING_PAYMENT', 'PENDING_PARTNER'].includes(booking.status)) {
+    if (booking.status !== 'PENDING_PARTNER') {
       return res.status(400).json({
         success: false,
-        message: 'Chỉ có thể duyệt đơn ở trạng thái chờ xử lý.',
+        message: 'Chỉ có thể duyệt đơn ở trạng thái chờ đối tác duyệt.',
       });
     }
 
@@ -621,10 +621,10 @@ async function rejectBooking(req, res, next) {
       return res.status(403).json({ success: false, message: 'Bạn không có quyền từ chối đơn này.' });
     }
 
-    if (booking.status === 'CANCELLED') {
+    if (booking.status !== 'PENDING_PARTNER') {
       return res.status(400).json({
         success: false,
-        message: 'Đơn đặt vé đã bị hủy trước đó.',
+        message: 'Chỉ có thể từ chối đơn ở trạng thái chờ đối tác duyệt.',
       });
     }
 
