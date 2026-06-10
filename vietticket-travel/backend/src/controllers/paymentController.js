@@ -212,6 +212,7 @@ async function vnpayIpn(req, res) {
     return res.status(200).json({ RspCode: result.code, Message: result.msg });
   } catch (error) {
     // Serialization failure / lỗi bất ngờ -> trả mã != 00 để VNPay gọi lại.
+    console.error('[vnpay-ipn] Lỗi:', error.message);
     return res.status(200).json({ RspCode: '99', Message: 'Unknown error' });
   }
 }
