@@ -12,9 +12,11 @@ import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favo
 const categoryFilters = [
   { value: 'All', text: 'Tất cả', icon: 'auto_awesome' },
   { value: 'Theme Park & Resort', text: 'Công viên chủ đề', icon: 'fort' },
+  { value: 'Amusement Park', text: 'Khu vui chơi', icon: 'mood' },
   { value: 'Museum', text: 'Bảo tàng', icon: 'museum' },
   { value: 'Nature & Sightseeing', text: 'Thiên nhiên', icon: 'forest' },
-  { value: 'Water Park', text: 'Công viên nước', icon: 'pool' },
+  { value: 'Cultural Experience', text: 'Văn hóa & Lịch sử', icon: 'theater_comedy' },
+  { value: 'Adventure', text: 'Mạo hiểm', icon: 'sailing' },
 ]
 
 const cityOptions = [
@@ -163,6 +165,10 @@ export default function SearchAttractionsPage() {
   })
   const [priceRange, setPriceRange] = useState(5000000)
   const [selectedStars, setSelectedStars] = useState([])
+  const [selectedSort, setSelectedSort] = useState(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get('sort') || 'popular'
+  })
 
   // 2. Quản lý dữ liệu & phân trang
   const [attractions, setAttractions] = useState([])
@@ -181,6 +187,7 @@ export default function SearchAttractionsPage() {
     setSearchQuery(params.get('search') || '')
     setSelectedCategory(params.get('category') || 'All')
     setSelectedCity(params.get('city') || 'Tất cả thành phố')
+    setSelectedSort(params.get('sort') || 'popular')
     setCurrentPage(1)
   }, [location.search])
 
@@ -221,6 +228,7 @@ export default function SearchAttractionsPage() {
           maxPrice: priceRange,
           minRating: selectedStars.length > 0 ? Math.min(...selectedStars) : '',
           search: searchQuery,
+          sort: selectedSort,
         })
 
         const result = await apiRequest(`/attractions?${params.toString()}`)
@@ -237,7 +245,7 @@ export default function SearchAttractionsPage() {
     }
 
     fetchAttractions()
-  }, [selectedCategory, selectedCity, priceRange, selectedStars, currentPage, searchQuery])
+  }, [selectedCategory, selectedCity, priceRange, selectedStars, currentPage, searchQuery, selectedSort])
 
   // Handler lọc đánh giá sao
   const handleStarChange = (star) => {
@@ -390,15 +398,30 @@ export default function SearchAttractionsPage() {
 
                 <FilterSection icon="sailing" title="Loại hình du lịch">
                   <div className="flex flex-wrap gap-2">
-                    {['Gia đình', 'Cặp đôi', 'Mạo hiểm'].map((type) => (
-                      <button
-                        className="rounded-full bg-[#eceeef] px-3 py-1 text-xs font-semibold text-[#3f484a] transition hover:bg-[#bec8ca]"
-                        key={type}
-                        type="button"
-                      >
-                        {type}
-                      </button>
-                    ))}
+                    {[
+                      { label: 'Gia đình', category: 'Theme Park & Resort' },
+                      { label: 'Cặp đôi', category: 'Nature & Sightseeing' },
+                      { label: 'Mạo hiểm', category: 'Adventure' },
+                    ].map((type) => {
+                      const isActive = selectedCategory === type.category
+                      return (
+                        <button
+                          className={`rounded-full px-3 py-1 text-xs font-semibold transition active:scale-95 ${
+                            isActive
+                              ? 'bg-[#00629d] text-white shadow-sm'
+                              : 'bg-[#eceeef] text-[#3f484a] hover:bg-[#bec8ca]'
+                          }`}
+                          key={type.label}
+                          onClick={() => {
+                            setSelectedCategory(type.category)
+                            setCurrentPage(1)
+                          }}
+                          type="button"
+                        >
+                          {type.label}
+                        </button>
+                      )
+                    })}
                   </div>
                 </FilterSection>
 
@@ -420,7 +443,14 @@ export default function SearchAttractionsPage() {
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-[#3f484a]">Sắp xếp:</span>
-                    <select className="rounded-lg border border-[#bec8ca] bg-[#f8fafb] px-3 py-1.5 text-xs font-bold text-[#3f484a] outline-none focus:border-[#00629d] transition cursor-pointer">
+                    <select
+                      className="rounded-lg border border-[#bec8ca] bg-[#f8fafb] px-3 py-1.5 text-xs font-bold text-[#3f484a] outline-none focus:border-[#00629d] transition cursor-pointer"
+                      value={selectedSort}
+                      onChange={(e) => {
+                        setSelectedSort(e.target.value)
+                        setCurrentPage(1)
+                      }}
+                    >
                       <option value="popular">Phổ biến nhất</option>
                       <option value="rating">Đánh giá cao nhất</option>
                       <option value="price-asc">Giá thấp nhất</option>

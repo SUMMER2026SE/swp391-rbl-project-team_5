@@ -44,6 +44,7 @@ model User {
   reviews                 Review[]
   reservations            Reservation[]
   bookings                Booking[]
+  supportTickets          SupportTicket[]
 }
 
 model UserProfile {
@@ -146,6 +147,8 @@ enum BookingStatus {
   CONFIRMED
   CANCELLED
   COMPLETED
+  REFUND_REQUESTED
+  REFUNDED
 }
 
 enum PaymentStatus {
@@ -364,12 +367,16 @@ model FavoriteAttraction {
 }
 
 model Review {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   userId       String
   attractionId String
   rating       Int
-  comment      String?  @db.Text
-  createdAt    DateTime @default(now())
+  comment      String?   @db.Text
+  isHidden     Boolean   @default(false)
+  replyComment String?   @db.Text
+  repliedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
@@ -398,6 +405,7 @@ model Booking {
   voucher         Voucher?         @relation(fields: [voucherId], references: [id])
   payments        Payment[]
   ticketInstances TicketInstance[]
+  refundRequests  RefundRequest[]
 
   @@index([userId])
   @@index([voucherId])
@@ -455,4 +463,64 @@ model Voucher {
   bookings Booking[]
 
   @@index([isActive, expiryDate])
+}
+
+enum RefundStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SupportStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+model RefundRequest {
+  id            String       @id @default(uuid())
+  bookingId     String       @unique
+  requestedById String
+  reason        String       @db.Text
+  amount        Decimal      @db.Decimal(12, 2)
+  status        RefundStatus @default(PENDING)
+  staffNotes    String?      @db.Text
+  processedById String?
+  createdAt     DateTime     @default(now())
+  processedAt   DateTime?
+  updatedAt     DateTime     @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([requestedById])
+}
+
+model SupportTicket {
+  id          String        @id @default(uuid())
+  userId      String
+  bookingId   String?
+  subject     String
+  description String        @db.Text
+  status      SupportStatus @default(OPEN)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages SupportMessage[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model SupportMessage {
+  id        String   @id @default(uuid())
+  ticketId  String
+  senderId  String
+  message   String   @db.Text
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
 }

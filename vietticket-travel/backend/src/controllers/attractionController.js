@@ -344,29 +344,48 @@ async function searchAttractions(req, res, next) {
     const minPrice = req.query.minPrice ? Number(req.query.minPrice) : null;
     const maxPrice = req.query.maxPrice ? Number(req.query.maxPrice) : null;
     const minRating = req.query.minRating ? Number(req.query.minRating) : null;
+    const sort = String(req.query.sort || '').trim();
 
     const where = { status: 'APPROVED' };
+    const andConditions = [];
 
-    if (city) where.city = { contains: city, mode: 'insensitive' };
-
-    if (search) {
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
+    if (city) {
+      let citySearchTerm = city;
+      if (/tp\.?\s*hcm/i.test(city) || /hồ chí minh/i.test(city)) {
+        citySearchTerm = 'Hồ Chí Minh';
+      }
+      andConditions.push({
+        OR: [
+          { city: { contains: citySearchTerm, mode: 'insensitive' } },
+          { district: { contains: citySearchTerm, mode: 'insensitive' } },
+        ]
+      });
     }
 
-    if (minRating) where.averageRating = { gte: minRating };
+    if (search) {
+      andConditions.push({
+        OR: [
+          { title: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+        ]
+      });
+    }
+
+    if (minRating) {
+      andConditions.push({ averageRating: { gte: minRating } });
+    }
 
     if (category) {
-      where.categories = {
-        some: {
-          OR: [
-            { categoryId: category },
-            { category: { name: { equals: category, mode: 'insensitive' } } },
-          ],
-        },
-      };
+      andConditions.push({
+        categories: {
+          some: {
+            OR: [
+              { categoryId: category },
+              { category: { name: { equals: category, mode: 'insensitive' } } },
+            ],
+          },
+        }
+      });
     }
 
     if (minPrice != null || maxPrice != null) {
@@ -374,24 +393,77 @@ async function searchAttractions(req, res, next) {
       if (minPrice != null) priceFilter.gte = minPrice;
       if (maxPrice != null) priceFilter.lte = maxPrice;
 
-      where.ticketProducts = { some: { sellingPrice: priceFilter } };
+      andConditions.push({
+        ticketProducts: { some: { status: 'ACTIVE', sellingPrice: priceFilter } }
+      });
     }
 
-    const [items, total] = await prisma.$transaction([
-      prisma.attraction.findMany({
-        where,
-        include: {
-          images: { where: { isPrimary: true }, take: 1 },
-          ticketProducts: { where: { status: 'ACTIVE' }, orderBy: { sellingPrice: 'asc' }, take: 1, select: { sellingPrice: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.attraction.count({ where }),
-    ]);
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
 
-    const mapped = items.map((a) => ({
+    // Xử lý sắp xếp và phân trang
+    const isPriceSort = sort === 'price-asc' || sort === 'price-desc';
+    let orderBy = { createdAt: 'desc' }; // mặc định
+
+    if (sort === 'popular') {
+      orderBy = { totalReviews: 'desc' };
+    } else if (sort === 'rating') {
+      orderBy = { averageRating: 'desc' };
+    }
+
+    const queryIncludes = {
+      images: { where: { isPrimary: true }, take: 1 },
+      ticketProducts: { where: { status: 'ACTIVE' }, orderBy: { sellingPrice: 'asc' }, take: 1, select: { sellingPrice: true } },
+    };
+
+    let rawItems = [];
+    let total = 0;
+
+    if (isPriceSort) {
+      // Đối với sắp xếp theo giá, chúng ta lấy tất cả kết quả phù hợp và sắp xếp trên bộ nhớ (JS memory)
+      const allItems = await prisma.attraction.findMany({
+        where,
+        include: queryIncludes,
+      });
+
+      // Gắn giá trị minPrice để sort
+      const itemsWithPrice = allItems.map((item) => {
+        const minVal = item.ticketProducts && item.ticketProducts[0] ? Number(item.ticketProducts[0].sellingPrice) : null;
+        return { ...item, minVal };
+      });
+
+      // Thực hiện sort
+      itemsWithPrice.sort((a, b) => {
+        const priceA = a.minVal;
+        const priceB = b.minVal;
+
+        if (priceA === null && priceB === null) return 0;
+        if (priceA === null) return 1; // Giá trị null được xếp xuống cuối
+        if (priceB === null) return -1;
+
+        return sort === 'price-asc' ? priceA - priceB : priceB - priceA;
+      });
+
+      total = itemsWithPrice.length;
+      rawItems = itemsWithPrice.slice(skip, skip + limit);
+    } else {
+      // Phân trang bằng CSDL thông thường
+      const [dbItems, dbCount] = await prisma.$transaction([
+        prisma.attraction.findMany({
+          where,
+          include: queryIncludes,
+          orderBy,
+          skip,
+          take: limit,
+        }),
+        prisma.attraction.count({ where }),
+      ]);
+      rawItems = dbItems;
+      total = dbCount;
+    }
+
+    const mapped = rawItems.map((a) => ({
       id: a.id,
       title: a.title,
       address: a.address,
@@ -401,10 +473,21 @@ async function searchAttractions(req, res, next) {
       primaryImage: a.images && a.images[0] ? a.images[0].imageUrl : null,
       averageRating: a.averageRating,
       totalReviews: a.totalReviews,
-      minPrice: a.ticketProducts && a.ticketProducts[0] ? a.ticketProducts[0].sellingPrice : null,
+      minPrice: a.ticketProducts && a.ticketProducts[0] ? Number(a.ticketProducts[0].sellingPrice) : null,
     }));
 
-    return res.status(200).json({ success: true, data: { attractions: mapped, pagination: { totalItems: total, totalPages: Math.ceil(total / limit), currentPage: page, limit } } });
+    return res.status(200).json({
+      success: true,
+      data: {
+        attractions: mapped,
+        pagination: {
+          totalItems: total,
+          totalPages: Math.ceil(total / limit),
+          currentPage: page,
+          limit,
+        },
+      },
+    });
   } catch (error) {
     return next(error);
   }

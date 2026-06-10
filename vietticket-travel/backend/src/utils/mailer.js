@@ -253,6 +253,77 @@ async function sendTicketConfirmationEmail({ booking, pdfBuffer }) {
   });
 }
 
+async function sendRefundStatusEmail({
+  to,
+  fullName,
+  bookingId,
+  action,
+  refundAmount,
+  staffNotes,
+}) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/my-tickets`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
+
+  if (action === 'APPROVED') {
+    return sendMail({
+      to,
+      subject: `Yêu cầu hoàn tiền đơn #${shortId} đã được duyệt - VietTicket Travel`,
+      text: `Yêu cầu hoàn tiền của bạn đã được duyệt. Số tiền ${formattedAmount} VND sẽ được chuyển trong 3-5 ngày làm việc.`,
+      fallbackLink: link,
+      html: createEmailTemplate({
+        title: 'Yêu cầu hoàn tiền đã được duyệt',
+        preview: `Xin chào ${safeName}, yêu cầu hoàn tiền cho đơn hàng <strong>#${shortId}</strong> đã được chấp thuận.<br /><br />Số tiền hoàn trả: <strong>${formattedAmount} VND</strong> sẽ được xử lý trong 3-5 ngày làm việc.`,
+        buttonText: 'Xem lịch sử vé của tôi',
+        link,
+      }),
+    });
+  }
+
+  const rejectionReason =
+    staffNotes || 'Không đáp ứng điều kiện hoàn tiền theo chính sách.';
+
+  return sendMail({
+    to,
+    subject: `Yêu cầu hoàn tiền đơn #${shortId} bị từ chối - VietTicket Travel`,
+    text: `Yêu cầu hoàn tiền của bạn đã bị từ chối. Lý do: ${rejectionReason}`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Yêu cầu hoàn tiền bị từ chối',
+      preview: `Xin chào ${safeName}, yêu cầu hoàn tiền cho đơn hàng <strong>#${shortId}</strong> đã bị từ chối.<br /><br /><strong>Lý do:</strong> ${escapeHtml(rejectionReason)}`,
+      buttonText: 'Xem lịch sử vé của tôi',
+      link,
+    }),
+  });
+}
+
+async function sendReissueTicketEmail({
+  to,
+  fullName,
+  bookingId,
+  newTicketCount,
+}) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/tickets/${bookingId}`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+
+  return sendMail({
+    to,
+    subject: `Vé điện tử mới đã được cấp lại - Đơn #${shortId} - VietTicket Travel`,
+    text: `Vé điện tử của bạn đã được cấp lại. Truy cập: ${link}`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Vé điện tử của bạn đã được cấp lại',
+      preview: `Xin chào ${safeName}, ${newTicketCount} vé điện tử mới cho đơn <strong>#${shortId}</strong> đã được tạo thành công. Mã QR cũ đã bị vô hiệu hóa. Vui lòng dùng mã QR mới khi vào cổng.`,
+      buttonText: 'Xem vé điện tử của tôi',
+      link,
+    }),
+  });
+}
+
 module.exports = {
   sendAccountStatusEmail,
   sendPasswordResetEmail,
@@ -260,4 +331,6 @@ module.exports = {
   sendPartnerReviewEmail,
   sendAttractionViolationEmail,
   sendTicketConfirmationEmail,
+  sendRefundStatusEmail,
+  sendReissueTicketEmail,
 };
