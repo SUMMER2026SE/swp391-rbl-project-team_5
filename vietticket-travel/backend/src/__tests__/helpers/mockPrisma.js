@@ -85,6 +85,11 @@ const mockPrisma = {
     update: jest.fn(),
     count: jest.fn(),
   },
+  refundRequest: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  },
   voucher: {
     findUnique: jest.fn(),
     updateMany: jest.fn(),
@@ -94,7 +99,9 @@ const mockPrisma = {
     update: jest.fn(),
   },
   ticketInstance: {
+    create: jest.fn(),
     createMany: jest.fn(),
+    updateMany: jest.fn(),
   },
   $transaction: jest.fn(),
 };

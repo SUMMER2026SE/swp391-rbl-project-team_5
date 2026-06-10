@@ -36,6 +36,10 @@ import KycApprovalPage from '../pages/admin/KycApprovalPage.jsx'
 import AttractionApprovalPage from '../pages/admin/AttractionApprovalPage.jsx'
 import ViolationManagementPage from '../pages/admin/ViolationManagementPage.jsx'
 import CategoryManagementPage from '../pages/admin/CategoryManagementPage.jsx'
+import RefundManagementPage from '../pages/staff/RefundManagementPage.jsx'
+import SupportTicketsPage from '../pages/staff/SupportTicketsPage.jsx'
+import PartnerReviewsPage from '../pages/PartnerReviewsPage.jsx'
+import ReviewModerationPage from '../pages/admin/ReviewModerationPage.jsx'
 
 function AppRoutes() {
   return (
@@ -265,6 +269,41 @@ function AppRoutes() {
           <ProtectedRoute>
             <ETicketPage />
           </ProtectedRoute>
+        }
+      />
+      {/* Module 5 - Staff Routes */}
+      <Route
+        path="/staff/refunds"
+        element={
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+            <RefundManagementPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/tickets"
+        element={
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+            <SupportTicketsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Module 5 - Partner Routes */}
+      <Route
+        path="/partner/reviews"
+        element={
+          <ProtectedRoute>
+            <PartnerReviewsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Module 5 - Admin Routes */}
+      <Route
+        path="/admin/reviews"
+        element={
+          <AdminRoute>
+            <ReviewModerationPage />
+          </AdminRoute>
         }
       />
     </Routes>

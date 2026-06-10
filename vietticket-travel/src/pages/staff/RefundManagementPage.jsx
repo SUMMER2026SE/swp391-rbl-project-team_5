@@ -1,0 +1,727 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { NavLink } from 'react-router-dom'
+import { toast } from 'react-toastify'
+import { useAuth } from '../../context/useAuth.js'
+import { apiRequest } from '../../services/api.js'
+
+const STATUS_META = {
+  PENDING: {
+    label: 'Chờ duyệt',
+    badge: 'bg-secondary-fixed text-on-secondary-fixed',
+  },
+  APPROVED: {
+    label: 'Đã hoàn',
+    badge: 'bg-primary-fixed-dim/40 text-primary',
+  },
+  REJECTED: {
+    label: 'Đã từ chối',
+    badge: 'bg-error-container text-on-error-container',
+  },
+}
+
+const NAV_ITEMS = [
+  { to: '/admin', icon: 'dashboard', label: 'Dashboard' },
+  { to: '/admin/attraction-approval', icon: 'local_activity', label: 'Attractions' },
+  { to: '/staff/tickets', icon: 'confirmation_number', label: 'Bookings' },
+  { to: '/staff/tickets', icon: 'support_agent', label: 'Support' },
+  { to: '/staff/refunds', icon: 'payments', label: 'Refund Management' },
+]
+
+function formatMoney(value) {
+  return `${Number(value || 0).toLocaleString('vi-VN')} VND`
+}
+
+function formatDate(value) {
+  if (!value) return 'Chưa cập nhật'
+
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(value))
+}
+
+function shortBookingId(value) {
+  return `VT-${String(value || '').replaceAll('-', '').slice(0, 8).toUpperCase()}`
+}
+
+function StatusBadge({ status }) {
+  const meta = STATUS_META[status] || STATUS_META.PENDING
+
+  return (
+    <span
+      className={`inline-flex rounded-full px-3 py-1 text-[12px] font-bold uppercase tracking-tight ${meta.badge}`}
+    >
+      {meta.label}
+    </span>
+  )
+}
+
+function StatCard({ icon, iconClass, label, value, badge }) {
+  return (
+    <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-5">
+      <div className="mb-4 flex min-h-8 items-start justify-between">
+        <span className={`material-symbols-outlined rounded-lg p-2 ${iconClass}`}>
+          {icon}
+        </span>
+        {badge}
+      </div>
+      <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
+        {label}
+      </p>
+      <h3 className="font-headline-md text-2xl font-semibold text-on-surface">{value}</h3>
+    </div>
+  )
+}
+
+function RefundDrawer({
+  selected,
+  isProcessing,
+  onClose,
+  onApprove,
+  onReject,
+}) {
+  if (!selected) {
+    return (
+      <aside className="hidden w-[400px] shrink-0 border-l border-outline-variant bg-surface-container-lowest xl:flex xl:flex-col">
+        <div className="flex flex-1 flex-col items-center justify-center px-10 text-center">
+          <span className="material-symbols-outlined mb-4 text-5xl text-outline">
+            receipt_long
+          </span>
+          <h3 className="mb-2 text-lg font-semibold text-on-surface">
+            Chọn một yêu cầu
+          </h3>
+          <p className="text-sm text-on-surface-variant">
+            Chi tiết hoàn tiền sẽ hiển thị tại đây.
+          </p>
+        </div>
+      </aside>
+    )
+  }
+
+  const booking = selected.booking || {}
+  const reservation = booking.reservation || {}
+  const ticketProduct = reservation.ticketProduct || {}
+  const totalAmount = Number(booking.totalAmount || 0)
+  const refundAmount = Number(selected.amount || 0)
+  const feeAmount = Math.max(0, totalAmount - refundAmount)
+  const feeRate = totalAmount > 0 ? Math.round((feeAmount / totalAmount) * 100) : 0
+  const isPending = selected.status === 'PENDING'
+
+  return (
+    <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-[400px] flex-col border-l border-outline-variant bg-surface-container-lowest shadow-2xl xl:static xl:w-[400px] xl:shrink-0">
+      <div className="flex items-center justify-between border-b border-outline-variant px-6 py-5">
+        <h3 className="text-xl font-semibold text-on-surface">Chi tiết yêu cầu</h3>
+        <button
+          type="button"
+          className="rounded-full border-0 bg-transparent p-1 hover:bg-surface-container-high"
+          onClick={onClose}
+          aria-label="Đóng chi tiết"
+        >
+          <span className="material-symbols-outlined text-on-surface-variant">
+            close
+          </span>
+        </button>
+      </div>
+
+      <div className="flex-1 space-y-8 overflow-y-auto p-6">
+        <div className="rounded-xl border border-outline-variant/50 bg-surface p-4">
+          <div className="flex items-start gap-4">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg bg-primary-fixed-dim/30">
+              <span className="material-symbols-outlined text-[32px] text-primary">
+                local_activity
+              </span>
+            </div>
+            <div className="min-w-0">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold text-primary">
+                  {shortBookingId(booking.id)}
+                </span>
+                <StatusBadge status={selected.status} />
+              </div>
+              <h4 className="text-base font-semibold leading-tight text-on-surface">
+                {ticketProduct.attraction?.title || 'Địa điểm chưa cập nhật'}
+              </h4>
+              <p className="mt-1 text-xs text-on-surface-variant">
+                Ngày sử dụng: {formatDate(reservation.date)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-y-6">
+          <div>
+            <p className="mb-1 text-xs uppercase text-on-surface-variant">
+              Khách hàng
+            </p>
+            <p className="text-sm font-semibold text-on-surface">
+              {booking.user?.fullName || booking.fullName || 'Chưa cập nhật'}
+            </p>
+          </div>
+          <div>
+            <p className="mb-1 text-xs uppercase text-on-surface-variant">
+              Loại vé
+            </p>
+            <p className="text-sm text-on-surface">
+              {ticketProduct.name || ticketProduct.type || 'Chưa cập nhật'}
+            </p>
+          </div>
+          <div className="col-span-2">
+            <p className="mb-1 text-xs uppercase text-on-surface-variant">
+              Lý do hoàn trả
+            </p>
+            <div className="rounded-lg border border-secondary-container/30 bg-secondary-container/10 p-3">
+              <p className="text-sm italic text-on-surface-variant">
+                “{selected.reason || 'Khách hàng không cung cấp lý do.'}”
+              </p>
+            </div>
+          </div>
+          {selected.staffNotes && (
+            <div className="col-span-2">
+              <p className="mb-1 text-xs uppercase text-on-surface-variant">
+                Ghi chú xử lý
+              </p>
+              <p className="rounded-lg bg-surface-container-low p-3 text-sm text-on-surface">
+                {selected.staffNotes}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <p className="text-xs uppercase text-on-surface-variant">
+            Tính toán hoàn tiền
+          </p>
+          <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-on-surface-variant">Giá trị vé gốc</span>
+              <span className="text-sm text-on-surface">{formatMoney(totalAmount)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-sm text-on-surface-variant">
+                Phí xử lý ({feeRate}%)
+              </span>
+              <span className="text-sm text-error">- {formatMoney(feeAmount)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-4 border-t border-outline-variant pt-3">
+              <span className="text-sm font-bold text-on-surface">
+                Thực nhận hoàn trả
+              </span>
+              <span className="text-lg font-bold text-primary">
+                {formatMoney(refundAmount)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs uppercase text-on-surface-variant">
+            Thông tin yêu cầu
+          </p>
+          <div className="flex items-center gap-3 rounded-lg border border-outline-variant p-3">
+            <span className="material-symbols-outlined text-primary">schedule</span>
+            <div>
+              <p className="text-sm font-semibold text-on-surface">
+                Gửi lúc {formatDate(selected.createdAt)}
+              </p>
+              <p className="text-xs text-on-surface-variant">
+                Mã yêu cầu: {String(selected.id).slice(0, 8).toUpperCase()}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-outline-variant bg-surface-container p-6 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+        {isPending ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                className="flex items-center justify-center gap-2 rounded-xl border-0 bg-primary px-4 py-3 text-sm font-semibold text-on-primary transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={onApprove}
+                disabled={isProcessing}
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  check_circle
+                </span>
+                Duyệt hoàn tiền
+              </button>
+              <button
+                type="button"
+                className="flex items-center justify-center gap-2 rounded-xl border border-error bg-white px-4 py-3 text-sm font-semibold text-error hover:bg-error/5 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={onReject}
+                disabled={isProcessing}
+              >
+                <span className="material-symbols-outlined text-[20px]">cancel</span>
+                Từ chối
+              </button>
+            </div>
+            <p className="mt-4 text-center text-[11px] text-on-surface-variant">
+              Phê duyệt sẽ hoàn kho vé và vô hiệu hóa toàn bộ mã QR của đơn.
+            </p>
+          </>
+        ) : (
+          <p className="text-center text-sm font-semibold text-on-surface-variant">
+            Yêu cầu này đã được xử lý.
+          </p>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+export default function RefundManagementPage() {
+  const { user } = useAuth()
+  const [requests, setRequests] = useState([])
+  const [selected, setSelected] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [search, setSearch] = useState('')
+  const [rejectModal, setRejectModal] = useState({ open: false, notes: '' })
+
+  const fetchRequests = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const params = statusFilter ? `?status=${statusFilter}` : ''
+      const response = await apiRequest(`/staff/refunds${params}`)
+      const nextRequests = response.data || []
+      setRequests(nextRequests)
+      setSelected((current) => {
+        if (!current) return nextRequests[0] || null
+        return nextRequests.find((item) => item.id === current.id) || null
+      })
+    } catch (error) {
+      toast.error(error.message)
+      setRequests([])
+      setSelected(null)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [statusFilter])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchRequests()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [fetchRequests])
+
+  async function handleApprove() {
+    if (!selected) return
+
+    setIsProcessing(true)
+    try {
+      await apiRequest(`/staff/refunds/${selected.id}`, {
+        method: 'PATCH',
+        body: { action: 'APPROVED', staffNotes: '' },
+      })
+      toast.success('Đã duyệt yêu cầu hoàn tiền.')
+      setSelected(null)
+      await fetchRequests()
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  async function handleReject() {
+    if (!selected) return
+
+    const notes = rejectModal.notes.trim()
+    if (!notes) {
+      toast.warning('Vui lòng nhập lý do từ chối.')
+      return
+    }
+
+    setIsProcessing(true)
+    try {
+      await apiRequest(`/staff/refunds/${selected.id}`, {
+        method: 'PATCH',
+        body: { action: 'REJECTED', staffNotes: notes },
+      })
+      toast.success('Đã từ chối yêu cầu hoàn tiền.')
+      setRejectModal({ open: false, notes: '' })
+      setSelected(null)
+      await fetchRequests()
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const stats = useMemo(
+    () => ({
+      total: requests.length,
+      pending: requests.filter((request) => request.status === 'PENDING').length,
+      approved: requests.filter((request) => request.status === 'APPROVED').length,
+      rejected: requests.filter((request) => request.status === 'REJECTED').length,
+    }),
+    [requests],
+  )
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    if (!query) return requests
+
+    return requests.filter((request) => {
+      const bookingId = request.booking?.id || ''
+      const customer =
+        request.booking?.user?.fullName || request.booking?.fullName || ''
+      const attraction =
+        request.booking?.reservation?.ticketProduct?.attraction?.title || ''
+
+      return [bookingId, customer, attraction].some((value) =>
+        value.toLowerCase().includes(query),
+      )
+    })
+  }, [requests, search])
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-background text-on-background">
+      <aside className="fixed left-0 top-0 z-30 hidden h-full w-64 flex-col border-r border-outline-variant bg-primary py-6 text-on-primary lg:flex">
+        <div className="mb-8 px-6">
+          <h1 className="text-xl font-black uppercase tracking-tighter text-on-primary">
+            VietTicket
+          </h1>
+          <p className="text-sm text-on-primary/60">Staff Dashboard</p>
+        </div>
+
+        <nav className="flex-1 space-y-1">
+          {NAV_ITEMS.map((item, index) => (
+            <NavLink
+              key={`${item.to}-${index}`}
+              to={item.to}
+              end={item.to === '/admin'}
+              className={({ isActive }) =>
+                `mx-2 flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'border-r-4 border-on-primary-container bg-primary-container text-on-primary-container'
+                    : 'text-on-primary/70 hover:bg-on-primary/10 hover:text-on-primary'
+                }`
+              }
+            >
+              <span className="material-symbols-outlined">{item.icon}</span>
+              <span>{item.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="mt-auto border-t border-on-primary/10 px-6 pt-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-primary-fixed-dim font-bold text-primary">
+              {user?.avatar ? (
+                <img
+                  className="h-full w-full object-cover"
+                  src={user.avatar}
+                  alt={user.fullName || 'Staff'}
+                />
+              ) : (
+                String(user?.fullName || 'S')
+                  .slice(0, 1)
+                  .toUpperCase()
+              )}
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-on-primary">
+                {user?.fullName || 'Nhân viên'}
+              </p>
+              <p className="truncate text-xs text-on-primary/60">
+                {user?.role === 'ADMIN' ? 'Quản trị viên' : 'Nhân viên hỗ trợ'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <div className="ml-0 flex h-screen min-w-0 flex-1 flex-col lg:ml-64">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-outline-variant bg-surface px-4 sm:px-8">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-on-surface-variant">Staff</span>
+            <span className="text-on-surface-variant/40">/</span>
+            <span className="text-sm font-bold text-primary">Refunds</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <span className="material-symbols-outlined cursor-pointer text-on-surface-variant">
+                notifications
+              </span>
+              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-surface bg-error" />
+            </div>
+            <button
+              type="button"
+              className="flex items-center gap-2 rounded-lg border-0 bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-sm hover:opacity-90"
+              onClick={() => void fetchRequests()}
+            >
+              <span className="material-symbols-outlined text-[18px]">refresh</span>
+              Làm mới
+            </button>
+          </div>
+        </header>
+
+        <main className="relative flex min-h-0 flex-1 overflow-hidden">
+          <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-8">
+            <div className="mb-8">
+              <h2 className="mb-1 text-3xl font-semibold text-on-surface">
+                Quản lý Hoàn tiền
+              </h2>
+              <p className="text-sm text-on-surface-variant">
+                Duyệt và xử lý yêu cầu hoàn trả vé từ khách hàng
+              </p>
+            </div>
+
+            <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+              <StatCard
+                icon="analytics"
+                iconClass="bg-primary-fixed-dim/20 text-primary"
+                label="Total Requests"
+                value={stats.total}
+              />
+              <StatCard
+                icon="pending_actions"
+                iconClass="bg-secondary-fixed/30 text-secondary"
+                label="Pending"
+                value={stats.pending}
+                badge={
+                  stats.pending > 0 ? (
+                    <span className="rounded bg-secondary-fixed/30 px-2 py-1 text-xs font-bold text-secondary">
+                      Action Required
+                    </span>
+                  ) : null
+                }
+              />
+              <StatCard
+                icon="check_circle"
+                iconClass="bg-primary-fixed-dim/20 text-primary-container"
+                label="Approved"
+                value={stats.approved}
+              />
+              <StatCard
+                icon="cancel"
+                iconClass="bg-error-container/40 text-error"
+                label="Rejected"
+                value={stats.rejected}
+              />
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+              <div className="flex flex-col gap-4 border-b border-outline-variant bg-surface-container-low px-6 py-4 md:flex-row md:items-center md:justify-between">
+                <h4 className="text-base font-semibold text-on-surface">
+                  Danh sách yêu cầu
+                </h4>
+                <div className="flex flex-col gap-3 sm:flex-row">
+                  <div className="relative">
+                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant">
+                      search
+                    </span>
+                    <input
+                      className="w-full rounded-full border border-outline-variant bg-surface py-2 pl-10 pr-4 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary sm:w-64"
+                      type="search"
+                      placeholder="Tìm booking, khách hàng..."
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                    />
+                  </div>
+                  <select
+                    className="rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface outline-none focus:border-primary"
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                    aria-label="Lọc theo trạng thái"
+                  >
+                    <option value="">Tất cả trạng thái</option>
+                    <option value="PENDING">Chờ duyệt</option>
+                    <option value="APPROVED">Đã hoàn</option>
+                    <option value="REJECTED">Đã từ chối</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] border-collapse text-left">
+                  <thead>
+                    <tr className="bg-surface-container-low/50">
+                      {[
+                        'Booking ID',
+                        'Khách hàng',
+                        'Địa điểm',
+                        'Giá gốc',
+                        'Hoàn tiền',
+                        'Trạng thái',
+                      ].map((heading) => (
+                        <th
+                          key={heading}
+                          className={`border-b border-outline-variant px-6 py-3 text-sm font-semibold text-on-surface-variant ${
+                            heading === 'Hoàn tiền' ? 'text-right' : ''
+                          }`}
+                        >
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant">
+                    {isLoading ? (
+                      Array.from({ length: 4 }, (_, index) => (
+                        <tr key={index} className="animate-pulse">
+                          {Array.from({ length: 6 }, (_, cell) => (
+                            <td key={cell} className="px-6 py-5">
+                              <div className="h-4 rounded bg-surface-container-high" />
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    ) : filtered.length ? (
+                      filtered.map((request) => {
+                        const booking = request.booking || {}
+                        const attraction =
+                          booking.reservation?.ticketProduct?.attraction?.title ||
+                          'Chưa cập nhật'
+                        const isSelected = selected?.id === request.id
+
+                        return (
+                          <tr
+                            key={request.id}
+                            className={`cursor-pointer transition-colors ${
+                              isSelected
+                                ? 'bg-primary-container/5 ring-1 ring-inset ring-primary/20'
+                                : 'hover:bg-surface-container-high'
+                            }`}
+                            onClick={() => setSelected(request)}
+                          >
+                            <td className="px-6 py-4 text-sm font-bold text-primary">
+                              {shortBookingId(booking.id)}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-on-surface">
+                              {booking.user?.fullName ||
+                                booking.fullName ||
+                                'Chưa cập nhật'}
+                            </td>
+                            <td className="max-w-52 truncate px-6 py-4 text-sm text-on-surface">
+                              {attraction}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-on-surface-variant">
+                              {formatMoney(booking.totalAmount)}
+                            </td>
+                            <td className="px-6 py-4 text-right text-sm font-bold text-primary">
+                              {formatMoney(request.amount)}
+                            </td>
+                            <td className="px-6 py-4">
+                              <StatusBadge status={request.status} />
+                            </td>
+                          </tr>
+                        )
+                      })
+                    ) : (
+                      <tr>
+                        <td
+                          colSpan="6"
+                          className="px-6 py-16 text-center text-sm text-on-surface-variant"
+                        >
+                          Không tìm thấy yêu cầu hoàn tiền phù hợp.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <RefundDrawer
+            selected={selected}
+            isProcessing={isProcessing}
+            onClose={() => setSelected(null)}
+            onApprove={() => void handleApprove()}
+            onReject={() => setRejectModal({ open: true, notes: '' })}
+          />
+        </main>
+      </div>
+
+      {rejectModal.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isProcessing) {
+              setRejectModal({ open: false, notes: '' })
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reject-refund-title"
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h3
+                  id="reject-refund-title"
+                  className="text-xl font-semibold text-on-surface"
+                >
+                  Từ chối hoàn tiền
+                </h3>
+                <p className="mt-1 text-sm text-on-surface-variant">
+                  Lý do này sẽ được gửi đến khách hàng qua email.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border-0 bg-transparent p-1 hover:bg-surface-container-high"
+                onClick={() => setRejectModal({ open: false, notes: '' })}
+                disabled={isProcessing}
+                aria-label="Đóng"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <label
+              className="mb-2 block text-sm font-semibold text-on-surface"
+              htmlFor="refund-rejection-notes"
+            >
+              Lý do từ chối
+            </label>
+            <textarea
+              id="refund-rejection-notes"
+              className="min-h-32 w-full resize-y rounded-xl border border-outline-variant bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              placeholder="Nhập lý do cụ thể..."
+              value={rejectModal.notes}
+              onChange={(event) =>
+                setRejectModal((current) => ({
+                  ...current,
+                  notes: event.target.value,
+                }))
+              }
+              autoFocus
+            />
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                className="rounded-lg border border-outline-variant bg-white px-4 py-2 text-sm font-semibold text-on-surface"
+                onClick={() => setRejectModal({ open: false, notes: '' })}
+                disabled={isProcessing}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border-0 bg-error px-4 py-2 text-sm font-semibold text-on-error disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void handleReject()}
+                disabled={isProcessing}
+              >
+                {isProcessing ? 'Đang xử lý...' : 'Xác nhận từ chối'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
