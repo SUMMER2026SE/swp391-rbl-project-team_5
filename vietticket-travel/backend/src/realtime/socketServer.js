@@ -89,6 +89,33 @@ function initializeSocketServer(httpServer) {
     if (socket.user.role === 'PARTNER' && socket.user.partnerProfileId) {
       socket.join(`partner:${socket.user.partnerProfileId}`);
     }
+
+    // Support ticket (Module 5): chỉ cho vào phòng chat khi là chủ ticket
+    // hoặc nhân viên (STAFF/ADMIN). Tránh nghe lén hội thoại của người khác.
+    socket.on('JOIN_SUPPORT_TICKET', async (ticketId) => {
+      try {
+        if (!ticketId || typeof ticketId !== 'string') return;
+
+        const isStaff = socket.user.role === 'STAFF' || socket.user.role === 'ADMIN';
+        if (!isStaff) {
+          const ticket = await prisma.supportTicket.findUnique({
+            where: { id: ticketId },
+            select: { userId: true },
+          });
+          if (!ticket || ticket.userId !== socket.user.id) return;
+        }
+
+        socket.join(`ticket:${ticketId}`);
+      } catch (error) {
+        console.error('[socket] JOIN_SUPPORT_TICKET lỗi:', error.message);
+      }
+    });
+
+    socket.on('LEAVE_SUPPORT_TICKET', (ticketId) => {
+      if (typeof ticketId === 'string' && ticketId) {
+        socket.leave(`ticket:${ticketId}`);
+      }
+    });
   });
 
   setSocketServer(io);

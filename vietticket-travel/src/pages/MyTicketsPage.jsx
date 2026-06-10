@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
+import RefundModal from '../components/tickets/RefundModal.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 
@@ -112,6 +113,15 @@ function MyTicketsPage() {
     }
   }, [socket])
 
+  const refetchBookings = () => {
+    void bookingService
+      .getBookings()
+      .then((data) => setBookings(data))
+      .catch(() => {
+        // Giữ nguyên danh sách hiện tại nếu tải lại thất bại.
+      })
+  }
+
   const filteredBookings = useMemo(
     () =>
       bookings.filter((booking) => {
@@ -199,7 +209,12 @@ function MyTicketsPage() {
               <EmptyTickets activeTab={activeTab} />
             ) : (
               filteredBookings.map((booking) => (
-                <TicketCard booking={booking} key={booking.id} now={now} />
+                <TicketCard
+                  booking={booking}
+                  key={booking.id}
+                  now={now}
+                  onRefetch={refetchBookings}
+                />
               ))
             )}
           </div>
@@ -226,12 +241,14 @@ function SidebarLink({ active = false, href, icon, label }) {
   )
 }
 
-function TicketCard({ booking, now }) {
+function TicketCard({ booking, now, onRefetch }) {
+  const [showRefund, setShowRefund] = useState(false)
   const remainingTime = getRemainingTime(booking.expiresAt, now)
   const isExpired = booking.status === 'unpaid' && remainingTime === 0
   const quantityText = `${booking.quantity || 1} vé`
 
   return (
+    <>
     <article className="group overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest shadow-[0_4px_20px_rgba(0,40,50,0.05)] transition hover:shadow-[0_8px_30px_rgba(0,40,50,0.08)] md:flex">
       <div className="h-48 overflow-hidden md:h-auto md:w-64 md:shrink-0">
         <img
@@ -287,15 +304,35 @@ function TicketCard({ booking, now }) {
             </>
           )}
           {booking.status === 'confirmed' && (
-            <Link
-              className="flex items-center gap-2 rounded-xl border border-primary px-7 py-2.5 font-bold text-primary transition hover:bg-primary/5 active:scale-95"
-              to={`/tickets/${booking.id}`}
-            >
-              <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
-                qr_code_2
+            <>
+              <button
+                className="flex items-center gap-2 rounded-xl px-5 py-2.5 font-bold text-error transition hover:bg-error/5 active:scale-95"
+                onClick={() => setShowRefund(true)}
+                type="button"
+              >
+                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                  currency_exchange
+                </span>
+                Yêu cầu hoàn tiền
+              </button>
+              <Link
+                className="flex items-center gap-2 rounded-xl border border-primary px-7 py-2.5 font-bold text-primary transition hover:bg-primary/5 active:scale-95"
+                to={`/tickets/${booking.id}`}
+              >
+                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                  qr_code_2
+                </span>
+                Xem mã QR
+              </Link>
+            </>
+          )}
+          {booking.status === 'refund_requested' && (
+            <span className="flex items-center gap-1 text-sm font-semibold text-on-surface-variant">
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                hourglass_top
               </span>
-              Xem mã QR
-            </Link>
+              Đang chờ duyệt hoàn tiền
+            </span>
           )}
           {booking.status === 'completed' && (
             <button
@@ -316,6 +353,14 @@ function TicketCard({ booking, now }) {
         </div>
       </div>
     </article>
+    {showRefund && (
+      <RefundModal
+        booking={booking}
+        onClose={() => setShowRefund(false)}
+        onSuccess={onRefetch}
+      />
+    )}
+    </>
   )
 }
 
@@ -337,6 +382,14 @@ function StatusBadge({ booking, isExpired }) {
         },
         completed: {
           label: 'Hoàn thành',
+          className: 'bg-surface-container-high text-on-surface-variant',
+        },
+        refund_requested: {
+          label: 'Chờ hoàn tiền',
+          className: 'bg-tertiary-fixed text-on-tertiary-fixed-variant',
+        },
+        refunded: {
+          label: 'Đã hoàn tiền',
           className: 'bg-surface-container-high text-on-surface-variant',
         },
         cancelled: {

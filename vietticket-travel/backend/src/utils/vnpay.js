@@ -54,9 +54,38 @@ function verifyVnpaySignature(query, secret) {
   return secureHash === signed;
 }
 
+// --- Hoàn tiền (refund) ---
+// API refund ký theo chuỗi nối '|' theo ĐÚNG thứ tự field dưới đây (KHÁC luồng pay
+// vốn ký theo querystring đã sort). Sai thứ tự -> VNPay trả mã 97 (chữ ký sai).
+const REFUND_SIGN_FIELDS = [
+  'vnp_RequestId',
+  'vnp_Version',
+  'vnp_Command',
+  'vnp_TmnCode',
+  'vnp_TransactionType',
+  'vnp_TxnRef',
+  'vnp_Amount',
+  'vnp_TransactionNo',
+  'vnp_TransactionDate',
+  'vnp_CreateBy',
+  'vnp_CreateDate',
+  'vnp_IpAddr',
+  'vnp_OrderInfo',
+];
+
+function signRefundData(params, secret) {
+  const data = REFUND_SIGN_FIELDS.map((key) => params[key] ?? '').join('|');
+  return crypto
+    .createHmac('sha512', secret)
+    .update(Buffer.from(data, 'utf-8'))
+    .digest('hex');
+}
+
 module.exports = {
   sortObject,
   formatVnpDate,
   buildVnpayUrl,
   verifyVnpaySignature,
+  signRefundData,
+  REFUND_SIGN_FIELDS,
 };

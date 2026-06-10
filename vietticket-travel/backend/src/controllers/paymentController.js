@@ -1,15 +1,28 @@
+const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { queueNewBookingNotification, emitBookingStatusUpdated } = require('../realtime/events');
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
 
-const { buildVnpayUrl, verifyVnpaySignature, formatVnpDate } = require('../utils/vnpay');
+const {
+  buildVnpayUrl,
+  verifyVnpaySignature,
+  formatVnpDate,
+  signRefundData,
+} = require('../utils/vnpay');
+const { calculateRefundAmount } = require('../utils/refundService');
 const {
   confirmReservationAndStock,
   createTicketInstances,
 } = require('./bookingController');
 
 const PAYMENT_WINDOW_MS = 10 * 60 * 1000; // 10 phút (khớp vnp_ExpireDate)
+
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
 
 function getClientIp(req) {
   const xff = req.headers['x-forwarded-for'];
@@ -279,8 +292,185 @@ async function vnpayReturn(req, res, next) {
   }
 }
 
+// POST /api/payments/refund-request — khách hàng GỬI yêu cầu hoàn tiền.
+// Tạo RefundRequest (PENDING) + chuyển đơn sang REFUND_REQUESTED. Staff sẽ duyệt sau.
+async function createRefundRequest(req, res, next) {
+  try {
+    const bookingId = String(req.body?.bookingId || '').trim();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!bookingId) {
+      return res.status(400).json({ message: 'bookingId là bắt buộc.' });
+    }
+    if (reason.length < 5) {
+      return res.status(400).json({ message: 'Vui lòng nhập lý do hoàn tiền (tối thiểu 5 ký tự).' });
+    }
+
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const booking = await tx.booking.findUnique({
+          where: { id: bookingId },
+          include: {
+            reservation: { include: { ticketProduct: true } },
+            refundRequests: { select: { id: true } },
+          },
+        });
+
+        if (!booking || booking.userId !== req.user.id) {
+          throw httpError(404, 'Không tìm thấy đơn đặt vé.');
+        }
+        if (booking.status !== 'CONFIRMED') {
+          throw httpError(409, 'Chỉ đơn đã xác nhận mới có thể yêu cầu hoàn tiền.');
+        }
+        if (booking.reservation.ticketProduct.refundPolicy === 'NON_REFUNDABLE') {
+          throw httpError(400, 'Vé này không áp dụng chính sách hoàn tiền.');
+        }
+        if (booking.refundRequests.length > 0) {
+          throw httpError(409, 'Đơn này đã có yêu cầu hoàn tiền.');
+        }
+
+        const { refundAmount } = calculateRefundAmount(booking);
+
+        const refundRequest = await tx.refundRequest.create({
+          data: {
+            bookingId,
+            requestedById: req.user.id,
+            reason,
+            amount: refundAmount,
+            status: 'PENDING',
+          },
+        });
+
+        await tx.booking.update({
+          where: { id: bookingId },
+          data: { status: 'REFUND_REQUESTED' },
+        });
+
+        return refundRequest;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return res.status(201).json({ success: true, data: result });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: { message: error.message },
+      });
+    }
+    return next(error);
+  }
+}
+
+// GET /api/payments/refund-preview/:bookingId — xem trước số tiền hoàn cho modal.
+async function getRefundPreview(req, res, next) {
+  try {
+    const { bookingId } = req.params;
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        reservation: { include: { ticketProduct: true } },
+        refundRequests: { select: { id: true } },
+      },
+    });
+
+    if (!booking || booking.userId !== req.user.id) {
+      return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé.' });
+    }
+
+    const ticketProduct = booking.reservation.ticketProduct;
+    const { refundAmount, feeAmount } = calculateRefundAmount(booking);
+
+    return res.json({
+      success: true,
+      data: {
+        bookingId: booking.id,
+        status: booking.status,
+        totalAmount: Number(booking.totalAmount),
+        refundPolicy: ticketProduct.refundPolicy,
+        refundFeeRate: Number(ticketProduct.refundFeeRate),
+        feeAmount,
+        refundAmount,
+        refundable:
+          booking.status === 'CONFIRMED' &&
+          ticketProduct.refundPolicy !== 'NON_REFUNDABLE' &&
+          booking.refundRequests.length === 0,
+        hasRefundRequest: booking.refundRequests.length > 0,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// Gọi API hoàn tiền VNPay (Sandbox). KHÔNG gọi trong transaction DB (I/O mạng chậm).
+// Trả { success, responseCode, message, raw }. Ném lỗi nếu thiếu cấu hình/dữ liệu gốc.
+// payment: bản ghi Payment SUCCESS của đơn (đã lưu rawResponse từ IPN).
+// transactionType: '02' (toàn phần) hoặc '03' (một phần — khi có phí hủy).
+async function refundViaVnpay({
+  payment,
+  amount,
+  transactionType,
+  createBy,
+  ipAddr,
+  orderInfo,
+}) {
+  const tmnCode = process.env.VNP_TMNCODE;
+  const secret = process.env.VNP_HASHSECRET;
+  const apiUrl = process.env.VNP_API;
+  if (!tmnCode || !secret || !apiUrl) {
+    throw httpError(500, 'Thiếu cấu hình VNPay hoàn tiền (VNP_TMNCODE/VNP_HASHSECRET/VNP_API).');
+  }
+
+  const raw = payment?.rawResponse || {};
+  const vnpTransactionNo = String(raw.vnp_TransactionNo || '');
+  const vnpPayDate = String(raw.vnp_PayDate || '');
+  if (!payment?.transactionId || !vnpTransactionNo || !vnpPayDate) {
+    throw httpError(
+      422,
+      'Thiếu thông tin giao dịch gốc để hoàn tiền (TxnRef/TransactionNo/PayDate).',
+    );
+  }
+
+  const params = {
+    vnp_RequestId: randomUUID(),
+    vnp_Version: '2.1.0',
+    vnp_Command: 'refund',
+    vnp_TmnCode: tmnCode,
+    vnp_TransactionType: transactionType,
+    vnp_TxnRef: payment.transactionId,
+    vnp_Amount: amountToVnp(amount),
+    vnp_TransactionNo: vnpTransactionNo,
+    vnp_TransactionDate: vnpPayDate,
+    vnp_CreateBy: createBy || 'system',
+    vnp_CreateDate: formatVnpDate(new Date()),
+    vnp_IpAddr: ipAddr || '127.0.0.1',
+    vnp_OrderInfo: orderInfo || `Hoan tien giao dich ${payment.transactionId}`,
+  };
+  params.vnp_SecureHash = signRefundData(params, secret);
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  const result = await response.json().catch(() => ({}));
+
+  return {
+    success: result.vnp_ResponseCode === '00',
+    responseCode: result.vnp_ResponseCode || null,
+    message: result.vnp_Message || null,
+    raw: result,
+  };
+}
+
 module.exports = {
   createVNPayUrl,
   vnpayIpn,
   vnpayReturn,
+  createRefundRequest,
+  getRefundPreview,
+  refundViaVnpay,
 };

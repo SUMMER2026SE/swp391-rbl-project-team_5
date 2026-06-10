@@ -5,12 +5,18 @@ const {
   createVNPayUrl,
   vnpayIpn,
   vnpayReturn,
+  createRefundRequest,
+  getRefundPreview,
 } = require('../controllers/paymentController');
 
 const router = express.Router();
 
 // Khách tạo URL thanh toán
 router.post('/create-vnpay-url', protect, restrictTo('CUSTOMER'), createVNPayUrl);
+
+// Khách xem trước số tiền hoàn + gửi yêu cầu hoàn tiền (modal "Yêu cầu hoàn tiền")
+router.get('/refund-preview/:bookingId', protect, restrictTo('CUSTOMER'), getRefundPreview);
+router.post('/refund-request', protect, restrictTo('CUSTOMER'), createRefundRequest);
 
 // VNPay gọi về (không auth)
 router.get('/vnpay-ipn', vnpayIpn);
