@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
+import useSocket from '../context/useSocket.js'
 import * as partnerApi from '../services/partnerApi.js'
 
 const STATUS = {
@@ -22,6 +23,7 @@ function formatVND(n) {
 const PAGE_SIZE = 10
 
 function PartnerBookingsPage() {
+  const socket = useSocket()
   const [bookings, setBookings]         = useState([])
   const [isLoading, setIsLoading]       = useState(true)
   const [actionLoading, setActionLoading] = useState(null) // id of booking being acted on
@@ -67,6 +69,20 @@ function PartnerBookingsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBookings()
   }, [fetchBookings])
+
+  useEffect(() => {
+    function handleNewBooking(payload) {
+      toast.info(
+        `Bạn có một đơn đặt vé mới từ khách hàng ${payload.customerName || 'mới'}!`,
+      )
+      void fetchBookings()
+    }
+
+    socket.on('NEW_BOOKING', handleNewBooking)
+    return () => {
+      socket.off('NEW_BOOKING', handleNewBooking)
+    }
+  }, [fetchBookings, socket])
 
   const handleConfirm = async (id) => {
     setActionLoading(id)

@@ -2,6 +2,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { ToastContainer } from 'react-toastify'
 import { AuthProvider } from './context/AuthContext.jsx'
+import { SocketProvider } from './context/SocketContext.jsx'
 import AppRoutes from './routes/AppRoutes.jsx'
 
 function App() {
@@ -11,16 +12,18 @@ function App() {
     <GoogleOAuthProvider clientId={googleClientId}>
       <BrowserRouter>
         <AuthProvider>
-          <AppRoutes />
-          <ToastContainer
-            autoClose={2600}
-            closeOnClick
-            draggable
-            newestOnTop
-            pauseOnHover
-            position="top-right"
-            theme="light"
-          />
+          <SocketProvider>
+            <AppRoutes />
+            <ToastContainer
+              autoClose={2600}
+              closeOnClick
+              draggable
+              newestOnTop
+              pauseOnHover
+              position="top-right"
+              theme="light"
+            />
+          </SocketProvider>
         </AuthProvider>
       </BrowserRouter>
     </GoogleOAuthProvider>

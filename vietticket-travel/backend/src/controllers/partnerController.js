@@ -3,6 +3,8 @@ const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
 const { validateKyc } = require('../utils/partnerValidators');
 const { isValidPhoneNumber } = require('../utils/validators');
+const { emitBookingStatusUpdated } = require('../realtime/events');
+const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
 
 function toNullable(value) {
   if (value === undefined || value === null) return undefined;
@@ -511,7 +513,7 @@ async function approveBooking(req, res, next) {
       return res.status(400).json({ success: false, message: 'Đơn đặt vé này đã được xác nhận trước đó.' });
     }
 
-    if (!['PENDING_PAYMENT'].includes(booking.status)) {
+    if (!['PENDING_PAYMENT', 'PENDING_PARTNER'].includes(booking.status)) {
       return res.status(400).json({
         success: false,
         message: 'Chỉ có thể duyệt đơn ở trạng thái chờ xử lý.',
@@ -572,6 +574,14 @@ async function approveBooking(req, res, next) {
         });
       }
     });
+
+    emitBookingStatusUpdated({
+      customerId: booking.userId,
+      bookingId,
+      status: 'CONFIRMED',
+      message: `Đặt vé ${bookingId.slice(0, 8).toUpperCase()} của bạn đã được đối tác phê duyệt thành công!`,
+    });
+    queueConfirmedTicketEmail(bookingId);
 
     return res.json({
       success: true,
@@ -682,6 +692,13 @@ async function rejectBooking(req, res, next) {
         where: { id: bookingId },
         data: { status: 'CANCELLED' },
       });
+    });
+
+    emitBookingStatusUpdated({
+      customerId: booking.userId,
+      bookingId,
+      status: 'CANCELLED',
+      message: `Rất tiếc, yêu cầu đặt vé ${bookingId.slice(0, 8).toUpperCase()} đã bị từ chối.`,
     });
 
     return res.json({
