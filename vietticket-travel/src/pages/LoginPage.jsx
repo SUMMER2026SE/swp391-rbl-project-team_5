@@ -12,14 +12,43 @@ import { validateEmail, validatePassword } from '../utils/formValidators.js'
 const loginVisual =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAVowbGqIGo-Mmb9eT-r0-j3FeUjczFEc36Yrq-z-FSsp1GIeLe1jQkCidEbxiyXh2qcmDXCh2C6-yg_SAngB23GucrZ8GyNi07SyMD2V5jd_4sfc0FqoiuyU-17NSO9rtgvIfc42qakAZ9IP33bxYY34h9MW5PejkAWBvzBeZBJUGCXG0vR7Df9WEJfk1czYKqhD3l28jkzpjNGgzpONwYw2xCUXsgXHsvdFhOmxnL9xmaw-lORJI7c7sOn69d6KCJHrQv1thQjis'
 
+function getSafeRedirect(loggedInUser, redirectFrom) {
+  const defaultForRole =
+    loggedInUser?.role === 'ADMIN'
+      ? '/admin/users'
+      : loggedInUser?.role === 'PARTNER'
+        ? '/partner/dashboard'
+        : '/'
+
+  if (!redirectFrom) return defaultForRole
+
+  const targetPath = redirectFrom.pathname || '/'
+
+  // Validate role permissions for the redirect path
+  if (targetPath.startsWith('/admin') && loggedInUser?.role !== 'ADMIN') {
+    return defaultForRole
+  }
+  if (targetPath.startsWith('/partner') && loggedInUser?.role !== 'PARTNER') {
+    return defaultForRole
+  }
+
+  // Prevent redirecting to login/register pages if already authenticated
+  if (targetPath === '/login' || targetPath === '/register') {
+    return defaultForRole
+  }
+
+  return `${targetPath}${redirectFrom.search || ''}${redirectFrom.hash || ''}`
+}
+
 function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { isAuthenticated, isAuthLoading, login, loginWithGoogle, demoLogin } = useAuth()
+  const { isAuthenticated, isAuthLoading, login, loginWithGoogle, demoLogin, user } = useAuth()
   const redirectFrom = location.state?.from
-  const redirectTo = redirectFrom
-    ? `${redirectFrom.pathname}${redirectFrom.search || ''}${redirectFrom.hash || ''}`
-    : '/'
+  const safeRedirectTo = useMemo(() => {
+    return getSafeRedirect(user, redirectFrom)
+  }, [user, redirectFrom])
+
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [touched, setTouched] = useState({})
   const [form, setForm] = useState({
@@ -43,9 +72,9 @@ function LoginPage() {
 
   useEffect(() => {
     if (!isAuthLoading && isAuthenticated) {
-      navigate(redirectTo, { replace: true })
+      navigate(safeRedirectTo, { replace: true })
     }
-  }, [isAuthenticated, isAuthLoading, navigate, redirectTo])
+  }, [isAuthenticated, isAuthLoading, navigate, safeRedirectTo])
 
   const updateField = (field, value) => {
     setTouched((current) => ({ ...current, [field]: true }))
@@ -73,7 +102,7 @@ function LoginPage() {
     if (!result.status) {
       demoLogin({ fullName: form.email.split('@')[0], email: form.email })
       toast.info('Chạy ở chế độ demo (không có server). Đăng nhập thành công!')
-      navigate(redirectTo || '/', { replace: true })
+      navigate(safeRedirectTo || '/', { replace: true })
       return
     }
 
@@ -98,7 +127,7 @@ function LoginPage() {
     }
 
     toast.success(result.message || 'Đăng nhập thành công.')
-    const dest = result.user?.role === 'ADMIN' ? '/admin/users' : redirectTo
+    const dest = getSafeRedirect(result.user, redirectFrom)
     navigate(dest, { replace: Boolean(redirectFrom) })
   }
 
@@ -113,7 +142,7 @@ function LoginPage() {
     }
 
     toast.success(result.message || 'Đăng nhập Google thành công.')
-    const dest = result.user?.role === 'ADMIN' ? '/admin/users' : redirectTo
+    const dest = getSafeRedirect(result.user, redirectFrom)
     navigate(dest, { replace: Boolean(redirectFrom) })
   }
 

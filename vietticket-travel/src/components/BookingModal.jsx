@@ -239,7 +239,7 @@ export default function BookingModal({
   return (
     <React.Fragment>
       <div
-        className="fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-[#1a1c1e]/55 p-4 backdrop-blur-sm"
+        className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-[#1a1c1e]/55 p-4 backdrop-blur-sm"
         onMouseDown={onClose}
         role="presentation"
       >
