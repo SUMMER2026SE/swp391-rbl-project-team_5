@@ -69,12 +69,45 @@ function CheckoutPage() {
         )
         if (!active) return
 
-        setBooking(reservation)
-        setContact({
-          fullName: reservation.customer?.fullName || '',
-          email: reservation.customer?.email || '',
-          phone: reservation.customer?.phone || '',
-        })
+        let finalBookingData = { ...reservation }
+
+        if (reservation.bookingId) {
+          try {
+            const bookingDetails = await bookingService.getBookingDetails(
+              reservation.bookingId,
+            )
+            finalBookingData = {
+              ...reservation,
+              fullName: bookingDetails.customer?.fullName || reservation.customer?.fullName,
+              email: bookingDetails.customer?.email || reservation.customer?.email,
+              phone: bookingDetails.customer?.phone || reservation.customer?.phone,
+              note: bookingDetails.note || '',
+              paymentMethod: bookingDetails.paymentMethod,
+              voucherCode: bookingDetails.voucherCode || '',
+              discountAmount: bookingDetails.discountAmount || 0,
+              totalAmount: bookingDetails.totalAmount,
+            }
+            setContact({
+              fullName: finalBookingData.fullName || '',
+              email: finalBookingData.email || '',
+              phone: finalBookingData.phone || '',
+            })
+            setNote(finalBookingData.note || '')
+            setSelectedPayment(finalBookingData.paymentMethod || 'vnpay')
+            setVoucherCode(finalBookingData.voucherCode || '')
+            setAppliedVoucherCode(finalBookingData.voucherCode || '')
+          } catch (bookingError) {
+            console.error('Không thể tải chi tiết đơn hàng cũ:', bookingError)
+          }
+        } else {
+          setContact({
+            fullName: reservation.customer?.fullName || '',
+            email: reservation.customer?.email || '',
+            phone: reservation.customer?.phone || '',
+          })
+        }
+
+        setBooking(finalBookingData)
       } catch (error) {
         if (active) setErrorMessage(error.message)
       } finally {
@@ -174,25 +207,29 @@ function CheckoutPage() {
 
     setIsSubmitting(true)
     try {
-      const createdBooking = await bookingService.createBooking({
-        reservationId: booking.id,
-        fullName: contact.fullName.trim(),
-        email: contact.email.trim(),
-        phone: contact.phone.trim(),
-        note: note.trim(),
-        voucherCode: appliedVoucherCode || undefined,
-        paymentMethod: selectedPayment,
-      })
+      let bookingId = booking.bookingId
+      if (!bookingId) {
+        const createdBooking = await bookingService.createBooking({
+          reservationId: booking.id,
+          fullName: contact.fullName.trim(),
+          email: contact.email.trim(),
+          phone: contact.phone.trim(),
+          note: note.trim(),
+          voucherCode: appliedVoucherCode || undefined,
+          paymentMethod: selectedPayment,
+        })
+        bookingId = createdBooking.id
+      }
 
       if (selectedPayment === 'onsite') {
         navigate(
-          `/booking-success?status=success&bookingId=${createdBooking.id}`,
+          `/booking-success?status=success&bookingId=${bookingId}`,
         )
         return
       }
 
       // VNPay: lấy URL thanh toán thật rồi chuyển hướng trình duyệt sang cổng.
-      const paymentUrl = await bookingService.createVNPayUrl(createdBooking.id)
+      const paymentUrl = await bookingService.createVNPayUrl(bookingId)
       if (!paymentUrl) {
         throw new Error('Không tạo được liên kết thanh toán VNPay. Vui lòng thử lại.')
       }
@@ -286,6 +323,7 @@ function CheckoutPage() {
                   onChange={handleContactChange('fullName')}
                   required
                   value={contact.fullName}
+                  disabled={Boolean(booking.bookingId)}
                 />
                 <ContactField
                   autoComplete="email"
@@ -295,6 +333,7 @@ function CheckoutPage() {
                   required
                   type="email"
                   value={contact.email}
+                  disabled={Boolean(booking.bookingId)}
                 />
                 <ContactField
                   autoComplete="tel"
@@ -303,6 +342,7 @@ function CheckoutPage() {
                   onChange={handleContactChange('phone')}
                   type="tel"
                   value={contact.phone}
+                  disabled={Boolean(booking.bookingId)}
                 />
               </div>
             </section>
@@ -310,11 +350,12 @@ function CheckoutPage() {
             <section className="rounded-2xl border border-outline-variant/20 bg-white p-6 shadow-sm md:p-8">
               <h2 className="mb-4 text-lg font-bold text-on-surface">Ghi chú</h2>
               <textarea
-                className="w-full resize-none rounded-xl border border-outline-variant/50 bg-surface-container-low p-4 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15"
+                className="w-full resize-none rounded-xl border border-outline-variant/50 bg-surface-container-low p-4 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:opacity-60 disabled:cursor-not-allowed"
                 onChange={(event) => setNote(event.target.value)}
                 placeholder="Nhập yêu cầu đặc biệt (nếu có)..."
                 rows={4}
                 value={note}
+                disabled={Boolean(booking.bookingId)}
               />
             </section>
           </div>
@@ -332,7 +373,7 @@ function CheckoutPage() {
                         selectedPayment === method.id
                           ? 'border-primary bg-primary/5'
                           : 'border-outline-variant/40 hover:border-primary/40'
-                      }`}
+                      } ${booking.bookingId ? 'opacity-70 cursor-not-allowed' : ''}`}
                       htmlFor={`payment-${method.id}`}
                       key={method.id}
                     >
@@ -343,6 +384,7 @@ function CheckoutPage() {
                         name="paymentMethod"
                         onChange={() => setSelectedPayment(method.id)}
                         type="radio"
+                        disabled={Boolean(booking.bookingId)}
                       />
                       <span className="material-symbols-outlined text-primary" aria-hidden="true">
                         {method.icon}
@@ -359,15 +401,16 @@ function CheckoutPage() {
                 </label>
                 <div className="mt-2 flex gap-2">
                   <input
-                    className="min-w-0 flex-1 rounded-xl border border-outline-variant px-4 py-3 uppercase outline-none focus:border-primary"
+                    className="min-w-0 flex-1 rounded-xl border border-outline-variant px-4 py-3 uppercase outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
                     id="voucher"
                     onChange={handleVoucherChange}
                     placeholder="GIAM20"
                     value={voucherCode}
+                    disabled={Boolean(booking.bookingId)}
                   />
                   <button
                     className="rounded-xl bg-secondary px-5 py-3 font-bold text-white disabled:opacity-60"
-                    disabled={isApplyingVoucher}
+                    disabled={isApplyingVoucher || Boolean(booking.bookingId)}
                     type="submit"
                   >
                     {isApplyingVoucher ? 'Đang kiểm tra...' : 'Áp dụng'}
@@ -378,9 +421,11 @@ function CheckoutPage() {
                     {voucherMessage}
                   </p>
                 )}
-                <p className="mt-2 text-xs text-on-surface-variant">
-                  Thử mã GIAM20 hoặc VIETTICKET10.
-                </p>
+                {!booking.bookingId && (
+                  <p className="mt-2 text-xs text-on-surface-variant">
+                    Thử mã GIAM20 hoặc VIETTICKET10.
+                  </p>
+                )}
               </form>
 
               <section className="flex flex-col gap-3 border-t border-outline-variant/20 pt-5">
@@ -426,13 +471,19 @@ function CheckoutPage() {
                 </p>
               )}
 
+              {booking.bookingId && (
+                <p className="text-sm font-bold text-green-700 bg-green-50 p-3 rounded-xl">
+                  Đơn hàng đã được tạo thành công. Vui lòng thanh toán để nhận vé QR.
+                </p>
+              )}
+
               <button
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#feb700] px-6 py-4 text-base font-bold text-gray-900 shadow-md transition hover:bg-[#e5a600] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={isSubmitting || isExpired}
                 onClick={handleConfirm}
                 type="button"
               >
-                {isSubmitting ? 'Đang xử lý...' : 'Xác nhận & Thanh toán'}
+                {isSubmitting ? 'Đang xử lý...' : booking.bookingId ? 'Thanh toán ngay' : 'Xác nhận & Thanh toán'}
                 <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
                   arrow_forward
                 </span>
@@ -473,6 +524,7 @@ function ContactField({
   required = false,
   type = 'text',
   value,
+  disabled = false,
 }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -483,11 +535,12 @@ function ContactField({
         </span>
         <input
           autoComplete={autoComplete}
-          className="w-full rounded-xl border border-outline-variant/50 bg-surface-container-low py-2.5 pl-10 pr-4 text-sm font-medium text-on-surface outline-none focus:border-primary"
+          className="w-full rounded-xl border border-outline-variant/50 bg-surface-container-low py-2.5 pl-10 pr-4 text-sm font-medium text-on-surface outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
           onChange={onChange}
           required={required}
           type={type}
           value={value}
+          disabled={disabled}
         />
       </span>
     </label>

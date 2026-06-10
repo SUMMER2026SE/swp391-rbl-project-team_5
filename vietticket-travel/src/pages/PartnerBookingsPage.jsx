@@ -163,7 +163,6 @@ function PartnerBookingsPage() {
           <option value="all">Tất cả trạng thái</option>
           <option value="confirmed">Đã xác nhận</option>
           <option value="pending_partner">Chờ duyệt</option>
-          <option value="pending">Chờ thanh toán</option>
           <option value="cancelled">Đã hủy</option>
           <option value="completed">Hoàn thành</option>
         </select>
@@ -212,7 +211,7 @@ function PartnerBookingsPage() {
                           <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${si.cls}`}>{si.label}</span>
                         </td>
                         <td className="px-5 py-3.5">
-                          {(b.status === 'pending_partner' || b.status === 'pending') && (
+                          {b.status === 'pending_partner' && (
                             <div className="flex gap-2">
                               <button
                                 onClick={() => handleConfirm(b.id)}
