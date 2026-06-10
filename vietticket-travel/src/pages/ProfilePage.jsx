@@ -3,12 +3,44 @@ import { Link, useNavigate } from 'react-router-dom'
 import AccountLayout from '../components/auth/AccountLayout.jsx'
 import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
+import bookingService from '../services/bookingService.js'
+import { getFavorites, getFavoriteItems } from '../services/favoriteApi.js'
+
+const fallbackImage =
+  'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=900&q=80'
+
+const formatCurrency = (value) =>
+  `${new Intl.NumberFormat('vi-VN').format(Number(value) || 0)} VND`
+
+const formatDate = (value) => {
+  if (!value) return 'Chưa cập nhật'
+  const date = new Date(`${value}T00:00:00`)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
+}
+
+const getAttraction = (favorite) => favorite.attraction || favorite
+
+const getAttractionImage = (attraction) => {
+  if (!attraction) return fallbackImage
+  if (attraction.primaryImage) return attraction.primaryImage
+  if (attraction.imageUrl) return attraction.imageUrl
+  if (Array.isArray(attraction.images) && attraction.images.length > 0) {
+    const primary = attraction.images.find((image) => image.isPrimary)
+    return primary?.imageUrl || attraction.images[0]?.imageUrl || fallbackImage
+  }
+  return fallbackImage
+}
 
 function ProfilePage() {
   const navigate = useNavigate()
   const { user, logout, getProfile } = useAuth()
   const [error, setError] = useState('')
   const currentUser = user || defaultUser
+
+  const [recentBookings, setRecentBookings] = useState([])
+  const [savedAttractions, setSavedAttractions] = useState([])
+  const [loadingBookings, setLoadingBookings] = useState(true)
+  const [loadingFavorites, setLoadingFavorites] = useState(true)
 
   useEffect(() => {
     document.title = 'Hồ sơ của tôi | VietTicket Travel'
@@ -40,6 +72,32 @@ function ProfilePage() {
       isMounted = false
     }
   }, [getProfile, navigate])
+
+  useEffect(() => {
+    let active = true
+
+    bookingService.getBookings()
+      .then((data) => {
+        if (active) setRecentBookings(data.slice(0, 3))
+      })
+      .catch((err) => console.error("Lỗi tải đặt chỗ:", err))
+      .finally(() => {
+        if (active) setLoadingBookings(false)
+      })
+
+    getFavorites()
+      .then((res) => {
+        if (active) setSavedAttractions(getFavoriteItems(res).slice(0, 3))
+      })
+      .catch((err) => console.error("Lỗi tải yêu thích:", err))
+      .finally(() => {
+        if (active) setLoadingFavorites(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -142,11 +200,36 @@ function ProfilePage() {
             <h2>Đặt chỗ gần đây</h2>
             <p>Lịch sử đặt vé tham quan của bạn.</p>
           </div>
+          {recentBookings.length > 0 && (
+            <Link className="auth-secondary-button" to="/my-tickets" style={{ width: 'auto', minHeight: 'auto', padding: '6px 16px', fontSize: '13px' }}>
+              Xem tất cả
+            </Link>
+          )}
         </div>
-        <div className="activity-list activity-list--empty">
-          <span className="material-symbols-outlined" aria-hidden="true">confirmation_number</span>
-          <p>Bạn chưa có đặt chỗ nào. Hãy khám phá các điểm tham quan!</p>
-        </div>
+        {loadingBookings ? (
+          <div className="activity-list">
+            <p className="auth-helper">Đang tải danh sách đặt vé...</p>
+          </div>
+        ) : recentBookings.length === 0 ? (
+          <div className="activity-list activity-list--empty">
+            <span className="material-symbols-outlined" aria-hidden="true">confirmation_number</span>
+            <p>Bạn chưa có đặt chỗ nào. Hãy khám phá các điểm tham quan!</p>
+          </div>
+        ) : (
+          <div className="activity-list">
+            {recentBookings.map((booking) => (
+              <Link to="/my-tickets" className="activity-item" key={booking.id}>
+                <img src={booking.attractionImage || fallbackImage} alt={booking.attractionTitle} />
+                <div className="activity-item__content">
+                  <h4 style={{ fontWeight: 'bold', fontSize: '15px' }}>{booking.attractionTitle}</h4>
+                  <p>Mã: {booking.id.slice(0, 8).toUpperCase()} · SL: {booking.quantity || 1} vé</p>
+                  <p>Ngày đi: {formatDate(booking.visitDate)}</p>
+                </div>
+                <div className="activity-price">{formatCurrency(booking.totalAmount)}</div>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="account-card">
@@ -155,11 +238,42 @@ function ProfilePage() {
             <h2>Điểm tham quan đã lưu</h2>
             <p>Các ý tưởng điểm tham quan Việt Nam bạn đã lưu.</p>
           </div>
+          {savedAttractions.length > 0 && (
+            <Link className="auth-secondary-button" to="/favorites" style={{ width: 'auto', minHeight: 'auto', padding: '6px 16px', fontSize: '13px' }}>
+              Xem tất cả
+            </Link>
+          )}
         </div>
-        <div className="activity-list activity-list--empty">
-          <span className="material-symbols-outlined" aria-hidden="true">favorite</span>
-          <p>Bạn chưa lưu điểm tham quan nào.</p>
-        </div>
+        {loadingFavorites ? (
+          <div className="activity-list">
+            <p className="auth-helper">Đang tải điểm tham quan đã lưu...</p>
+          </div>
+        ) : savedAttractions.length === 0 ? (
+          <div className="activity-list activity-list--empty">
+            <span className="material-symbols-outlined" aria-hidden="true">favorite</span>
+            <p>Bạn chưa lưu điểm tham quan nào.</p>
+          </div>
+        ) : (
+          <div className="activity-list">
+            {savedAttractions.map((item) => {
+              const attraction = getAttraction(item)
+              return (
+                <Link to={`/attractions/${attraction.id}`} className="activity-item" key={attraction.id}>
+                  <img src={getAttractionImage(attraction)} alt={attraction.title || attraction.name} />
+                  <div className="activity-item__content">
+                    <h4 style={{ fontWeight: 'bold', fontSize: '15px' }}>{attraction.title || attraction.name}</h4>
+                    <p>{attraction.city || attraction.location || 'Việt Nam'}</p>
+                    <p style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--color-primary)', fontSize: '13px', fontWeight: 'bold' }}>
+                      <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1", fontSize: '16px' }}>star</span>
+                      {attraction.averageRating ? Number(attraction.averageRating).toFixed(1) : 'New'}
+                    </p>
+                  </div>
+                  <div className="activity-price" style={{ fontSize: '13px', fontWeight: 'bold' }}>Xem chi tiết</div>
+                </Link>
+              )
+            })}
+          </div>
+        )}
       </section>
 
       <section className="summary-grid">
