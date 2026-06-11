@@ -166,6 +166,7 @@ function MyTicketsPage() {
               label="Vé của tôi"
             />
             <SidebarLink href="/favorites" icon="favorite" label="Yêu thích" />
+            <SidebarLink href="/my-support" icon="support_agent" label="Hỗ trợ của tôi" />
             <SidebarLink href="/change-password" icon="settings" label="Cài đặt" />
           </nav>
           <button
