@@ -42,20 +42,24 @@ export default function AdminSidebar() {
 
       {/* Navigation */}
       <nav className="admin-sidebar__nav" style={{ padding: '12px 12px', flex: 1, overflowY: 'auto' }}>
-        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '4px 12px 8px' }}>Quản trị hệ thống</p>
-        {NAV_ITEMS_ADMIN.map(({ to, icon, label, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            className={({ isActive }) =>
-              'admin-sidebar__nav-link' + (isActive ? ' admin-sidebar__nav-link--active-dark' : ' admin-sidebar__nav-link--dark')
-            }
-          >
-            <span className="material-symbols-outlined">{icon}</span>
-            <span>{label}</span>
-          </NavLink>
-        ))}
+        {user?.role === 'ADMIN' && (
+          <>
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '4px 12px 8px' }}>Quản trị hệ thống</p>
+            {NAV_ITEMS_ADMIN.map(({ to, icon, label, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) =>
+                  'admin-sidebar__nav-link' + (isActive ? ' admin-sidebar__nav-link--active-dark' : ' admin-sidebar__nav-link--dark')
+                }
+              >
+                <span className="material-symbols-outlined">{icon}</span>
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </>
+        )}
         <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '16px 12px 8px' }}>Công cụ nhân viên</p>
         {NAV_ITEMS_STAFF.map(({ to, icon, label }) => (
           <NavLink
@@ -102,7 +106,9 @@ export default function AdminSidebar() {
           />
           <div>
             <p className="admin-sidebar__profile-name" style={{ color: '#fff' }}>{user?.fullName || 'Admin'}</p>
-            <p className="admin-sidebar__profile-role" style={{ color: 'rgba(255,255,255,0.6)' }}>Quản trị viên</p>
+            <p className="admin-sidebar__profile-role" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              {user?.role === 'ADMIN' ? 'Quản trị viên' : 'Nhân viên hỗ trợ'}
+            </p>
           </div>
         </Link>
       </div>

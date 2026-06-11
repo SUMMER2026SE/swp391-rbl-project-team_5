@@ -84,6 +84,15 @@ function Header({ links = defaultLinks, activeLink = '' }) {
                   Trang quản trị
                 </Link>
               )}
+              {user?.role === 'STAFF' && (
+                <Link
+                  className="text-button"
+                  to="/staff/tickets"
+                  style={{ marginRight: '4px', color: 'var(--color-primary)', fontWeight: 'bold' }}
+                >
+                  Cổng nhân viên
+                </Link>
+              )}
               {user?.role === 'PARTNER' && (
                 <Link
                   className="text-button"
@@ -163,6 +172,11 @@ function Header({ links = defaultLinks, activeLink = '' }) {
                 {user?.role === 'ADMIN' && (
                   <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: 8 }}>
                     Trang quản trị
+                  </Link>
+                )}
+                {user?.role === 'STAFF' && (
+                  <Link className="button button--secondary" to="/staff/tickets" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                    Cổng nhân viên
                   </Link>
                 )}
                 {user?.role === 'PARTNER' && (

@@ -127,6 +127,20 @@ function RefundModal({ booking, onClose, onSuccess }) {
               </div>
             </div>
 
+            {preview.refundable && preview.visitDate && (
+              <div className="mt-4 flex gap-3 rounded-xl border border-error/20 bg-red-50 p-3 text-xs text-error">
+                <span className="material-symbols-outlined shrink-0 text-[18px] text-error" style={{ fontVariationSettings: "'FILL' 1" }}>
+                  warning
+                </span>
+                <div>
+                  <strong className="block mb-0.5">Thời hạn hoàn tiền:</strong>
+                  Yêu cầu phải được gửi trước ngày sử dụng vé (ngày{' '}
+                  <strong>{new Date(preview.visitDate).toLocaleDateString('vi-VN')}</strong>).
+                  Sau ngày này, vé sẽ không còn hiệu lực để hoàn trả.
+                </div>
+              </div>
+            )}
+
             <label
               className="mb-2 mt-5 block text-sm font-semibold text-on-surface"
               htmlFor="refund-reason"

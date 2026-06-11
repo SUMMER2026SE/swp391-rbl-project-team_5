@@ -229,14 +229,36 @@ export default function SupportTicketsPage() {
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between border-b border-outline-variant bg-surface px-5 py-4">
-                <div className="min-w-0">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-outline-variant bg-surface px-5 py-4">
+                <div className="min-w-0 flex-1">
                   <h3 className="truncate font-bold text-on-surface">{detail.subject}</h3>
                   <p className="text-xs text-on-surface-variant">
                     {customer?.fullName} · {customer?.email}
                   </p>
                 </div>
-                <StatusBadge status={detail.status} />
+                <div className="flex items-center gap-2">
+                  {isOpen && (
+                    <button
+                      type="button"
+                      onClick={() => void handleClaim()}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-primary bg-primary/5 px-3 py-1.5 text-xs font-semibold text-primary transition hover:bg-primary/10"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">person_raised_hand</span>
+                      Nhận xử lý
+                    </button>
+                  )}
+                  {!isResolved && (
+                    <button
+                      type="button"
+                      onClick={() => void handleResolve()}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary transition hover:opacity-90"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">task_alt</span>
+                      Giải quyết
+                    </button>
+                  )}
+                  <StatusBadge status={detail.status} />
+                </div>
               </div>
 
               <div className="flex-1 space-y-3 overflow-y-auto bg-surface-container-low/40 p-4">
@@ -313,28 +335,6 @@ export default function SupportTicketsPage() {
                 label="Điện thoại"
                 value={customer?.profile?.phoneNumber || 'Chưa cập nhật'}
               />
-            </div>
-            <div className="mt-6 flex flex-col gap-3">
-              {isOpen && (
-                <button
-                  type="button"
-                  onClick={() => void handleClaim()}
-                  className="flex items-center justify-center gap-2 rounded-xl border border-primary bg-primary/5 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/10"
-                >
-                  <span className="material-symbols-outlined text-[20px]">person_raised_hand</span>
-                  Nhận xử lý
-                </button>
-              )}
-              {!isResolved && (
-                <button
-                  type="button"
-                  onClick={() => void handleResolve()}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-on-primary transition hover:opacity-90"
-                >
-                  <span className="material-symbols-outlined text-[20px]">task_alt</span>
-                  Đánh dấu đã giải quyết
-                </button>
-              )}
             </div>
           </aside>
         )}

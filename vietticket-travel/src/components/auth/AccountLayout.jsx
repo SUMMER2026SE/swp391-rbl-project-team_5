@@ -67,6 +67,16 @@ function AccountLayout({ active = 'profile', children }) {
                 Trang quản trị
               </Link>
             )}
+            {currentUser?.role === 'STAFF' && (
+              <Link className="text-button" to="/staff/tickets">
+                Cổng nhân viên
+              </Link>
+            )}
+            {currentUser?.role === 'PARTNER' && (
+              <Link className="text-button" to="/partner/dashboard">
+                Cổng đối tác
+              </Link>
+            )}
             <Link className="text-button" to="/">
               Trang chủ
             </Link>
@@ -105,6 +115,22 @@ function AccountLayout({ active = 'profile', children }) {
                   admin_panel_settings
                 </span>
                 Trang quản trị
+              </Link>
+            )}
+            {currentUser?.role === 'STAFF' && (
+              <Link to="/staff/tickets">
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  support_agent
+                </span>
+                Cổng nhân viên
+              </Link>
+            )}
+            {currentUser?.role === 'PARTNER' && (
+              <Link to="/partner/dashboard">
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  dashboard
+                </span>
+                Cổng đối tác
               </Link>
             )}
             {visibleNavItems.map((item) =>

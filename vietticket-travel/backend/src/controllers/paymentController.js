@@ -398,6 +398,7 @@ async function getRefundPreview(req, res, next) {
           ticketProduct.refundPolicy !== 'NON_REFUNDABLE' &&
           booking.refundRequests.length === 0,
         hasRefundRequest: booking.refundRequests.length > 0,
+        visitDate: booking.reservation.date,
       },
     });
   } catch (error) {
