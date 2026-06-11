@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth.js';
 import '../../styles/admin.css';
 
@@ -23,6 +24,15 @@ export default function AdminHeader({ placeholder = 'Tìm kiếm hệ thống...
       </div>
 
       <div className="admin-header__actions">
+        <Link
+          to="/"
+          className="admin-header__icon-btn"
+          aria-label="Xem trang bán vé chính"
+          title="Xem trang bán vé chính"
+          style={{ color: 'inherit', textDecoration: 'none', display: 'flex', alignItems: 'center' }}
+        >
+          <span className="material-symbols-outlined">home</span>
+        </Link>
         <button className="admin-header__icon-btn" aria-label="Thông báo">
           <span className="material-symbols-outlined">notifications</span>
           <span className="admin-header__notif-dot" />

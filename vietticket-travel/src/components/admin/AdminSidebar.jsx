@@ -36,7 +36,9 @@ export default function AdminSidebar() {
     <aside className="admin-sidebar" style={{ background: 'var(--adm-primary-dark)' }}>
       {/* Brand */}
       <div className="admin-sidebar__brand" style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-        <h1 style={{ color: '#fff' }}>VietTicket Admin</h1>
+        <Link to="/" style={{ textDecoration: 'none' }} title="Về trang chủ khách hàng">
+          <h1 style={{ color: '#fff', cursor: 'pointer' }} className="hover:opacity-90 transition-opacity">VietTicket Admin</h1>
+        </Link>
         <p style={{ color: 'rgba(255,255,255,0.7)' }}>Management Portal</p>
       </div>
 

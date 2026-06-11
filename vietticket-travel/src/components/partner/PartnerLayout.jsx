@@ -32,7 +32,9 @@ function PartnerLayout({ children, pageTitle = 'Partner Dashboard' }) {
     >
       {/* ── Mobile Top Nav ── */}
       <nav className="md:hidden bg-white text-[#00474d] shadow-sm flex justify-between items-center w-full px-5 h-16 fixed top-0 z-50">
-        <div className="font-bold text-lg text-[#00474d]">VietTicket B2B</div>
+        <Link to="/" className="font-bold text-lg text-[#00474d]" style={{ textDecoration: 'none' }} title="Về trang chủ khách hàng">
+          VietTicket B2B
+        </Link>
         <div className="flex items-center gap-4">
           <span className="material-symbols-outlined cursor-pointer">notifications</span>
           <span
@@ -106,7 +108,12 @@ function SidebarContent({ user, initials, onLogout, onNavClick }) {
   return (
     <>
       {/* Brand */}
-      <div className="mb-8 px-4 flex items-center gap-3">
+      <Link
+        to="/"
+        className="mb-8 px-4 flex items-center gap-3 hover:opacity-90 transition-opacity"
+        style={{ textDecoration: 'none' }}
+        title="Về trang chủ khách hàng"
+      >
         <div className="w-10 h-10 rounded-lg bg-[#00474d] text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
           {initials}
         </div>
@@ -116,7 +123,7 @@ function SidebarContent({ user, initials, onLogout, onNavClick }) {
           </h2>
           <p className="text-xs text-[#3f484a]">Premium Partner</p>
         </div>
-      </div>
+      </Link>
 
       {/* Nav */}
       <nav className="flex-1 flex flex-col gap-1">

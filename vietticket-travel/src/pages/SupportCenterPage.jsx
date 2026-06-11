@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
@@ -30,6 +30,7 @@ function SupportCenterPage() {
   const [description, setDescription] = useState('')
   const [bookings, setBookings] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [hasTickets, setHasTickets] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -44,6 +45,17 @@ function SupportCenterPage() {
       .catch(() => {
         // Không chặn form nếu không tải được danh sách đơn.
       })
+
+    supportApi.getMyTickets()
+      .then((data) => {
+        if (active && data && data.length > 0) {
+          setHasTickets(true)
+        }
+      })
+      .catch(() => {
+        // Không làm phiền trải nghiệm nếu fetch thất bại
+      })
+
     return () => {
       active = false
     }
@@ -87,6 +99,26 @@ function SupportCenterPage() {
               Gửi yêu cầu, chúng tôi sẽ phản hồi sớm nhất qua khung chat trực tuyến.
             </p>
           </div>
+
+          {hasTickets && (
+            <div className="mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-primary shadow-sm">
+              <div className="flex items-start gap-2.5">
+                <span className="material-symbols-outlined text-primary shrink-0 mt-0.5" style={{ fontSize: 20 }}>
+                  chat
+                </span>
+                <p className="text-left font-medium leading-tight">
+                  Bạn đã có các yêu cầu hỗ trợ trước đó. Tiếp tục trò chuyện với nhân viên CSKH tại Lịch sử hỗ trợ.
+                </p>
+              </div>
+              <Link
+                to="/my-support"
+                className="w-full sm:w-auto shrink-0 text-center rounded-xl bg-primary px-4 py-2 text-xs font-bold text-on-primary hover:brightness-110 transition active:scale-95"
+                style={{ textDecoration: 'none' }}
+              >
+                Trò chuyện ngay
+              </Link>
+            </div>
+          )}
 
           <form
             onSubmit={handleSubmit}
