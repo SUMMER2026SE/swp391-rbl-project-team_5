@@ -6,6 +6,7 @@ const {
 } = require('../utils/partnerMappers');
 const { validateTicket } = require('../utils/partnerValidators');
 const { findOwnedAttraction } = require('./attractionController');
+const { todayInVietnam } = require('../utils/refundService');
 
 // Tìm vé và xác minh thuộc về đối tác hiện tại (qua điểm tham quan)
 async function findOwnedTicket(ticketId, partnerId) {
@@ -288,6 +289,23 @@ async function reserveTickets(req, res, next) {
 
     const date = parseDateString(dateStr);
     if (!date) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid date format (YYYY-MM-DD)' } });
+
+    // Chỉ cho đặt từ hôm nay (giờ VN) tới tối đa 1 năm — chặn đặt vé cho ngày quá khứ.
+    const today = todayInVietnam();
+    const visitDay = date.toISOString().slice(0, 10);
+    if (visitDay < today) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Ngày tham quan phải từ hôm nay trở đi.' },
+      });
+    }
+    const maxDay = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (visitDay > maxDay) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Chỉ có thể đặt vé trong vòng 1 năm tới.' },
+      });
+    }
 
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 

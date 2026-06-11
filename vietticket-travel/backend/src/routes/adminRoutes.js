@@ -7,6 +7,7 @@ const {
   reviewPartner,
   reviewAttraction,
   hideAttraction,
+  getAdminBookings,
 } = require('../controllers/adminController');
 const protect = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
@@ -17,6 +18,7 @@ const router = express.Router();
 router.use(protect, restrictTo('ADMIN'));
 
 router.get('/users', getUsers);
+router.get('/bookings', getAdminBookings);
 router.patch('/users/:id/status', changeUserStatus);
 router.get('/partners', getPartners);
 router.get('/attractions', getAttractions);

@@ -10,9 +10,24 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
 }
 
+// Diễn giải mã lỗi VNPay phổ biến thành thông báo khách hiểu được.
+const VNPAY_ERROR_MESSAGES = {
+  '07': 'Giao dịch bị nghi ngờ gian lận và đã bị từ chối. Vui lòng liên hệ ngân hàng của bạn.',
+  '09': 'Thẻ/tài khoản chưa đăng ký dịch vụ InternetBanking tại ngân hàng.',
+  10: 'Bạn xác thực thông tin thẻ/tài khoản sai quá 3 lần.',
+  11: 'Đã hết thời gian chờ thanh toán. Vui lòng thử lại.',
+  12: 'Thẻ/tài khoản của bạn đang bị khóa.',
+  13: 'Bạn nhập sai mật khẩu xác thực (OTP).',
+  24: 'Bạn đã hủy giao dịch trên cổng thanh toán.',
+  51: 'Tài khoản của bạn không đủ số dư để thực hiện giao dịch.',
+  65: 'Tài khoản của bạn đã vượt quá hạn mức giao dịch trong ngày.',
+  75: 'Ngân hàng thanh toán đang bảo trì. Vui lòng thử lại sau ít phút.',
+  79: 'Bạn nhập sai mật khẩu thanh toán quá số lần quy định.',
+}
+
 function BookingSuccessPage() {
   const [searchParams] = useSearchParams()
-  // Backend /vnpay-return redirect về với ?status=...&vnp_ResponseCode=...
+  // Backend /vnpay-return redirect về với ?status=success|failed|invalid&vnp_ResponseCode=...
   const statusParam = searchParams.get('status')
   const responseCode =
     searchParams.get('vnp_ResponseCode') || searchParams.get('vnpayResponseCode')
@@ -20,8 +35,15 @@ function BookingSuccessPage() {
   const [booking, setBooking] = useState(null)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState('')
-  const isSuccess = statusParam ? statusParam === 'success' : responseCode === '00'
+
+  // 3 kết cục: success / invalid (không xác minh được chữ ký) / failed (khách hủy, lỗi thẻ...)
+  const outcome = statusParam || (responseCode === '00' ? 'success' : 'failed')
+  const isSuccess = outcome === 'success'
+  const isInvalid = outcome === 'invalid'
   const isPendingPartner = booking?.status === 'pending_partner'
+  const failureReason =
+    VNPAY_ERROR_MESSAGES[responseCode] ||
+    'Giao dịch không thể hoàn tất. Bạn chưa bị trừ tiền cho đơn này.'
 
   const handleRetry = async () => {
     if (!bookingId || retrying) return
@@ -67,7 +89,9 @@ function BookingSuccessPage() {
                 ? isPendingPartner
                   ? 'bg-tertiary-fixed'
                   : 'bg-primary-container'
-                : 'bg-red-100'
+                : isInvalid
+                  ? 'bg-amber-100'
+                  : 'bg-red-100'
             }`}
           >
             <span
@@ -76,20 +100,34 @@ function BookingSuccessPage() {
                   ? isPendingPartner
                     ? 'text-tertiary'
                     : 'text-white'
-                  : 'text-error'
+                  : isInvalid
+                    ? 'text-amber-600'
+                    : 'text-error'
               }`}
               aria-hidden="true"
             >
-              {isSuccess ? (isPendingPartner ? 'hourglass_top' : 'check_circle') : 'error'}
+              {isSuccess
+                ? isPendingPartner
+                  ? 'hourglass_top'
+                  : 'check_circle'
+                : isInvalid
+                  ? 'help'
+                  : 'error'}
             </span>
           </div>
 
-          <h1 className={`mt-6 text-3xl font-extrabold md:text-4xl ${isSuccess ? 'text-primary' : 'text-error'}`}>
+          <h1
+            className={`mt-6 text-3xl font-extrabold md:text-4xl ${
+              isSuccess ? 'text-primary' : isInvalid ? 'text-amber-700' : 'text-error'
+            }`}
+          >
             {isSuccess
               ? isPendingPartner
                 ? 'Đang chờ đối tác duyệt'
                 : 'Đặt vé thành công!'
-              : 'Thanh toán chưa thành công'}
+              : isInvalid
+                ? 'Chưa xác minh được kết quả'
+                : 'Thanh toán chưa thành công'}
           </h1>
 
           <p className="mt-3 leading-relaxed text-on-surface-variant">
@@ -97,8 +135,17 @@ function BookingSuccessPage() {
               ? isPendingPartner
                 ? 'Thanh toán đã được ghi nhận. VietTicket sẽ phát hành mã QR ngay khi đối tác xác nhận vé.'
                 : 'Thanh toán đã được ghi nhận và vé điện tử của bạn đã sẵn sàng.'
-              : 'Giao dịch đã bị hủy hoặc không thể hoàn tất. Đơn giữ chỗ vẫn được giữ nguyên để bạn thử lại.'}
+              : isInvalid
+                ? 'Chúng tôi chưa xác minh được kết quả trả về từ cổng thanh toán. Nếu bạn đã bị trừ tiền, trạng thái đơn sẽ được cập nhật tự động trong ít phút — vui lòng kiểm tra mục "Vé của tôi" trước khi thanh toán lại.'
+                : failureReason}
           </p>
+
+          {!isSuccess && !isInvalid && (
+            <p className="mt-2 text-sm text-on-surface-variant">
+              Đơn giữ chỗ của bạn vẫn được giữ trong thời gian giữ chỗ. Bạn có thể thử thanh toán
+              lại ngay bên dưới, hoặc đổi phương thức thanh toán khác trên VNPay.
+            </p>
+          )}
 
           {booking && (
             <div className="mt-7 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-6 text-left">
@@ -130,6 +177,14 @@ function BookingSuccessPage() {
               >
                 <span className="material-symbols-outlined text-[19px]" aria-hidden="true">confirmation_number</span>
                 Theo dõi trạng thái vé
+              </Link>
+            ) : isInvalid ? (
+              <Link
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
+                to="/my-tickets"
+              >
+                <span className="material-symbols-outlined text-[19px]" aria-hidden="true">confirmation_number</span>
+                Kiểm tra trạng thái đơn
               </Link>
             ) : (
               <button

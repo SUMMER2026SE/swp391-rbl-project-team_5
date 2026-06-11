@@ -5,6 +5,7 @@ const { validateKyc } = require('../utils/partnerValidators');
 const { isValidPhoneNumber } = require('../utils/validators');
 const { emitBookingStatusUpdated } = require('../realtime/events');
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
+const { sendBookingRejectedEmail } = require('../utils/mailer');
 
 function toNullable(value) {
   if (value === undefined || value === null) return undefined;
@@ -520,9 +521,20 @@ async function approveBooking(req, res, next) {
       });
     }
 
-    const reservation = booking.reservation;
-
     await prisma.$transaction(async (tx) => {
+      // Re-read TRONG transaction: guard bằng dữ liệu mới nhất để hai request
+      // duyệt đồng thời không trừ kho / tạo vé hai lần.
+      const current = await tx.booking.findUnique({
+        where: { id: bookingId },
+        include: { reservation: true },
+      });
+      if (!current || current.status !== 'PENDING_PARTNER') {
+        const err = new Error('Đơn đặt vé đã được xử lý trước đó.');
+        err.statusCode = 409;
+        throw err;
+      }
+      const reservation = current.reservation;
+
       // 1. Xác nhận DailyStock: heldQuantity -> bookedQuantity
       if (reservation.status !== 'CONFIRMED') {
         await tx.dailyStock.updateMany({
@@ -563,8 +575,13 @@ async function approveBooking(req, res, next) {
         data: { status: 'CONFIRMED' },
       });
 
-      // 5. Tạo TicketInstance (QR code) nếu chưa có
-      if (booking.ticketInstances.length === 0) {
+      // 5. Tạo TicketInstance (QR code) nếu chưa có.
+      // Đếm lại TRONG transaction (không dùng dữ liệu đọc trước đó) để
+      // hai request duyệt đồng thời không tạo vé trùng.
+      const existingTickets = await tx.ticketInstance.count({
+        where: { bookingId },
+      });
+      if (existingTickets === 0) {
         await tx.ticketInstance.createMany({
           data: Array.from({ length: reservation.quantity }, () => ({
             bookingId,
@@ -594,15 +611,27 @@ async function approveBooking(req, res, next) {
 }
 
 // PATCH /api/partners/bookings/:id/reject — Partner từ chối đơn đặt vé
-// Khi từ chối: CANCELLED booking + hoàn trả DailyStock & TimeSlotStock
+// Khi từ chối: CANCELLED booking + hoàn trả DailyStock & TimeSlotStock.
+// Đơn PENDING_PARTNER đã thu tiền qua cổng -> bắt buộc gắn refundRequired
+// và tự tạo RefundRequest (hoàn 100%) để rơi vào hàng đợi duyệt của Staff.
 async function rejectBooking(req, res, next) {
   try {
     const partnerId = req.partner.id;
     const bookingId = req.params.id;
+    const reason = String(req.body?.reason || '').trim();
+
+    if (reason.length < 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng nhập lý do từ chối (tối thiểu 5 ký tự) để thông báo cho khách hàng.',
+      });
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
+        payments: { where: { status: 'SUCCESS' }, select: { id: true } },
+        refundRequests: { select: { id: true } },
         reservation: {
           include: {
             ticketProduct: {
@@ -629,6 +658,7 @@ async function rejectBooking(req, res, next) {
     }
 
     const reservation = booking.reservation;
+    const hasPaid = booking.payments.length > 0;
 
     await prisma.$transaction(async (tx) => {
       // 1. Hoàn trả DailyStock: bookedQuantity -> giảm, giải phóng lại slot
@@ -687,24 +717,53 @@ async function rejectBooking(req, res, next) {
         data: { status: 'CANCELLED' },
       });
 
-      // 4. Cập nhật Booking -> CANCELLED
+      // 4. Cập nhật Booking -> CANCELLED. Đơn đã thu tiền -> gắn refundRequired.
       await tx.booking.update({
         where: { id: bookingId },
-        data: { status: 'CANCELLED' },
+        data: { status: 'CANCELLED', refundRequired: hasPaid },
       });
+
+      // 5. Đơn đã thu tiền -> tạo RefundRequest hoàn 100% (partner từ chối thì
+      //    khách không chịu phí hủy) để Staff duyệt hoàn qua luồng sẵn có.
+      if (hasPaid && booking.refundRequests.length === 0) {
+        await tx.refundRequest.create({
+          data: {
+            bookingId,
+            requestedById: booking.userId,
+            reason: `Đối tác từ chối đơn đặt vé. Lý do: ${reason}`,
+            amount: booking.totalAmount,
+            status: 'PENDING',
+          },
+        });
+      }
     });
 
     emitBookingStatusUpdated({
       customerId: booking.userId,
       bookingId,
       status: 'CANCELLED',
-      message: `Rất tiếc, yêu cầu đặt vé ${bookingId.slice(0, 8).toUpperCase()} đã bị từ chối.`,
+      message:
+        `Rất tiếc, yêu cầu đặt vé ${bookingId.slice(0, 8).toUpperCase()} đã bị từ chối. Lý do: ${reason}.` +
+        (hasPaid ? ' Số tiền bạn đã thanh toán sẽ được hoàn lại đầy đủ trong thời gian sớm nhất.' : ''),
     });
+
+    // Email thông báo từ chối + cam kết hoàn tiền (không chặn response nếu gửi lỗi).
+    sendBookingRejectedEmail({
+      to: booking.email,
+      fullName: booking.fullName,
+      bookingId,
+      reason,
+      refundAmount: hasPaid ? Number(booking.totalAmount) : 0,
+    }).catch((emailError) =>
+      console.error('[partner-reject] Không thể gửi email:', emailError.message),
+    );
 
     return res.json({
       success: true,
-      message: 'Đã từ chối đơn đặt vé và hoàn trả kho vé.',
-      data: { id: bookingId, status: 'cancelled' },
+      message: hasPaid
+        ? 'Đã từ chối đơn, hoàn trả kho vé và tạo yêu cầu hoàn tiền cho khách.'
+        : 'Đã từ chối đơn đặt vé và hoàn trả kho vé.',
+      data: { id: bookingId, status: 'cancelled', refundRequired: hasPaid },
     });
   } catch (error) {
     next(error);

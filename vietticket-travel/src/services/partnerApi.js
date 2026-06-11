@@ -157,8 +157,11 @@ export function approveBooking(id) {
   return apiRequest(`/partners/bookings/${id}/approve`, { method: 'PATCH' })
 }
 
-export function rejectBooking(id) {
-  return apiRequest(`/partners/bookings/${id}/reject`, { method: 'PATCH' })
+export function rejectBooking(id, reason) {
+  return apiRequest(`/partners/bookings/${id}/reject`, {
+    method: 'PATCH',
+    body: { reason },
+  })
 }
 
 // Tiện ích: xác định lỗi mạng (backend không chạy) để fallback demo.

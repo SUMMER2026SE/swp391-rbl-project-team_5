@@ -9,7 +9,7 @@ const regionFilters = ['Tất cả', 'Miền Bắc', 'Miền Trung', 'Miền Nam
 
 const favNavLinks = [
   { label: 'Khám phá', href: '/attractions' },
-  { label: 'Đặt chỗ của tôi', href: '/profile' },
+  { label: 'Vé của tôi', href: '/my-tickets' },
   { label: 'Yêu thích', href: '/favorites', active: true },
 ]
 

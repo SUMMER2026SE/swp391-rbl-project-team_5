@@ -7,6 +7,7 @@ const ADMIN_AVATAR =
 
 const NAV_ITEMS_ADMIN = [
   { to: '/admin',                     icon: 'dashboard',      label: 'Tổng quan',          end: true },
+  { to: '/admin/bookings',            icon: 'receipt_long',   label: 'Đặt vé & Thanh toán' },
   { to: '/admin/kyc-approval',        icon: 'verified_user',  label: 'Duyệt hồ sơ KYC' },
   { to: '/admin/attraction-approval', icon: 'location_on',    label: 'Duyệt địa điểm' },
   { to: '/admin/violations',          icon: 'report_problem', label: 'Quản lý vi phạm' },
@@ -16,6 +17,7 @@ const NAV_ITEMS_ADMIN = [
 ];
 
 const NAV_ITEMS_STAFF = [
+  { to: '/staff/checkin',  icon: 'qr_code_scanner', label: 'Check-in vé' },
   { to: '/staff/tickets',  icon: 'support_agent', label: 'Hỗ trợ khách hàng' },
   { to: '/staff/refunds',  icon: 'currency_exchange', label: 'Quản lý hoàn tiền' },
 ];
@@ -39,7 +41,7 @@ export default function AdminSidebar() {
         <Link to="/" style={{ textDecoration: 'none' }} title="Về trang chủ khách hàng">
           <h1 style={{ color: '#fff', cursor: 'pointer' }} className="hover:opacity-90 transition-opacity">VietTicket Admin</h1>
         </Link>
-        <p style={{ color: 'rgba(255,255,255,0.7)' }}>Management Portal</p>
+        <p style={{ color: 'rgba(255,255,255,0.7)' }}>Cổng quản trị</p>
       </div>
 
       {/* Navigation */}

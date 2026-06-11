@@ -7,6 +7,7 @@ import RefundModal from '../components/tickets/RefundModal.jsx'
 import ReviewModal from '../components/tickets/ReviewModal.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
+import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 
 const tabs = [
   { id: 'all', label: 'Tất cả' },
@@ -434,43 +435,16 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
 }
 
 function StatusBadge({ booking, isExpired }) {
-  const statusConfig = isExpired
-    ? { label: 'Đã hết hạn', className: 'bg-surface-container-high text-on-surface-variant' }
-    : {
-        unpaid: {
-          label: 'Chờ thanh toán',
-          className: 'bg-tertiary-fixed text-on-tertiary-fixed-variant',
-        },
-        confirmed: {
-          label: 'Đã xác nhận',
-          className: 'bg-primary-container text-on-primary',
-        },
-        pending_partner: {
-          label: 'Chờ đối tác duyệt',
-          className: 'bg-tertiary-fixed text-on-tertiary-fixed-variant',
-        },
-        completed: {
-          label: (booking.reviewed || booking.review) ? 'Đã xong & Đánh giá' : 'Đã hoàn thành',
-          className: (booking.reviewed || booking.review)
-            ? 'bg-outline text-white'
-            : 'bg-primary-container text-on-primary',
-        },
-        refund_requested: {
-          label: 'Chờ hoàn tiền',
-          className: 'bg-tertiary-fixed text-on-tertiary-fixed-variant',
-        },
-        refunded: {
-          label: 'Đã hoàn tiền',
-          className: 'bg-surface-container-high text-on-surface-variant',
-        },
-        cancelled: {
-          label: 'Đã hủy',
-          className: 'bg-red-50 text-error',
-        },
-      }[booking.status] || {
-        label: booking.status,
-        className: 'bg-surface-container-high text-on-surface-variant',
-      }
+  // Nhãn + màu lấy từ nguồn dùng chung; riêng 2 trường hợp đặc thù của trang này
+  // (đơn quá hạn thanh toán, đơn hoàn thành đã đánh giá) thì ghi đè tại chỗ.
+  let statusConfig
+  if (isExpired) {
+    statusConfig = { label: 'Đã hết hạn', className: 'bg-surface-container-high text-on-surface-variant' }
+  } else if (booking.status === 'completed' && (booking.reviewed || booking.review)) {
+    statusConfig = { label: 'Đã xong & Đánh giá', className: 'bg-outline text-white' }
+  } else {
+    statusConfig = getBookingStatusMeta(booking.status)
+  }
 
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-bold ${statusConfig.className}`}>

@@ -3,17 +3,13 @@ import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import useSocket from '../context/useSocket.js'
 import * as partnerApi from '../services/partnerApi.js'
+import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 
-const STATUS = {
-  confirmed:       { label: 'Đã xác nhận',   cls: 'bg-[#E6F4EA] text-[#137333]' },
-  pending:         { label: 'Chờ thanh toán', cls: 'bg-[#ffdea8] text-[#725000]' },
-  pending_partner: { label: 'Chờ duyệt',      cls: 'bg-[#e0f4f5] text-[#00474d]' },
-  cancelled:       { label: 'Đã hủy',         cls: 'bg-[#ffdad6] text-[#ba1a1a]' },
-  completed:       { label: 'Hoàn thành',     cls: 'bg-[#cfe5ff] text-[#00629d]' },
-}
-
+// Nhãn + màu trạng thái lấy từ nguồn dùng chung (utils/bookingStatus.js)
+// để khớp với màn hình của khách hàng và admin.
 function getStatusInfo(status) {
-  return STATUS[status] || { label: status, cls: 'bg-[#e1e3e4] text-[#3f484a]' }
+  const meta = getBookingStatusMeta(status)
+  return { label: meta.label, cls: meta.className }
 }
 
 function formatVND(n) {
@@ -32,6 +28,8 @@ function PartnerBookingsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage]                 = useState(1)
   const [pagination, setPagination]     = useState({ total: 0, totalPages: 1 })
+  const [rejectTarget, setRejectTarget] = useState(null) // booking đang chờ nhập lý do từ chối
+  const [rejectReason, setRejectReason] = useState('')
 
   useEffect(() => {
     document.title = 'Quản lý Đặt vé | VietTicket B2B'
@@ -97,11 +95,19 @@ function PartnerBookingsPage() {
     }
   }
 
-  const handleCancel = async (id) => {
-    setActionLoading(id)
+  const handleCancel = async () => {
+    if (!rejectTarget) return
+    const reason = rejectReason.trim()
+    if (reason.length < 5) {
+      toast.warning('Vui lòng nhập lý do từ chối (tối thiểu 5 ký tự).')
+      return
+    }
+    setActionLoading(rejectTarget.id)
     try {
-      await partnerApi.rejectBooking(id)
-      toast.success('Đã từ chối đơn đặt vé.')
+      await partnerApi.rejectBooking(rejectTarget.id, reason)
+      toast.success('Đã từ chối đơn. Khách đã thanh toán sẽ được hoàn tiền đầy đủ.')
+      setRejectTarget(null)
+      setRejectReason('')
       fetchBookings()
     } catch (err) {
       toast.error(err.message || 'Không thể từ chối đơn.')
@@ -162,9 +168,9 @@ function PartnerBookingsPage() {
         >
           <option value="all">Tất cả trạng thái</option>
           <option value="confirmed">Đã xác nhận</option>
-          <option value="pending_partner">Chờ duyệt</option>
+          <option value="pending_partner">Chờ đối tác duyệt</option>
           <option value="cancelled">Đã hủy</option>
-          <option value="completed">Hoàn thành</option>
+          <option value="completed">Đã hoàn thành</option>
         </select>
       </div>
 
@@ -221,7 +227,10 @@ function PartnerBookingsPage() {
                                 {isActing ? '…' : 'Duyệt đơn'}
                               </button>
                               <button
-                                onClick={() => handleCancel(b.id)}
+                                onClick={() => {
+                                  setRejectTarget(b)
+                                  setRejectReason('')
+                                }}
                                 disabled={isActing}
                                 className="px-3 py-1.5 border border-[#ba1a1a] text-[#ba1a1a] text-xs font-medium rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
                               >
@@ -287,6 +296,50 @@ function PartnerBookingsPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Modal nhập lý do từ chối đơn */}
+      {rejectTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-[#191c1d]">Từ chối đơn đặt vé</h3>
+            <p className="mt-1 text-sm text-[#3f484a]">
+              Đơn <span className="font-mono font-semibold text-[#00629d]">{rejectTarget.id.slice(0, 8).toUpperCase()}</span> của khách{' '}
+              <span className="font-semibold">{rejectTarget.customer}</span>.
+            </p>
+            <p className="mt-2 rounded-lg bg-[#fff3e0] px-3 py-2 text-xs text-[#725000]">
+              Khách đã thanh toán đơn này. Khi từ chối, hệ thống sẽ tự tạo yêu cầu hoàn tiền 100% cho khách
+              và lý do bên dưới sẽ được gửi tới khách hàng.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={3}
+              placeholder="Ví dụ: Khung giờ này đã kín chỗ do sự cố vận hành…"
+              className="mt-3 w-full rounded-lg border border-[#bec8ca] px-3 py-2 text-sm outline-none focus:border-[#00474d]"
+            />
+            <p className="mt-1 text-xs text-[#6f797a]">Tối thiểu 5 ký tự.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setRejectTarget(null)
+                  setRejectReason('')
+                }}
+                disabled={actionLoading === rejectTarget.id}
+                className="px-4 py-2 rounded-lg border border-[#bec8ca] text-sm text-[#3f484a] hover:bg-[#f2f4f5] transition-colors disabled:opacity-50"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                onClick={handleCancel}
+                disabled={actionLoading === rejectTarget.id || rejectReason.trim().length < 5}
+                className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-sm font-semibold text-white hover:bg-[#93000a] transition-colors disabled:opacity-50"
+              >
+                {actionLoading === rejectTarget.id ? 'Đang xử lý…' : 'Xác nhận từ chối'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </PartnerLayout>
   )

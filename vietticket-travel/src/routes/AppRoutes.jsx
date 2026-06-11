@@ -38,6 +38,8 @@ import KycApprovalPage from '../pages/admin/KycApprovalPage.jsx'
 import AttractionApprovalPage from '../pages/admin/AttractionApprovalPage.jsx'
 import ViolationManagementPage from '../pages/admin/ViolationManagementPage.jsx'
 import CategoryManagementPage from '../pages/admin/CategoryManagementPage.jsx'
+import BookingManagementPage from '../pages/admin/BookingManagementPage.jsx'
+import CheckinPage from '../pages/staff/CheckinPage.jsx'
 import RefundManagementPage from '../pages/staff/RefundManagementPage.jsx'
 import SupportTicketsPage from '../pages/staff/SupportTicketsPage.jsx'
 import PartnerReviewsPage from '../pages/PartnerReviewsPage.jsx'
@@ -202,6 +204,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/bookings"
+        element={
+          <AdminRoute>
+            <BookingManagementPage />
+          </AdminRoute>
+        }
+      />
+      <Route
         path="/admin/kyc-approval"
         element={
           <AdminRoute>
@@ -236,9 +246,9 @@ function AppRoutes() {
       <Route
         path="/admin/users"
         element={
-          <ProtectedRoute allowedRoles={['ADMIN']}>
+          <AdminRoute>
             <AdminUserManagementPage />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
@@ -291,6 +301,14 @@ function AppRoutes() {
         }
       />
       {/* Module 5 - Staff Routes */}
+      <Route
+        path="/staff/checkin"
+        element={
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+            <CheckinPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/staff/refunds"
         element={

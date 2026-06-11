@@ -356,6 +356,70 @@ async function sendReissueTicketEmail({
   });
 }
 
+async function sendBookingRejectedEmail({
+  to,
+  fullName,
+  bookingId,
+  reason,
+  refundAmount,
+}) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/my-tickets`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
+  const hasRefund = Number(refundAmount || 0) > 0;
+
+  return sendMail({
+    to,
+    subject: `Đơn đặt vé #${shortId} đã bị từ chối - VietTicket Travel`,
+    text:
+      `Xin chào ${fullName || 'bạn'}, rất tiếc đơn đặt vé ${bookingId} đã bị đối tác từ chối. ` +
+      `Lý do: ${reason}.` +
+      (hasRefund
+        ? ` Số tiền ${formattedAmount} VND bạn đã thanh toán sẽ được hoàn lại đầy đủ trong 3-5 ngày làm việc.`
+        : ''),
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Đơn đặt vé của bạn đã bị từ chối',
+      preview:
+        `Xin chào ${safeName}, rất tiếc đơn đặt vé <strong>#${shortId}</strong> đã bị đối tác từ chối.<br /><br />` +
+        `<strong>Lý do:</strong> ${escapeHtml(reason || 'Không có thông tin chi tiết.')}<br /><br />` +
+        (hasRefund
+          ? `Số tiền <strong>${formattedAmount} VND</strong> bạn đã thanh toán sẽ được hoàn lại <strong>đầy đủ (100%)</strong> trong vòng 3-5 ngày làm việc. Bạn không cần thao tác gì thêm.`
+          : 'Đơn này chưa phát sinh thanh toán nên không có khoản hoàn tiền nào.'),
+      buttonText: 'Xem vé của tôi',
+      link,
+    }),
+  });
+}
+
+async function sendHoldExpiredEmail({ to, fullName, bookingId, attractionTitle }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/attractions`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+
+  return sendMail({
+    to,
+    subject: `Đơn giữ chỗ #${shortId} đã hết hạn - VietTicket Travel`,
+    text:
+      `Xin chào ${fullName || 'bạn'}, đơn giữ chỗ ${bookingId} đã hết hạn thanh toán và bị hủy tự động. ` +
+      'Bạn chưa bị trừ tiền. Vui lòng đặt lại nếu vẫn muốn tham quan.',
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Đơn giữ chỗ của bạn đã hết hạn',
+      preview:
+        `Xin chào ${safeName}, đơn giữ chỗ <strong>#${shortId}</strong>` +
+        (attractionTitle ? ` cho <strong>${escapeHtml(attractionTitle)}</strong>` : '') +
+        ' đã quá thời gian thanh toán và được hủy tự động.<br /><br />' +
+        'Bạn <strong>chưa bị trừ tiền</strong> cho đơn này. Nếu vẫn muốn tham quan, hãy đặt vé lại — chỉ mất chưa đầy 2 phút.',
+      buttonText: 'Đặt vé lại',
+      link,
+    }),
+  });
+}
+
 module.exports = {
   sendAccountStatusEmail,
   sendPasswordResetEmail,
@@ -366,4 +430,6 @@ module.exports = {
   sendRefundRequestReceivedEmail,
   sendRefundStatusEmail,
   sendReissueTicketEmail,
+  sendBookingRejectedEmail,
+  sendHoldExpiredEmail,
 };
