@@ -595,30 +595,49 @@ function AmenityTab({ attraction }) {
   )
 }
 
+const REVIEWS_PAGE_SIZE = 6
+
 function ReviewTab({ attraction }) {
   const [reviews, setReviews] = useState([])
+  const [meta, setMeta] = useState({ total: 0, page: 1, limit: REVIEWS_PAGE_SIZE, totalPages: 1 })
+  const [breakdown, setBreakdown] = useState({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 })
   const [isLoading, setIsLoading] = useState(true)
-  const [filterType, setFilterType] = useState('all') // 'all', 'newest', '5', '4', '3', '2', '1'
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [filterType, setFilterType] = useState('all') // 'all', '5', '4', '3', '2', '1'
   const [now] = useState(() => Date.now())
 
-  useEffect(() => {
-    let active = true
-    reviewService.getReviews(attraction.id)
-      .then((data) => {
-        if (active) {
-          setReviews(data)
-        }
+  // Tải 1 trang review từ server; append=true khi bấm "Xem thêm".
+  const loadReviews = (filter, page, append) => {
+    const rating = ['5', '4', '3', '2', '1'].includes(filter) ? Number(filter) : undefined
+    if (append) setIsLoadingMore(true)
+    else setIsLoading(true)
+    setLoadError('')
+
+    return reviewService
+      .getReviews(attraction.id, { page, limit: REVIEWS_PAGE_SIZE, rating })
+      .then((result) => {
+        setReviews((current) => (append ? [...current, ...result.data] : result.data))
+        setMeta(result.meta)
+        setBreakdown(result.breakdown)
       })
       .catch((err) => {
         console.error('Lỗi khi tải đánh giá:', err)
+        setLoadError('Không thể tải đánh giá. Vui lòng thử lại.')
       })
       .finally(() => {
-        if (active) {
-          setIsLoading(false)
-        }
+        setIsLoading(false)
+        setIsLoadingMore(false)
       })
-    return () => { active = false }
-  }, [attraction.id])
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadReviews(filterType, 1, false)
+    }, 0)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attraction.id, filterType])
 
   const rating = Number(attraction.averageRating || 0)
   const totalReviews = Number(attraction.totalReviews || 0)
@@ -648,25 +667,8 @@ function ReviewTab({ attraction }) {
 
 
 
-  // Filter & sort logic
-  const filteredReviews = useMemo(() => {
-    let list = [...reviews]
-    if (filterType === 'newest') {
-      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    } else if (['5', '4', '3', '2', '1'].includes(filterType)) {
-      const star = parseInt(filterType)
-      list = list.filter((r) => r.rating === star)
-    }
-    return list
-  }, [reviews, filterType])
-
-  if (isLoading) {
-    return <div className="py-6 text-center text-sm font-semibold text-[#3f484a]">Đang tải đánh giá...</div>
-  }
-
-  const getStarFilterCount = (star) => {
-    return reviews.filter((r) => r.rating === star).length
-  }
+  // Tổng review hiển thị (mọi mức sao) — dùng cho histogram, không phụ thuộc filter.
+  const breakdownTotal = [1, 2, 3, 4, 5].reduce((acc, star) => acc + (breakdown[star] || 0), 0)
 
   return (
     <div className="space-y-6">
@@ -701,40 +703,72 @@ function ReviewTab({ attraction }) {
         </div>
       </div>
 
+      {/* Rating Histogram */}
+      {breakdownTotal > 0 && (
+        <div className="bg-white p-6 rounded-xl border border-[#bec8ca]/20 shadow-[0px_4px_20px_rgba(0,96,104,0.04)] max-w-md space-y-2">
+          {[5, 4, 3, 2, 1].map((star) => {
+            const count = breakdown[star] || 0
+            const percent = breakdownTotal > 0 ? Math.round((count / breakdownTotal) * 100) : 0
+            return (
+              <button
+                key={star}
+                className="group flex w-full items-center gap-3 text-left"
+                onClick={() => setFilterType(filterType === String(star) ? 'all' : String(star))}
+                title={`Lọc đánh giá ${star} sao`}
+                type="button"
+              >
+                <span className="flex w-12 shrink-0 items-center gap-0.5 text-xs font-bold text-[#3f484a]">
+                  {star}
+                  <span
+                    className="material-symbols-outlined text-[14px] text-[#feb700]"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    star
+                  </span>
+                </span>
+                <span className="h-2 flex-1 overflow-hidden rounded-full bg-[#f3f3f6]">
+                  <span
+                    className={`block h-full rounded-full transition-all duration-500 ${
+                      filterType === String(star) ? 'bg-[#00474d]' : 'bg-[#feb700] group-hover:bg-[#e5a500]'
+                    }`}
+                    style={{ width: `${percent}%` }}
+                  />
+                </span>
+                <span className="w-14 shrink-0 text-right text-xs font-semibold text-[#3f484a]">
+                  {count} ({percent}%)
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Filter Chips */}
       <div className="flex flex-wrap gap-2 py-2">
-        <button 
+        <button
           className={`px-5 py-2 rounded-full text-xs font-semibold transition-all ${
-            filterType === 'all' 
-              ? 'bg-[#00474d] text-white shadow-sm' 
+            filterType === 'all'
+              ? 'bg-[#00474d] text-white shadow-sm'
               : 'bg-[#f3f3f6] text-[#3f484a] hover:bg-[#bec8ca]/20'
           }`}
           onClick={() => setFilterType('all')}
+          type="button"
         >
-          Tất cả
-        </button>
-        <button 
-          className={`px-5 py-2 rounded-full text-xs font-semibold transition-all ${
-            filterType === 'newest' 
-              ? 'bg-[#00474d] text-white shadow-sm' 
-              : 'bg-[#f3f3f6] text-[#3f484a] hover:bg-[#bec8ca]/20'
-          }`}
-          onClick={() => setFilterType('newest')}
-        >
-          Mới nhất
+          Tất cả ({breakdownTotal})
         </button>
         {[5, 4, 3, 2, 1].map((star) => {
-          const count = getStarFilterCount(star)
+          const count = breakdown[star] || 0
           if (count === 0 && filterType !== String(star)) return null
           return (
-            <button 
+            <button
               key={star}
               className={`px-5 py-2 rounded-full text-xs font-semibold transition-all ${
-                filterType === String(star) 
-                  ? 'bg-[#00474d] text-white shadow-sm' 
+                filterType === String(star)
+                  ? 'bg-[#00474d] text-white shadow-sm'
                   : 'bg-[#f3f3f6] text-[#3f484a] hover:bg-[#bec8ca]/20'
               }`}
               onClick={() => setFilterType(String(star))}
+              type="button"
             >
               {star} sao ({count})
             </button>
@@ -744,12 +778,29 @@ function ReviewTab({ attraction }) {
 
       {/* Review List */}
       <div className="space-y-6 pt-2">
-        {filteredReviews.length === 0 ? (
+        {isLoading ? (
+          <p className="py-12 text-center text-sm font-semibold text-[#3f484a]">
+            Đang tải đánh giá...
+          </p>
+        ) : loadError ? (
+          <div className="text-center py-12 bg-white rounded-xl border border-[#bec8ca]/20">
+            <p className="text-sm font-semibold text-[#3f484a] mb-4">{loadError}</p>
+            <button
+              type="button"
+              className="px-6 py-2.5 bg-[#00474d] text-white rounded-lg font-bold text-xs hover:bg-[#003d42] transition-colors"
+              onClick={() => void loadReviews(filterType, 1, false)}
+            >
+              Thử lại
+            </button>
+          </div>
+        ) : reviews.length === 0 ? (
           <p className="text-center py-12 text-[#6f797a] bg-white rounded-xl border border-[#bec8ca]/20">
-            Không tìm thấy đánh giá phù hợp.
+            {filterType === 'all'
+              ? 'Chưa có đánh giá nào. Hãy là người đầu tiên chia sẻ trải nghiệm!'
+              : 'Không tìm thấy đánh giá phù hợp với bộ lọc.'}
           </p>
         ) : (
-          filteredReviews.map((review) => (
+          reviews.map((review) => (
             <div 
               key={review.id} 
               className="bg-white p-6 rounded-xl border border-[#bec8ca]/20 shadow-[0px_4px_20px_rgba(0,96,104,0.04)] transition hover:shadow-[0px_12px_32px_rgba(0,96,104,0.08)] duration-200"
@@ -808,6 +859,32 @@ function ReviewTab({ attraction }) {
               )}
             </div>
           ))
+        )}
+
+        {/* Load More */}
+        {!isLoading && !loadError && meta.page < meta.totalPages && (
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-full border border-[#00474d] px-8 py-3 text-sm font-bold text-[#00474d] transition-colors hover:bg-[#00474d] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void loadReviews(filterType, meta.page + 1, true)}
+              disabled={isLoadingMore}
+            >
+              {isLoadingMore ? (
+                <>
+                  <span className="material-symbols-outlined animate-spin text-[18px]">
+                    progress_activity
+                  </span>
+                  Đang tải...
+                </>
+              ) : (
+                <>
+                  Xem thêm đánh giá ({meta.total - reviews.length} còn lại)
+                  <span className="material-symbols-outlined text-[18px]">expand_more</span>
+                </>
+              )}
+            </button>
+          </div>
         )}
       </div>
     </div>

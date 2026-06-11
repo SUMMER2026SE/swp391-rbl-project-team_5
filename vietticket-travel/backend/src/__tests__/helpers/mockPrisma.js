@@ -119,6 +119,7 @@ const mockPrisma = {
     update: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
+    groupBy: jest.fn(),
   },
   $transaction: jest.fn(),
 };

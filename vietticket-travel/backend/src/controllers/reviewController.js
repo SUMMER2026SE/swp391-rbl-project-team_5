@@ -30,7 +30,8 @@ async function recalculateAttractionRating(tx, attractionId) {
   });
 }
 
-// 1. GET /api/reviews?attractionId=...
+// 1. GET /api/reviews?attractionId=...&page=1&limit=6&rating=5
+// Trả về 1 trang review công khai + meta phân trang + phân bố số sao (histogram).
 async function listPublicReviews(req, res, next) {
   try {
     const { attractionId } = req.query;
@@ -38,30 +39,58 @@ async function listPublicReviews(req, res, next) {
       return res.status(400).json({ message: 'Thiếu attractionId.' });
     }
 
-    const reviews = await prisma.review.findMany({
-      where: {
-        attractionId,
-        isHidden: false,
-      },
-      include: {
-        user: {
-          select: {
-            fullName: true,
-            profile: {
-              select: {
-                avatarUrl: true,
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 6));
+    const ratingFilter = parseInt(req.query.rating, 10);
+    const hasRatingFilter = !isNaN(ratingFilter) && ratingFilter >= 1 && ratingFilter <= 5;
+
+    const baseWhere = { attractionId, isHidden: false };
+    const where = hasRatingFilter ? { ...baseWhere, rating: ratingFilter } : baseWhere;
+
+    const [total, grouped, reviews] = await Promise.all([
+      prisma.review.count({ where }),
+      // Phân bố sao tính trên TOÀN BỘ review hiển thị (không theo filter trang).
+      prisma.review.groupBy({
+        by: ['rating'],
+        where: baseWhere,
+        _count: { rating: true },
+      }),
+      prisma.review.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              fullName: true,
+              profile: {
+                select: {
+                  avatarUrl: true,
+                },
               },
             },
           },
         },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    grouped.forEach((g) => {
+      breakdown[g.rating] = g._count.rating;
     });
 
     return res.json({
       success: true,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      breakdown,
       data: reviews.map((r) => ({
         id: r.id,
         rating: r.rating,
@@ -95,6 +124,11 @@ async function createReview(req, res, next) {
     const parsedRating = parseInt(rating);
     if (isNaN(parsedRating) || parsedRating < 1 || parsedRating > 5) {
       return res.status(400).json({ message: 'Số sao đánh giá không hợp lệ (phải từ 1 đến 5).' });
+    }
+
+    const trimmedComment = String(comment || '').trim();
+    if (trimmedComment.length > 2000) {
+      return res.status(400).json({ message: 'Nhận xét tối đa 2000 ký tự.' });
     }
 
     // Find booking
@@ -133,7 +167,7 @@ async function createReview(req, res, next) {
           attractionId,
           bookingId,
           rating: parsedRating,
-          comment: comment || '',
+          comment: trimmedComment,
           isHidden: false,
         },
       });
@@ -148,6 +182,10 @@ async function createReview(req, res, next) {
       data: review,
     });
   } catch (error) {
+    // Race hiếm: 2 request cùng lúc vượt qua check phía trên -> unique(bookingId) chặn.
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Đơn đặt vé này đã được đánh giá trước đó.' });
+    }
     return next(error);
   }
 }
@@ -160,6 +198,9 @@ async function replyReview(req, res, next) {
 
     if (!replyComment || !replyComment.trim()) {
       return res.status(400).json({ message: 'Nội dung phản hồi không được để trống.' });
+    }
+    if (replyComment.trim().length > 2000) {
+      return res.status(400).json({ message: 'Nội dung phản hồi tối đa 2000 ký tự.' });
     }
 
     // Fetch review
@@ -174,10 +215,13 @@ async function replyReview(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy đánh giá.' });
     }
 
-    // Fetch partner profile of the user
-    const partnerProfile = await prisma.partnerProfile.findUnique({
-      where: { userId: req.user.id },
-    });
+    // req.partner do middleware requirePartner nạp sẵn; fallback tự truy vấn
+    // để controller vẫn dùng được ở nơi không gắn middleware.
+    const partnerProfile =
+      req.partner ||
+      (await prisma.partnerProfile.findUnique({
+        where: { userId: req.user.id },
+      }));
 
     if (!partnerProfile || review.attraction.partnerId !== partnerProfile.id) {
       return res.status(403).json({ message: 'Bạn không có quyền phản hồi đánh giá này.' });
@@ -288,6 +332,7 @@ async function listPartnerReviews(req, res, next) {
         comment: r.comment,
         replyComment: r.replyComment,
         repliedAt: r.repliedAt,
+        isHidden: r.isHidden,
         createdAt: r.createdAt,
         user: {
           fullName: r.user.fullName,

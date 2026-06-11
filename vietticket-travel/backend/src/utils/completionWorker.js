@@ -1,16 +1,19 @@
 const prisma = require('../config/prisma');
+const { todayInVietnam } = require('./refundService');
 
 const DEFAULT_INTERVAL_MS = 10 * 60 * 1000; // chạy mỗi 10 phút
 
-// Mốc 00:00 hôm nay (UTC). Đơn có ngày tham quan TRƯỚC mốc này coi như đã đi xong.
-function startOfTodayUtc(now = new Date()) {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+// Mốc 00:00 của NGÀY HÔM NAY THEO GIỜ VIỆT NAM, biểu diễn bằng UTC midnight
+// (reservation.date lưu dạng date-only = UTC midnight của ngày tham quan).
+// Đơn có ngày tham quan TRƯỚC mốc này coi như đã đi xong.
+function startOfTodayVn(now = new Date()) {
+  return new Date(`${todayInVietnam(now)}T00:00:00.000Z`);
 }
 
 // Quét các Booking CONFIRMED đã qua ngày tham quan -> chuyển sang COMPLETED.
 // Tách riêng khỏi timer để test được. Trả về số đơn đã hoàn tất.
 async function sweepCompletedBookings({ now = new Date() } = {}) {
-  const cutoff = startOfTodayUtc(now);
+  const cutoff = startOfTodayVn(now);
 
   // updateMany không lọc được theo quan hệ -> tìm id trước rồi cập nhật hàng loạt.
   const due = await prisma.booking.findMany({
@@ -59,6 +62,6 @@ function startCompletionWorker({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
 module.exports = {
   sweepCompletedBookings,
   startCompletionWorker,
-  startOfTodayUtc,
+  startOfTodayVn,
   DEFAULT_INTERVAL_MS,
 };

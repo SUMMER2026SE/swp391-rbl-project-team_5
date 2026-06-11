@@ -3,85 +3,36 @@ import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import reviewService from '../services/reviewService.js'
 
-// Mock Data for Fallback
-const MOCK_STATS = {
-  averageRating: 4.8,
-  totalReviews: 1248,
-  unrepliedReviews: 24,
+const EMPTY_STATS = {
+  averageRating: 0,
+  totalReviews: 0,
+  unrepliedReviews: 0,
 }
-
-const MOCK_REVIEWS = [
-  {
-    id: 'rev-1',
-    rating: 5,
-    comment: 'Trải nghiệm leo Fansipan thật tuyệt vời. Dịch vụ cáp treo rất nhanh chóng và an toàn. Nhân viên tại VietTicket hỗ trợ đặt vé rất nhiệt tình và chu đáo. Nhất định sẽ quay lại!',
-    replyComment: null,
-    repliedAt: null,
-    createdAt: '2026-06-10T11:40:00Z',
-    updatedAt: '2026-06-10T11:40:00Z',
-    user: {
-      fullName: 'Nguyễn Thu Hà',
-      profile: { avatarUrl: null },
-    },
-    attraction: {
-      title: 'Sun World Fansipan Legend',
-    },
-  },
-  {
-    id: 'rev-2',
-    rating: 4,
-    comment: 'Khu vui chơi rất rộng và nhiều trò chơi hấp dẫn. Tuy nhiên thời gian xếp hàng hơi lâu vào cuối tuần. Mong VietTicket có thêm tính năng đặt trước giờ chơi cho từng trò.',
-    replyComment: 'Chào anh Tuấn, cảm ơn anh đã góp ý chân thành. VietTicket đang làm việc với đối tác VinWonders để tối ưu hóa quy trình đặt chỗ. Rất mong được phục vụ anh tốt hơn trong lần tới!',
-    repliedAt: '2026-06-09T23:45:00Z',
-    createdAt: '2026-06-09T11:45:00Z',
-    updatedAt: '2026-06-09T23:45:00Z',
-    user: {
-      fullName: 'Lê Minh Tuấn',
-      profile: { avatarUrl: null },
-    },
-    attraction: {
-      title: 'VinWonders Nha Trang',
-    },
-  },
-  {
-    id: 'rev-3',
-    rating: 5,
-    comment: 'Cảm ơn VietTicket đã giúp gia đình tôi có một chuyến đi Đà Nẵng trọn vẹn. Khách sạn view biển cực đẹp, xe đưa đón đúng giờ. Rất hài lòng với dịch vụ hỗ trợ khách hàng 24/7.',
-    replyComment: 'VietTicket Travel xin chào anh Hải. Thật vinh dự khi được gia đình mình tin tưởng lựa chọn. Những lời khen của anh là động lực lớn để đội ngũ chúng tôi không ngừng cải thiện chất lượng dịch vụ. Hẹn gặp lại gia đình mình trong tương lai gần!',
-    repliedAt: '2026-06-03T10:00:00Z',
-    createdAt: '2026-06-03T09:00:00Z',
-    updatedAt: '2026-06-03T10:00:00Z',
-    user: {
-      fullName: 'Lê Minh Hải',
-      profile: { avatarUrl: null },
-    },
-    attraction: {
-      title: 'Cầu Vàng Đà Nẵng',
-    },
-  },
-]
 
 export default function PartnerReviewsPage() {
   const [isLoading, setIsLoading] = useState(true)
-  const [stats, setStats] = useState(MOCK_STATS)
-  const [reviews, setReviews] = useState(MOCK_REVIEWS)
+  const [loadError, setLoadError] = useState('')
+  const [stats, setStats] = useState(EMPTY_STATS)
+  const [reviews, setReviews] = useState([])
   const [filterTab, setFilterTab] = useState('all') // 'all', 'unanswered', 'answered'
   const [sortBy, setSortBy] = useState('newest') // 'newest', 'highest', 'lowest'
-  const [replyTexts, setReplyTexts] = useState({}) 
+  const [replyTexts, setReplyTexts] = useState({})
   const [editingReviewId, setEditingReviewId] = useState(null)
   const [now] = useState(() => Date.now())
 
   const fetchReviewsData = async (showLoading = false) => {
     if (showLoading) setIsLoading(true)
+    setLoadError('')
     try {
-      const fetchedStats = await reviewService.getPartnerReviewStats()
-      const fetchedReviews = await reviewService.getPartnerReviews()
+      const [fetchedStats, fetchedReviews] = await Promise.all([
+        reviewService.getPartnerReviewStats(),
+        reviewService.getPartnerReviews(),
+      ])
       setStats(fetchedStats)
       setReviews(fetchedReviews)
     } catch (error) {
-      console.warn('Lỗi kết nối API, sử dụng dữ liệu mô phỏng:', error)
-      setStats(MOCK_STATS)
-      setReviews(MOCK_REVIEWS)
+      console.error('Lỗi khi tải dữ liệu đánh giá:', error)
+      setLoadError(error.message || 'Không thể tải dữ liệu đánh giá. Vui lòng thử lại.')
     } finally {
       setIsLoading(false)
     }
@@ -89,32 +40,10 @@ export default function PartnerReviewsPage() {
 
   useEffect(() => {
     document.title = 'Quản lý Đánh giá Đối tác | VietTicket'
-    let active = true
-    reviewService.getPartnerReviewStats()
-      .then((fetchedStats) => {
-        if (active) setStats(fetchedStats)
-      })
-      .catch((err) => console.error(err))
-    
-    reviewService.getPartnerReviews()
-      .then((fetchedReviews) => {
-        if (active) {
-          setReviews(fetchedReviews)
-          setIsLoading(false)
-        }
-      })
-      .catch((err) => {
-        console.warn('Lỗi kết nối API, sử dụng dữ liệu mô phỏng:', err)
-        if (active) {
-          setStats(MOCK_STATS)
-          setReviews(MOCK_REVIEWS)
-          setIsLoading(false)
-        }
-      })
-
-    return () => {
-      active = false
-    }
+    const timer = window.setTimeout(() => {
+      void fetchReviewsData(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
   }, [])
 
   const handleReplySubmit = async (reviewId) => {
@@ -132,29 +61,7 @@ export default function PartnerReviewsPage() {
       fetchReviewsData(true)
     } catch (error) {
       console.error('Lỗi khi gửi phản hồi:', error)
-      if (!error.status) {
-        // Mock mode local state update
-        setReviews((current) =>
-          current.map((r) =>
-            r.id === reviewId
-              ? {
-                  ...r,
-                  replyComment: text,
-                  repliedAt: new Date().toISOString(),
-                }
-              : r,
-          ),
-        )
-        setStats((prev) => ({
-          ...prev,
-          unrepliedReviews: Math.max(0, prev.unrepliedReviews - 1),
-        }))
-        setEditingReviewId(null)
-        setReplyTexts((prev) => ({ ...prev, [reviewId]: '' }))
-        toast.success('Gửi phản hồi thành công (Chế độ mô phỏng)!')
-      } else {
-        toast.error(error.message || 'Không thể gửi phản hồi. Vui lòng thử lại.')
-      }
+      toast.error(error.message || 'Không thể gửi phản hồi. Vui lòng thử lại.')
     }
   }
 
@@ -222,6 +129,18 @@ export default function PartnerReviewsPage() {
             progress_activity
           </span>
         </div>
+      ) : loadError ? (
+        <div className="bg-white rounded-xl py-16 text-center border border-[#bec8ca]/20 shadow-sm">
+          <span className="material-symbols-outlined text-5xl mb-3 text-[#bec8ca]">cloud_off</span>
+          <p className="font-semibold text-sm text-[#3f484a] mb-4">{loadError}</p>
+          <button
+            type="button"
+            className="px-6 py-2.5 bg-[#00474d] text-white rounded-lg font-bold text-xs hover:bg-[#003d42] transition-colors"
+            onClick={() => fetchReviewsData(true)}
+          >
+            Thử lại
+          </button>
+        </div>
       ) : (
         <div className="space-y-8 animate-in fade-in duration-300">
           
@@ -251,7 +170,7 @@ export default function PartnerReviewsPage() {
                 <p className="text-sm text-[#3f484a] mb-1 font-semibold">Tổng số Đánh giá</p>
                 <div className="flex items-baseline gap-2">
                   <span className="text-3xl font-extrabold text-[#00474d]">{stats.totalReviews.toLocaleString('vi-VN')}</span>
-                  <span className="text-[#006068] font-bold text-xs">+12% tháng này</span>
+                  <span className="text-[#006068] font-bold text-xs">lượt đánh giá</span>
                 </div>
               </div>
             </div>
@@ -368,9 +287,9 @@ export default function PartnerReviewsPage() {
                       <div className="flex-1 space-y-4">
                         
                         {/* Rating Stars Row */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-wrap">
                           {Array.from({ length: 5 }).map((_, i) => (
-                            <span 
+                            <span
                               key={i}
                               className={`material-symbols-outlined text-sm ${i < review.rating ? 'text-[#feb700]' : 'text-[#bec8ca]'}`}
                               style={{ fontVariationSettings: i < review.rating ? '"FILL" 1' : '"FILL" 0' }}
@@ -379,6 +298,12 @@ export default function PartnerReviewsPage() {
                             </span>
                           ))}
                           <span className="ml-2 font-bold text-[#00474d] text-xs uppercase tracking-wider">{getRatingText(review.rating)}</span>
+                          {review.isHidden && (
+                            <span className="ml-2 inline-flex items-center gap-1 bg-[#ffdad6] text-[#93000a] text-[10px] font-bold px-2 py-0.5 rounded-full">
+                              <span className="material-symbols-outlined text-[12px]">visibility_off</span>
+                              Đã bị quản trị viên ẩn
+                            </span>
+                          )}
                         </div>
 
                         {/* Customer Comment */}

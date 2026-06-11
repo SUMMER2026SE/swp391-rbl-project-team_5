@@ -1,5 +1,29 @@
 'use strict';
 
+// Múi giờ nghiệp vụ của hệ thống (Việt Nam, UTC+7).
+const VN_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+/**
+ * Ngày hiện tại theo giờ Việt Nam ở dạng 'YYYY-MM-DD'.
+ */
+function todayInVietnam(now = new Date()) {
+  return new Date(now.getTime() + VN_UTC_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Yêu cầu hoàn tiền chỉ hợp lệ khi gửi TRƯỚC ngày tham quan (theo giờ Việt Nam).
+ * Từ 00:00 ngày tham quan trở đi, vé coi như đã/đang được sử dụng — không hoàn.
+ *
+ * @param {Object} booking Booking including reservation.
+ * @returns {boolean}
+ */
+function isBeforeRefundCutoff(booking, now = new Date()) {
+  const visitDate = booking?.reservation?.date;
+  if (!visitDate) return false;
+  const visitDay = new Date(visitDate).toISOString().slice(0, 10);
+  return todayInVietnam(now) < visitDay;
+}
+
 /**
  * Calculate the refundable amount from the ticket product's refund policy.
  *
@@ -96,4 +120,9 @@ async function releaseInventory(tx, booking) {
   });
 }
 
-module.exports = { calculateRefundAmount, releaseInventory };
+module.exports = {
+  calculateRefundAmount,
+  releaseInventory,
+  isBeforeRefundCutoff,
+  todayInVietnam,
+};

@@ -241,12 +241,14 @@ export default function RefundManagementPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
   const [rejectModal, setRejectModal] = useState({ open: false, notes: '' })
+  const [approveModal, setApproveModal] = useState({ open: false, notes: '' })
 
+  // Luôn tải TOÀN BỘ danh sách; lọc trạng thái ở client để các thẻ thống kê
+  // phía trên không bị lệch theo bộ lọc.
   const fetchRequests = useCallback(async () => {
     setIsLoading(true)
     try {
-      const params = statusFilter ? `?status=${statusFilter}` : ''
-      const response = await apiRequest(`/staff/refunds${params}`)
+      const response = await apiRequest('/staff/refunds')
       const nextRequests = response.data || []
       setRequests(nextRequests)
       setSelected((current) => {
@@ -260,7 +262,7 @@ export default function RefundManagementPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [statusFilter])
+  }, [])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -275,9 +277,10 @@ export default function RefundManagementPage() {
     try {
       await apiRequest(`/staff/refunds/${selected.id}`, {
         method: 'PATCH',
-        body: { action: 'APPROVED', staffNotes: '' },
+        body: { action: 'APPROVED', staffNotes: approveModal.notes.trim() },
       })
       toast.success('Đã duyệt yêu cầu hoàn tiền.')
+      setApproveModal({ open: false, notes: '' })
       setSelected(null)
       await fetchRequests()
     } catch (error) {
@@ -323,8 +326,9 @@ export default function RefundManagementPage() {
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) return requests
     return requests.filter((request) => {
+      if (statusFilter && request.status !== statusFilter) return false
+      if (!query) return true
       const bookingId = request.booking?.id || ''
       const customer = request.booking?.user?.fullName || request.booking?.fullName || ''
       const attraction = request.booking?.reservation?.ticketProduct?.attraction?.title || ''
@@ -332,7 +336,7 @@ export default function RefundManagementPage() {
         value.toLowerCase().includes(query),
       )
     })
-  }, [requests, search])
+  }, [requests, search, statusFilter])
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm hoàn tiền...">
@@ -510,11 +514,117 @@ export default function RefundManagementPage() {
             selected={selected}
             isProcessing={isProcessing}
             onClose={() => setSelected(null)}
-            onApprove={() => void handleApprove()}
+            onApprove={() => setApproveModal({ open: true, notes: '' })}
             onReject={() => setRejectModal({ open: true, notes: '' })}
           />
         </div>
       </div>
+
+      {approveModal.open && selected && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isProcessing) {
+              setApproveModal({ open: false, notes: '' })
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-surface-container-lowest p-6 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="approve-refund-title"
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h3 id="approve-refund-title" className="text-xl font-semibold text-on-surface">
+                  Xác nhận duyệt hoàn tiền
+                </h3>
+                <p className="mt-1 text-sm text-on-surface-variant">
+                  Hành động này sẽ hoàn tiền cho khách và không thể hoàn tác.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border-0 bg-transparent p-1 hover:bg-surface-container-high"
+                onClick={() => setApproveModal({ open: false, notes: '' })}
+                disabled={isProcessing}
+                aria-label="Đóng"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-on-surface-variant">Đơn hàng</span>
+                <span className="text-sm font-bold text-primary">
+                  {shortBookingId(selected.booking?.id)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-on-surface-variant">Khách hàng</span>
+                <span className="text-sm font-semibold text-on-surface">
+                  {selected.booking?.user?.fullName || selected.booking?.fullName || 'Chưa cập nhật'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-on-surface-variant">Phương thức hoàn</span>
+                <span className="text-sm font-semibold text-on-surface">
+                  {(selected.booking?.payments || []).some(
+                    (p) => p.status === 'SUCCESS' && /vnpay/i.test(p.paymentGateway),
+                  )
+                    ? 'Tự động qua VNPay'
+                    : 'Hoàn thủ công (ngoài cổng)'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-t border-outline-variant pt-3">
+                <span className="text-sm font-bold text-on-surface">Số tiền hoàn</span>
+                <span className="text-lg font-bold text-primary">
+                  {formatMoney(selected.amount)}
+                </span>
+              </div>
+            </div>
+
+            <label
+              className="mb-2 mt-4 block text-sm font-semibold text-on-surface"
+              htmlFor="refund-approve-notes"
+            >
+              Ghi chú xử lý (không bắt buộc)
+            </label>
+            <textarea
+              id="refund-approve-notes"
+              className="min-h-20 w-full resize-y rounded-xl border border-outline-variant bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              placeholder="Ghi chú nội bộ về quyết định duyệt..."
+              value={approveModal.notes}
+              onChange={(event) =>
+                setApproveModal((current) => ({ ...current, notes: event.target.value }))
+              }
+            />
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                className="rounded-lg border border-outline-variant bg-white px-4 py-2 text-sm font-semibold text-on-surface"
+                onClick={() => setApproveModal({ open: false, notes: '' })}
+                disabled={isProcessing}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-2 rounded-lg border-0 bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => void handleApprove()}
+                disabled={isProcessing}
+              >
+                <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                {isProcessing ? 'Đang hoàn tiền...' : 'Xác nhận hoàn tiền'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {rejectModal.open && (
         <div

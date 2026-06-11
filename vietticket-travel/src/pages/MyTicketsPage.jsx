@@ -133,12 +133,13 @@ function MyTicketsPage() {
 
         if (activeTab === 'unpaid') return booking.status === 'unpaid' && !isExpired
         if (activeTab === 'active') {
-          return ['confirmed', 'pending_partner'].includes(booking.status)
+          // Vé đang chờ duyệt hoàn tiền vẫn là vé "đang sử dụng" cho tới khi có kết quả.
+          return ['confirmed', 'pending_partner', 'refund_requested'].includes(booking.status)
         }
         if (activeTab === 'history') {
           return (
             isExpired ||
-            ['completed', 'cancelled'].includes(booking.status)
+            ['completed', 'cancelled', 'refunded'].includes(booking.status)
           )
         }
         return true
@@ -316,16 +317,35 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
           )}
           {booking.status === 'confirmed' && (
             <>
-              <button
-                className="flex items-center gap-2 rounded-xl px-5 py-2.5 font-bold text-error transition hover:bg-error/5 active:scale-95"
-                onClick={() => setShowRefund(true)}
-                type="button"
-              >
-                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
-                  currency_exchange
-                </span>
-                Yêu cầu hoàn tiền
-              </button>
+              {booking.refundRequest?.status === 'REJECTED' ? (
+                <div className="mr-auto flex items-start gap-2 rounded-xl bg-red-50 px-4 py-2.5 text-sm">
+                  <span
+                    className="material-symbols-outlined mt-0.5 text-[18px] text-error"
+                    aria-hidden="true"
+                  >
+                    block
+                  </span>
+                  <div>
+                    <p className="font-bold text-error">Yêu cầu hoàn tiền đã bị từ chối</p>
+                    {booking.refundRequest.staffNotes && (
+                      <p className="mt-0.5 text-xs text-on-surface-variant">
+                        Lý do: {booking.refundRequest.staffNotes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  className="flex items-center gap-2 rounded-xl px-5 py-2.5 font-bold text-error transition hover:bg-error/5 active:scale-95"
+                  onClick={() => setShowRefund(true)}
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                    currency_exchange
+                  </span>
+                  Yêu cầu hoàn tiền
+                </button>
+              )}
               <Link
                 className="flex items-center gap-2 rounded-xl border border-primary px-7 py-2.5 font-bold text-primary transition hover:bg-primary/5 active:scale-95"
                 to={`/tickets/${booking.id}`}
@@ -343,6 +363,18 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
                 hourglass_top
               </span>
               Đang chờ duyệt hoàn tiền
+              {booking.refundRequest
+                ? ` — dự kiến nhận ${formatCurrency(booking.refundRequest.amount)}`
+                : ''}
+            </span>
+          )}
+          {booking.status === 'refunded' && (
+            <span className="flex items-center gap-1 text-sm font-semibold text-primary">
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                price_check
+              </span>
+              Đã hoàn {booking.refundRequest ? formatCurrency(booking.refundRequest.amount) : 'tiền'}
+              {' — tiền về tài khoản trong 3-5 ngày làm việc'}
             </span>
           )}
           {booking.status === 'completed' && !(booking.reviewed || booking.review) && (

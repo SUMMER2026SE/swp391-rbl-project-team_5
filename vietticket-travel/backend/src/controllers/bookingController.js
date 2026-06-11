@@ -29,6 +29,7 @@ const bookingInclude = {
   review: true,
   voucher: true,
   payments: { orderBy: { createdAt: 'desc' } },
+  refundRequests: { orderBy: { createdAt: 'desc' } },
   ticketInstances: true,
   reservation: {
     include: {
@@ -149,6 +150,19 @@ function toBookingResponse(booking) {
     updatedAt: booking.updatedAt,
     reviewed: !!booking.review,
     rating: booking.review?.rating || 0,
+    // Yêu cầu hoàn tiền gần nhất (mỗi đơn tối đa 1) để UI hiện đúng trạng thái
+    // chờ duyệt / đã duyệt / bị từ chối kèm lý do.
+    refundRequest: booking.refundRequests?.[0]
+      ? {
+          id: booking.refundRequests[0].id,
+          status: booking.refundRequests[0].status,
+          amount: decimalToNumber(booking.refundRequests[0].amount),
+          reason: booking.refundRequests[0].reason,
+          staffNotes: booking.refundRequests[0].staffNotes || '',
+          createdAt: booking.refundRequests[0].createdAt,
+          processedAt: booking.refundRequests[0].processedAt,
+        }
+      : null,
     ticketInstances: booking.ticketInstances.map((ticket) => ({
       id: ticket.id,
       qrCodeToken: ticket.qrCodeToken,

@@ -10,7 +10,11 @@ afterEach(() => jest.clearAllMocks());
 
 describe('Review Routes Integration Tests', () => {
   describe('GET /api/reviews', () => {
-    test('✅ Lấy danh sách reviews công khai của attractionId thành công', async () => {
+    test('✅ Lấy danh sách reviews công khai của attractionId thành công (kèm meta + breakdown)', async () => {
+      mockPrisma.review.count.mockResolvedValue(1);
+      mockPrisma.review.groupBy.mockResolvedValue([
+        { rating: 5, _count: { rating: 1 } },
+      ]);
       mockPrisma.review.findMany.mockResolvedValue([
         {
           id: 'rev-001',
@@ -34,6 +38,8 @@ describe('Review Routes Integration Tests', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data).toHaveLength(1);
       expect(res.body.data[0].comment).toBe('Rất tuyệt vời!');
+      expect(res.body.meta).toEqual({ total: 1, page: 1, limit: 6, totalPages: 1 });
+      expect(res.body.breakdown).toEqual({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 1 });
       expect(mockPrisma.review.findMany).toHaveBeenCalled();
     });
 

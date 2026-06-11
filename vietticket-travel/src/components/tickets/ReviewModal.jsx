@@ -33,13 +33,26 @@ function ReviewModal({ booking, onClose, onSuccess }) {
   }
 
   const starValues = [1, 2, 3, 4, 5]
+  const RATING_LABELS = {
+    1: 'Rất tệ',
+    2: 'Không hài lòng',
+    3: 'Bình thường',
+    4: 'Hài lòng',
+    5: 'Tuyệt vời',
+  }
+  const COMMENT_MAX_LENGTH = 2000
+  const displayedRating = hoverRating || rating
+
+  const handleClose = () => {
+    if (!isSubmitting) onClose()
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-5">
       {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/45 backdrop-blur-sm transition-opacity" 
-        onClick={onClose}
+      <div
+        className="absolute inset-0 bg-black/45 backdrop-blur-sm transition-opacity"
+        onClick={handleClose}
       />
 
       {/* Modal Card */}
@@ -50,9 +63,11 @@ function ReviewModal({ booking, onClose, onSuccess }) {
         {/* Header */}
         <div className="p-6 border-b border-[#bec8ca]/20 flex justify-between items-center bg-white/40">
           <h2 className="text-xl font-bold text-[#00474d]">Đánh giá trải nghiệm</h2>
-          <button 
-            className="material-symbols-outlined text-[#3f484a] hover:text-[#ba1a1a] transition-colors"
-            onClick={onClose}
+          <button
+            className="material-symbols-outlined text-[#3f484a] hover:text-[#ba1a1a] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={handleClose}
+            disabled={isSubmitting}
+            aria-label="Đóng"
             type="button"
           >
             close
@@ -92,19 +107,34 @@ function ReviewModal({ booking, onClose, onSuccess }) {
                 )
               })}
             </div>
+
+            {/* Rating label feedback */}
+            <p
+              className={`text-sm font-bold h-5 transition-opacity ${
+                displayedRating ? 'opacity-100 text-[#feb700]' : 'opacity-0'
+              }`}
+              aria-live="polite"
+            >
+              {displayedRating ? RATING_LABELS[displayedRating] : ''}
+            </p>
           </div>
 
           {/* Comment input */}
           <div className="space-y-2">
-            <label className="text-sm font-semibold text-[#3f484a] px-1 block">
+            <label className="text-sm font-semibold text-[#3f484a] px-1 block" htmlFor="review-comment">
               Nhận xét của bạn
             </label>
-            <textarea 
+            <textarea
+              id="review-comment"
               className="w-full h-32 p-4 rounded-2xl border border-[#bec8ca] bg-white/60 focus:ring-2 focus:ring-[#00474d] focus:border-[#00474d] transition-all resize-none text-sm leading-6"
               placeholder="Hãy chia sẻ những điều bạn tâm đắc nhất về chuyến đi..."
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
+              onChange={(e) => setComment(e.target.value.slice(0, COMMENT_MAX_LENGTH))}
+              maxLength={COMMENT_MAX_LENGTH}
             />
+            <p className="text-right text-[11px] text-[#6f797a] px-1">
+              {comment.length}/{COMMENT_MAX_LENGTH} ký tự
+            </p>
           </div>
 
           {/* Submit button */}
