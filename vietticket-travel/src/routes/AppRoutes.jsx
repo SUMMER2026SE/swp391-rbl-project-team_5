@@ -56,7 +56,7 @@ function AppRoutes() {
       <Route
         path="/partner/dashboard"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerDashboardPage />
           </ProtectedRoute>
         }
@@ -64,7 +64,7 @@ function AppRoutes() {
       <Route
         path="/partner/bookings"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerBookingsPage />
           </ProtectedRoute>
         }
@@ -72,7 +72,7 @@ function AppRoutes() {
       <Route
         path="/partner/reports"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerReportsPage />
           </ProtectedRoute>
         }
@@ -80,7 +80,7 @@ function AppRoutes() {
       <Route
         path="/partner/settings"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerSettingsPage />
           </ProtectedRoute>
         }
@@ -88,7 +88,7 @@ function AppRoutes() {
       <Route
         path="/partner/attractions"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerAttractionsPage />
           </ProtectedRoute>
         }
@@ -96,7 +96,7 @@ function AppRoutes() {
       <Route
         path="/partner/attractions/new"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerAddAttractionPage />
           </ProtectedRoute>
         }
@@ -104,7 +104,7 @@ function AppRoutes() {
       <Route
         path="/partner/attractions/:id/edit"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerEditAttractionPage />
           </ProtectedRoute>
         }
@@ -112,7 +112,7 @@ function AppRoutes() {
       <Route
         path="/partner/attractions/:id/tickets"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerTicketsPage />
           </ProtectedRoute>
         }
@@ -120,7 +120,7 @@ function AppRoutes() {
       <Route
         path="/partner/attractions/:id/tickets/new"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerTicketFormPage />
           </ProtectedRoute>
         }
@@ -128,7 +128,7 @@ function AppRoutes() {
       <Route
         path="/partner/attractions/:id/tickets/:ticketId/edit"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerTicketFormPage />
           </ProtectedRoute>
         }
@@ -136,7 +136,7 @@ function AppRoutes() {
       <Route
         path="/partner/attractions/:id/schedule"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerSchedulePage />
           </ProtectedRoute>
         }
@@ -144,7 +144,7 @@ function AppRoutes() {
       <Route
         path="/partner/pending"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerPendingPage />
           </ProtectedRoute>
         }
@@ -152,7 +152,7 @@ function AppRoutes() {
       <Route
         path="/partner/kyc"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerKycPage />
           </ProtectedRoute>
         }
@@ -311,7 +311,7 @@ function AppRoutes() {
       <Route
         path="/partner/reviews"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerReviewsPage />
           </ProtectedRoute>
         }
