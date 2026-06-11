@@ -17,6 +17,12 @@ const navItems = [
     active: 'saved',
   },
   {
+    label: 'Lịch sử hỗ trợ',
+    icon: 'support_agent',
+    to: '/my-support',
+    active: 'support',
+  },
+  {
     label: 'Phương thức thanh toán',
     icon: 'credit_card',
     to: null,
