@@ -8,9 +8,7 @@ import GoogleButton from '../components/auth/GoogleButton.jsx'
 import PasswordInput from '../components/auth/PasswordInput.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { validateEmail, validatePassword } from '../utils/formValidators.js'
-
-const loginVisual =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuAVowbGqIGo-Mmb9eT-r0-j3FeUjczFEc36Yrq-z-FSsp1GIeLe1jQkCidEbxiyXh2qcmDXCh2C6-yg_SAngB23GucrZ8GyNi07SyMD2V5jd_4sfc0FqoiuyU-17NSO9rtgvIfc42qakAZ9IP33bxYY34h9MW5PejkAWBvzBeZBJUGCXG0vR7Df9WEJfk1czYKqhD3l28jkzpjNGgzpONwYw2xCUXsgXHsvdFhOmxnL9xmaw-lORJI7c7sOn69d6KCJHrQv1thQjis'
+import loginVisual from '../assets/sapa.png'
 
 function getSafeRedirect(loggedInUser, redirectFrom) {
   const defaultForRole =
@@ -156,7 +154,7 @@ function LoginPage() {
       visualTitle="Việt Nam đang chờ tấm vé tiếp theo của bạn."
       visualDescription="Truy cập đặt chỗ, điểm tham quan đã lưu, vé QR và ưu đãi du lịch độc quyền trong một không gian an toàn."
       visualImage={loginVisual}
-      visualAlt="Vịnh Hạ Long lúc hoàng hôn với núi đá vôi và thuyền du lịch"
+      visualAlt="Ruộng bậc thang Sa Pa trong sương sớm rực rỡ sắc màu"
     >
       <AuthCard
         title="Chào mừng trở lại"
