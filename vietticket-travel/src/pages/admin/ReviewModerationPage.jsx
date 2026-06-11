@@ -72,8 +72,8 @@ export default function ReviewModerationPage() {
   const [searchText, setSearchText] = useState('')
   const [filterRating, setFilterRating] = useState('all')
 
-  const fetchReviews = async () => {
-    setLoading(true)
+  const fetchReviews = async (showLoading = false) => {
+    if (showLoading) setLoading(true)
     try {
       const data = await reviewService.getAdminReviews()
       setReviews(data)
@@ -87,7 +87,25 @@ export default function ReviewModerationPage() {
 
   useEffect(() => {
     document.title = 'Kiểm duyệt Đánh giá | VietTicket Admin'
-    fetchReviews()
+    let active = true
+    reviewService.getAdminReviews()
+      .then((data) => {
+        if (active) {
+          setReviews(data)
+          setLoading(false)
+        }
+      })
+      .catch((err) => {
+        console.warn('Lỗi kết nối API Admin, sử dụng dữ liệu mô phỏng:', err)
+        if (active) {
+          setReviews(MOCK_ADMIN_REVIEWS)
+          setLoading(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const handleToggleHide = async (review) => {
