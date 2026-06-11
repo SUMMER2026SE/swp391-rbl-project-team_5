@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
 import * as partnerApi from '../services/partnerApi.js'
@@ -25,7 +25,7 @@ const popularBanks = [
 
 function PartnerKycPage() {
   const navigate = useNavigate()
-  const { user, getProfile } = useAuth()
+  const { user, getProfile, logout } = useAuth()
   const bankDropdownRef = useRef(null)
 
   // Các bước form: 1 (Doanh nghiệp), 2 (Tài chính), 3 (Pháp lý)
@@ -286,8 +286,35 @@ function PartnerKycPage() {
   }
 
   return (
-    <main className="flex-grow flex items-center justify-center py-margin-mobile md:py-margin-desktop px-4 bg-[#f8fafb] min-h-screen">
-      <div className="w-full max-w-4xl bg-white rounded-xl shadow-[0px_4px_20px_rgba(0,40,50,0.05)] overflow-hidden flex flex-col border border-[#eceeef]">
+    <main className="min-h-screen bg-[#f8fafb] flex flex-col" style={{ fontFamily: "'Be Vietnam Pro', 'Inter', sans-serif" }}>
+      {/* Onboarding Top Navigation Bar */}
+      <header className="bg-white border-b border-[#e1e3e4] h-16 flex items-center justify-between px-6 md:px-12 sticky top-0 z-50">
+        <Link to="/" className="flex items-center gap-2 font-bold text-lg text-[#00474d]" style={{ textDecoration: 'none' }}>
+          <span className="material-symbols-outlined filled" aria-hidden="true">travel</span>
+          <span>VietTicket B2B</span>
+        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/" className="text-sm font-medium text-[#3f484a] hover:text-[#00474d] transition-colors" style={{ textDecoration: 'none' }}>
+            Trang chủ khách hàng
+          </Link>
+          <div className="h-4 w-[1px] bg-[#bec8ca]" />
+          <button
+            onClick={async () => {
+              await logout()
+              navigate('/login')
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-[#ba1a1a] hover:bg-[#ffdad6] hover:text-[#93000a] transition-all duration-200"
+            type="button"
+          >
+            <span className="material-symbols-outlined text-[18px]">logout</span>
+            <span>Đăng xuất</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Form Area */}
+      <div className="flex-grow flex items-center justify-center py-margin-mobile md:py-margin-desktop px-4">
+        <div className="w-full max-w-4xl bg-white rounded-xl shadow-[0px_4px_20px_rgba(0,40,50,0.05)] overflow-hidden flex flex-col border border-[#eceeef]">
         
         <div className="bg-white rounded-xl p-6 md:p-10">
           {/* Stepper */}
@@ -931,6 +958,7 @@ function PartnerKycPage() {
             animation: fadeIn 0.4s ease-out forwards;
           }
         `}</style>
+      </div>
       </div>
     </main>
   )

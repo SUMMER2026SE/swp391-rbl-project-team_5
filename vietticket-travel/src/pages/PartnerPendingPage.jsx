@@ -12,7 +12,7 @@ const NAV_ITEMS = [
 ]
 
 function PartnerPendingPage() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [partner, setPartner] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -220,6 +220,17 @@ function PartnerPendingPage() {
             >
               Quay lại Trang chủ
             </Link>
+            <button
+              onClick={async () => {
+                await logout()
+                navigate('/login')
+              }}
+              className="text-sm font-medium px-6 py-3 rounded-lg text-[#ba1a1a] hover:bg-[#ffdad6] hover:text-[#93000a] transition-all duration-200 flex items-center justify-center gap-2"
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[20px]">logout</span>
+              Đăng xuất
+            </button>
           </div>
         </div>
 
