@@ -599,6 +599,7 @@ function ReviewTab({ attraction }) {
   const [reviews, setReviews] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [filterType, setFilterType] = useState('all') // 'all', 'newest', '5', '4', '3', '2', '1'
+  const [now] = useState(() => Date.now())
 
   useEffect(() => {
     let active = true
@@ -645,18 +646,7 @@ function ReviewTab({ attraction }) {
       .join(' ')
   }
 
-  const formatTimeAgo = (dateStr) => {
-    if (!dateStr) return ''
-    const date = new Date(dateStr)
-    if (isNaN(date.getTime())) return dateStr
-    const diffMs = Date.now() - date.getTime()
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-    if (diffDays <= 0) return 'Hôm nay'
-    if (diffDays === 1) return 'Hôm qua'
-    if (diffDays < 7) return `${diffDays} ngày trước`
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} tuần trước`
-    return `${Math.floor(diffDays / 30)} tháng trước`
-  }
+
 
   // Filter & sort logic
   const filteredReviews = useMemo(() => {
@@ -809,7 +799,7 @@ function ReviewTab({ attraction }) {
                   <div className="flex items-center gap-x-2 mb-2">
                     <span className="material-symbols-outlined text-[#00474d] text-[18px]">verified_user</span>
                     <span className="text-xs font-bold text-[#00474d]">Phản hồi từ Đối tác</span>
-                    <span className="text-xs text-[#3f484a] ml-auto">{formatTimeAgo(review.repliedAt || review.updatedAt)}</span>
+                    <span className="text-xs text-[#3f484a] ml-auto">{formatTimeAgo(review.repliedAt || review.updatedAt, now)}</span>
                   </div>
                   <p className="text-sm text-[#3f484a] italic">
                     "{review.replyComment}"
@@ -895,4 +885,17 @@ function TicketProductCard({ isFeatured, onChoose, onQuantityChange, quantity, t
       </div>
     </div>
   )
+}
+
+const formatTimeAgo = (dateStr, referenceTime) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return dateStr
+  const diffMs = (referenceTime || Date.now()) - date.getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  if (diffDays <= 0) return 'Hôm nay'
+  if (diffDays === 1) return 'Hôm qua'
+  if (diffDays < 7) return `${diffDays} ngày trước`
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} tuần trước`
+  return `${Math.floor(diffDays / 30)} tháng trước`
 }

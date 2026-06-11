@@ -69,9 +69,10 @@ export default function PartnerReviewsPage() {
   const [sortBy, setSortBy] = useState('newest') // 'newest', 'highest', 'lowest'
   const [replyTexts, setReplyTexts] = useState({}) 
   const [editingReviewId, setEditingReviewId] = useState(null)
+  const [now] = useState(() => Date.now())
 
-  const fetchReviewsData = async () => {
-    setIsLoading(true)
+  const fetchReviewsData = async (showLoading = false) => {
+    if (showLoading) setIsLoading(true)
     try {
       const fetchedStats = await reviewService.getPartnerReviewStats()
       const fetchedReviews = await reviewService.getPartnerReviews()
@@ -88,7 +89,32 @@ export default function PartnerReviewsPage() {
 
   useEffect(() => {
     document.title = 'Quản lý Đánh giá Đối tác | VietTicket'
-    fetchReviewsData()
+    let active = true
+    reviewService.getPartnerReviewStats()
+      .then((fetchedStats) => {
+        if (active) setStats(fetchedStats)
+      })
+      .catch((err) => console.error(err))
+    
+    reviewService.getPartnerReviews()
+      .then((fetchedReviews) => {
+        if (active) {
+          setReviews(fetchedReviews)
+          setIsLoading(false)
+        }
+      })
+      .catch((err) => {
+        console.warn('Lỗi kết nối API, sử dụng dữ liệu mô phỏng:', err)
+        if (active) {
+          setStats(MOCK_STATS)
+          setReviews(MOCK_REVIEWS)
+          setIsLoading(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
   }, [])
 
   const handleReplySubmit = async (reviewId) => {
@@ -103,7 +129,7 @@ export default function PartnerReviewsPage() {
       toast.success('Gửi phản hồi thành công!')
       setEditingReviewId(null)
       setReplyTexts((prev) => ({ ...prev, [reviewId]: '' }))
-      fetchReviewsData()
+      fetchReviewsData(true)
     } catch (error) {
       console.error('Lỗi khi gửi phản hồi:', error)
       if (!error.status) {
@@ -175,21 +201,7 @@ export default function PartnerReviewsPage() {
       .toUpperCase()
   }
 
-  const formatReviewTime = (dateStr) => {
-    if (!dateStr) return ''
-    const date = new Date(dateStr)
-    if (isNaN(date.getTime())) return dateStr
-    const diffMs = Date.now() - date.getTime()
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-    if (diffDays <= 0) {
-      const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-      if (diffHours <= 0) return 'Vừa xong'
-      return `${diffHours} giờ trước`
-    }
-    if (diffDays === 1) return '1 ngày trước'
-    if (diffDays < 7) return `${diffDays} ngày trước`
-    return date.toLocaleDateString('vi-VN')
-  }
+
 
   const getRatingText = (rating) => {
     switch (rating) {
@@ -341,7 +353,7 @@ export default function PartnerReviewsPage() {
                           )}
                           <div>
                             <h4 className="font-bold text-[#1a1c1e] text-sm">{review.user?.fullName}</h4>
-                            <p className="text-[11px] text-[#3f484a] font-semibold">{formatReviewTime(review.createdAt)}</p>
+                            <p className="text-[11px] text-[#3f484a] font-semibold">{formatReviewTime(review.createdAt, now)}</p>
                           </div>
                         </div>
                         <div className="bg-[#f3f3f6] p-3 rounded-lg">
@@ -396,7 +408,7 @@ export default function PartnerReviewsPage() {
                                 <div className="flex items-center gap-2">
                                   <span className="material-symbols-outlined text-[#00474d] text-[18px]">reply</span>
                                   <span className="text-xs font-bold text-[#00474d]">Phản hồi từ Đối tác</span>
-                                  <span className="text-[10px] text-[#3f484a] font-bold ml-2">• {formatReviewTime(review.repliedAt || review.updatedAt)}</span>
+                                  <span className="text-[10px] text-[#3f484a] font-bold ml-2">• {formatReviewTime(review.repliedAt || review.updatedAt, now)}</span>
                                 </div>
                                 <button 
                                   className="text-[#00474d] hover:underline text-xs font-bold flex items-center gap-1"
@@ -453,4 +465,20 @@ export default function PartnerReviewsPage() {
       )}
     </PartnerLayout>
   )
+}
+
+const formatReviewTime = (dateStr, referenceTime) => {
+  if (!dateStr) return ''
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return dateStr
+  const diffMs = (referenceTime || Date.now()) - date.getTime()
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  if (diffDays <= 0) {
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    if (diffHours <= 0) return 'Vừa xong'
+    return `${diffHours} giờ trước`
+  }
+  if (diffDays === 1) return '1 ngày trước'
+  if (diffDays < 7) return `${diffDays} ngày trước`
+  return date.toLocaleDateString('vi-VN')
 }
