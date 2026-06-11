@@ -1,6 +1,8 @@
 const {
   calculateRefundAmount,
   releaseInventory,
+  isBeforeRefundCutoff,
+  todayInVietnam,
 } = require('../utils/refundService');
 
 function bookingWithPolicy(refundPolicy, refundFeeRate = 0) {
@@ -11,6 +13,37 @@ function bookingWithPolicy(refundPolicy, refundFeeRate = 0) {
     },
   };
 }
+
+describe('isBeforeRefundCutoff', () => {
+  // 10:00 sáng 15/06/2026 giờ VN = 03:00 UTC cùng ngày.
+  const nowVn = new Date('2026-06-15T03:00:00.000Z');
+
+  const bookingWithVisitDate = (date) => ({
+    reservation: { date: new Date(`${date}T00:00:00.000Z`) },
+  });
+
+  test('cho phép khi ngày tham quan ở tương lai', () => {
+    expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-16'), nowVn)).toBe(true);
+  });
+
+  test('chặn ngay TRONG ngày tham quan (vé đang được sử dụng)', () => {
+    expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-15'), nowVn)).toBe(false);
+  });
+
+  test('chặn sau ngày tham quan', () => {
+    expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-14'), nowVn)).toBe(false);
+  });
+
+  test('dùng ngày theo giờ VN: 19:00 UTC 14/06 đã là ngày 15/06 ở VN', () => {
+    const lateUtc = new Date('2026-06-14T19:00:00.000Z'); // 02:00 sáng 15/06 giờ VN
+    expect(todayInVietnam(lateUtc)).toBe('2026-06-15');
+    expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-15'), lateUtc)).toBe(false);
+  });
+
+  test('chặn khi booking thiếu ngày tham quan', () => {
+    expect(isBeforeRefundCutoff({ reservation: {} }, nowVn)).toBe(false);
+  });
+});
 
 describe('calculateRefundAmount', () => {
   test('returns the full amount for free cancellation', () => {

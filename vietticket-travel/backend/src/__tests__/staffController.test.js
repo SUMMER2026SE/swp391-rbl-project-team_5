@@ -132,7 +132,7 @@ describe('processRefundRequest', () => {
     );
     const { req, res, next } = makeReqRes({
       params: { refundId: 'refund-1' },
-      body: { action: 'REJECTED' },
+      body: { action: 'REJECTED', staffNotes: 'Đơn không đủ điều kiện.' },
     });
 
     await processRefundRequest(req, res, next);
