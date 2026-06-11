@@ -38,8 +38,8 @@ const starFilters = [
 
 const searchNavLinks = [
   { label: 'Khám phá', href: '/attractions', active: true },
-  { label: 'Đặt chỗ của tôi', href: '/profile' },
-  { label: 'Hỗ trợ', href: '#support' },
+  { label: 'Vé của tôi', href: '/my-tickets' },
+  { label: 'Hỗ trợ', href: '/support' },
 ]
 
 const fallbackImage =

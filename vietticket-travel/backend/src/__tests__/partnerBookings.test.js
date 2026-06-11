@@ -44,6 +44,9 @@ function makeBooking(statusOverride = 'PENDING_PARTNER') {
     phone: '0901234567',
     createdAt: new Date('2026-06-01T08:00:00Z'),
     ticketInstances: [],
+    // PENDING_PARTNER nghĩa là đã thanh toán thành công qua cổng
+    payments: [{ id: 'pay-001' }],
+    refundRequests: [],
     reservation: {
       id: RESERVATION_ID,
       ticketProductId: TICKET_ID,
@@ -196,24 +199,29 @@ describe('getPartnerBookings', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 // 2. approveBooking
 // ═══════════════════════════════════════════════════════════════════════════
-describe('approveBooking', () => {
-  // Setup $transaction để thực thi callback thật
-  beforeEach(() => {
-    mockPrisma.$transaction.mockImplementation(async (fn) => {
-      const tx = {
-        dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        reservation:   { update:     jest.fn().mockResolvedValue({}) },
-        booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CONFIRMED' }) },
-        ticketInstance:{ createMany: jest.fn().mockResolvedValue({ count: 2 }) },
-      };
-      return fn(tx);
-    });
-  });
+// Tạo tx mock cho approveBooking: controller re-read booking TRONG transaction
+// nên tx.booking.findUnique phải trả về trạng thái hiện tại của đơn.
+function makeApproveTx(booking, { existingTicketCount = 0 } = {}) {
+  return {
+    dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    reservation:   { update:     jest.fn().mockResolvedValue({}) },
+    booking:       {
+      findUnique: jest.fn().mockResolvedValue(booking),
+      update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CONFIRMED' }),
+    },
+    ticketInstance: {
+      count:      jest.fn().mockResolvedValue(existingTicketCount),
+      createMany: jest.fn().mockResolvedValue({ count: 2 }),
+    },
+  };
+}
 
+describe('approveBooking', () => {
   test('✅ Duyệt thành công: booking PENDING_PARTNER → CONFIRMED + tạo TicketInstance', async () => {
     const booking = makeBooking('PENDING_PARTNER');
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
+    mockPrisma.$transaction.mockImplementation(async (fn) => fn(makeApproveTx(booking)));
 
     const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
     await approveBooking(req, res, next);
@@ -233,15 +241,8 @@ describe('approveBooking', () => {
 
     let capturedTx;
     mockPrisma.$transaction.mockImplementation(async (fn) => {
-      const tx = {
-        dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        reservation:   { update:     jest.fn().mockResolvedValue({}) },
-        booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CONFIRMED' }) },
-        ticketInstance:{ createMany: jest.fn().mockResolvedValue({ count: 2 }) },
-      };
-      capturedTx = tx;
-      return fn(tx);
+      capturedTx = makeApproveTx(booking);
+      return fn(capturedTx);
     });
 
     const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
@@ -264,29 +265,39 @@ describe('approveBooking', () => {
     );
   });
 
-  test('✅ Không tạo TicketInstance trùng nếu đã tồn tại', async () => {
+  test('✅ Không tạo TicketInstance trùng nếu đã tồn tại (đếm lại trong transaction)', async () => {
     const booking = makeBooking('PENDING_PARTNER');
-    booking.ticketInstances = [{ id: 'ti-001' }]; // đã có
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
 
     let capturedTx;
     mockPrisma.$transaction.mockImplementation(async (fn) => {
-      const tx = {
-        dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        timeSlotStock: { updateMany: jest.fn() },
-        reservation:   { update:     jest.fn().mockResolvedValue({}) },
-        booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID }) },
-        ticketInstance:{ createMany: jest.fn() },
-      };
-      capturedTx = tx;
-      return fn(tx);
+      capturedTx = makeApproveTx(booking, { existingTicketCount: 2 });
+      return fn(capturedTx);
     });
 
     const { req, res } = makeReqRes({ params: { id: BOOKING_ID } });
     await approveBooking(req, res, jest.fn());
 
-    // createMany không được gọi vì ticketInstances.length > 0
+    // createMany không được gọi vì tx.ticketInstance.count > 0
     expect(capturedTx.ticketInstance.createMany).not.toHaveBeenCalled();
+  });
+
+  test('❌ Hai request duyệt đồng thời: request sau bị chặn 409 vì re-read trong transaction', async () => {
+    const booking = makeBooking('PENDING_PARTNER');
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+
+    // Trong transaction, đơn đã bị request trước chuyển sang CONFIRMED
+    const confirmedInside = { ...booking, status: 'CONFIRMED' };
+    mockPrisma.$transaction.mockImplementation(async (fn) =>
+      fn(makeApproveTx(confirmedInside)),
+    );
+
+    const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
+    await approveBooking(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 409 }),
+    );
   });
 
   test('❌ Trả 404 khi không tìm thấy booking', async () => {
@@ -364,16 +375,20 @@ describe('approveBooking', () => {
 // 3. rejectBooking
 // ═══════════════════════════════════════════════════════════════════════════
 describe('rejectBooking', () => {
+  const REASON = 'Khung giờ này đã kín chỗ do sự cố vận hành';
+
+  function makeRejectTx() {
+    return {
+      dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      reservation:   { update:     jest.fn().mockResolvedValue({}) },
+      booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CANCELLED' }) },
+      refundRequest: { create:     jest.fn().mockResolvedValue({ id: 'refund-001' }) },
+    };
+  }
+
   beforeEach(() => {
-    mockPrisma.$transaction.mockImplementation(async (fn) => {
-      const tx = {
-        dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        reservation:   { update:     jest.fn().mockResolvedValue({}) },
-        booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CANCELLED' }) },
-      };
-      return fn(tx);
-    });
+    mockPrisma.$transaction.mockImplementation(async (fn) => fn(makeRejectTx()));
   });
 
   test('✅ Từ chối thành công: booking → CANCELLED + hoàn trả DailyStock (reservation HELD)', async () => {
@@ -382,23 +397,20 @@ describe('rejectBooking', () => {
 
     let capturedTx;
     mockPrisma.$transaction.mockImplementation(async (fn) => {
-      const tx = {
-        dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        timeSlotStock: { updateMany: jest.fn() },
-        reservation:   { update:     jest.fn().mockResolvedValue({}) },
-        booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CANCELLED' }) },
-      };
-      capturedTx = tx;
-      return fn(tx);
+      capturedTx = makeRejectTx();
+      return fn(capturedTx);
     });
 
-    const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res, next } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, next);
 
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         success: true,
-        data: expect.objectContaining({ status: 'cancelled' }),
+        data: expect.objectContaining({ status: 'cancelled', refundRequired: true }),
       }),
     );
     // Khi reservation HELD → heldQuantity được giảm
@@ -410,30 +422,103 @@ describe('rejectBooking', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  test('✅ Từ chối booking đã CONFIRMED: hoàn trả bookedQuantity', async () => {
-    const booking = makeBooking('CONFIRMED'); // reservation.status = CONFIRMED
+  test('✅ Đơn đã thanh toán: gắn refundRequired + tạo RefundRequest hoàn 100%', async () => {
+    const booking = makeBooking('PENDING_PARTNER');
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
 
-    // Wait! Confirmed booking is not PENDING_PARTNER, so rejectBooking will return 400!
-    // But wait! If booking.status is CONFIRMED, in our new code:
-    // booking.status must be PENDING_PARTNER to allow rejection!
-    // Wait, let's think: Can a partner reject an already CONFIRMED booking?
-    // In our new backend code, we checked:
-    // `if (booking.status !== 'PENDING_PARTNER') return res.status(400)...`
-    // So a partner CANNOT reject a confirmed booking. They can only reject pending partner bookings!
-    // This is correct business logic, so we should actually assert that rejectBooking on a CONFIRMED booking returns 400!
-    // Wait, let's look at the original test: "Từ chối booking đã CONFIRMED: hoàn trả bookedQuantity"
-    // Since in the new business logic, rejecting a confirmed booking is prohibited, we should update the test to expect 400!
-    // Let's verify this. Yes, once a booking is confirmed, it is finalized. If the customer wants to cancel, it has to go through refund request, not partner direct rejection.
-    // So the partner rejecting a confirmed booking directly is indeed disallowed.
-    // Let's modify the test to expect 400 Bad Request instead.
+    let capturedTx;
+    mockPrisma.$transaction.mockImplementation(async (fn) => {
+      capturedTx = makeRejectTx();
+      return fn(capturedTx);
+    });
+
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
+    await rejectBooking(req, res, jest.fn());
+
+    expect(capturedTx.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: 'CANCELLED', refundRequired: true },
+      }),
+    );
+    expect(capturedTx.refundRequest.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          bookingId: BOOKING_ID,
+          amount: 500000, // hoàn 100%, không trừ phí
+          status: 'PENDING',
+          reason: expect.stringContaining(REASON),
+        }),
+      }),
+    );
+  });
+
+  test('✅ Đơn CHƯA thanh toán: không gắn refundRequired, không tạo RefundRequest', async () => {
+    const booking = makeBooking('PENDING_PARTNER');
+    booking.payments = []; // chưa có payment SUCCESS
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+
+    let capturedTx;
+    mockPrisma.$transaction.mockImplementation(async (fn) => {
+      capturedTx = makeRejectTx();
+      return fn(capturedTx);
+    });
+
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
+    await rejectBooking(req, res, jest.fn());
+
+    expect(capturedTx.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: 'CANCELLED', refundRequired: false },
+      }),
+    );
+    expect(capturedTx.refundRequest.create).not.toHaveBeenCalled();
+  });
+
+  test('✅ Không tạo RefundRequest trùng nếu booking đã có sẵn yêu cầu hoàn tiền', async () => {
+    const booking = makeBooking('PENDING_PARTNER');
+    booking.refundRequests = [{ id: 'refund-cũ' }];
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+
+    let capturedTx;
+    mockPrisma.$transaction.mockImplementation(async (fn) => {
+      capturedTx = makeRejectTx();
+      return fn(capturedTx);
+    });
+
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
+    await rejectBooking(req, res, jest.fn());
+
+    expect(capturedTx.refundRequest.create).not.toHaveBeenCalled();
+  });
+
+  test('❌ Trả 400 khi thiếu lý do từ chối', async () => {
+    const { req, res } = makeReqRes({ params: { id: BOOKING_ID }, body: {} });
+    await rejectBooking(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('lý do') }),
+    );
+    expect(mockPrisma.booking.findUnique).not.toHaveBeenCalled();
   });
 
   test('❌ Trả 400 khi từ chối booking đã CONFIRMED', async () => {
     const booking = makeBooking('CONFIRMED');
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
 
-    const { req, res } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(400);
@@ -445,24 +530,23 @@ describe('rejectBooking', () => {
 
     let capturedTx;
     mockPrisma.$transaction.mockImplementation(async (fn) => {
-      const tx = {
-        dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        timeSlotStock: { updateMany: jest.fn() },
-        reservation:   { update:     jest.fn().mockResolvedValue({}) },
-        booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CANCELLED' }) },
-      };
-      capturedTx = tx;
-      return fn(tx);
+      capturedTx = makeRejectTx();
+      return fn(capturedTx);
     });
 
-    const { req, res } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, jest.fn());
 
     expect(capturedTx.reservation.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: 'CANCELLED' } }),
     );
     expect(capturedTx.booking.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'CANCELLED' } }),
+      expect.objectContaining({
+        data: { status: 'CANCELLED', refundRequired: true },
+      }),
     );
   });
 
@@ -473,17 +557,14 @@ describe('rejectBooking', () => {
 
     let capturedTx;
     mockPrisma.$transaction.mockImplementation(async (fn) => {
-      const tx = {
-        dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-        reservation:   { update:     jest.fn().mockResolvedValue({}) },
-        booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CANCELLED' }) },
-      };
-      capturedTx = tx;
-      return fn(tx);
+      capturedTx = makeRejectTx();
+      return fn(capturedTx);
     });
 
-    const { req, res } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, jest.fn());
 
     expect(capturedTx.timeSlotStock.updateMany).toHaveBeenCalled();
@@ -492,7 +573,10 @@ describe('rejectBooking', () => {
   test('❌ Trả 404 khi không tìm thấy booking', async () => {
     mockPrisma.booking.findUnique.mockResolvedValue(null);
 
-    const { req, res, next } = makeReqRes({ params: { id: 'not-exist' } });
+    const { req, res, next } = makeReqRes({
+      params: { id: 'not-exist' },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(404);
@@ -503,7 +587,10 @@ describe('rejectBooking', () => {
     booking.reservation.ticketProduct.attraction.partnerId = 'another-partner';
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
 
-    const { req, res } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(403);
@@ -513,7 +600,10 @@ describe('rejectBooking', () => {
     const booking = makeBooking('PENDING_PAYMENT');
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
 
-    const { req, res } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(400);
@@ -526,7 +616,10 @@ describe('rejectBooking', () => {
     const booking = makeBooking('CANCELLED');
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
 
-    const { req, res } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(400);
@@ -540,7 +633,10 @@ describe('rejectBooking', () => {
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
     mockPrisma.$transaction.mockRejectedValue(new Error('Transaction error'));
 
-    const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
+    const { req, res, next } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
     await rejectBooking(req, res, next);
 
     expect(next).toHaveBeenCalledWith(expect.any(Error));

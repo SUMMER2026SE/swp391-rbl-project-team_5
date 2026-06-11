@@ -3,7 +3,7 @@
 const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
-const { releaseInventory } = require('../utils/refundService');
+const { releaseInventory, todayInVietnam } = require('../utils/refundService');
 const { refundViaVnpay } = require('./paymentController');
 const {
   sendRefundStatusEmail,
@@ -209,12 +209,15 @@ async function processRefundRequest(req, res, next) {
             where: { id: booking.id },
             data: { status: 'REFUNDED', refundRequired: false },
           });
-        } else {
+        } else if (booking.status === 'REFUND_REQUESTED') {
+          // Khách tự yêu cầu hoàn -> từ chối thì trả đơn về trạng thái đã xác nhận.
           await tx.booking.update({
             where: { id: booking.id },
             data: { status: 'CONFIRMED', refundRequired: false },
           });
         }
+        // Đơn CANCELLED (partner từ chối / thu tiền nhưng mất vé) thì giữ nguyên
+        // trạng thái và refundRequired để tiếp tục đối soát — tiền của khách vẫn phải hoàn.
 
         const updated = await tx.refundRequest.update({
           where: { id: refundId },
@@ -340,8 +343,240 @@ async function reissueTicket(req, res, next) {
   }
 }
 
+// ─── Check-in tại cổng ──────────────────────────────────────────────────────
+
+// Khách có thể quét nguyên chuỗi trong QR ("VIETTICKET:<token>") hoặc nhập tay token.
+function normalizeQrToken(raw) {
+  const value = String(raw || '').trim();
+  return value.startsWith('VIETTICKET:') ? value.slice('VIETTICKET:'.length) : value;
+}
+
+function toCheckinTicket(instance) {
+  const booking = instance.booking;
+  const reservation = booking.reservation;
+  const visitDay = new Date(reservation.date).toISOString().slice(0, 10);
+  const timeSlot = reservation.timeSlot;
+
+  return {
+    bookingId: booking.id,
+    bookingStatus: booking.status,
+    ticketStatus: instance.status,
+    customer: booking.fullName,
+    phone: booking.phone,
+    attraction: reservation.ticketProduct.attraction.title,
+    ticketName: reservation.ticketProduct.name,
+    quantity: reservation.quantity,
+    visitDate: visitDay,
+    timeSlot: timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null,
+    checkedInAt: instance.status === 'USED' ? instance.updatedAt : null,
+  };
+}
+
+// Lý do KHÔNG được check-in (null = hợp lệ). Thứ tự ưu tiên để thông báo chính xác.
+function getCheckinBlockReason(instance, now = new Date()) {
+  const booking = instance.booking;
+  const visitDay = new Date(booking.reservation.date).toISOString().slice(0, 10);
+  const today = todayInVietnam(now);
+
+  if (instance.status === 'USED') {
+    return 'Vé này ĐÃ ĐƯỢC CHECK-IN trước đó. Không cho khách vào lần hai.';
+  }
+  if (instance.status === 'REFUNDED') {
+    return 'Vé này đã được hoàn tiền và không còn hiệu lực.';
+  }
+  if (instance.status === 'EXPIRED') {
+    return 'Vé này đã bị thu hồi (đã cấp lại vé mới). Yêu cầu khách mở vé mới nhất trong email/ứng dụng.';
+  }
+  if (booking.status !== 'CONFIRMED') {
+    return `Đơn đặt vé không ở trạng thái đã xác nhận (hiện tại: ${booking.status}).`;
+  }
+  if (visitDay !== today) {
+    return visitDay > today
+      ? `Vé dùng cho ngày ${visitDay}, chưa tới ngày tham quan.`
+      : `Vé dùng cho ngày ${visitDay}, đã quá ngày tham quan.`;
+  }
+  return null;
+}
+
+// GET /api/staff/checkin/:token — tra cứu vé theo mã QR (chỉ xem, không ghi DB).
+async function lookupTicketByQr(req, res, next) {
+  try {
+    const token = normalizeQrToken(req.params.token);
+    if (!token) {
+      return res.status(400).json({ success: false, error: { message: 'Thiếu mã vé.' } });
+    }
+
+    const instance = await prisma.ticketInstance.findUnique({
+      where: { qrCodeToken: token },
+      include: {
+        booking: {
+          include: {
+            reservation: {
+              include: {
+                timeSlot: true,
+                ticketProduct: { include: { attraction: { select: { title: true } } } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!instance) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Không tìm thấy vé với mã này. Kiểm tra lại mã QR hoặc nhập tay mã vé.' },
+      });
+    }
+
+    const blockReason = getCheckinBlockReason(instance);
+    return res.json({
+      success: true,
+      data: {
+        ...toCheckinTicket(instance),
+        canCheckIn: blockReason === null,
+        blockReason,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// POST /api/staff/checkin/:token — check-in cả đơn (mọi vé VALID của booking → USED).
+// E-ticket hiển thị MỘT mã QR cho cả đơn nên check-in theo đơn, không theo từng vé lẻ.
+async function checkInTicket(req, res, next) {
+  try {
+    const token = normalizeQrToken(req.params.token);
+    if (!token) {
+      return res.status(400).json({ success: false, error: { message: 'Thiếu mã vé.' } });
+    }
+
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const instance = await tx.ticketInstance.findUnique({
+          where: { qrCodeToken: token },
+          include: {
+            booking: {
+              include: {
+                reservation: {
+                  include: {
+                    timeSlot: true,
+                    ticketProduct: { include: { attraction: { select: { title: true } } } },
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        if (!instance) {
+          throw httpError(404, 'Không tìm thấy vé với mã này.');
+        }
+
+        const blockReason = getCheckinBlockReason(instance);
+        if (blockReason) {
+          throw httpError(409, blockReason);
+        }
+
+        // updateMany với guard status VALID: hai nhân viên quét cùng lúc thì chỉ
+        // một request thực sự check-in, request sau thấy count = 0 -> đã dùng.
+        const updated = await tx.ticketInstance.updateMany({
+          where: { bookingId: instance.bookingId, status: 'VALID' },
+          data: { status: 'USED' },
+        });
+        if (updated.count === 0) {
+          throw httpError(409, 'Vé này vừa được check-in bởi một nhân viên khác.');
+        }
+
+        return { instance, checkedInCount: updated.count };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    return res.json({
+      success: true,
+      message: `Check-in thành công ${result.checkedInCount} vé.`,
+      data: {
+        ...toCheckinTicket(result.instance),
+        ticketStatus: 'USED',
+        checkedInCount: result.checkedInCount,
+        checkedInAt: new Date(),
+        checkedInBy: req.user.email,
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: { message: error.message },
+      });
+    }
+    return next(error);
+  }
+}
+
+// GET /api/staff/bookings/today — danh sách đơn CONFIRMED/COMPLETED có ngày tham quan
+// là hôm nay (giờ VN) để nhân viên đối chiếu khách đến cổng.
+async function listTodayBookings(req, res, next) {
+  try {
+    const today = todayInVietnam();
+    const todayDate = new Date(`${today}T00:00:00.000Z`);
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        status: { in: ['CONFIRMED', 'COMPLETED'] },
+        reservation: { date: todayDate },
+      },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        ticketInstances: { select: { status: true } },
+        reservation: {
+          include: {
+            timeSlot: true,
+            ticketProduct: { include: { attraction: { select: { title: true } } } },
+          },
+        },
+      },
+    });
+
+    const data = bookings.map((b) => {
+      const usedCount = b.ticketInstances.filter((t) => t.status === 'USED').length;
+      const validCount = b.ticketInstances.filter((t) => t.status === 'VALID').length;
+      const timeSlot = b.reservation.timeSlot;
+      return {
+        bookingId: b.id,
+        customer: b.fullName,
+        phone: b.phone,
+        attraction: b.reservation.ticketProduct.attraction.title,
+        ticketName: b.reservation.ticketProduct.name,
+        quantity: b.reservation.quantity,
+        timeSlot: timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null,
+        checkedIn: usedCount > 0 && validCount === 0,
+        usedCount,
+        validCount,
+      };
+    });
+
+    return res.json({
+      success: true,
+      data,
+      meta: {
+        date: today,
+        total: data.length,
+        checkedIn: data.filter((b) => b.checkedIn).length,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   listRefundRequests,
   processRefundRequest,
   reissueTicket,
+  lookupTicketByQr,
+  checkInTicket,
+  listTodayBookings,
 };

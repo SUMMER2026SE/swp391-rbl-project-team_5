@@ -84,10 +84,13 @@ const mockPrisma = {
     findUnique: jest.fn(),
     update: jest.fn(),
     count: jest.fn(),
+    groupBy: jest.fn(),
+    aggregate: jest.fn(),
   },
   refundRequest: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    create: jest.fn(),
     update: jest.fn(),
   },
   voucher: {
@@ -102,6 +105,10 @@ const mockPrisma = {
     create: jest.fn(),
     createMany: jest.fn(),
     updateMany: jest.fn(),
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
   },
   supportTicket: {
     create: jest.fn(),

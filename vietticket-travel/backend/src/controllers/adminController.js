@@ -394,6 +394,136 @@ async function hideAttraction(req, res, next) {
   }
 }
 
+// ─── Quản lý booking & payment toàn hệ thống ────────────────────────────────
+
+const ALLOWED_BOOKING_STATUSES = [
+  'PENDING_PAYMENT',
+  'PENDING_PARTNER',
+  'CONFIRMED',
+  'CANCELLED',
+  'COMPLETED',
+  'REFUND_REQUESTED',
+  'REFUNDED',
+];
+
+// GET /api/admin/bookings — danh sách đặt vé toàn sàn cho admin.
+// Hỗ trợ: ?status= ?search= (mã đơn / tên KH / email / địa điểm) ?refundRequired=true
+//         ?page= ?limit=. Kèm thống kê tổng quan để vẽ thẻ trên dashboard.
+async function getAdminBookings(req, res, next) {
+  try {
+    const page = parsePositiveInteger(req.query.page, DEFAULT_PAGE);
+    const limit = Math.min(parsePositiveInteger(req.query.limit, DEFAULT_LIMIT), MAX_LIMIT);
+    const status = String(req.query.status || '').trim().toUpperCase();
+    const search = String(req.query.search || '').trim();
+    const onlyRefundRequired = String(req.query.refundRequired || '') === 'true';
+
+    if (status && !ALLOWED_BOOKING_STATUSES.includes(status)) {
+      return res.status(400).json({ message: 'Trạng thái đặt vé không hợp lệ.' });
+    }
+
+    const where = {};
+    if (status) where.status = status;
+    if (onlyRefundRequired) where.refundRequired = true;
+    if (search) {
+      where.OR = [
+        { id: { contains: search } },
+        { fullName: { contains: search } },
+        { email: { contains: search } },
+        {
+          reservation: {
+            ticketProduct: { attraction: { title: { contains: search } } },
+          },
+        },
+      ];
+    }
+
+    const [total, bookings, statusGroups, refundRequiredCount, revenueAgg] =
+      await Promise.all([
+        prisma.booking.count({ where }),
+        prisma.booking.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+          include: {
+            payments: {
+              orderBy: { createdAt: 'desc' },
+              select: { paymentGateway: true, status: true, amount: true, createdAt: true },
+            },
+            refundRequests: { select: { status: true } },
+            reservation: {
+              include: {
+                timeSlot: true,
+                ticketProduct: {
+                  include: {
+                    attraction: {
+                      select: {
+                        title: true,
+                        partner: { select: { businessName: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+        prisma.booking.groupBy({ by: ['status'], _count: { _all: true } }),
+        prisma.booking.count({ where: { refundRequired: true } }),
+        prisma.booking.aggregate({
+          where: { status: { in: ['CONFIRMED', 'COMPLETED'] } },
+          _sum: { totalAmount: true },
+        }),
+      ]);
+
+    const data = bookings.map((b) => {
+      const latestPayment = b.payments[0] || null;
+      const timeSlot = b.reservation.timeSlot;
+      return {
+        id: b.id,
+        customer: b.fullName,
+        email: b.email,
+        phone: b.phone,
+        attraction: b.reservation.ticketProduct.attraction.title,
+        partner: b.reservation.ticketProduct.attraction.partner?.businessName || null,
+        ticketName: b.reservation.ticketProduct.name,
+        quantity: b.reservation.quantity,
+        visitDate: new Date(b.reservation.date).toISOString().slice(0, 10),
+        timeSlot: timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null,
+        totalAmount: Number(b.totalAmount),
+        status: b.status,
+        refundRequired: b.refundRequired,
+        refundStatus: b.refundRequests[0]?.status || null,
+        paymentGateway: latestPayment?.paymentGateway || null,
+        paymentStatus: latestPayment?.status || null,
+        createdAt: b.createdAt,
+      };
+    });
+
+    const countsByStatus = Object.fromEntries(
+      statusGroups.map((g) => [g.status, g._count._all]),
+    );
+
+    return res.json({
+      success: true,
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      stats: {
+        countsByStatus,
+        refundRequired: refundRequiredCount,
+        grossRevenue: Number(revenueAgg._sum.totalAmount || 0),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   changeUserStatus,
   getUsers,
@@ -402,5 +532,6 @@ module.exports = {
   reviewPartner,
   reviewAttraction,
   hideAttraction,
+  getAdminBookings,
 };
 

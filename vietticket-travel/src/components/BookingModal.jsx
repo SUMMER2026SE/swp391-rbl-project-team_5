@@ -37,6 +37,18 @@ const isSlotUnavailable = (slot) =>
   slot.available === false ||
   ['UNAVAILABLE', 'SOLD_OUT', 'DISABLED'].includes(slot.status)
 
+// Khung giờ còn ít vé hơn số đã chọn -> tự co lại (giữ tối thiểu 1 người lớn,
+// ưu tiên giảm vé trẻ em trước).
+const clampCountsToLimit = (prev, availableTickets) => {
+  const limit = typeof availableTickets === 'number' ? availableTickets : null
+  if (limit === null) return prev
+  const total = prev.adult + prev.child
+  if (total <= limit) return prev
+  const adult = Math.max(1, Math.min(prev.adult, limit))
+  const child = Math.max(0, limit - adult)
+  return { adult, child }
+}
+
 export default function BookingModal({
   isOpen,
   onClose,
@@ -65,7 +77,25 @@ export default function BookingModal({
   const adultPrice = Number(ticketProduct?.sellingPrice || ticketProduct?.price || 0)
   const childPrice = adultPrice
   const totalPrice = counts.adult * adultPrice + counts.child * childPrice
+  const totalQuantity = counts.adult + counts.child
   const ticketId = ticketProduct?.id
+
+  // Số vé còn lại của khung giờ đang chọn — dùng để chặn chọn quá số lượng.
+  const selectedSlot = timeSlots.find((slot) => getSlotId(slot) === selectedTimeSlotId)
+  const maxQuantity =
+    typeof selectedSlot?.availableTickets === 'number' ? selectedSlot.availableTickets : null
+
+  // Chính sách hoàn tiền của loại vé (hiển thị TRƯỚC khi khách thanh toán).
+  const refundPolicyText = (() => {
+    const policy = ticketProduct?.refundPolicy
+    if (policy === 'FREE_CANCELLATION') return 'Hoàn tiền 100% nếu hủy trước ngày tham quan.'
+    if (policy === 'REFUND_WITH_FEE') {
+      const rate = Number(ticketProduct?.refundFeeRate || 0)
+      return `Hoàn tiền trước ngày tham quan, phí hủy ${Math.round(rate * 100)}%.`
+    }
+    if (policy === 'NON_REFUNDABLE') return 'Vé không hỗ trợ hoàn / hủy sau khi thanh toán.'
+    return null
+  })()
 
   const renderCalendarCells = () => {
     const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay()
@@ -171,6 +201,9 @@ export default function BookingModal({
 
         const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
         setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
+        if (availableSlot) {
+          setCounts((prev) => clampCountsToLimit(prev, availableSlot.availableTickets))
+        }
       } catch (error) {
         console.error('Lỗi lấy thông tin khung giờ trống:', error)
         setTimeSlots([])
@@ -184,14 +217,26 @@ export default function BookingModal({
     fetchAvailability()
   }, [isOpen, selectedDate, ticketId])
 
+  const handleSelectSlot = (slot) => {
+    setSelectedTimeSlotId(getSlotId(slot))
+    setErrorMessage('')
+    setCounts((prev) => clampCountsToLimit(prev, slot?.availableTickets))
+  }
+
   const handleQtyChange = (type, delta) => {
     setCounts((prev) => {
       const minVal = type === 'adult' ? 1 : 0
+      const next = Math.max(minVal, prev[type] + delta)
+      const other = type === 'adult' ? prev.child : prev.adult
 
-      return {
-        ...prev,
-        [type]: Math.max(minVal, prev[type] + delta),
+      // Không cho tổng số vé vượt quá số vé còn lại của khung giờ.
+      if (delta > 0 && maxQuantity !== null && next + other > maxQuantity) {
+        setErrorMessage(`Khung giờ này chỉ còn ${maxQuantity} vé.`)
+        return prev
       }
+
+      setErrorMessage('')
+      return { ...prev, [type]: next }
     })
   }
 
@@ -205,6 +250,11 @@ export default function BookingModal({
 
     if (!selectedTimeSlotId) {
       setErrorMessage('Vui lòng chọn khung giờ tham quan trước khi tiếp tục.')
+      return
+    }
+
+    if (maxQuantity !== null && totalQuantity > maxQuantity) {
+      setErrorMessage(`Khung giờ này chỉ còn ${maxQuantity} vé. Vui lòng giảm số lượng.`)
       return
     }
 
@@ -358,7 +408,7 @@ export default function BookingModal({
                         }`}
                         disabled={disabled}
                         key={slotId}
-                        onClick={() => setSelectedTimeSlotId(slotId)}
+                        onClick={() => handleSelectSlot(slot)}
                         type="button"
                       >
                         <span className="text-sm font-bold">{getSlotLabel(slot)}</span>
@@ -393,6 +443,7 @@ export default function BookingModal({
               <TicketCountRow
                 ageLabel="Từ 13 tuổi trở lên"
                 count={counts.adult}
+                disableIncrement={maxQuantity !== null && totalQuantity >= maxQuantity}
                 label="Vé Người lớn"
                 minValue={1}
                 onChange={(delta) => handleQtyChange('adult', delta)}
@@ -401,16 +452,36 @@ export default function BookingModal({
               <TicketCountRow
                 ageLabel="Dưới 12 tuổi"
                 count={counts.child}
+                disableIncrement={maxQuantity !== null && totalQuantity >= maxQuantity}
                 label="Vé Trẻ em"
                 minValue={0}
                 onChange={(delta) => handleQtyChange('child', delta)}
                 price={childPrice}
               />
+              {maxQuantity !== null && (
+                <p className="text-xs font-semibold text-[#6e797a]">
+                  Khung giờ đang chọn còn {maxQuantity} vé.
+                </p>
+              )}
             </section>
           </div>
 
           <footer className="border-t border-[#bdc9ca]/40 bg-white/70 p-8">
-            <div className="mb-6 flex items-end justify-between gap-4">
+            {/* Bảng giá chi tiết để khách biết mình trả tiền cho gì */}
+            <div className="mb-4 space-y-1.5 text-sm">
+              <div className="flex justify-between text-[#3e494a]">
+                <span>Vé Người lớn × {counts.adult}</span>
+                <span className="font-semibold">{formatCurrency(counts.adult * adultPrice)}</span>
+              </div>
+              {counts.child > 0 && (
+                <div className="flex justify-between text-[#3e494a]">
+                  <span>Vé Trẻ em × {counts.child}</span>
+                  <span className="font-semibold">{formatCurrency(counts.child * childPrice)}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="mb-4 flex items-end justify-between gap-4 border-t border-dashed border-[#bdc9ca]/60 pt-4">
               <div>
                 <span className="text-sm font-semibold text-[#3e494a]">Tổng cộng</span>
                 <div className="text-3xl font-bold text-[#006068]">{formatCurrency(totalPrice)}</div>
@@ -419,6 +490,15 @@ export default function BookingModal({
                 Đã bao gồm VAT & phí dịch vụ
               </span>
             </div>
+
+            {refundPolicyText && (
+              <div className="mb-4 flex items-start gap-2 rounded-2xl bg-[#f3f3f6] px-4 py-3 text-xs font-semibold text-[#3e494a]">
+                <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px] text-[#006068]" aria-hidden="true">
+                  policy
+                </span>
+                {refundPolicyText}
+              </div>
+            )}
 
             {errorMessage && (
               <div className="mb-4 flex items-start gap-2 rounded-2xl border border-[#ba1a1a]/20 bg-[#ffedea] px-4 py-3 text-sm font-semibold text-[#ba1a1a]">
@@ -445,7 +525,7 @@ export default function BookingModal({
   )
 }
 
-function TicketCountRow({ ageLabel, count, label, minValue, onChange, price }) {
+function TicketCountRow({ ageLabel, count, disableIncrement = false, label, minValue, onChange, price }) {
   return (
     <div className="flex flex-col gap-4 rounded-2xl bg-[#f3f3f6] p-5 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -469,7 +549,8 @@ function TicketCountRow({ ageLabel, count, label, minValue, onChange, price }) {
           <span className="w-10 text-center text-lg font-bold">{count}</span>
           <button
             aria-label={`Tăng ${label}`}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm transition hover:text-[#006068]"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm transition hover:text-[#006068] disabled:cursor-not-allowed disabled:opacity-45"
+            disabled={disableIncrement}
             onClick={() => onChange(1)}
             type="button"
           >

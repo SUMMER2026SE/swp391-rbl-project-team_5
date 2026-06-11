@@ -3,7 +3,7 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/useAuth.js'
 
 const NAV_ITEMS = [
-  { to: '/partner/dashboard', icon: 'dashboard', label: 'Dashboard' },
+  { to: '/partner/dashboard', icon: 'dashboard', label: 'Tổng quan' },
   { to: '/partner/attractions', icon: 'local_activity', label: 'Điểm tham quan', fillIcon: true },
   { to: '/partner/bookings', icon: 'confirmation_number', label: 'Đặt vé' },
   { to: '/partner/reviews', icon: 'rate_review', label: 'Đánh giá' },
