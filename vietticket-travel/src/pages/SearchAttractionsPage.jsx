@@ -188,6 +188,8 @@ export default function SearchAttractionsPage() {
     setSelectedCategory(params.get('category') || 'All')
     setSelectedCity(params.get('city') || 'Tất cả thành phố')
     setSelectedSort(params.get('sort') || 'popular')
+    setPriceRange(5000000)
+    setSelectedStars([])
     setCurrentPage(1)
   }, [location.search])
 
@@ -214,37 +216,59 @@ export default function SearchAttractionsPage() {
 
   // 3. Gọi API fetch danh sách địa điểm
   useEffect(() => {
+    let active = true
+
     const fetchAttractions = async () => {
       setLoading(true)
       setErrorMessage('')
 
       try {
         // Xây dựng query params gửi lên API
-        const params = new URLSearchParams({
-          page: currentPage,
-          limit: 9,
-          city: selectedCity !== 'Tất cả thành phố' ? selectedCity : '',
-          category: selectedCategory !== 'All' ? selectedCategory : '',
-          maxPrice: priceRange,
-          minRating: selectedStars.length > 0 ? Math.min(...selectedStars) : '',
-          search: searchQuery,
-          sort: selectedSort,
-        })
+        const params = new URLSearchParams()
+        params.append('page', currentPage.toString())
+        params.append('limit', '9')
+        if (selectedCity && selectedCity !== 'Tất cả thành phố') {
+          params.append('city', selectedCity)
+        }
+        if (selectedCategory && selectedCategory !== 'All') {
+          params.append('category', selectedCategory)
+        }
+        if (priceRange < 5000000) {
+          params.append('maxPrice', priceRange.toString())
+        }
+        if (selectedStars && selectedStars.length > 0) {
+          params.append('minRating', Math.min(...selectedStars).toString())
+        }
+        if (searchQuery) {
+          params.append('search', searchQuery)
+        }
+        if (selectedSort) {
+          params.append('sort', selectedSort)
+        }
 
         const result = await apiRequest(`/attractions?${params.toString()}`)
+        if (!active) return
+
         setAttractions(result.data?.attractions || [])
         setTotalPages(Math.max(result.data?.pagination?.totalPages || 1, 1))
       } catch (error) {
+        if (!active) return
         console.error('Lỗi khi tải danh sách địa điểm từ API:', error)
         setAttractions([])
         setTotalPages(1)
         setErrorMessage(error.message)
       } finally {
-        setLoading(false)
+        if (active) {
+          setLoading(false)
+        }
       }
     }
 
     fetchAttractions()
+
+    return () => {
+      active = false
+    }
   }, [selectedCategory, selectedCity, priceRange, selectedStars, currentPage, searchQuery, selectedSort])
 
   // Handler lọc đánh giá sao
@@ -253,6 +277,17 @@ export default function SearchAttractionsPage() {
       prev.includes(star) ? prev.filter((selectedStar) => selectedStar !== star) : [...prev, star],
     )
     setCurrentPage(1)
+  }
+
+  const handleClearFilters = () => {
+    setSearchQuery('')
+    setSelectedCategory('All')
+    setSelectedCity('Tất cả thành phố')
+    setPriceRange(5000000)
+    setSelectedStars([])
+    setSelectedSort('popular')
+    setCurrentPage(1)
+    navigate('/attractions', { replace: true })
   }
 
   const handleCategoryChange = (category) => {
@@ -425,13 +460,22 @@ export default function SearchAttractionsPage() {
                   </div>
                 </FilterSection>
 
-                <button
-                  className="mt-2 w-full rounded-lg bg-gradient-to-r from-[#00474d] to-[#00629d] py-3 text-sm font-bold text-white shadow-md transition hover:shadow-lg active:scale-95"
-                  onClick={() => setCurrentPage(1)}
-                  type="button"
-                >
-                  Áp dụng bộ lọc
-                </button>
+                <div className="flex flex-col gap-2 mt-2">
+                  <button
+                    className="w-full rounded-lg bg-gradient-to-r from-[#00474d] to-[#00629d] py-3 text-sm font-bold text-white shadow-md transition hover:shadow-lg active:scale-95"
+                    onClick={() => setCurrentPage(1)}
+                    type="button"
+                  >
+                    Áp dụng bộ lọc
+                  </button>
+                  <button
+                    className="w-full rounded-lg border border-[#bec8ca] bg-white py-3 text-sm font-bold text-[#3f484a] transition hover:bg-[#eceeef] active:scale-95"
+                    onClick={handleClearFilters}
+                    type="button"
+                  >
+                    Xóa bộ lọc
+                  </button>
+                </div>
               </div>
             </aside>
 
