@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { NavLink } from 'react-router-dom'
 import { toast } from 'react-toastify'
-import { useAuth } from '../../context/useAuth.js'
+import AdminLayout from '../../layouts/AdminLayout.jsx'
 import useSocket from '../../context/useSocket.js'
 import supportApi from '../../services/supportApi.js'
-
-const NAV_ITEMS = [
-  { to: '/admin', icon: 'dashboard', label: 'Dashboard' },
-  { to: '/admin/attraction-approval', icon: 'local_activity', label: 'Attractions' },
-  { to: '/staff/tickets', icon: 'support_agent', label: 'Support' },
-  { to: '/staff/refunds', icon: 'payments', label: 'Refund Management' },
-]
 
 const FILTERS = [
   { value: '', label: 'Tất cả' },
@@ -38,7 +30,6 @@ function StatusBadge({ status }) {
 }
 
 export default function SupportTicketsPage() {
-  const { user } = useAuth()
   const socket = useSocket()
   const [tickets, setTickets] = useState([])
   const [filter, setFilter] = useState('')
@@ -136,44 +127,8 @@ export default function SupportTicketsPage() {
   const customer = detail?.user
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-on-background">
-      <aside className="fixed left-0 top-0 z-30 hidden h-full w-64 flex-col border-r border-outline-variant bg-primary py-6 text-on-primary lg:flex">
-        <div className="mb-8 px-6">
-          <h1 className="text-xl font-black uppercase tracking-tighter text-on-primary">
-            VietTicket
-          </h1>
-          <p className="text-sm text-on-primary/60">Staff Dashboard</p>
-        </div>
-        <nav className="flex-1 space-y-1">
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.label}
-              to={item.to}
-              end={item.to === '/admin'}
-              className={({ isActive }) =>
-                `mx-2 flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'border-r-4 border-on-primary-container bg-primary-container text-on-primary-container'
-                    : 'text-on-primary/70 hover:bg-on-primary/10 hover:text-on-primary'
-                }`
-              }
-            >
-              <span className="material-symbols-outlined">{item.icon}</span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
-        <div className="mt-auto border-t border-on-primary/10 px-6 pt-6">
-          <p className="truncate text-sm font-semibold text-on-primary">
-            {user?.fullName || 'Nhân viên'}
-          </p>
-          <p className="truncate text-xs text-on-primary/60">
-            {user?.role === 'ADMIN' ? 'Quản trị viên' : 'Nhân viên hỗ trợ'}
-          </p>
-        </div>
-      </aside>
-
-      <div className="ml-0 flex h-screen min-w-0 flex-1 lg:ml-64">
+    <AdminLayout searchPlaceholder="Tìm kiếm ticket...">
+      <div className="flex h-[calc(100vh-64px)] overflow-hidden">
         {/* Hàng đợi ticket */}
         <section className="flex w-72 shrink-0 flex-col border-r border-outline-variant bg-surface-container-lowest xl:w-80">
           <div className="border-b border-outline-variant p-4">
@@ -346,7 +301,7 @@ export default function SupportTicketsPage() {
           </aside>
         )}
       </div>
-    </div>
+    </AdminLayout>
   )
 }
 
