@@ -4,68 +4,10 @@ import AdminLayout from '../../layouts/AdminLayout.jsx'
 import reviewService from '../../services/reviewService.js'
 import '../../styles/admin.css'
 
-const MOCK_ADMIN_REVIEWS = [
-  {
-    id: 'rev-101',
-    rating: 5,
-    comment: 'Chuyến đi Bà Nà Hills rất tuyệt vời. Cảnh đẹp và khí hậu mát mẻ.',
-    isHidden: false,
-    createdAt: '2026-06-10T09:00:00Z',
-    user: {
-      fullName: 'Nguyễn Văn Hải',
-      email: 'hai.nv@gmail.com',
-    },
-    attraction: {
-      title: 'Sun World Ba Na Hills',
-    },
-  },
-  {
-    id: 'rev-102',
-    rating: 1,
-    comment: 'Dịch vụ vô cùng kém chất lượng! Mua vé ảo, lừa đảo khách du lịch tiền bạc bẩn thỉu. Hãy cẩn thận!',
-    isHidden: false,
-    createdAt: '2026-06-09T15:20:00Z',
-    user: {
-      fullName: 'Trần Minh Tâm',
-      email: 'tam.tm@yahoo.com',
-    },
-    attraction: {
-      title: 'Du thuyền Vịnh Hạ Long 5 Sao',
-    },
-  },
-  {
-    id: 'rev-103',
-    rating: 2,
-    comment: 'Quá đông đúc và chen lấn. Hướng dẫn viên không quản lý được đoàn. Dịch vụ chèo thuyền hoa đăng đắt đỏ.',
-    isHidden: true,
-    createdAt: '2026-06-08T11:30:00Z',
-    user: {
-      fullName: 'Phan Khánh Linh',
-      email: 'linhpk99@gmail.com',
-    },
-    attraction: {
-      title: 'Tour Phố Cổ Hội An',
-    },
-  },
-  {
-    id: 'rev-104',
-    rating: 4,
-    comment: 'Thời tiết mát mẻ thích hợp cho nghỉ dưỡng. Cáp treo đi êm và phong cảnh Fansipan hùng vĩ.',
-    isHidden: false,
-    createdAt: '2026-06-07T08:10:00Z',
-    user: {
-      fullName: 'Vũ Quốc Anh',
-      email: 'quocanh.vu@outlook.com',
-    },
-    attraction: {
-      title: 'Cáp treo Fansipan Sapa',
-    },
-  },
-]
-
 export default function ReviewModerationPage() {
-  const [reviews, setReviews] = useState(MOCK_ADMIN_REVIEWS)
+  const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [actionId, setActionId] = useState('')
 
   // Filters
@@ -74,12 +16,12 @@ export default function ReviewModerationPage() {
 
   const fetchReviews = async (showLoading = false) => {
     if (showLoading) setLoading(true)
+    setError('')
     try {
       const data = await reviewService.getAdminReviews()
       setReviews(data)
-    } catch (error) {
-      console.warn('Lỗi kết nối API Admin, sử dụng dữ liệu mô phỏng:', error)
-      setReviews(MOCK_ADMIN_REVIEWS)
+    } catch (err) {
+      setError(err?.message || 'Không thể tải danh sách đánh giá. Vui lòng thử lại.')
     } finally {
       setLoading(false)
     }
@@ -96,9 +38,8 @@ export default function ReviewModerationPage() {
         }
       })
       .catch((err) => {
-        console.warn('Lỗi kết nối API Admin, sử dụng dữ liệu mô phỏng:', err)
         if (active) {
-          setReviews(MOCK_ADMIN_REVIEWS)
+          setError(err?.message || 'Không thể tải danh sách đánh giá. Vui lòng thử lại.')
           setLoading(false)
         }
       })
@@ -119,23 +60,8 @@ export default function ReviewModerationPage() {
           : 'Đã hiển thị lại đánh giá thành công!'
       )
       fetchReviews()
-    } catch (error) {
-      console.error('Lỗi khi kiểm duyệt đánh giá:', error)
-      // Mock mode simulator
-      if (!error.status) {
-        setReviews((current) =>
-          current.map((r) =>
-            r.id === review.id ? { ...r, isHidden: nextHiddenStatus } : r
-          )
-        )
-        toast.success(
-          nextHiddenStatus
-            ? 'Đã ẩn đánh giá vi phạm (Chế độ mô phỏng)!'
-            : 'Đã hiển thị lại đánh giá (Chế độ mô phỏng)!'
-        )
-      } else {
-        toast.error(error.message || 'Không thể thực hiện kiểm duyệt. Vui lòng thử lại.')
-      }
+    } catch (err) {
+      toast.error(err?.message || 'Không thể thực hiện kiểm duyệt. Vui lòng thử lại.')
     } finally {
       setActionId('')
     }
@@ -312,7 +238,32 @@ export default function ReviewModerationPage() {
                 </tr>
               )}
 
-              {!loading && filteredReviews.length === 0 && (
+              {!loading && error && (
+                <tr>
+                  <td colSpan={7} style={{ textAlign: 'center', padding: 40 }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 40, color: 'var(--adm-outline)' }}>cloud_off</span>
+                    <div style={{ marginTop: 8, color: 'var(--adm-outline)', fontWeight: 600 }}>{error}</div>
+                    <button
+                      type="button"
+                      onClick={() => fetchReviews(true)}
+                      style={{
+                        marginTop: 16,
+                        padding: '8px 20px',
+                        borderRadius: 8,
+                        background: 'var(--adm-primary-dark)',
+                        color: '#fff',
+                        border: 'none',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Thử lại
+                    </button>
+                  </td>
+                </tr>
+              )}
+
+              {!loading && !error && filteredReviews.length === 0 && (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: 32, color: 'var(--adm-on-surface-variant)' }}>
                     Không tìm thấy đánh giá nào.

@@ -76,6 +76,14 @@ async function processRefundRequest(req, res, next) {
       });
     }
 
+    // staffNotes bắt buộc khi từ chối để gửi email giải thích cho khách.
+    if (action === 'REJECTED' && !staffNotes) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Vui lòng nhập lý do từ chối để thông báo cho khách hàng.' },
+      });
+    }
+
     // 1) Đọc trước (NGOÀI transaction) để có dữ liệu gọi cổng thanh toán.
     const refundRequest = await prisma.refundRequest.findUnique({
       where: { id: refundId },
