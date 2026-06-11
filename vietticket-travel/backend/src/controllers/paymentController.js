@@ -10,7 +10,8 @@ const {
   formatVnpDate,
   signRefundData,
 } = require('../utils/vnpay');
-const { calculateRefundAmount } = require('../utils/refundService');
+const { calculateRefundAmount, isBeforeRefundCutoff } = require('../utils/refundService');
+const { sendRefundRequestReceivedEmail } = require('../utils/mailer');
 const {
   confirmReservationAndStock,
   createTicketInstances,
@@ -325,6 +326,12 @@ async function createRefundRequest(req, res, next) {
         if (booking.reservation.ticketProduct.refundPolicy === 'NON_REFUNDABLE') {
           throw httpError(400, 'Vé này không áp dụng chính sách hoàn tiền.');
         }
+        if (!isBeforeRefundCutoff(booking)) {
+          throw httpError(
+            409,
+            'Đã quá thời hạn hoàn tiền. Yêu cầu phải được gửi trước ngày sử dụng vé.',
+          );
+        }
         if (booking.refundRequests.length > 0) {
           throw httpError(409, 'Đơn này đã có yêu cầu hoàn tiền.');
         }
@@ -346,12 +353,24 @@ async function createRefundRequest(req, res, next) {
           data: { status: 'REFUND_REQUESTED' },
         });
 
-        return refundRequest;
+        return { refundRequest, booking };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
-    return res.status(201).json({ success: true, data: result });
+    // Email xác nhận đã tiếp nhận yêu cầu (không chặn response nếu gửi lỗi).
+    try {
+      await sendRefundRequestReceivedEmail({
+        to: result.booking.email,
+        fullName: result.booking.fullName,
+        bookingId: result.booking.id,
+        refundAmount: Number(result.refundRequest.amount),
+      });
+    } catch (emailError) {
+      console.error('[refund-request] Không thể gửi email xác nhận:', emailError.message);
+    }
+
+    return res.status(201).json({ success: true, data: result.refundRequest });
   } catch (error) {
     if (error.statusCode) {
       return res.status(error.statusCode).json({
@@ -382,6 +401,20 @@ async function getRefundPreview(req, res, next) {
 
     const ticketProduct = booking.reservation.ticketProduct;
     const { refundAmount, feeAmount } = calculateRefundAmount(booking);
+    const beforeCutoff = isBeforeRefundCutoff(booking);
+
+    // Lý do không đủ điều kiện (theo thứ tự ưu tiên) để UI hiển thị chính xác.
+    let notRefundableReason = null;
+    if (booking.status !== 'CONFIRMED') {
+      notRefundableReason = 'Chỉ đơn đã xác nhận mới có thể yêu cầu hoàn tiền.';
+    } else if (ticketProduct.refundPolicy === 'NON_REFUNDABLE') {
+      notRefundableReason = 'Vé này không áp dụng chính sách hoàn tiền.';
+    } else if (booking.refundRequests.length > 0) {
+      notRefundableReason = 'Đơn này đã có yêu cầu hoàn tiền trước đó.';
+    } else if (!beforeCutoff) {
+      notRefundableReason =
+        'Đã quá thời hạn hoàn tiền. Yêu cầu phải được gửi trước ngày sử dụng vé.';
+    }
 
     return res.json({
       success: true,
@@ -393,10 +426,8 @@ async function getRefundPreview(req, res, next) {
         refundFeeRate: Number(ticketProduct.refundFeeRate),
         feeAmount,
         refundAmount,
-        refundable:
-          booking.status === 'CONFIRMED' &&
-          ticketProduct.refundPolicy !== 'NON_REFUNDABLE' &&
-          booking.refundRequests.length === 0,
+        refundable: notRefundableReason === null,
+        notRefundableReason,
         hasRefundRequest: booking.refundRequests.length > 0,
         visitDate: booking.reservation.date,
       },

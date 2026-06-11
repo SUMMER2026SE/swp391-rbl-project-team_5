@@ -253,6 +253,38 @@ async function sendTicketConfirmationEmail({ booking, pdfBuffer }) {
   });
 }
 
+async function sendRefundRequestReceivedEmail({
+  to,
+  fullName,
+  bookingId,
+  refundAmount,
+}) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/my-tickets`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
+
+  return sendMail({
+    to,
+    subject: `Đã tiếp nhận yêu cầu hoàn tiền đơn #${shortId} - VietTicket Travel`,
+    text:
+      `Xin chào ${fullName || 'bạn'}, chúng tôi đã tiếp nhận yêu cầu hoàn tiền cho đơn ${bookingId}. ` +
+      `Số tiền hoàn dự kiến: ${formattedAmount} VND. Nhân viên sẽ xử lý trong vòng 1-3 ngày làm việc.`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Đã tiếp nhận yêu cầu hoàn tiền',
+      preview:
+        `Xin chào ${safeName}, yêu cầu hoàn tiền cho đơn hàng <strong>#${shortId}</strong> đã được ghi nhận.<br /><br />` +
+        `Số tiền hoàn dự kiến: <strong>${formattedAmount} VND</strong>.<br />` +
+        'Nhân viên của chúng tôi sẽ xem xét và phản hồi trong vòng <strong>1-3 ngày làm việc</strong>. ' +
+        'Bạn sẽ nhận được email thông báo ngay khi yêu cầu được xử lý.',
+      buttonText: 'Theo dõi yêu cầu của tôi',
+      link,
+    }),
+  });
+}
+
 async function sendRefundStatusEmail({
   to,
   fullName,
@@ -331,6 +363,7 @@ module.exports = {
   sendPartnerReviewEmail,
   sendAttractionViolationEmail,
   sendTicketConfirmationEmail,
+  sendRefundRequestReceivedEmail,
   sendRefundStatusEmail,
   sendReissueTicketEmail,
 };

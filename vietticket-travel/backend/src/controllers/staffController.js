@@ -42,6 +42,11 @@ async function listRefundRequests(req, res, next) {
         booking: {
           include: {
             user: { select: { fullName: true, email: true } },
+            payments: {
+              where: { status: 'SUCCESS' },
+              orderBy: { createdAt: 'desc' },
+              select: { id: true, paymentGateway: true, status: true },
+            },
             reservation: {
               include: {
                 timeSlot: true,
@@ -113,6 +118,7 @@ async function processRefundRequest(req, res, next) {
     // 2) Khi DUYỆT: nếu đơn trả online qua VNPay -> gọi cổng hoàn tiền TRƯỚC.
     //    Nếu cổng từ chối -> dừng, KHÔNG đụng DB (đơn giữ nguyên REFUND_REQUESTED).
     let finalStaffNotes = staffNotes;
+    let gatewayRefundDone = false;
     if (action === 'APPROVED') {
       const onlinePayment = refundRequest.booking.payments.find((p) =>
         /vnpay/i.test(p.paymentGateway),
@@ -141,13 +147,36 @@ async function processRefundRequest(req, res, next) {
           );
         }
 
+        gatewayRefundDone = true;
         const noteRefundOk = `VNPay refund OK (RequestNo gốc: ${onlinePayment.rawResponse?.vnp_TransactionNo || 'N/A'})`;
         finalStaffNotes = [staffNotes, noteRefundOk].filter(Boolean).join(' | ');
+
+        // Lưu NGAY kết quả hoàn tiền của cổng vào Payment.rawResponse để có dữ liệu
+        // đối soát, kể cả khi transaction cập nhật trạng thái phía dưới thất bại.
+        try {
+          await prisma.payment.update({
+            where: { id: onlinePayment.id },
+            data: {
+              rawResponse: {
+                ...(onlinePayment.rawResponse || {}),
+                refund: gateway.raw,
+              },
+            },
+          });
+        } catch (persistError) {
+          console.error(
+            `[staff-refund] KHÔNG LƯU ĐƯỢC kết quả refund VNPay của booking ${refundRequest.booking.id} ` +
+              `(refund TransactionNo: ${gateway.raw?.vnp_TransactionNo || 'N/A'}):`,
+            persistError.message,
+          );
+        }
       }
     }
 
     // 3) Cổng đã OK (hoặc đơn không trả online) -> mới ghi DB trong transaction.
-    const result = await prisma.$transaction(
+    let result;
+    try {
+      result = await prisma.$transaction(
       async (tx) => {
         const fresh = await tx.refundRequest.findUnique({
           where: { id: refundId },
@@ -197,10 +226,20 @@ async function processRefundRequest(req, res, next) {
           },
         });
 
-        return { updated, booking, amount: fresh.amount };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+          return { updated, booking, amount: fresh.amount };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (txError) {
+      if (gatewayRefundDone) {
+        // Tiền ĐÃ hoàn qua cổng nhưng DB chưa cập nhật được -> cần đối soát thủ công.
+        console.error(
+          `[staff-refund][ĐỐI SOÁT] Cổng VNPay đã hoàn tiền cho booking ${refundRequest.booking.id} ` +
+            `nhưng cập nhật DB thất bại. Kiểm tra Payment.rawResponse.refund để đối soát. Lỗi: ${txError.message}`,
+        );
+      }
+      throw txError;
+    }
 
     try {
       await sendRefundStatusEmail({
