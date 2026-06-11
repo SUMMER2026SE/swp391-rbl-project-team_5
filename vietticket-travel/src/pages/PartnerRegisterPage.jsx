@@ -2,15 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
+import heroImage from '../assets/halong_bay.png'
 import {
   validateEmail,
   validateFullName,
   validatePassword,
   getPasswordStrength,
 } from '../utils/formValidators.js'
-
-const heroImage =
-  'https://lh3.googleusercontent.com/aida/AP1WRLuItGov8OwUqIRt08tCuMhByoj9aG9vIEH41WjqTI6Wj0tiTQSmbTQPHCtpdxy6amn21gB1glhk5xPPVuZfpuniQS8gaxTN_np4iPZa8_q-gC7keyUZGyNss6hAUcRvB0aQypooYBbr_ofrU2RqzwoMYPT0-YEaSKw3lpayNhMfwkm65v5djKTIfXJRlD0iB4MdJ6hLDEoBaVgVG-Z948TT5N2pwYhSiF6a_hKhK514-yaWye8UdEUtlGc'
 
 const benefits = [
   { icon: 'language', text: 'Tiếp cận khách hàng toàn cầu' },
