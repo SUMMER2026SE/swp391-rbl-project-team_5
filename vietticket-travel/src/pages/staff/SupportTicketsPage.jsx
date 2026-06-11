@@ -20,6 +20,14 @@ const STATUS_META = {
 const formatTime = (value) =>
   new Date(value).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 
+function formatAge(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 60) return `${mins} phút`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs} giờ`
+  return `${Math.floor(hrs / 24)} ngày`
+}
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.OPEN
   return (
@@ -123,7 +131,17 @@ export default function SupportTicketsPage() {
     }
   }
 
+  async function handleClaim() {
+    try {
+      await supportApi.updateTicketStatus(activeId, 'IN_PROGRESS')
+      toast.success('Đã nhận xử lý ticket.')
+    } catch (error) {
+      toast.error(error.message)
+    }
+  }
+
   const isResolved = detail?.status === 'RESOLVED'
+  const isOpen = detail?.status === 'OPEN'
   const customer = detail?.user
 
   return (
@@ -169,28 +187,36 @@ export default function SupportTicketsPage() {
               </p>
             ) : (
               tickets.map((ticket) => {
-                const last = ticket.messages?.[0]
-                return (
-                  <button
-                    key={ticket.id}
-                    type="button"
-                    onClick={() => setActiveId(ticket.id)}
-                    className={`flex w-full flex-col gap-1 border-b border-outline-variant/20 p-4 text-left transition ${
-                      activeId === ticket.id ? 'bg-primary/5' : 'hover:bg-surface-container-high'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-semibold text-on-surface">
-                        {ticket.subject}
-                      </span>
-                      <StatusBadge status={ticket.status} />
-                    </div>
-                    <span className="truncate text-xs text-on-surface-variant">
-                      {ticket.user?.fullName || 'Khách'} · {last?.message || ''}
-                    </span>
-                  </button>
-                )
-              })
+                  const last = ticket.messages?.[0]
+                  const age = ticket.createdAt ? formatAge(ticket.createdAt) : ''
+                  return (
+                    <button
+                      key={ticket.id}
+                      type="button"
+                      onClick={() => setActiveId(ticket.id)}
+                      className={`flex w-full flex-col gap-1 border-b border-outline-variant/20 p-4 text-left transition ${
+                        activeId === ticket.id ? 'bg-primary/5' : 'hover:bg-surface-container-high'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-semibold text-on-surface">
+                          {ticket.subject}
+                        </span>
+                        <StatusBadge status={ticket.status} />
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-xs text-on-surface-variant">
+                          {ticket.user?.fullName || 'Khách'} · {last?.message || ''}
+                        </span>
+                        {ticket.status === 'OPEN' && (
+                          <span className="shrink-0 rounded-full bg-error/10 px-2 py-0.5 text-[10px] font-bold text-error">
+                            {age}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })
             )}
           </div>
         </section>
@@ -288,16 +314,28 @@ export default function SupportTicketsPage() {
                 value={customer?.profile?.phoneNumber || 'Chưa cập nhật'}
               />
             </div>
-            {!isResolved && (
-              <button
-                type="button"
-                onClick={() => void handleResolve()}
-                className="mt-6 flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-on-primary transition hover:opacity-90"
-              >
-                <span className="material-symbols-outlined text-[20px]">task_alt</span>
-                Đánh dấu đã giải quyết
-              </button>
-            )}
+            <div className="mt-6 flex flex-col gap-3">
+              {isOpen && (
+                <button
+                  type="button"
+                  onClick={() => void handleClaim()}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-primary bg-primary/5 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/10"
+                >
+                  <span className="material-symbols-outlined text-[20px]">person_raised_hand</span>
+                  Nhận xử lý
+                </button>
+              )}
+              {!isResolved && (
+                <button
+                  type="button"
+                  onClick={() => void handleResolve()}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-on-primary transition hover:opacity-90"
+                >
+                  <span className="material-symbols-outlined text-[20px]">task_alt</span>
+                  Đánh dấu đã giải quyết
+                </button>
+              )}
+            </div>
           </aside>
         )}
       </div>

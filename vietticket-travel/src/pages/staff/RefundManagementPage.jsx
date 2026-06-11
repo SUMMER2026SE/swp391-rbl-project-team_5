@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { NavLink } from 'react-router-dom'
 import { toast } from 'react-toastify'
-import { useAuth } from '../../context/useAuth.js'
+import AdminLayout from '../../layouts/AdminLayout.jsx'
 import { apiRequest } from '../../services/api.js'
 
 const STATUS_META = {
@@ -19,21 +18,12 @@ const STATUS_META = {
   },
 }
 
-const NAV_ITEMS = [
-  { to: '/admin', icon: 'dashboard', label: 'Dashboard' },
-  { to: '/admin/attraction-approval', icon: 'local_activity', label: 'Attractions' },
-  { to: '/staff/tickets', icon: 'confirmation_number', label: 'Bookings' },
-  { to: '/staff/tickets', icon: 'support_agent', label: 'Support' },
-  { to: '/staff/refunds', icon: 'payments', label: 'Refund Management' },
-]
-
 function formatMoney(value) {
   return `${Number(value || 0).toLocaleString('vi-VN')} VND`
 }
 
 function formatDate(value) {
   if (!value) return 'Chưa cập nhật'
-
   return new Intl.DateTimeFormat('vi-VN', {
     day: '2-digit',
     month: '2-digit',
@@ -48,7 +38,6 @@ function shortBookingId(value) {
 
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.PENDING
-
   return (
     <span
       className={`inline-flex rounded-full px-3 py-1 text-[12px] font-bold uppercase tracking-tight ${meta.badge}`}
@@ -75,13 +64,7 @@ function StatCard({ icon, iconClass, label, value, badge }) {
   )
 }
 
-function RefundDrawer({
-  selected,
-  isProcessing,
-  onClose,
-  onApprove,
-  onReject,
-}) {
+function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) {
   if (!selected) {
     return (
       <aside className="hidden w-[400px] shrink-0 border-l border-outline-variant bg-surface-container-lowest xl:flex xl:flex-col">
@@ -89,9 +72,7 @@ function RefundDrawer({
           <span className="material-symbols-outlined mb-4 text-5xl text-outline">
             receipt_long
           </span>
-          <h3 className="mb-2 text-lg font-semibold text-on-surface">
-            Chọn một yêu cầu
-          </h3>
+          <h3 className="mb-2 text-lg font-semibold text-on-surface">Chọn một yêu cầu</h3>
           <p className="text-sm text-on-surface-variant">
             Chi tiết hoàn tiền sẽ hiển thị tại đây.
           </p>
@@ -119,9 +100,7 @@ function RefundDrawer({
           onClick={onClose}
           aria-label="Đóng chi tiết"
         >
-          <span className="material-symbols-outlined text-on-surface-variant">
-            close
-          </span>
+          <span className="material-symbols-outlined text-on-surface-variant">close</span>
         </button>
       </div>
 
@@ -152,36 +131,28 @@ function RefundDrawer({
 
         <div className="grid grid-cols-2 gap-y-6">
           <div>
-            <p className="mb-1 text-xs uppercase text-on-surface-variant">
-              Khách hàng
-            </p>
+            <p className="mb-1 text-xs uppercase text-on-surface-variant">Khách hàng</p>
             <p className="text-sm font-semibold text-on-surface">
               {booking.user?.fullName || booking.fullName || 'Chưa cập nhật'}
             </p>
           </div>
           <div>
-            <p className="mb-1 text-xs uppercase text-on-surface-variant">
-              Loại vé
-            </p>
+            <p className="mb-1 text-xs uppercase text-on-surface-variant">Loại vé</p>
             <p className="text-sm text-on-surface">
               {ticketProduct.name || ticketProduct.type || 'Chưa cập nhật'}
             </p>
           </div>
           <div className="col-span-2">
-            <p className="mb-1 text-xs uppercase text-on-surface-variant">
-              Lý do hoàn trả
-            </p>
+            <p className="mb-1 text-xs uppercase text-on-surface-variant">Lý do hoàn trả</p>
             <div className="rounded-lg border border-secondary-container/30 bg-secondary-container/10 p-3">
               <p className="text-sm italic text-on-surface-variant">
-                “{selected.reason || 'Khách hàng không cung cấp lý do.'}”
+                &ldquo;{selected.reason || 'Khách hàng không cung cấp lý do.'}&rdquo;
               </p>
             </div>
           </div>
           {selected.staffNotes && (
             <div className="col-span-2">
-              <p className="mb-1 text-xs uppercase text-on-surface-variant">
-                Ghi chú xử lý
-              </p>
+              <p className="mb-1 text-xs uppercase text-on-surface-variant">Ghi chú xử lý</p>
               <p className="rounded-lg bg-surface-container-low p-3 text-sm text-on-surface">
                 {selected.staffNotes}
               </p>
@@ -190,9 +161,7 @@ function RefundDrawer({
         </div>
 
         <div className="space-y-4">
-          <p className="text-xs uppercase text-on-surface-variant">
-            Tính toán hoàn tiền
-          </p>
+          <p className="text-xs uppercase text-on-surface-variant">Tính toán hoàn tiền</p>
           <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
             <div className="flex items-center justify-between gap-4">
               <span className="text-sm text-on-surface-variant">Giá trị vé gốc</span>
@@ -205,20 +174,14 @@ function RefundDrawer({
               <span className="text-sm text-error">- {formatMoney(feeAmount)}</span>
             </div>
             <div className="flex items-center justify-between gap-4 border-t border-outline-variant pt-3">
-              <span className="text-sm font-bold text-on-surface">
-                Thực nhận hoàn trả
-              </span>
-              <span className="text-lg font-bold text-primary">
-                {formatMoney(refundAmount)}
-              </span>
+              <span className="text-sm font-bold text-on-surface">Thực nhận hoàn trả</span>
+              <span className="text-lg font-bold text-primary">{formatMoney(refundAmount)}</span>
             </div>
           </div>
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs uppercase text-on-surface-variant">
-            Thông tin yêu cầu
-          </p>
+          <p className="text-xs uppercase text-on-surface-variant">Thông tin yêu cầu</p>
           <div className="flex items-center gap-3 rounded-lg border border-outline-variant p-3">
             <span className="material-symbols-outlined text-primary">schedule</span>
             <div>
@@ -243,9 +206,7 @@ function RefundDrawer({
                 onClick={onApprove}
                 disabled={isProcessing}
               >
-                <span className="material-symbols-outlined text-[20px]">
-                  check_circle
-                </span>
+                <span className="material-symbols-outlined text-[20px]">check_circle</span>
                 Duyệt hoàn tiền
               </button>
               <button
@@ -273,7 +234,6 @@ function RefundDrawer({
 }
 
 export default function RefundManagementPage() {
-  const { user } = useAuth()
   const [requests, setRequests] = useState([])
   const [selected, setSelected] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -306,13 +266,11 @@ export default function RefundManagementPage() {
     const timer = window.setTimeout(() => {
       void fetchRequests()
     }, 0)
-
     return () => window.clearTimeout(timer)
   }, [fetchRequests])
 
   async function handleApprove() {
     if (!selected) return
-
     setIsProcessing(true)
     try {
       await apiRequest(`/staff/refunds/${selected.id}`, {
@@ -331,13 +289,11 @@ export default function RefundManagementPage() {
 
   async function handleReject() {
     if (!selected) return
-
     const notes = rejectModal.notes.trim()
     if (!notes) {
       toast.warning('Vui lòng nhập lý do từ chối.')
       return
     }
-
     setIsProcessing(true)
     try {
       await apiRequest(`/staff/refunds/${selected.id}`, {
@@ -358,9 +314,9 @@ export default function RefundManagementPage() {
   const stats = useMemo(
     () => ({
       total: requests.length,
-      pending: requests.filter((request) => request.status === 'PENDING').length,
-      approved: requests.filter((request) => request.status === 'APPROVED').length,
-      rejected: requests.filter((request) => request.status === 'REJECTED').length,
+      pending: requests.filter((r) => r.status === 'PENDING').length,
+      approved: requests.filter((r) => r.status === 'APPROVED').length,
+      rejected: requests.filter((r) => r.status === 'REJECTED').length,
     }),
     [requests],
   )
@@ -368,14 +324,10 @@ export default function RefundManagementPage() {
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
     if (!query) return requests
-
     return requests.filter((request) => {
       const bookingId = request.booking?.id || ''
-      const customer =
-        request.booking?.user?.fullName || request.booking?.fullName || ''
-      const attraction =
-        request.booking?.reservation?.ticketProduct?.attraction?.title || ''
-
+      const customer = request.booking?.user?.fullName || request.booking?.fullName || ''
+      const attraction = request.booking?.reservation?.ticketProduct?.attraction?.title || ''
       return [bookingId, customer, attraction].some((value) =>
         value.toLowerCase().includes(query),
       )
@@ -383,88 +335,9 @@ export default function RefundManagementPage() {
   }, [requests, search])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background text-on-background">
-      <aside className="fixed left-0 top-0 z-30 hidden h-full w-64 flex-col border-r border-outline-variant bg-primary py-6 text-on-primary lg:flex">
-        <div className="mb-8 px-6">
-          <h1 className="text-xl font-black uppercase tracking-tighter text-on-primary">
-            VietTicket
-          </h1>
-          <p className="text-sm text-on-primary/60">Staff Dashboard</p>
-        </div>
-
-        <nav className="flex-1 space-y-1">
-          {NAV_ITEMS.map((item, index) => (
-            <NavLink
-              key={`${item.to}-${index}`}
-              to={item.to}
-              end={item.to === '/admin'}
-              className={({ isActive }) =>
-                `mx-2 flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'border-r-4 border-on-primary-container bg-primary-container text-on-primary-container'
-                    : 'text-on-primary/70 hover:bg-on-primary/10 hover:text-on-primary'
-                }`
-              }
-            >
-              <span className="material-symbols-outlined">{item.icon}</span>
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
-
-        <div className="mt-auto border-t border-on-primary/10 px-6 pt-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-primary-fixed-dim font-bold text-primary">
-              {user?.avatar ? (
-                <img
-                  className="h-full w-full object-cover"
-                  src={user.avatar}
-                  alt={user.fullName || 'Staff'}
-                />
-              ) : (
-                String(user?.fullName || 'S')
-                  .slice(0, 1)
-                  .toUpperCase()
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-on-primary">
-                {user?.fullName || 'Nhân viên'}
-              </p>
-              <p className="truncate text-xs text-on-primary/60">
-                {user?.role === 'ADMIN' ? 'Quản trị viên' : 'Nhân viên hỗ trợ'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <div className="ml-0 flex h-screen min-w-0 flex-1 flex-col lg:ml-64">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-outline-variant bg-surface px-4 sm:px-8">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-on-surface-variant">Staff</span>
-            <span className="text-on-surface-variant/40">/</span>
-            <span className="text-sm font-bold text-primary">Refunds</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <span className="material-symbols-outlined cursor-pointer text-on-surface-variant">
-                notifications
-              </span>
-              <span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-surface bg-error" />
-            </div>
-            <button
-              type="button"
-              className="flex items-center gap-2 rounded-lg border-0 bg-primary px-4 py-2 text-sm font-semibold text-on-primary shadow-sm hover:opacity-90"
-              onClick={() => void fetchRequests()}
-            >
-              <span className="material-symbols-outlined text-[18px]">refresh</span>
-              Làm mới
-            </button>
-          </div>
-        </header>
-
-        <main className="relative flex min-h-0 flex-1 overflow-hidden">
+    <AdminLayout searchPlaceholder="Tìm kiếm hoàn tiền...">
+      <div className="flex overflow-hidden" style={{ height: 'calc(100vh - 64px)' }}>
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <div className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-8">
             <div className="mb-8">
               <h2 className="mb-1 text-3xl font-semibold text-on-surface">
@@ -479,18 +352,18 @@ export default function RefundManagementPage() {
               <StatCard
                 icon="analytics"
                 iconClass="bg-primary-fixed-dim/20 text-primary"
-                label="Total Requests"
+                label="Tổng yêu cầu"
                 value={stats.total}
               />
               <StatCard
                 icon="pending_actions"
                 iconClass="bg-secondary-fixed/30 text-secondary"
-                label="Pending"
+                label="Chờ duyệt"
                 value={stats.pending}
                 badge={
                   stats.pending > 0 ? (
                     <span className="rounded bg-secondary-fixed/30 px-2 py-1 text-xs font-bold text-secondary">
-                      Action Required
+                      Cần xử lý
                     </span>
                   ) : null
                 }
@@ -498,22 +371,32 @@ export default function RefundManagementPage() {
               <StatCard
                 icon="check_circle"
                 iconClass="bg-primary-fixed-dim/20 text-primary-container"
-                label="Approved"
+                label="Đã duyệt"
                 value={stats.approved}
               />
               <StatCard
                 icon="cancel"
                 iconClass="bg-error-container/40 text-error"
-                label="Rejected"
+                label="Đã từ chối"
                 value={stats.rejected}
               />
             </div>
 
             <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
               <div className="flex flex-col gap-4 border-b border-outline-variant bg-surface-container-low px-6 py-4 md:flex-row md:items-center md:justify-between">
-                <h4 className="text-base font-semibold text-on-surface">
-                  Danh sách yêu cầu
-                </h4>
+                <div className="flex items-center gap-3">
+                  <h4 className="text-base font-semibold text-on-surface">
+                    Danh sách yêu cầu
+                  </h4>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary hover:opacity-90"
+                    onClick={() => void fetchRequests()}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">refresh</span>
+                    Làm mới
+                  </button>
+                </div>
                 <div className="flex flex-col gap-3 sm:flex-row">
                   <div className="relative">
                     <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant">
@@ -545,23 +428,18 @@ export default function RefundManagementPage() {
                 <table className="w-full min-w-[900px] border-collapse text-left">
                   <thead>
                     <tr className="bg-surface-container-low/50">
-                      {[
-                        'Booking ID',
-                        'Khách hàng',
-                        'Địa điểm',
-                        'Giá gốc',
-                        'Hoàn tiền',
-                        'Trạng thái',
-                      ].map((heading) => (
-                        <th
-                          key={heading}
-                          className={`border-b border-outline-variant px-6 py-3 text-sm font-semibold text-on-surface-variant ${
-                            heading === 'Hoàn tiền' ? 'text-right' : ''
-                          }`}
-                        >
-                          {heading}
-                        </th>
-                      ))}
+                      {['Booking ID', 'Khách hàng', 'Địa điểm', 'Giá gốc', 'Hoàn tiền', 'Trạng thái'].map(
+                        (heading) => (
+                          <th
+                            key={heading}
+                            className={`border-b border-outline-variant px-6 py-3 text-sm font-semibold text-on-surface-variant ${
+                              heading === 'Hoàn tiền' ? 'text-right' : ''
+                            }`}
+                          >
+                            {heading}
+                          </th>
+                        ),
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-outline-variant">
@@ -579,10 +457,8 @@ export default function RefundManagementPage() {
                       filtered.map((request) => {
                         const booking = request.booking || {}
                         const attraction =
-                          booking.reservation?.ticketProduct?.attraction?.title ||
-                          'Chưa cập nhật'
+                          booking.reservation?.ticketProduct?.attraction?.title || 'Chưa cập nhật'
                         const isSelected = selected?.id === request.id
-
                         return (
                           <tr
                             key={request.id}
@@ -597,9 +473,7 @@ export default function RefundManagementPage() {
                               {shortBookingId(booking.id)}
                             </td>
                             <td className="px-6 py-4 text-sm text-on-surface">
-                              {booking.user?.fullName ||
-                                booking.fullName ||
-                                'Chưa cập nhật'}
+                              {booking.user?.fullName || booking.fullName || 'Chưa cập nhật'}
                             </td>
                             <td className="max-w-52 truncate px-6 py-4 text-sm text-on-surface">
                               {attraction}
@@ -639,7 +513,7 @@ export default function RefundManagementPage() {
             onApprove={() => void handleApprove()}
             onReject={() => setRejectModal({ open: true, notes: '' })}
           />
-        </main>
+        </div>
       </div>
 
       {rejectModal.open && (
@@ -660,10 +534,7 @@ export default function RefundManagementPage() {
           >
             <div className="mb-4 flex items-start justify-between">
               <div>
-                <h3
-                  id="reject-refund-title"
-                  className="text-xl font-semibold text-on-surface"
-                >
+                <h3 id="reject-refund-title" className="text-xl font-semibold text-on-surface">
                   Từ chối hoàn tiền
                 </h3>
                 <p className="mt-1 text-sm text-on-surface-variant">
@@ -685,18 +556,15 @@ export default function RefundManagementPage() {
               className="mb-2 block text-sm font-semibold text-on-surface"
               htmlFor="refund-rejection-notes"
             >
-              Lý do từ chối
+              Lý do từ chối <span className="text-error">*</span>
             </label>
             <textarea
               id="refund-rejection-notes"
               className="min-h-32 w-full resize-y rounded-xl border border-outline-variant bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-              placeholder="Nhập lý do cụ thể..."
+              placeholder="Nhập lý do cụ thể để thông báo cho khách hàng..."
               value={rejectModal.notes}
               onChange={(event) =>
-                setRejectModal((current) => ({
-                  ...current,
-                  notes: event.target.value,
-                }))
+                setRejectModal((current) => ({ ...current, notes: event.target.value }))
               }
               autoFocus
             />
@@ -722,6 +590,6 @@ export default function RefundManagementPage() {
           </div>
         </div>
       )}
-    </div>
+    </AdminLayout>
   )
 }
