@@ -141,20 +141,25 @@ function RefundModal({ booking, onClose, onSuccess }) {
               </div>
             )}
 
-            <label
-              className="mb-2 mt-5 block text-sm font-semibold text-on-surface"
-              htmlFor="refund-reason"
-            >
-              Lý do hoàn tiền <span className="text-error">*</span>
-            </label>
-            <textarea
-              id="refund-reason"
-              className="min-h-28 w-full resize-y rounded-xl border border-outline-variant bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-              placeholder="Vui lòng cho biết lý do bạn muốn hoàn vé..."
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              autoFocus
-            />
+            {preview.refundable && (
+              <>
+                <label
+                  className="mb-2 mt-5 block text-sm font-semibold text-on-surface"
+                  htmlFor="refund-reason"
+                >
+                  Lý do hoàn tiền <span className="text-error">*</span>
+                </label>
+                <textarea
+                  id="refund-reason"
+                  className="min-h-28 w-full resize-y rounded-xl border border-outline-variant bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  placeholder="Vui lòng cho biết lý do bạn muốn hoàn vé..."
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  maxLength={1000}
+                  autoFocus
+                />
+              </>
+            )}
 
             <div className="mt-5 flex justify-end gap-3">
               <button
@@ -163,22 +168,25 @@ function RefundModal({ booking, onClose, onSuccess }) {
                 onClick={onClose}
                 disabled={isSubmitting}
               >
-                Hủy
+                {preview.refundable ? 'Hủy' : 'Đóng'}
               </button>
-              <button
-                type="button"
-                className="rounded-lg border-0 bg-error px-4 py-2 text-sm font-semibold text-on-error disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => void handleSubmit()}
-                disabled={isSubmitting || !preview.refundable}
-              >
-                {isSubmitting ? 'Đang gửi...' : 'Xác nhận gửi yêu cầu'}
-              </button>
+              {preview.refundable && (
+                <button
+                  type="button"
+                  className="rounded-lg border-0 bg-error px-4 py-2 text-sm font-semibold text-on-error disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={() => void handleSubmit()}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Đang gửi...' : 'Xác nhận gửi yêu cầu'}
+                </button>
+              )}
             </div>
             {!preview.refundable && (
-              <p className="mt-3 text-center text-xs text-on-surface-variant">
-                {preview.hasRefundRequest
-                  ? 'Đơn này đã có yêu cầu hoàn tiền.'
-                  : 'Đơn này hiện không đủ điều kiện hoàn tiền.'}
+              <p className="mt-3 rounded-xl bg-surface-container-low p-3 text-center text-xs font-semibold text-on-surface-variant">
+                {preview.notRefundableReason ||
+                  (preview.hasRefundRequest
+                    ? 'Đơn này đã có yêu cầu hoàn tiền.'
+                    : 'Đơn này hiện không đủ điều kiện hoàn tiền.')}
               </p>
             )}
           </>

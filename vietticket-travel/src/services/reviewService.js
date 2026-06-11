@@ -1,10 +1,23 @@
 import { apiRequest } from './api.js'
 
-export const getReviews = async (attractionId) => {
-  const result = await apiRequest(`/reviews?attractionId=${attractionId}`, {
+// Trả về { data, meta, breakdown } — meta phục vụ phân trang "Xem thêm",
+// breakdown là phân bố số sao (histogram) trên toàn bộ review hiển thị.
+export const getReviews = async (attractionId, { page = 1, limit = 6, rating } = {}) => {
+  const params = new URLSearchParams({
+    attractionId,
+    page: String(page),
+    limit: String(limit),
+  })
+  if (rating) params.set('rating', String(rating))
+
+  const result = await apiRequest(`/reviews?${params.toString()}`, {
     method: 'GET',
   })
-  return result.data || []
+  return {
+    data: result.data || [],
+    meta: result.meta || { total: (result.data || []).length, page: 1, limit, totalPages: 1 },
+    breakdown: result.breakdown || { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+  }
 }
 
 export const createReview = async (payload) => {
