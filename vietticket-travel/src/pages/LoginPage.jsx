@@ -16,9 +16,11 @@ function getSafeRedirect(loggedInUser, redirectFrom) {
   const defaultForRole =
     loggedInUser?.role === 'ADMIN'
       ? '/admin/users'
-      : loggedInUser?.role === 'PARTNER'
-        ? '/partner/dashboard'
-        : '/'
+      : loggedInUser?.role === 'STAFF'
+        ? '/staff/tickets'
+        : loggedInUser?.role === 'PARTNER'
+          ? '/partner/dashboard'
+          : '/'
 
   if (!redirectFrom) return defaultForRole
 
@@ -26,6 +28,9 @@ function getSafeRedirect(loggedInUser, redirectFrom) {
 
   // Validate role permissions for the redirect path
   if (targetPath.startsWith('/admin') && loggedInUser?.role !== 'ADMIN') {
+    return defaultForRole
+  }
+  if (targetPath.startsWith('/staff') && !['STAFF', 'ADMIN'].includes(loggedInUser?.role)) {
     return defaultForRole
   }
   if (targetPath.startsWith('/partner') && loggedInUser?.role !== 'PARTNER') {
