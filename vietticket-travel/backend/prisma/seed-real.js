@@ -13,6 +13,7 @@ const path = require('path');
 const bcrypt = require('bcrypt');
 const prisma = require('../src/config/prisma');
 const { realAttractions } = require('./data/realAttractions');
+const { attractionContent } = require('./data/attractionContent');
 
 const PARTNER_EMAIL = 'partner@vietticket.com';
 const PARTNER_PASSWORD = 'Partner@123';
@@ -78,7 +79,8 @@ async function createAttraction(partner, a) {
     data: {
       partnerId: partner.id,
       title: a.title,
-      description: a.description,
+      // Ưu tiên mô tả chi tiết trong attractionContent.js nếu có.
+      description: attractionContent[a.title]?.description || a.description,
       address: a.address,
       city: a.city,
       district: a.district || null,
