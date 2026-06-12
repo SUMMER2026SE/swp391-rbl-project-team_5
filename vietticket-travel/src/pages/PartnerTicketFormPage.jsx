@@ -22,20 +22,12 @@ const REFUND_POLICIES = [
   { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% giá vé nếu huỷ trước 48 giờ.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
 ]
 
-// Mock existing ticket data for edit mode
-const MOCK_TICKET = {
-  name: 'Vé người lớn', type: 'ADULT', originalPrice: 900000, sellingPrice: 850000,
-  description: 'Bao gồm toàn bộ trải nghiệm tại khu vui chơi.', refundPolicy: 'PARTIAL', status: 'active',
-}
-
-const MOCK_ATTRACTION_NAMES = { 1: 'Sun World Ba Na Hills', 2: 'Vịnh Hạ Long Cruise', 3: 'VinWonders Nha Trang', 4: 'Hội An Lantern Festival Tour' }
-
 function PartnerTicketFormPage() {
   const { id, ticketId } = useParams()
   const navigate = useNavigate()
   const isEdit = Boolean(ticketId)
 
-  const attractionName = MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan'
+  const [attractionName, setAttractionName] = useState('Điểm tham quan')
   const [isLoading, setIsLoading] = useState(isEdit)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [touched, setTouched] = useState({})
@@ -47,15 +39,19 @@ function PartnerTicketFormPage() {
 
   useEffect(() => {
     document.title = `${isEdit ? 'Chỉnh sửa' : 'Thêm'} gói vé | VietTicket B2B`
-    if (!isEdit) return
     let active = true
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsLoading(true)
+    setIsLoading(isEdit)
     ;(async () => {
       try {
-        const data = await partnerApi.getTicket(ticketId)
+        const [attractionData, ticketData] = await Promise.all([
+          partnerApi.getAttraction(id),
+          isEdit ? partnerApi.getTicket(ticketId) : Promise.resolve(null),
+        ])
         if (!active) return
-        const t = data.ticket
+        setAttractionName(attractionData.attraction?.name || 'Điểm tham quan')
+        if (!ticketData) return
+        const t = ticketData.ticket
         setForm({
           name: t.name ?? '',
           type: t.type ?? 'ADULT',
@@ -67,18 +63,14 @@ function PartnerTicketFormPage() {
         })
       } catch (err) {
         if (!active) return
-        if (partnerApi.isNetworkError(err)) {
-          // Fallback demo khi không có server
-          setForm({ ...MOCK_TICKET })
-        } else {
-          toast.error(err.message)
-        }
+        toast.error(err.message)
+        if (isEdit) navigate(`/partner/attractions/${id}/tickets`)
       } finally {
         if (active) setIsLoading(false)
       }
     })()
     return () => { active = false }
-  }, [isEdit, ticketId])
+  }, [id, isEdit, navigate, ticketId])
 
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }))
   const touch = (field) => setTouched((prev) => ({ ...prev, [field]: true }))
@@ -118,12 +110,7 @@ function PartnerTicketFormPage() {
       toast.success(isEdit ? 'Đã cập nhật gói vé thành công!' : 'Đã tạo gói vé thành công!')
       navigate(`/partner/attractions/${id}/tickets`)
     } catch (err) {
-      if (partnerApi.isNetworkError(err)) {
-        toast.info('Chế độ demo (không có server) — thao tác được mô phỏng.')
-        navigate(`/partner/attractions/${id}/tickets`)
-      } else {
-        toast.error(err.message)
-      }
+      toast.error(err.message)
     } finally {
       setIsSubmitting(false)
     }

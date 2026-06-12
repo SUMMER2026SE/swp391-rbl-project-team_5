@@ -4,49 +4,6 @@ import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
-const MOCK_ATTRACTIONS = [
-  {
-    id: 1,
-    name: 'Sun World Ba Na Hills',
-    category: 'Theme Park & Resort',
-    city: 'Đà Nẵng',
-    district: 'Huyện Hòa Vang',
-    hours: '08:00 - 17:00',
-    status: 'active',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuCag3M2zF38lDdMsnGFJqx9FTSbdlLjthr5VH-sVXZ7RG52d0YYdKUWobxmQPoRHVGezdA5Tc1g32YBAVGwrwHCz-lW8jp1ZBSoMtDTVsV9p5Pq7VZUc2lOOSxoeRFz6IcAwCh9m1TiqbQAeXhGWiE8X7KOt0t_LoK9LuVo8q3aGXoUttCe9bmcQmxkg59ikor3zP8EKfuYZ8XVXUkNb7D0Bs5M2lHeC99exJOQzOPZVrBiFnmhG7vLBhwA669ULFZMvcTwzCQUNZk',
-  },
-  {
-    id: 2,
-    name: 'Vịnh Hạ Long Cruise',
-    category: 'Nature & Sightseeing',
-    city: 'Quảng Ninh',
-    district: 'Cảng Tuần Châu',
-    hours: '07:30 - 18:00',
-    status: 'active',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAEvMOJ5fWzm3DQFSECU_jJ3B_zrcQ3HHcQU46k4kj1ZZaSGDA_SKQrHpkiG9efwn6GEuSVdHqyb8UJ1QLsUQhGwyGivn-CKpELH0mSpJxnYeiYmS-WBfdCtwbEgIwBocBdYZ_HtzSOcbUUpprhMnSTd577m5p6wppJzLoy5kHHRCjaMN7O1emb021Wn8zKaMfCtbsZJ-_iChMVAprlrkwewnMXS_nBzl5N1VDygAUuYKKkdjIhnZzSMHiEkrqYeEsCl7k0Kn_8VKU',
-  },
-  {
-    id: 3,
-    name: 'VinWonders Nha Trang',
-    category: 'Amusement Park',
-    city: 'Khánh Hòa',
-    district: 'Đảo Hòn Tre',
-    hours: '08:00 - 20:00',
-    status: 'inactive',
-    image: null,
-  },
-  {
-    id: 4,
-    name: 'Hội An Lantern Festival Tour',
-    category: 'Cultural Experience',
-    city: 'Quảng Nam',
-    district: 'Phố Cổ Hội An',
-    hours: '18:00 - 22:00',
-    status: 'active',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBQWHBR3aa0GefQYIDEajyI9BM5UcnBD_3gLTrZWlFMd1fbCQXP27lbJSy54UraymjirEzU3KzVeTj-HFH8loC64Zx3KWpm3nN9v_dUVK5jThRxGvY3NlHUmlUn8MJKJpHtGWA9tzamRk5YhTPgfuvGM8N1SpaOfr3D0V7o0qXHMCsf-7hmXr7E2rj5O5NXQIjsjguj192D2NYbKqwNSNgrT995ee3EvCuSWeUeulbRkbulE4WjanRnOrKdcftt2ehoX1fGArIXwcg',
-  },
-]
-
 const ITEMS_PER_PAGE = 10
 
 function StatusBadge({ status }) {
@@ -66,7 +23,7 @@ function StatusBadge({ status }) {
 
 function PartnerAttractionsPage() {
   const navigate = useNavigate()
-  const [attractions, setAttractions] = useState(MOCK_ATTRACTIONS)
+  const [attractions, setAttractions] = useState([])
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [cityFilter, setCityFilter] = useState('')
@@ -85,11 +42,8 @@ function PartnerAttractionsPage() {
         const data = await partnerApi.listAttractions()
         if (active) setAttractions(data.attractions)
       } catch (err) {
-        if (partnerApi.isNetworkError(err)) {
-          if (active) setAttractions(MOCK_ATTRACTIONS) // demo fallback khi không có server
-        } else {
-          toast.error(err.message)
-        }
+        if (active) setAttractions([])
+        toast.error(err.message)
       }
     })()
     return () => { active = false }
@@ -117,13 +71,7 @@ function PartnerAttractionsPage() {
       setAttractions((prev) => prev.filter((a) => a.id !== target.id))
       toast.success(`Đã xóa "${target.name}".`)
     } catch (err) {
-      if (partnerApi.isNetworkError(err)) {
-        // demo: vẫn xóa khỏi danh sách cục bộ khi không có server
-        setAttractions((prev) => prev.filter((a) => a.id !== target.id))
-        toast.success(`Đã xóa "${target.name}".`)
-      } else {
-        toast.error(err.message)
-      }
+      toast.error(err.message)
     } finally {
       setDeleteTarget(null)
     }

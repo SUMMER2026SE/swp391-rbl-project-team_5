@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react'
+import React, { lazy, Suspense, useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { defaultIcon, hasValidLatLng } from './leafletIcon.js'
-import MapTilerLayer from './MapTilerLayer.jsx'
+
+const MapTilerLayer = lazy(() => import('./MapTilerLayer.jsx'))
 
 // Tâm mặc định (giữa Việt Nam) khi chưa có điểm nào.
 const VN_CENTER = [16.0, 107.9]
@@ -53,7 +54,9 @@ export default function AttractionsMap({ attractions = [], navigate, height = 48
         style={{ height, width: '100%' }}
       >
         {MAPTILER_KEY ? (
-          <MapTilerLayer apiKey={MAPTILER_KEY} />
+          <Suspense fallback={null}>
+            <MapTilerLayer apiKey={MAPTILER_KEY} />
+          </Suspense>
         ) : (
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'

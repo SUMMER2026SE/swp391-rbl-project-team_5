@@ -27,7 +27,10 @@ function toDateKey(date) {
 async function getSchedule(req, res, next) {
   try {
     const attraction = await findOwnedAttraction(req.params.id, req.partner.id, {
-      timeSlots: { where: { ticketProductId: null }, orderBy: { startTime: 'asc' } },
+      timeSlots: {
+        where: { ticketProductId: null, isActive: true },
+        orderBy: { startTime: 'asc' },
+      },
       specialDates: true,
     });
     if (!attraction) {
@@ -141,8 +144,13 @@ async function saveSchedule(req, res, next) {
 
       // Thay thế toàn bộ khung giờ cấp điểm tham quan
       if (hasTimeSlots) {
-        await tx.timeSlot.deleteMany({
-          where: { attractionId: attraction.id, ticketProductId: null },
+        await tx.timeSlot.updateMany({
+          where: {
+            attractionId: attraction.id,
+            ticketProductId: null,
+            isActive: true,
+          },
+          data: { isActive: false },
         });
         if (timeSlots.length > 0) {
           await tx.timeSlot.createMany({

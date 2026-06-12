@@ -33,12 +33,12 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "google-auth-library": "^10.6.2",
+    "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "nodemailer": "^8.0.7",
     "pdfkit": "^0.19.0",
     "pg": "^8.21.0",
-    "prisma": "^7.8.0",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3"
   },
@@ -46,6 +46,7 @@
     "@jest/globals": "^29.7.0",
     "jest": "^29.7.0",
     "nodemon": "^3.1.14",
+    "prisma": "^7.8.0",
     "supertest": "^6.3.3"
   },
   "jest": {

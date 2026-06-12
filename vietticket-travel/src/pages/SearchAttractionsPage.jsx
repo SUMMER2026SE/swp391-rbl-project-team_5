@@ -1,13 +1,15 @@
-import React, { useEffect, useState } from 'react'
+import React, { lazy, Suspense, useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'react-toastify'
-import AttractionsMap from '../components/AttractionsMap.jsx'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
+import Seo from '../components/Seo.jsx'
 import { useAuth } from '../context/useAuth.js'
-import { appDownloadButtons, footerLinks } from '../data/landingData.js'
+import { footerLinks } from '../data/landingData.js'
 import { apiRequest } from '../services/api.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
+
+const AttractionsMap = lazy(() => import('../components/AttractionsMap.jsx'))
 
 const categoryFilters = [
   { value: 'All', text: 'Tất cả', icon: 'auto_awesome' },
@@ -314,6 +316,10 @@ export default function SearchAttractionsPage() {
 
   return (
     <React.Fragment>
+      <Seo
+        title="Điểm tham quan Việt Nam"
+        description="Khám phá và so sánh giá vé các điểm tham quan tại Việt Nam trên VietTicket Travel."
+      />
       <Header links={searchNavLinks} />
       <main className="min-h-screen bg-[#f8fafb] px-5 py-8 text-[#191c1d] md:px-16">
         <div className="mx-auto max-w-[1280px]">
@@ -515,7 +521,9 @@ export default function SearchAttractionsPage() {
                     </div>
                   ) : (
                     <>
-                      <AttractionsMap attractions={mapPoints} navigate={navigate} />
+                      <Suspense fallback={<div className="h-[520px] flex items-center justify-center">Đang tải bản đồ...</div>}>
+                        <AttractionsMap attractions={mapPoints} navigate={navigate} />
+                      </Suspense>
                       <p className="mt-2 text-xs font-medium text-[#3f484a]">
                         Hiển thị {mapPoints.length} địa điểm bán vé trên toàn quốc.
                       </p>
@@ -591,7 +599,7 @@ export default function SearchAttractionsPage() {
         </button>
       </div>
 
-      <Footer links={footerLinks} appButtons={appDownloadButtons} />
+      <Footer links={footerLinks} />
     </React.Fragment>
   )
 }

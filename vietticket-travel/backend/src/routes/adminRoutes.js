@@ -8,6 +8,11 @@ const {
   reviewAttraction,
   hideAttraction,
   getAdminBookings,
+  getDashboard,
+  listCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
 } = require('../controllers/adminController');
 const protect = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
@@ -18,7 +23,12 @@ const router = express.Router();
 router.use(protect, restrictTo('ADMIN'));
 
 router.get('/users', getUsers);
+router.get('/dashboard', getDashboard);
 router.get('/bookings', getAdminBookings);
+router.get('/categories', listCategories);
+router.post('/categories', createCategory);
+router.put('/categories/:id', updateCategory);
+router.delete('/categories/:id', deleteCategory);
 router.patch('/users/:id/status', changeUserStatus);
 router.get('/partners', getPartners);
 router.get('/attractions', getAttractions);

@@ -25,9 +25,17 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
           const r = await tx.reservation.findUnique({
             where: { id },
             include: {
-              booking: { select: { id: true, status: true, email: true, fullName: true } },
+              booking: {
+                select: {
+                  id: true,
+                  status: true,
+                  email: true,
+                  fullName: true,
+                  voucherId: true,
+                },
+              },
               ticketProduct: {
-                select: { attraction: { select: { title: true } } },
+                select: { attractionId: true, attraction: { select: { title: true } } },
               },
             },
           });
@@ -47,6 +55,14 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
             },
             data: { heldQuantity: { decrement: r.quantity } },
           });
+          await tx.attractionDailyStock.updateMany({
+            where: {
+              attractionId: r.ticketProduct.attractionId,
+              date: r.date,
+              heldQty: { gte: r.quantity },
+            },
+            data: { heldQty: { decrement: r.quantity } },
+          });
 
           if (r.timeSlotId) {
             await tx.timeSlotStock.updateMany({
@@ -65,6 +81,12 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
               where: { id: r.booking.id },
               data: { status: 'CANCELLED' },
             });
+            if (r.booking.voucherId) {
+              await tx.voucher.updateMany({
+                where: { id: r.booking.voucherId, usedCount: { gt: 0 } },
+                data: { usedCount: { decrement: 1 } },
+              });
+            }
             await tx.payment.updateMany({
               where: { bookingId: r.booking.id, status: 'PENDING' },
               data: { status: 'FAILED' },

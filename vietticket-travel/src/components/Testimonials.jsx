@@ -1,52 +1,38 @@
-function Testimonials({ testimonials, partners }) {
+const TRUST_ITEMS = [
+  {
+    icon: 'verified_user',
+    title: 'Giá và tồn kho từ hệ thống',
+    description: 'Giá vé, ngày tham quan và số chỗ được kiểm tra lại trước khi tạo đơn.',
+  },
+  {
+    icon: 'qr_code_2',
+    title: 'Vé điện tử có thể kiểm tra',
+    description: 'Mỗi vé hợp lệ có mã QR riêng và trạng thái sử dụng được theo dõi.',
+  },
+  {
+    icon: 'policy',
+    title: 'Chính sách hiển thị rõ ràng',
+    description: 'Điều kiện hoàn hủy của từng gói vé được công bố trước khi thanh toán.',
+  },
+]
+
+function Testimonials() {
   return (
-    <>
-      <section className="section container testimonials-section">
-        <div className="testimonials-layout">
-          <div className="testimonials-intro">
-            <p className="eyebrow">Ý kiến khách hàng</p>
-            <h2>Khách du lịch nói gì về chúng tôi.</h2>
-            <div className="testimonial-dots" aria-hidden="true">
-              {testimonials.map((testimonial, index) => (
-                <span
-                  className={index === 0 ? 'testimonial-dots__active' : ''}
-                  key={testimonial.name}
-                ></span>
-              ))}
-            </div>
-          </div>
-
-          <div className="testimonial-list">
-            {testimonials.map((testimonial, index) => (
-              <article
-                className={`testimonial-card${
-                  index === 0 ? ' testimonial-card--featured' : ''
-                }`}
-                key={testimonial.name}
-              >
-                <img
-                  src={testimonial.avatar}
-                  alt={`Ảnh đại diện của ${testimonial.name}`}
-                />
-                <blockquote>
-                  <p>"{testimonial.quote}"</p>
-                </blockquote>
-                <h3>{testimonial.name}</h3>
-                <p>{testimonial.location}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="partners-band" aria-label="Đối tác du lịch">
-        <div className="container partners-list">
-          {partners.map((partner) => (
-            <span key={partner}>{partner}</span>
-          ))}
-        </div>
-      </section>
-    </>
+    <section className="section container testimonials-section">
+      <div className="section-heading text-center">
+        <p className="eyebrow">ĐẶT VÉ MINH BẠCH</p>
+        <h2>Những điều VietTicket cam kết trong mỗi đơn hàng</h2>
+      </div>
+      <div className="destination-grid">
+        {TRUST_ITEMS.map((item) => (
+          <article className="testimonial-card" key={item.title}>
+            <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
+            <h3>{item.title}</h3>
+            <p>{item.description}</p>
+          </article>
+        ))}
+      </div>
+    </section>
   )
 }
 

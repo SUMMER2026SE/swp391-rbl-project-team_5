@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import { useAuth } from '../context/useAuth.js'
@@ -11,13 +12,10 @@ function PartnerSettingsPage() {
   const [activeTab, setActiveTab] = useState('profile')
 
   const [profile, setProfile] = useState({ displayName: '', contactEmail: '', phone: '', website: '', description: '' })
-  const [notif, setNotif] = useState({ newBooking: true, cancellation: true, lowCapacity: false, weeklyReport: true })
-
   useEffect(() => {
     document.title = 'Cài đặt | VietTicket B2B'
 
-    // Giá trị khởi tạo (cũng là fallback demo khi không có server)
-    const mockProfile = {
+    const accountProfile = {
       displayName: user?.fullName || '',
       contactEmail: user?.email || '',
       phone: '',
@@ -32,19 +30,16 @@ function PartnerSettingsPage() {
         const p = data.partner || {}
         if (!cancelled) {
           setProfile({
-            displayName: p.displayName || p.businessName || mockProfile.displayName,
-            contactEmail: p.contactEmail || mockProfile.contactEmail,
+            displayName: p.displayName || p.businessName || accountProfile.displayName,
+            contactEmail: p.contactEmail || accountProfile.contactEmail,
             phone: p.phone || '',
             website: p.website || '',
             description: p.description || '',
           })
         }
       } catch (err) {
-        if (partnerApi.isNetworkError(err)) {
-          if (!cancelled) setProfile(mockProfile)
-        } else {
-          toast.error(err.message)
-        }
+        if (!cancelled) setProfile(accountProfile)
+        toast.error(err.message)
       } finally {
         if (!cancelled) setIsLoading(false)
       }
@@ -65,11 +60,7 @@ function PartnerSettingsPage() {
       })
       toast.success('Đã lưu cài đặt thành công!')
     } catch (err) {
-      if (partnerApi.isNetworkError(err)) {
-        toast.info('Chế độ demo (không có server) — thao tác được mô phỏng.')
-      } else {
-        toast.error(err.message)
-      }
+      toast.error(err.message)
     } finally {
       setIsSaving(false)
     }
@@ -77,7 +68,6 @@ function PartnerSettingsPage() {
 
   const TABS = [
     { key: 'profile',  label: 'Thông tin đối tác', icon: 'business' },
-    { key: 'notif',    label: 'Thông báo', icon: 'notifications' },
     { key: 'security', label: 'Bảo mật', icon: 'lock' },
   ]
 
@@ -85,10 +75,12 @@ function PartnerSettingsPage() {
     <PartnerLayout pageTitle="Settings">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 -mt-2 mb-6">
         <h2 className="text-2xl font-semibold text-[#191c1d]">Cài đặt tài khoản</h2>
-        <button onClick={handleSave} disabled={isSaving} className="px-6 py-2.5 bg-[#00474d] text-white text-sm font-medium rounded-lg hover:bg-[#136870] transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2 self-start sm:self-auto">
-          {isSaving && <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>}
-          <span className="material-symbols-outlined text-[18px]">save</span>Lưu thay đổi
-        </button>
+        {activeTab === 'profile' && (
+          <button onClick={handleSave} disabled={isSaving} className="px-6 py-2.5 bg-[#00474d] text-white text-sm font-medium rounded-lg hover:bg-[#136870] transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2 self-start sm:self-auto">
+            {isSaving && <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>}
+            <span className="material-symbols-outlined text-[18px]">save</span>Lưu thay đổi
+          </button>
+        )}
       </div>
 
       <div className="flex gap-1 bg-[#f2f4f5] p-1 rounded-xl w-fit mb-6">
@@ -134,45 +126,17 @@ function PartnerSettingsPage() {
             </div>
           )}
 
-          {/* Notification Tab */}
-          {activeTab === 'notif' && (
-            <div className="max-w-2xl">
-              <div className="bg-white rounded-xl border border-[#e1e3e4] shadow-sm p-6 flex flex-col gap-1">
-                {[
-                  { key: 'newBooking', label: 'Đặt vé mới', desc: 'Nhận thông báo khi có đặt vé mới.' },
-                  { key: 'cancellation', label: 'Hủy đặt vé', desc: 'Nhận thông báo khi khách hàng hủy đặt vé.' },
-                  { key: 'lowCapacity', label: 'Sắp hết chỗ', desc: 'Cảnh báo khi sức chứa còn dưới 10%.' },
-                  { key: 'weeklyReport', label: 'Báo cáo tuần', desc: 'Nhận báo cáo doanh thu vào mỗi thứ Hai hàng tuần.' },
-                ].map((n, i) => (
-                  <label key={n.key} className={`flex items-center justify-between p-4 cursor-pointer hover:bg-[#f7f8f9] rounded-lg ${i > 0 ? 'border-t border-[#f2f4f5]' : ''}`}>
-                    <div>
-                      <p className="text-sm font-medium text-[#191c1d]">{n.label}</p>
-                      <p className="text-xs text-[#6f797a] mt-0.5">{n.desc}</p>
-                    </div>
-                    <div className="relative flex-shrink-0 ml-4">
-                      <input type="checkbox" className="sr-only peer" checked={notif[n.key]} onChange={(e) => setNotif((p) => ({ ...p, [n.key]: e.target.checked }))} />
-                      <div className="w-10 h-6 bg-[#bec8ca] peer-checked:bg-[#00474d] rounded-full transition-colors" />
-                      <div className="absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transition-transform peer-checked:translate-x-4" />
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Security Tab */}
           {activeTab === 'security' && (
             <div className="max-w-2xl">
-              <div className="bg-white rounded-xl border border-[#e1e3e4] shadow-sm p-6 flex flex-col gap-5">
-                {['Mật khẩu hiện tại', 'Mật khẩu mới', 'Xác nhận mật khẩu mới'].map((l) => (
-                  <div key={l}>
-                    <label className="block text-sm font-medium text-[#191c1d] mb-1.5">{l}</label>
-                    <input type="password" className="w-full rounded-lg border border-[#bec8ca] focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] px-4 py-3 text-sm outline-none shadow-sm" placeholder="••••••••" />
-                  </div>
-                ))}
-                <button onClick={() => toast.success('Đổi mật khẩu thành công!')} className="self-start px-5 py-2.5 bg-[#00474d] text-white text-sm font-medium rounded-lg hover:bg-[#136870] transition-colors">
-                  Đổi mật khẩu
-                </button>
+              <div className="bg-white rounded-xl border border-[#e1e3e4] shadow-sm p-6">
+                <h3 className="text-base font-semibold text-[#191c1d]">Mật khẩu tài khoản</h3>
+                <p className="text-sm text-[#6f797a] mt-2 mb-5">
+                  Việc đổi mật khẩu yêu cầu xác minh mật khẩu hiện tại và được xử lý qua luồng bảo mật chung.
+                </p>
+                <Link to="/change-password" className="inline-flex px-5 py-2.5 bg-[#00474d] text-white text-sm font-medium rounded-lg hover:bg-[#136870] transition-colors">
+                  Mở trang đổi mật khẩu
+                </Link>
               </div>
             </div>
           )}

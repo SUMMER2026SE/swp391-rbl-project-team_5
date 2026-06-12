@@ -114,11 +114,14 @@ describe('getTicket / updateTicket / deleteTicket', () => {
 
   test('✅ deleteTicket xóa vé sở hữu', async () => {
     mockPrisma.ticketProduct.findUnique.mockResolvedValue(ownedTicket);
-    mockPrisma.ticketProduct.delete.mockResolvedValue({});
+    mockPrisma.ticketProduct.update.mockResolvedValue({});
     const req = { partner: PARTNER, params: { ticketId: 'tkt-001' } };
     const res = createRes();
     await deleteTicket(req, res, jest.fn());
-    expect(mockPrisma.ticketProduct.delete).toHaveBeenCalledWith({ where: { id: 'tkt-001' } });
+    expect(mockPrisma.ticketProduct.update).toHaveBeenCalledWith({
+      where: { id: 'tkt-001' },
+      data: { archivedAt: expect.any(Date), status: 'INACTIVE' },
+    });
   });
 });
 
@@ -168,7 +171,7 @@ describe('setupTimeSlots', () => {
   test('✅ Thiết lập khung giờ thành công', async () => {
     mockPrisma.ticketProduct.findUnique.mockResolvedValue({ id: 'tkt-001', attraction: { partnerId: 'partner-001' } });
     mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });
-    const tx = { timeSlot: { deleteMany: jest.fn(), createMany: jest.fn() } };
+    const tx = { timeSlot: { updateMany: jest.fn(), createMany: jest.fn() } };
     mockPrisma.$transaction.mockImplementation((cb) => cb(tx));
     const req = {
       user: { id: 'user-001' }, params: { ticketProductId: 'tkt-001' },
@@ -176,7 +179,7 @@ describe('setupTimeSlots', () => {
     };
     const res = createRes();
     await setupTimeSlots(req, res, jest.fn());
-    expect(tx.timeSlot.deleteMany).toHaveBeenCalled();
+    expect(tx.timeSlot.updateMany).toHaveBeenCalled();
     expect(tx.timeSlot.createMany).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
   });

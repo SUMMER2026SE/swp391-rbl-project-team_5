@@ -21,9 +21,7 @@ export function SocketProvider({ children }) {
   const [socket] = useState(createSocket)
 
   useEffect(() => {
-    const isDemoSession = localStorage.getItem('vietticket_demo_mode') === 'true'
-
-    if (isAuthenticated && user?.id && !isDemoSession) {
+    if (isAuthenticated && user?.id) {
       socket.connect()
     } else {
       socket.disconnect()

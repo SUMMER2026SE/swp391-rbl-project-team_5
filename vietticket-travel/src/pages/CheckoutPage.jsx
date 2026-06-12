@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
 
 const paymentMethods = [
   { id: 'vnpay', label: 'Ví VNPay', icon: 'account_balance_wallet' },
-  { id: 'onsite', label: 'Thanh toán khi đến nơi', icon: 'store' },
 ]
 
 const checkoutNavLinks = [
@@ -40,7 +39,6 @@ const formatDate = (value) => {
 
 function CheckoutPage() {
   const { reservationId } = useParams()
-  const navigate = useNavigate()
   const [booking, setBooking] = useState(null)
   const [contact, setContact] = useState({
     fullName: '',
@@ -219,13 +217,6 @@ function CheckoutPage() {
           paymentMethod: selectedPayment,
         })
         bookingId = createdBooking.id
-      }
-
-      if (selectedPayment === 'onsite') {
-        navigate(
-          `/booking-success?status=success&bookingId=${bookingId}`,
-        )
-        return
       }
 
       // VNPay: lấy URL thanh toán thật rồi chuyển hướng trình duyệt sang cổng.

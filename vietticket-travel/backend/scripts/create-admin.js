@@ -4,9 +4,15 @@ const bcrypt = require('bcrypt');
 const prisma = new PrismaClient();
 
 async function main() {
-  const email = 'admin@vietticket.com';
-  const password = 'AdminPassword123@';
-  const fullName = 'Hệ Thống Admin';
+  const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || '');
+  const fullName = String(process.env.ADMIN_FULLNAME || 'VietTicket Admin').trim();
+
+  if (!email || !password || password.length < 12) {
+    throw new Error(
+      'Cần cấu hình ADMIN_EMAIL và ADMIN_PASSWORD (ít nhất 12 ký tự).',
+    );
+  }
 
   console.log(`Đang kiểm tra tài khoản: ${email}...`);
 
@@ -52,7 +58,6 @@ async function main() {
   console.log(`====================================================`);
   console.log(`Tạo tài khoản ADMIN thành công!`);
   console.log(`Email: ${email}`);
-  console.log(`Mật khẩu: ${password}`);
   console.log(`====================================================`);
 }
 

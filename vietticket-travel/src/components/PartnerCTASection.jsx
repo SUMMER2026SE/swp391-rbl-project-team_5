@@ -9,7 +9,7 @@ const BENEFITS = [
   {
     icon: 'trending_up',
     title: 'Tăng doanh thu',
-    desc: 'Tiếp cận hàng triệu du khách đang tìm kiếm trải nghiệm tại Việt Nam.',
+    desc: 'Đưa sản phẩm đến nhóm khách đang chủ động tìm kiếm trải nghiệm tại Việt Nam.',
   },
   {
     icon: 'bar_chart',
@@ -57,7 +57,7 @@ function PartnerCTASection() {
             margin: '0 auto 52px',
           }}
         >
-          Đưa điểm tham quan của bạn đến với hàng triệu du khách. Quản lý vé,
+          Đưa điểm tham quan của bạn lên một kênh bán vé trực tuyến. Quản lý vé,
           đặt chỗ và doanh thu trên một nền tảng duy nhất — miễn phí và dễ
           dàng.
         </p>
@@ -127,13 +127,8 @@ function PartnerCTASection() {
           </span>
         </Link>
 
-        {/* Trust note */}
-        <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13, marginTop: 20 }}>
-          Đã có{' '}
-          <span style={{ color: 'rgba(255,255,255,0.8)', fontWeight: 600 }}>
-            500+
-          </span>{' '}
-          đối tác tin tưởng VietTicket
+        <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13, marginTop: 20 }}>
+          Hồ sơ đối tác và điểm tham quan được kiểm duyệt trước khi mở bán.
         </p>
       </div>
     </section>

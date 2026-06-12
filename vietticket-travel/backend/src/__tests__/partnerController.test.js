@@ -19,7 +19,11 @@ describe('registerPartner', () => {
 		mockPrisma.partnerProfile.findUnique.mockResolvedValue(null);
 		mockPrisma.partnerProfile.create.mockResolvedValue({ id: 'p-001', userId: 'user-001', businessName: 'Công ty Test', status: 'PENDING', createdAt: new Date() });
 
-		const { req, res, next } = mockReqRes({ businessName: 'Công ty Test', taxCode: '0123456789' });
+		const { req, res, next } = mockReqRes({
+			businessName: 'Công ty Test',
+			taxCode: '0123456789',
+			businessLicenseUrl: 'http://localhost/api/upload/documents/user-001-license.pdf',
+		});
 		await registerPartner(req, res, next);
 
 		expect(res.status).toHaveBeenCalledWith(201);
@@ -28,7 +32,10 @@ describe('registerPartner', () => {
 
 	test('❌ Trả 409 nếu đã có partner profile', async () => {
 		mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-existing' });
-		const { req, res, next } = mockReqRes({ businessName: 'Test' });
+		const { req, res, next } = mockReqRes({
+			businessName: 'Test',
+			businessLicenseUrl: 'http://localhost/api/upload/documents/user-001-license.pdf',
+		});
 		await registerPartner(req, res, next);
 		expect(res.status).toHaveBeenCalledWith(409);
 	});

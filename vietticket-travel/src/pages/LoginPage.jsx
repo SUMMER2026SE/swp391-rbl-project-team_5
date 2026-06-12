@@ -8,7 +8,7 @@ import GoogleButton from '../components/auth/GoogleButton.jsx'
 import PasswordInput from '../components/auth/PasswordInput.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { validateEmail, validatePassword } from '../utils/formValidators.js'
-import loginVisual from '../assets/sapa.png'
+import loginVisual from '../assets/sapa.webp'
 
 function getSafeRedirect(loggedInUser, redirectFrom) {
   const defaultForRole =
@@ -46,7 +46,7 @@ function getSafeRedirect(loggedInUser, redirectFrom) {
 function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { isAuthenticated, isAuthLoading, login, loginWithGoogle, demoLogin, user } = useAuth()
+  const { isAuthenticated, isAuthLoading, login, loginWithGoogle, user } = useAuth()
   const redirectFrom = location.state?.from
   const safeRedirectTo = useMemo(() => {
     return getSafeRedirect(user, redirectFrom)
@@ -101,14 +101,6 @@ function LoginPage() {
     const result = await login(form)
     setIsSubmitting(false)
 
-    // Network error (backend chưa chạy) — dùng demo fallback
-    if (!result.status) {
-      demoLogin({ fullName: form.email.split('@')[0], email: form.email })
-      toast.info('Chạy ở chế độ demo (không có server). Đăng nhập thành công!')
-      navigate(safeRedirectTo || '/', { replace: true })
-      return
-    }
-
     if (!result.ok) {
       if (result.code === 'EMAIL_NOT_VERIFIED') {
         toast.error(
@@ -152,7 +144,7 @@ function LoginPage() {
   return (
     <AuthLayout
       visualTitle="Việt Nam đang chờ tấm vé tiếp theo của bạn."
-      visualDescription="Truy cập đặt chỗ, điểm tham quan đã lưu, vé QR và ưu đãi du lịch độc quyền trong một không gian an toàn."
+      visualDescription="Truy cập đặt chỗ, điểm tham quan đã lưu, vé QR và thông tin hỗ trợ trong một không gian an toàn."
       visualImage={loginVisual}
       visualAlt="Ruộng bậc thang Sa Pa trong sương sớm rực rỡ sắc màu"
     >

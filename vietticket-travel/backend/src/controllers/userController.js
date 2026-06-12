@@ -126,10 +126,11 @@ async function uploadAvatar(req, res, next) {
     const oldAvatarUrl = existingUser?.profile?.avatarUrl;
     if (oldAvatarUrl) {
       try {
-        const uploadsDir = require('path').join(__dirname, '../../uploads');
-        const oldFilename = oldAvatarUrl.split('/uploads/').pop();
-        if (oldFilename) {
-          const oldPath = require('path').join(uploadsDir, oldFilename);
+        const path = require('path');
+        const uploadsDir = path.join(__dirname, '../../public/uploads');
+        const oldFilename = path.basename(oldAvatarUrl.split('/uploads/').pop() || '');
+        if (oldFilename && oldAvatarUrl.includes('/uploads/')) {
+          const oldPath = path.join(uploadsDir, oldFilename);
           require('fs').unlink(oldPath, () => {});
         }
       } catch {

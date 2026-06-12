@@ -4,7 +4,12 @@ const prisma = require('../config/prisma');
 const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
 const generateToken = require('../utils/generateToken');
 const { sendPasswordResetEmail, sendVerificationEmail } = require('../utils/mailer');
-const { addMinutes, createRandomToken, isExpired } = require('../utils/tokenUtils');
+const {
+  addMinutes,
+  createRandomToken,
+  hashToken,
+  isExpired,
+} = require('../utils/tokenUtils');
 const {
   isValidAvatarUrl,
   isValidEmail,
@@ -59,7 +64,7 @@ async function createVerificationToken(tx, userId) {
   await tx.emailVerificationToken.create({
     data: {
       userId,
-      token: verificationToken,
+      token: hashToken(verificationToken),
       expiresAt: addMinutes(TOKEN_EXPIRY_MINUTES),
     },
   });
@@ -187,7 +192,7 @@ async function verifyEmail(req, res, next) {
     }
 
     const verificationToken = await prisma.emailVerificationToken.findUnique({
-      where: { token },
+      where: { token: hashToken(token) },
       include: { user: true },
     });
 
@@ -312,35 +317,13 @@ async function verifyGoogleCredential(credential) {
   }
 }
 
-function getDevelopmentGooglePayload(req) {
-  if (process.env.NODE_ENV !== 'development') {
-    return null;
-  }
-
-  const email = normalizeEmail(req.body.email);
-
-  if (!email) {
-    return null;
-  }
-
-  return {
-    email,
-    fullName: String(req.body.fullName || 'Google User').trim() || 'Google User',
-    avatarUrl: req.body.avatarUrl ? String(req.body.avatarUrl).trim() : null,
-    providerAccountId: email,
-  };
-}
-
 async function googleLogin(req, res, next) {
   try {
     const credential = String(req.body.credential || '').trim();
-    const googlePayload = credential
-      ? await verifyGoogleCredential(credential)
-      : getDevelopmentGooglePayload(req);
-
-    if (!googlePayload) {
+    if (!credential) {
       return res.status(400).json({ message: 'Thiếu Google credential hợp lệ.' });
     }
+    const googlePayload = await verifyGoogleCredential(credential);
 
     if (!isValidEmail(googlePayload.email)) {
       return res.status(400).json({ message: 'Email Google không hợp lệ.' });
@@ -447,7 +430,7 @@ async function forgotPassword(req, res, next) {
         await tx.passwordResetToken.create({
           data: {
             userId: user.id,
-            token: resetToken,
+            token: hashToken(resetToken),
             expiresAt: addMinutes(TOKEN_EXPIRY_MINUTES),
           },
         });
@@ -478,7 +461,7 @@ async function resetPassword(req, res, next) {
     }
 
     const resetToken = await prisma.passwordResetToken.findUnique({
-      where: { token },
+      where: { token: hashToken(token) },
     });
 
     if (!resetToken) {

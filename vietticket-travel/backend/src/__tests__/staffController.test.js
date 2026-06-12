@@ -57,6 +57,7 @@ function refundFixture(overrides = {}) {
         quantity: 1,
         status: 'CONFIRMED',
         ticketProduct: {
+          attractionId: 'attraction-1',
           refundPolicy: 'REFUND_WITH_FEE',
           refundFeeRate: 0.1,
         },
@@ -68,6 +69,7 @@ function refundFixture(overrides = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  prisma.refundRequest.updateMany.mockResolvedValue({ count: 1 });
 });
 
 describe('listRefundRequests', () => {
@@ -86,13 +88,14 @@ describe('processRefundRequest', () => {
     const request = refundFixture();
     const tx = {
       refundRequest: {
-        findUnique: jest.fn().mockResolvedValue(request),
+        findUnique: jest.fn().mockResolvedValue({ ...request, status: 'PROCESSING' }),
         update: jest.fn().mockResolvedValue({
           ...request,
           status: 'APPROVED',
         }),
       },
       dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       timeSlotStock: { updateMany: jest.fn() },
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -142,6 +145,21 @@ describe('processRefundRequest', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  test('only one staff request can claim a pending refund', async () => {
+    prisma.refundRequest.findUnique.mockResolvedValue(refundFixture());
+    prisma.refundRequest.updateMany.mockResolvedValueOnce({ count: 0 });
+    const { req, res, next } = makeReqRes({
+      params: { refundId: 'refund-1' },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(refundViaVnpay).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test('calls VNPay refund for an online payment before updating the DB', async () => {
     const request = refundFixture({
       booking: {
@@ -157,10 +175,11 @@ describe('processRefundRequest', () => {
     });
     const tx = {
       refundRequest: {
-        findUnique: jest.fn().mockResolvedValue(request),
+        findUnique: jest.fn().mockResolvedValue({ ...request, status: 'PROCESSING' }),
         update: jest.fn().mockResolvedValue({ ...request, status: 'APPROVED' }),
       },
       dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       timeSlotStock: { updateMany: jest.fn() },
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },

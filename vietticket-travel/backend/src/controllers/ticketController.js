@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { Prisma } = require('@prisma/client');
 const {
   ticketStatusFromClient,
   refundPolicyFromClient,
@@ -7,6 +8,12 @@ const {
 const { validateTicket } = require('../utils/partnerValidators');
 const { findOwnedAttraction } = require('./attractionController');
 const { todayInVietnam } = require('../utils/refundService');
+const {
+  getBookableSchedule,
+  getProductCapacity,
+  getSlotCapacity,
+} = require('../services/availabilityService');
+const { refreshAttractionMinPrice } = require('../services/catalogService');
 
 // Tìm vé và xác minh thuộc về đối tác hiện tại (qua điểm tham quan)
 async function findOwnedTicket(ticketId, partnerId) {
@@ -15,7 +22,7 @@ async function findOwnedTicket(ticketId, partnerId) {
     include: { attraction: { select: { partnerId: true } } },
   });
 
-  if (!ticket || ticket.attraction.partnerId !== partnerId) {
+  if (!ticket || ticket.archivedAt || ticket.attraction.partnerId !== partnerId) {
     return null;
   }
 
@@ -43,7 +50,7 @@ async function listTickets(req, res, next) {
     }
 
     const tickets = await prisma.ticketProduct.findMany({
-      where: { attractionId: attraction.id },
+      where: { attractionId: attraction.id, archivedAt: null },
       orderBy: { createdAt: 'asc' },
     });
 
@@ -78,6 +85,7 @@ async function createTicket(req, res, next) {
     const ticket = await prisma.ticketProduct.create({
       data: { ...data, attractionId: attraction.id },
     });
+    await refreshAttractionMinPrice(prisma, attraction.id);
 
     return res.status(201).json({
       message: 'Tạo gói vé thành công.',
@@ -129,6 +137,7 @@ async function updateTicket(req, res, next) {
       where: { id: existing.id },
       data: buildTicketData(req.body),
     });
+    await refreshAttractionMinPrice(prisma, existing.attractionId);
 
     return res.json({
       message: 'Cập nhật gói vé thành công.',
@@ -147,9 +156,13 @@ async function deleteTicket(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
     }
 
-    await prisma.ticketProduct.delete({ where: { id: existing.id } });
+    await prisma.ticketProduct.update({
+      where: { id: existing.id },
+      data: { archivedAt: new Date(), status: 'INACTIVE' },
+    });
+    await refreshAttractionMinPrice(prisma, existing.attractionId);
 
-    return res.json({ message: 'Đã xóa gói vé.' });
+    return res.json({ message: 'Đã lưu trữ gói vé. Lịch sử đặt vé được giữ nguyên.' });
   } catch (error) {
     next(error);
   }
@@ -206,6 +219,7 @@ async function createTicketProduct(req, res, next) {
         status: 'ACTIVE',
       },
     });
+    await refreshAttractionMinPrice(prisma, attractionId);
 
     return res.status(201).json({ success: true, data: { id: product.id, name: product.name, status: product.status } });
   } catch (error) {
@@ -221,7 +235,7 @@ async function setupTimeSlots(req, res, next) {
 
     const ticketProductId = req.params.ticketProductId;
     const product = await prisma.ticketProduct.findUnique({ where: { id: ticketProductId }, include: { attraction: true } });
-    if (!product) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Ticket product not found' } });
+    if (!product || product.archivedAt) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Ticket product not found' } });
 
     const partner = await prisma.partnerProfile.findUnique({ where: { userId } });
     if (!partner || partner.id !== product.attraction.partnerId) {
@@ -239,7 +253,10 @@ async function setupTimeSlots(req, res, next) {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.timeSlot.deleteMany({ where: { ticketProductId } });
+      await tx.timeSlot.updateMany({
+        where: { ticketProductId, isActive: true },
+        data: { isActive: false },
+      });
       const createData = slots.map((s) => ({ ticketProductId, startTime: s.startTime, endTime: s.endTime, maxCapacity: Number(s.maxCapacity), isActive: s.isActive !== false }));
       await tx.timeSlot.createMany({ data: createData });
     });
@@ -258,21 +275,111 @@ async function checkAvailability(req, res, next) {
     const date = parseDateString(dateStr);
     if (!date) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid date format (YYYY-MM-DD)' } });
 
-    const timeSlots = await prisma.timeSlot.findMany({ where: { ticketProductId, isActive: true } });
-
-    const results = [];
-    for (const slot of timeSlots) {
-      const stock = await prisma.timeSlotStock.findUnique({ where: { timeSlotId_date: { timeSlotId: slot.id, date } } });
-      const booked = (stock && stock.bookedQty) || 0;
-      const held = (stock && stock.heldQty) || 0;
-      const available = Math.max(0, slot.maxCapacity - booked - held);
-      results.push({ timeSlotId: slot.id, startTime: slot.startTime, endTime: slot.endTime, maxCapacity: slot.maxCapacity, availableTickets: available });
+    const schedule = await getBookableSchedule(prisma, ticketProductId, date);
+    if (schedule.isClosed) {
+      return res.status(200).json({
+        success: true,
+        data: [],
+        meta: { closed: true, reason: 'Địa điểm đóng cửa trong ngày đã chọn.' },
+      });
     }
 
-    return res.status(200).json({ success: true, data: results });
+    const [dailyStock, attractionStock, slotStocks] = await Promise.all([
+      prisma.dailyStock.findUnique({
+        where: { ticketProductId_date: { ticketProductId, date } },
+      }),
+      prisma.attractionDailyStock.findUnique({
+        where: {
+          attractionId_date: { attractionId: schedule.attraction.id, date },
+        },
+      }),
+      schedule.slots.length > 0
+        ? prisma.timeSlotStock.findMany({
+            where: { timeSlotId: { in: schedule.slots.map((slot) => slot.id) }, date },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const productAvailable = Math.max(
+      0,
+      Number(dailyStock?.capacity ?? getProductCapacity(schedule))
+        - Number(dailyStock?.bookedQuantity || 0)
+        - Number(dailyStock?.heldQuantity || 0),
+    );
+    const attractionAvailable = Math.max(
+      0,
+      Number(attractionStock?.capacity ?? schedule.dayCapacity)
+        - Number(attractionStock?.bookedQty || 0)
+        - Number(attractionStock?.heldQty || 0),
+    );
+    const stockBySlot = new Map(slotStocks.map((stock) => [stock.timeSlotId, stock]));
+
+    const results = schedule.slots.length > 0
+      ? schedule.slots.map((slot) => {
+          const stock = stockBySlot.get(slot.id);
+          const slotAvailable = Math.max(
+            0,
+            getSlotCapacity(schedule, slot)
+              - Number(stock?.bookedQty || 0)
+              - Number(stock?.heldQty || 0),
+          );
+          return {
+            id: slot.id,
+            timeSlotId: slot.id,
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            maxCapacity: getSlotCapacity(schedule, slot),
+            availableTickets: Math.min(
+              slotAvailable,
+              productAvailable,
+              attractionAvailable,
+            ),
+          };
+        })
+      : [{
+          id: 'all-day',
+          timeSlotId: null,
+          startTime: schedule.attraction.openTime || null,
+          endTime: schedule.attraction.closeTime || null,
+          label: 'Vé sử dụng trong ngày',
+          maxCapacity: Math.min(getProductCapacity(schedule), schedule.dayCapacity),
+          availableTickets: Math.min(productAvailable, attractionAvailable),
+        }];
+
+    return res.status(200).json({
+      success: true,
+      data: results,
+      meta: {
+        closed: false,
+        slotSource: schedule.slotSource,
+        dayCapacity: schedule.dayCapacity,
+      },
+    });
   } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: error.message },
+      });
+    }
     return next(error);
   }
+}
+
+async function runSerializable(work, maxAttempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await prisma.$transaction(work, {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      });
+    } catch (error) {
+      lastError = error;
+      const retryable = error.code === 'P2034' || error.code === 'P2002';
+      if (!retryable || attempt === maxAttempts) throw error;
+    }
+  }
+  throw lastError;
 }
 
 // POST /api/tickets/:ticketProductId/reserve — đặt chỗ (MPhu)
@@ -309,66 +416,115 @@ async function reserveTickets(req, res, next) {
 
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    const result = await prisma.$transaction(async (tx) => {
-      const product = await tx.ticketProduct.findUnique({ where: { id: ticketProductId } });
-      if (!product || product.status !== 'ACTIVE') {
-        const err = new Error('Ticket product not available');
-        err.statusCode = 404;
-        throw err;
-      }
-
-      // compute capacity
-      let totalCapacity;
-      if (timeSlotId) {
-        const slot = await tx.timeSlot.findUnique({ where: { id: timeSlotId } });
-        if (!slot || slot.ticketProductId !== ticketProductId) {
-          const err = new Error('Time slot not found');
-          err.statusCode = 404;
-          throw err;
-        }
-        totalCapacity = slot.maxCapacity;
-      } else {
-        const slots = await tx.timeSlot.findMany({ where: { ticketProductId, isActive: true } });
-        totalCapacity = slots.reduce((s, t) => s + (t.maxCapacity || 0), 0);
-      }
-
-      // find or create daily stock
-      const dailyWhere = { ticketProductId_date: { ticketProductId, date } };
-      let daily = await tx.dailyStock.findUnique({ where: dailyWhere });
-      if (!daily) {
-        daily = await tx.dailyStock.create({ data: { ticketProductId, date, capacity: totalCapacity, bookedQuantity: 0, heldQuantity: 0 } });
-      }
-
-      const availableDaily = daily.capacity - daily.bookedQuantity - daily.heldQuantity;
-      if (availableDaily < quantity) {
-        const err = new Error(`Không đủ vé. Còn lại: ${availableDaily} vé`);
+    const result = await runSerializable(async (tx) => {
+      const schedule = await getBookableSchedule(tx, ticketProductId, date);
+      if (schedule.isClosed) {
+        const err = new Error('Địa điểm đóng cửa trong ngày đã chọn.');
         err.statusCode = 409;
         throw err;
       }
 
-      // if timeSlot provided, check time slot stock
+      let selectedSlot = null;
       if (timeSlotId) {
-        const tslotWhere = { timeSlotId_date: { timeSlotId, date } };
-        let tstock = await tx.timeSlotStock.findUnique({ where: tslotWhere });
-        if (!tstock) {
-          tstock = await tx.timeSlotStock.create({ data: { timeSlotId, date, bookedQty: 0, heldQty: 0 } });
+        selectedSlot = schedule.slots.find((slot) => slot.id === timeSlotId) || null;
+        if (!selectedSlot) {
+          const err = new Error('Khung giờ không thuộc gói vé hoặc đã ngừng hoạt động.');
+          err.statusCode = 404;
+          throw err;
         }
-        const availableSlot = (await tx.timeSlot.findUnique({ where: { id: timeSlotId } })).maxCapacity - tstock.bookedQty - tstock.heldQty;
+      } else if (schedule.slots.length > 0) {
+        const err = new Error('Vui lòng chọn khung giờ tham quan.');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const productCapacity = getProductCapacity(schedule);
+      const dailyWhere = { ticketProductId_date: { ticketProductId, date } };
+      let daily = await tx.dailyStock.findUnique({ where: dailyWhere });
+      if (!daily) {
+        daily = await tx.dailyStock.create({
+          data: {
+            ticketProductId,
+            date,
+            capacity: productCapacity,
+            bookedQuantity: 0,
+            heldQuantity: 0,
+          },
+        });
+      }
+
+      const attractionWhere = {
+        attractionId_date: { attractionId: schedule.attraction.id, date },
+      };
+      let attractionStock = await tx.attractionDailyStock.findUnique({
+        where: attractionWhere,
+      });
+      if (!attractionStock) {
+        attractionStock = await tx.attractionDailyStock.create({
+          data: {
+            attractionId: schedule.attraction.id,
+            date,
+            capacity: schedule.dayCapacity,
+          },
+        });
+      }
+
+      const availableDaily = daily.capacity - daily.bookedQuantity - daily.heldQuantity;
+      const availableAttraction =
+        attractionStock.capacity - attractionStock.bookedQty - attractionStock.heldQty;
+      const availableForDay = Math.min(availableDaily, availableAttraction);
+      if (availableForDay < quantity) {
+        const err = new Error(`Không đủ vé. Còn lại: ${Math.max(0, availableForDay)} vé`);
+        err.statusCode = 409;
+        throw err;
+      }
+
+      let tstock = null;
+      if (selectedSlot) {
+        const tslotWhere = { timeSlotId_date: { timeSlotId, date } };
+        tstock = await tx.timeSlotStock.findUnique({ where: tslotWhere });
+        if (!tstock) {
+          tstock = await tx.timeSlotStock.create({
+            data: { timeSlotId, date, bookedQty: 0, heldQty: 0 },
+          });
+        }
+        const availableSlot =
+          getSlotCapacity(schedule, selectedSlot) - tstock.bookedQty - tstock.heldQty;
         if (availableSlot < quantity) {
-          const err = new Error(`Không đủ vé ở khung giờ này. Còn lại: ${availableSlot} vé`);
+          const err = new Error(
+            `Không đủ vé ở khung giờ này. Còn lại: ${Math.max(0, availableSlot)} vé`,
+          );
           err.statusCode = 409;
           throw err;
         }
-
-        // increment held counts
-        await tx.dailyStock.update({ where: { id: daily.id }, data: { heldQuantity: { increment: quantity } } });
-        await tx.timeSlotStock.update({ where: { id: tstock.id }, data: { heldQty: { increment: quantity } } });
-      } else {
-        // increment only daily held
-        await tx.dailyStock.update({ where: { id: daily.id }, data: { heldQuantity: { increment: quantity } } });
       }
 
-      const reservation = await tx.reservation.create({ data: { userId, ticketProductId, timeSlotId: timeSlotId || null, date, quantity, status: 'HELD', expiresAt } });
+      await tx.dailyStock.update({
+        where: { id: daily.id },
+        data: { heldQuantity: { increment: quantity } },
+      });
+      await tx.attractionDailyStock.update({
+        where: { id: attractionStock.id },
+        data: { heldQty: { increment: quantity } },
+      });
+      if (tstock) {
+        await tx.timeSlotStock.update({
+          where: { id: tstock.id },
+          data: { heldQty: { increment: quantity } },
+        });
+      }
+
+      const reservation = await tx.reservation.create({
+        data: {
+          userId,
+          ticketProductId,
+          timeSlotId: selectedSlot?.id || null,
+          date,
+          quantity,
+          status: 'HELD',
+          expiresAt,
+        },
+      });
 
       return { reservationId: reservation.id, ticketProductId, quantity, expiresAt };
     });
@@ -376,6 +532,7 @@ async function reserveTickets(req, res, next) {
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
     if (error.statusCode === 404) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: error.message } });
+    if (error.statusCode === 400) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: error.message } });
     if (error.statusCode === 409) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: error.message } });
     return next(error);
   }

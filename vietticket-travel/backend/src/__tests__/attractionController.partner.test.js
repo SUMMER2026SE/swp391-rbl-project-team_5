@@ -7,6 +7,8 @@ const {
   updateAttraction,
   deleteAttraction,
   uploadImages,
+  deleteImage,
+  setPrimaryImage,
   listCategories,
   submitAttraction,
 } = require('../controllers/attractionController');
@@ -183,11 +185,14 @@ describe('updateAttraction', () => {
 describe('deleteAttraction', () => {
   test('✅ Xóa khi sở hữu', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', partnerId: 'partner-001' });
-    mockPrisma.attraction.delete.mockResolvedValue({});
+    mockPrisma.attraction.update.mockResolvedValue({});
     const req = { partner: PARTNER, params: { id: 'attr-001' } };
     const res = createRes();
     await deleteAttraction(req, res, jest.fn());
-    expect(mockPrisma.attraction.delete).toHaveBeenCalledWith({ where: { id: 'attr-001' } });
+    expect(mockPrisma.attraction.update).toHaveBeenCalledWith({
+      where: { id: 'attr-001' },
+      data: { archivedAt: expect.any(Date), status: 'SUSPENDED' },
+    });
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: expect.any(String) }));
   });
 
@@ -225,6 +230,87 @@ describe('uploadImages', () => {
     await uploadImages(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ images: expect.any(Array) }));
+  });
+});
+
+describe('manage attraction images', () => {
+  test('✅ Xóa ảnh primary và chuyển primary sang ảnh còn lại', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      images: [
+        { id: 'img-1', isPrimary: true },
+        { id: 'img-2', isPrimary: false },
+      ],
+    });
+    const tx = {
+      attractionImage: {
+        delete: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const req = {
+      partner: PARTNER,
+      params: { id: 'attr-001', imageId: 'img-1' },
+    };
+    const res = createRes();
+    await deleteImage(req, res, jest.fn());
+
+    expect(tx.attractionImage.delete).toHaveBeenCalledWith({ where: { id: 'img-1' } });
+    expect(tx.attractionImage.update).toHaveBeenCalledWith({
+      where: { id: 'img-2' },
+      data: { isPrimary: true },
+    });
+    expect(res.json).toHaveBeenCalledWith({ message: 'Đã xóa ảnh.' });
+  });
+
+  test('✅ Đặt ảnh đại diện trong một transaction', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      images: [{ id: 'img-2', isPrimary: false }],
+    });
+    const tx = {
+      attractionImage: {
+        updateMany: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const req = {
+      partner: PARTNER,
+      params: { id: 'attr-001', imageId: 'img-2' },
+    };
+    const res = createRes();
+    await setPrimaryImage(req, res, jest.fn());
+
+    expect(tx.attractionImage.updateMany).toHaveBeenCalledWith({
+      where: { attractionId: 'attr-001', isPrimary: true },
+      data: { isPrimary: false },
+    });
+    expect(tx.attractionImage.update).toHaveBeenCalledWith({
+      where: { id: 'img-2' },
+      data: { isPrimary: true },
+    });
+    expect(res.json).toHaveBeenCalledWith({ message: 'Đã cập nhật ảnh đại diện.' });
+  });
+
+  test('❌ Không cho thao tác ảnh không thuộc địa điểm', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      images: [],
+    });
+    const res = createRes();
+    await deleteImage(
+      { partner: PARTNER, params: { id: 'attr-001', imageId: 'unknown' } },
+      res,
+      jest.fn(),
+    );
+    expect(res.status).toHaveBeenCalledWith(404);
   });
 });
 

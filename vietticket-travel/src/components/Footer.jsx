@@ -1,6 +1,7 @@
-import { appDownloadButtons, footerLinks } from '../data/landingData.js'
+import { Link } from 'react-router-dom'
+import { footerLinks } from '../data/landingData.js'
 
-function Footer({ links = footerLinks, appButtons = appDownloadButtons }) {
+function Footer({ links = footerLinks }) {
   return (
     <footer className="site-footer" id="support">
       <div className="container footer-grid">
@@ -18,20 +19,11 @@ function Footer({ links = footerLinks, appButtons = appDownloadButtons }) {
         <FooterLinkGroup title="Hỗ trợ" links={links.support} />
 
         <div className="footer-downloads">
-          <h2>Tải ứng dụng</h2>
-          <div className="download-buttons">
-            {appButtons.map((button) => (
-              <button className="download-button" type="button" key={button.label}>
-                <span className="material-symbols-outlined" aria-hidden="true">
-                  {button.icon}
-                </span>
-                <span>
-                  <small>{button.eyebrow}</small>
-                  {button.label}
-                </span>
-              </button>
-            ))}
-          </div>
+          <h2>Đặt vé trực tuyến</h2>
+          <p>Tìm điểm tham quan, thanh toán an toàn và quản lý vé QR ngay trên website.</p>
+          <Link className="button button--secondary" to="/attractions">
+            Khám phá điểm đến
+          </Link>
         </div>
       </div>
 
@@ -49,7 +41,11 @@ function FooterLinkGroup({ title, links }) {
       <ul>
         {links.map((link) => (
           <li key={link.label}>
-            <a href={link.href}>{link.label}</a>
+            {link.external ? (
+              <a href={link.href}>{link.label}</a>
+            ) : (
+              <Link to={link.href}>{link.label}</Link>
+            )}
           </li>
         ))}
       </ul>

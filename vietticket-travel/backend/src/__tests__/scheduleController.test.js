@@ -50,7 +50,7 @@ describe('saveSchedule', () => {
     setupOwned();
     const tx = {
       attraction: { update: jest.fn() },
-      timeSlot: { deleteMany: jest.fn(), createMany: jest.fn() },
+      timeSlot: { updateMany: jest.fn(), createMany: jest.fn() },
       specialDate: { deleteMany: jest.fn(), createMany: jest.fn() },
     };
     mockPrisma.$transaction.mockImplementation((cb) => cb(tx));

@@ -77,6 +77,7 @@ describe('releaseInventory', () => {
   test('returns daily and time-slot stock for a confirmed reservation', async () => {
     const tx = {
       dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       reservation: { update: jest.fn().mockResolvedValue({}) },
     };
@@ -88,6 +89,7 @@ describe('releaseInventory', () => {
         date: new Date('2026-06-10T00:00:00.000Z'),
         quantity: 2,
         status: 'CONFIRMED',
+        ticketProduct: { attractionId: 'attraction-1' },
       },
     };
 
@@ -112,6 +114,7 @@ describe('releaseInventory', () => {
   test('does not change stock for a reservation that is not confirmed', async () => {
     const tx = {
       dailyStock: { updateMany: jest.fn() },
+      attractionDailyStock: { updateMany: jest.fn() },
       timeSlotStock: { updateMany: jest.fn() },
       reservation: { update: jest.fn() },
     };

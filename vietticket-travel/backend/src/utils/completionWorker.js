@@ -10,31 +10,63 @@ function startOfTodayVn(now = new Date()) {
   return new Date(`${todayInVietnam(now)}T00:00:00.000Z`);
 }
 
-// Quét các Booking CONFIRMED đã qua ngày tham quan -> chuyển sang COMPLETED.
+// Chỉ đơn đã check-in toàn bộ vé mới được COMPLETED. Đơn đã qua ngày nhưng
+// không sử dụng được đánh dấu NO_SHOW để không mở quyền đánh giá sai.
 // Tách riêng khỏi timer để test được. Trả về số đơn đã hoàn tất.
 async function sweepCompletedBookings({ now = new Date() } = {}) {
   const cutoff = startOfTodayVn(now);
 
   // updateMany không lọc được theo quan hệ -> tìm id trước rồi cập nhật hàng loạt.
-  const due = await prisma.booking.findMany({
+  const completed = await prisma.booking.findMany({
     where: {
       status: 'CONFIRMED',
       reservation: { date: { lt: cutoff } },
+      ticketInstances: {
+        some: { status: 'USED' },
+        every: { status: 'USED' },
+      },
     },
     select: { id: true },
   });
 
-  if (due.length === 0) return 0;
-
-  const result = await prisma.booking.updateMany({
-    where: { id: { in: due.map((b) => b.id) }, status: 'CONFIRMED' },
-    data: { status: 'COMPLETED' },
+  const noShows = await prisma.booking.findMany({
+    where: {
+      status: 'CONFIRMED',
+      reservation: { date: { lt: cutoff } },
+      NOT: {
+        ticketInstances: {
+          some: { status: 'USED' },
+          every: { status: 'USED' },
+        },
+      },
+    },
+    select: { id: true },
   });
 
-  if (result.count > 0) {
-    console.log(`[completion] Đã chuyển ${result.count} đơn sang COMPLETED.`);
+  const [completedResult, noShowResult] = await prisma.$transaction([
+    prisma.booking.updateMany({
+      where: { id: { in: completed.map((booking) => booking.id) }, status: 'CONFIRMED' },
+      data: { status: 'COMPLETED' },
+    }),
+    prisma.booking.updateMany({
+      where: { id: { in: noShows.map((booking) => booking.id) }, status: 'CONFIRMED' },
+      data: { status: 'NO_SHOW' },
+    }),
+    prisma.ticketInstance.updateMany({
+      where: {
+        bookingId: { in: noShows.map((booking) => booking.id) },
+        status: 'VALID',
+      },
+      data: { status: 'EXPIRED' },
+    }),
+  ]);
+
+  if (completedResult.count > 0 || noShowResult.count > 0) {
+    console.log(
+      `[completion] COMPLETED=${completedResult.count}, NO_SHOW=${noShowResult.count}.`,
+    );
   }
-  return result.count;
+  return completedResult.count;
 }
 
 // Khởi động vòng lặp định kỳ. Có cờ isRunning chống chạy chồng.

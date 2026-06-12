@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
-import heroImage from '../assets/halong_bay.png'
+import heroImage from '../assets/halong_bay.webp'
 import {
   validateEmail,
   validateFullName,
@@ -27,7 +27,7 @@ const strengthBarConfig = {
 
 function PartnerRegisterPage() {
   const navigate = useNavigate()
-  const { isAuthenticated, isAuthLoading, register, demoLogin } = useAuth()
+  const { isAuthenticated, isAuthLoading, register } = useAuth()
 
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -107,13 +107,6 @@ function PartnerRegisterPage() {
     setIsSubmitting(false)
 
     if (!result.ok) {
-      // Demo fallback: khi không có backend, tự inject session và đi tiếp luồng
-      if (!result.status) {
-        demoLogin({ fullName: form.fullName, email: form.email })
-        toast.info('Chạy ở chế độ demo (không có server). Tiếp tục luồng đăng ký.')
-        navigate('/partner/kyc')
-        return
-      }
       toast.error(result.message || 'Không thể tạo tài khoản đối tác.')
       return
     }
@@ -155,7 +148,7 @@ function PartnerRegisterPage() {
               Gia nhập mạng lưới đối tác toàn cầu
             </h1>
             <p className="text-lg text-white/90 leading-7">
-              Kết nối doanh nghiệp của bạn với hàng triệu du khách. Quản lý,
+              Kết nối doanh nghiệp của bạn với khách hàng đang tìm vé tham quan. Quản lý,
               bán vé và phát triển kinh doanh một cách dễ dàng.
             </p>
           </div>

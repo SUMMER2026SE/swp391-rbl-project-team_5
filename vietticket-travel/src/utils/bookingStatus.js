@@ -22,6 +22,10 @@ const BOOKING_STATUS_META = {
     label: 'Đã hoàn thành',
     className: 'bg-primary-fixed-dim/30 text-primary',
   },
+  no_show: {
+    label: 'Không đến sử dụng',
+    className: 'bg-surface-container-high text-on-surface-variant',
+  },
   cancelled: {
     label: 'Đã hủy',
     className: 'bg-error-container/50 text-error',
@@ -62,6 +66,7 @@ export function getBookingStatusMeta(status) {
 // Nhãn trạng thái yêu cầu hoàn tiền (RefundRequest.status).
 export const REFUND_STATUS_META = {
   PENDING: { label: 'Chờ duyệt hoàn tiền', className: 'bg-secondary-fixed/40 text-on-secondary-fixed' },
+  PROCESSING: { label: 'Đang xử lý hoàn tiền', className: 'bg-tertiary-fixed text-on-tertiary-fixed-variant' },
   APPROVED: { label: 'Đã hoàn tiền', className: 'bg-primary-fixed-dim/30 text-primary' },
   REJECTED: { label: 'Từ chối hoàn tiền', className: 'bg-error-container/50 text-error' },
 }

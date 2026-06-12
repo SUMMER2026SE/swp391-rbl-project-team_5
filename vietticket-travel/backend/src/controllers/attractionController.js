@@ -28,7 +28,7 @@ async function findOwnedAttraction(attractionId, partnerId, include = attraction
     include,
   });
 
-  if (!attraction || attraction.partnerId !== partnerId) {
+  if (!attraction || attraction.archivedAt || attraction.partnerId !== partnerId) {
     return null;
   }
 
@@ -59,7 +59,7 @@ async function listAttractions(req, res, next) {
     const limit = Math.min(parsePositiveInt(req.query.limit, DEFAULT_LIMIT), MAX_LIMIT);
     const skip = (page - 1) * limit;
 
-    const where = { partnerId: req.partner.id };
+    const where = { partnerId: req.partner.id, archivedAt: null };
 
     const search = String(req.query.search || '').trim();
     if (search) {
@@ -249,10 +249,14 @@ async function deleteAttraction(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
 
-    // onDelete: Cascade trong schema sẽ tự xóa vé, ảnh, khung giờ liên quan
-    await prisma.attraction.delete({ where: { id: existing.id } });
+    await prisma.attraction.update({
+      where: { id: existing.id },
+      data: { archivedAt: new Date(), status: 'SUSPENDED' },
+    });
 
-    return res.json({ message: 'Đã xóa điểm tham quan.' });
+    return res.json({
+      message: 'Đã lưu trữ điểm tham quan. Lịch sử đặt vé và thanh toán được giữ nguyên.',
+    });
   } catch (error) {
     next(error);
   }
@@ -294,10 +298,83 @@ async function uploadImages(req, res, next) {
   }
 }
 
+// DELETE /api/partners/attractions/:id/images/:imageId
+async function deleteImage(req, res, next) {
+  try {
+    const attraction = await findOwnedAttraction(
+      req.params.id,
+      req.partner.id,
+      { images: { orderBy: { createdAt: 'asc' } } },
+    );
+    if (!attraction) {
+      return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
+    }
+
+    const image = attraction.images.find((item) => item.id === req.params.imageId);
+    if (!image) {
+      return res.status(404).json({ message: 'Không tìm thấy ảnh.' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.attractionImage.delete({ where: { id: image.id } });
+      if (image.isPrimary) {
+        const replacement = attraction.images.find((item) => item.id !== image.id);
+        if (replacement) {
+          await tx.attractionImage.update({
+            where: { id: replacement.id },
+            data: { isPrimary: true },
+          });
+        }
+      }
+    });
+
+    return res.json({ message: 'Đã xóa ảnh.' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// PATCH /api/partners/attractions/:id/images/:imageId/primary
+async function setPrimaryImage(req, res, next) {
+  try {
+    const attraction = await findOwnedAttraction(
+      req.params.id,
+      req.partner.id,
+      { images: true },
+    );
+    if (!attraction) {
+      return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
+    }
+
+    const image = attraction.images.find((item) => item.id === req.params.imageId);
+    if (!image) {
+      return res.status(404).json({ message: 'Không tìm thấy ảnh.' });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.attractionImage.updateMany({
+        where: { attractionId: attraction.id, isPrimary: true },
+        data: { isPrimary: false },
+      });
+      await tx.attractionImage.update({
+        where: { id: image.id },
+        data: { isPrimary: true },
+      });
+    });
+
+    return res.json({ message: 'Đã cập nhật ảnh đại diện.' });
+  } catch (error) {
+    next(error);
+  }
+}
+
 // GET /api/partners/categories — danh sách danh mục cho form
 async function listCategories(req, res, next) {
   try {
-    const categories = await prisma.category.findMany({ orderBy: { name: 'asc' } });
+      const categories = await prisma.category.findMany({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+      });
     return res.json({ categories: categories.map((c) => ({ id: c.id, name: c.name })) });
   } catch (error) {
     next(error);
@@ -315,7 +392,7 @@ async function submitAttraction(req, res, next) {
 
     const attractionId = req.params.id;
     const attraction = await prisma.attraction.findUnique({ where: { id: attractionId } });
-    if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
+    if (!attraction || attraction.archivedAt) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
 
     if (attraction.partnerId !== partner.id) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Không có quyền thao tác trên địa điểm này' } });
 
@@ -346,7 +423,25 @@ async function searchAttractions(req, res, next) {
     const minRating = req.query.minRating ? Number(req.query.minRating) : null;
     const sort = String(req.query.sort || '').trim();
 
-    const where = { status: 'APPROVED' };
+    if (
+      [minPrice, maxPrice, minRating].some(
+        (value) => value != null && (!Number.isFinite(value) || value < 0),
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Bộ lọc số không hợp lệ.' },
+      });
+    }
+
+    if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Giá tối thiểu không được lớn hơn giá tối đa.' },
+      });
+    }
+
+    const where = { status: 'APPROVED', archivedAt: null };
     const andConditions = [];
 
     if (city) {
@@ -393,9 +488,7 @@ async function searchAttractions(req, res, next) {
       if (minPrice != null) priceFilter.gte = minPrice;
       if (maxPrice != null) priceFilter.lte = maxPrice;
 
-      andConditions.push({
-        ticketProducts: { some: { status: 'ACTIVE', sellingPrice: priceFilter } }
-      });
+      andConditions.push({ minTicketPrice: priceFilter });
     }
 
     if (andConditions.length > 0) {
@@ -403,65 +496,38 @@ async function searchAttractions(req, res, next) {
     }
 
     // Xử lý sắp xếp và phân trang
-    const isPriceSort = sort === 'price-asc' || sort === 'price-desc';
     let orderBy = { createdAt: 'desc' }; // mặc định
 
     if (sort === 'popular') {
       orderBy = { totalReviews: 'desc' };
     } else if (sort === 'rating') {
       orderBy = { averageRating: 'desc' };
+    } else if (sort === 'price-asc') {
+      orderBy = { minTicketPrice: { sort: 'asc', nulls: 'last' } };
+    } else if (sort === 'price-desc') {
+      orderBy = { minTicketPrice: { sort: 'desc', nulls: 'last' } };
     }
 
     const queryIncludes = {
       images: { where: { isPrimary: true }, take: 1 },
-      ticketProducts: { where: { status: 'ACTIVE' }, orderBy: { sellingPrice: 'asc' }, take: 1, select: { sellingPrice: true } },
+      ticketProducts: {
+        where: { status: 'ACTIVE', archivedAt: null },
+        orderBy: { sellingPrice: 'asc' },
+        take: 1,
+        select: { sellingPrice: true },
+      },
     };
 
-    let rawItems = [];
-    let total = 0;
-
-    if (isPriceSort) {
-      // Đối với sắp xếp theo giá, chúng ta lấy tất cả kết quả phù hợp và sắp xếp trên bộ nhớ (JS memory)
-      const allItems = await prisma.attraction.findMany({
+    const [rawItems, total] = await prisma.$transaction([
+      prisma.attraction.findMany({
         where,
         include: queryIncludes,
-      });
-
-      // Gắn giá trị minPrice để sort
-      const itemsWithPrice = allItems.map((item) => {
-        const minVal = item.ticketProducts && item.ticketProducts[0] ? Number(item.ticketProducts[0].sellingPrice) : null;
-        return { ...item, minVal };
-      });
-
-      // Thực hiện sort
-      itemsWithPrice.sort((a, b) => {
-        const priceA = a.minVal;
-        const priceB = b.minVal;
-
-        if (priceA === null && priceB === null) return 0;
-        if (priceA === null) return 1; // Giá trị null được xếp xuống cuối
-        if (priceB === null) return -1;
-
-        return sort === 'price-asc' ? priceA - priceB : priceB - priceA;
-      });
-
-      total = itemsWithPrice.length;
-      rawItems = itemsWithPrice.slice(skip, skip + limit);
-    } else {
-      // Phân trang bằng CSDL thông thường
-      const [dbItems, dbCount] = await prisma.$transaction([
-        prisma.attraction.findMany({
-          where,
-          include: queryIncludes,
-          orderBy,
-          skip,
-          take: limit,
-        }),
-        prisma.attraction.count({ where }),
-      ]);
-      rawItems = dbItems;
-      total = dbCount;
-    }
+        orderBy,
+        skip,
+        take: limit,
+      }),
+      prisma.attraction.count({ where }),
+    ]);
 
     const mapped = rawItems.map((a) => ({
       id: a.id,
@@ -473,7 +539,7 @@ async function searchAttractions(req, res, next) {
       primaryImage: a.images && a.images[0] ? a.images[0].imageUrl : null,
       averageRating: a.averageRating,
       totalReviews: a.totalReviews,
-      minPrice: a.ticketProducts && a.ticketProducts[0] ? Number(a.ticketProducts[0].sellingPrice) : null,
+      minPrice: a.minTicketPrice == null ? null : Number(a.minTicketPrice),
     }));
 
     return res.status(200).json({
@@ -499,6 +565,7 @@ async function getMapPoints(req, res, next) {
     const items = await prisma.attraction.findMany({
       where: {
         status: 'APPROVED',
+        archivedAt: null,
         latitude: { not: null },
         longitude: { not: null },
       },
@@ -510,7 +577,7 @@ async function getMapPoints(req, res, next) {
         longitude: true,
         images: { where: { isPrimary: true }, take: 1, select: { imageUrl: true } },
         ticketProducts: {
-          where: { status: 'ACTIVE' },
+          where: { status: 'ACTIVE', archivedAt: null },
           orderBy: { sellingPrice: 'asc' },
           take: 1,
           select: { sellingPrice: true },
@@ -543,16 +610,25 @@ async function getAttractionDetail(req, res, next) {
       include: {
         images: true,
         categories: { include: { category: true } },
-        ticketProducts: { where: { status: 'ACTIVE' } },
+        ticketProducts: { where: { status: 'ACTIVE', archivedAt: null } },
       },
     });
 
-    if (!attraction || attraction.status !== 'APPROVED') {
+    if (!attraction || attraction.archivedAt || attraction.status !== 'APPROVED') {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
     }
 
     const categories = (attraction.categories || []).map((c) => ({ id: c.category.id, name: c.category.name }));
-    const ticketProducts = (attraction.ticketProducts || []).map((t) => ({ id: t.id, name: t.name, description: t.description, originalPrice: t.originalPrice, sellingPrice: t.sellingPrice, refundPolicy: t.refundPolicy }));
+    const ticketProducts = (attraction.ticketProducts || []).map((t) => ({
+      id: t.id,
+      name: t.name,
+      type: t.type,
+      description: t.description,
+      originalPrice: t.originalPrice,
+      sellingPrice: t.sellingPrice,
+      refundPolicy: t.refundPolicy,
+      refundFeeRate: t.refundFeeRate,
+    }));
 
     const result = {
       id: attraction.id,
@@ -583,6 +659,8 @@ module.exports = {
   updateAttraction,
   deleteAttraction,
   uploadImages,
+  deleteImage,
+  setPrimaryImage,
   listCategories,
   findOwnedAttraction,
   // Public routes (từ MPhu)

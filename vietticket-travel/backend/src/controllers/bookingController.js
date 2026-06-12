@@ -1,12 +1,10 @@
 const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
-const { emitNewBooking } = require('../realtime/events');
-const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
 
 
 const { Decimal } = Prisma;
-const PAYMENT_METHODS = new Set(['vnpay', 'card', 'onsite']);
+const PAYMENT_METHODS = new Set(['vnpay']);
 
 const reservationInclude = {
   user: { include: { profile: true } },
@@ -240,6 +238,34 @@ async function confirmReservationAndStock(tx, reservation) {
   });
   if (dailyStock.count !== 1) {
     const error = new Error('Số lượng vé giữ chỗ không còn hợp lệ.');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const attractionId = reservation.ticketProduct?.attractionId
+    || (await tx.ticketProduct.findUnique({
+      where: { id: reservation.ticketProductId },
+      select: { attractionId: true },
+    }))?.attractionId;
+  if (!attractionId) {
+    const error = new Error('Không xác định được kho của điểm tham quan.');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const attractionStock = await tx.attractionDailyStock.updateMany({
+    where: {
+      attractionId,
+      date: reservation.date,
+      heldQty: { gte: reservation.quantity },
+    },
+    data: {
+      heldQty: { decrement: reservation.quantity },
+      bookedQty: { increment: reservation.quantity },
+    },
+  });
+  if (attractionStock.count !== 1) {
+    const error = new Error('Số lượng giữ chỗ của điểm tham quan không còn hợp lệ.');
     error.statusCode = 409;
     throw error;
   }
@@ -484,18 +510,6 @@ async function createBooking(req, res, next) {
           }
         }
 
-        // Địa điểm yêu cầu đối tác duyệt thủ công?
-        const needsApproval =
-          reservation.ticketProduct.attraction.requiresManualApproval === true;
-
-        // onsite: chốt kho ngay. Nếu cần duyệt -> PENDING_PARTNER (chưa phát vé), ngược lại CONFIRMED.
-        let bookingStatus;
-        if (paymentMethod === 'onsite') {
-          bookingStatus = needsApproval ? 'PENDING_PARTNER' : 'CONFIRMED';
-        } else {
-          bookingStatus = 'PENDING_PAYMENT';
-        }
-
         const created = await tx.booking.create({
           data: {
             userId,
@@ -504,34 +518,14 @@ async function createBooking(req, res, next) {
             subtotalAmount,
             discountAmount,
             totalAmount,
-            status: bookingStatus,
+            status: 'PENDING_PAYMENT',
             paymentMethod,
             fullName,
             email,
             phone: phone || null,
             note: note || null,
-            payments: {
-              create: {
-                amount: totalAmount,
-                paymentGateway: paymentMethod.toUpperCase(),
-                status: 'PENDING',
-              },
-            },
           },
         });
-
-        if (paymentMethod === 'onsite') {
-          await confirmReservationAndStock(tx, reservation);
-          // Chỉ phát vé ngay khi KHÔNG cần đối tác duyệt; nếu cần duyệt, vé tạo ở bước approve (N2).
-          if (!needsApproval) {
-            await createTicketInstances(
-              tx,
-              created.id,
-              reservation.ticketProductId,
-              reservation.quantity,
-            );
-          }
-        }
 
         return tx.booking.findUnique({
           where: { id: created.id },
@@ -540,15 +534,6 @@ async function createBooking(req, res, next) {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
-
-    if (['PENDING_PARTNER', 'CONFIRMED'].includes(booking.status)) {
-      emitNewBooking(booking);
-    }
-
-    // Đơn onsite không cần duyệt -> CONFIRMED ngay: gửi email vé PDF luôn.
-    if (booking.status === 'CONFIRMED') {
-      queueConfirmedTicketEmail(booking.id);
-    }
 
     return res.status(201).json({
       success: true,

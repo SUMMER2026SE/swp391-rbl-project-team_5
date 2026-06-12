@@ -1,4 +1,3 @@
-const { randomUUID } = require('crypto');
 const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
 const { validateKyc } = require('../utils/partnerValidators');
@@ -6,6 +5,17 @@ const { isValidPhoneNumber } = require('../utils/validators');
 const { emitBookingStatusUpdated } = require('../realtime/events');
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
 const { sendBookingRejectedEmail } = require('../utils/mailer');
+const {
+  confirmReservationAndStock,
+  createTicketInstances,
+} = require('./bookingController');
+const { releaseInventory } = require('../utils/refundService');
+const { isDocumentOwnedByUser } = require('../middleware/uploadMiddleware');
+const {
+  buildTimeline,
+  getPeriodStart,
+  normalizePeriod,
+} = require('../services/analyticsService');
 
 function toNullable(value) {
   if (value === undefined || value === null) return undefined;
@@ -44,6 +54,11 @@ async function submitKyc(req, res, next) {
     const validationError = validateKyc(req.body);
     if (validationError) {
       return res.status(400).json({ message: validationError });
+    }
+    if (!isDocumentOwnedByUser(req.body.businessLicenseUrl, req.user.id)) {
+      return res.status(400).json({
+        message: 'Tài liệu pháp lý phải được tải lên qua hệ thống VietTicket.',
+      });
     }
 
     const existing = await prisma.partnerProfile.findUnique({
@@ -195,14 +210,16 @@ async function getDashboard(req, res, next) {
     const commissionRate = req.partner.commissionRate ? Number(req.partner.commissionRate) : 0.10;
 
     const attractions = await prisma.attraction.findMany({
-      where: { partnerId },
+      where: { partnerId, archivedAt: null },
       select: { id: true, status: true },
     });
 
     const attractionIds = attractions.map((a) => a.id);
 
     const totalTickets = attractionIds.length
-      ? await prisma.ticketProduct.count({ where: { attractionId: { in: attractionIds } } })
+      ? await prisma.ticketProduct.count({
+          where: { attractionId: { in: attractionIds }, archivedAt: null },
+        })
       : 0;
 
     // Tính số liệu booking thật từ DB
@@ -222,7 +239,7 @@ async function getDashboard(req, res, next) {
 
       // Lấy tất cả bookings liên quan đến partner này qua reservation -> ticketProduct -> attraction
       const ticketProducts = await prisma.ticketProduct.findMany({
-        where: { attractionId: { in: attractionIds } },
+        where: { attractionId: { in: attractionIds }, archivedAt: null },
         select: { id: true },
       });
       const ticketProductIds = ticketProducts ? ticketProducts.map((r) => r.id) : [];
@@ -236,15 +253,19 @@ async function getDashboard(req, res, next) {
         const reservationIds = reservations ? reservations.map((r) => r.id) : [];
 
         if (reservationIds.length > 0) {
-          // Lấy tất cả Booking có trạng thái CONFIRMED hoặc COMPLETED thuộc partner
+          // Chỉ doanh thu đã thu tiền và chưa bị hủy/hoàn mới được ghi nhận.
           const bookings = await prisma.booking.findMany({
             where: {
               reservationId: { in: reservationIds },
-              status: { in: ['CONFIRMED', 'COMPLETED'] },
+              status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
+              payments: { some: { status: 'SUCCESS' } },
             },
             select: {
               createdAt: true,
-              totalAmount: true,
+              payments: {
+                where: { status: 'SUCCESS' },
+                select: { amount: true },
+              },
               reservation: {
                 select: { quantity: true },
               },
@@ -252,7 +273,10 @@ async function getDashboard(req, res, next) {
           });
 
           bookings.forEach((b) => {
-            const amount = Number(b.totalAmount);
+            const amount = b.payments.reduce(
+              (sum, payment) => sum + Number(payment.amount),
+              0,
+            );
             const qty = b.reservation ? b.reservation.quantity : 0;
             totalRevenue += amount;
             totalTicketsSold += qty;
@@ -347,6 +371,98 @@ async function getDashboard(req, res, next) {
     });
   } catch (error) {
     next(error);
+  }
+}
+
+async function getReports(req, res, next) {
+  try {
+    const period = normalizePeriod(String(req.query.period || '').trim());
+    const startDate = getPeriodStart(period);
+    const commissionRate = Number(req.partner.commissionRate || 0.1);
+
+    const bookings = await prisma.booking.findMany({
+      where: {
+        createdAt: { gte: startDate },
+        status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
+        payments: { some: { status: 'SUCCESS' } },
+        reservation: {
+          ticketProduct: {
+            attraction: { partnerId: req.partner.id },
+          },
+        },
+      },
+      select: {
+        createdAt: true,
+        payments: {
+          where: { status: 'SUCCESS' },
+          select: { amount: true },
+        },
+        reservation: {
+          select: {
+            quantity: true,
+            ticketProduct: {
+              select: {
+                attraction: { select: { id: true, title: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const revenueOf = (booking) => booking.payments.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0,
+    );
+    const byAttraction = new Map();
+    let grossRevenue = 0;
+    let ticketsSold = 0;
+
+    for (const booking of bookings) {
+      const revenue = revenueOf(booking);
+      const quantity = Number(booking.reservation.quantity || 0);
+      const attraction = booking.reservation.ticketProduct.attraction;
+      grossRevenue += revenue;
+      ticketsSold += quantity;
+
+      const current = byAttraction.get(attraction.id) || {
+        id: attraction.id,
+        name: attraction.title,
+        bookings: 0,
+        ticketsSold: 0,
+        revenue: 0,
+      };
+      current.bookings += 1;
+      current.ticketsSold += quantity;
+      current.revenue += revenue;
+      byAttraction.set(attraction.id, current);
+    }
+
+    const attractions = [...byAttraction.values()]
+      .sort((a, b) => b.revenue - a.revenue)
+      .map((item) => ({
+        ...item,
+        share: grossRevenue > 0 ? item.revenue / grossRevenue : 0,
+      }));
+
+    return res.json({
+      success: true,
+      data: {
+        period,
+        summary: {
+          bookings: bookings.length,
+          ticketsSold,
+          grossRevenue,
+          commission: grossRevenue * commissionRate,
+          netRevenue: grossRevenue * (1 - commissionRate),
+        },
+        timeline: buildTimeline(bookings, period, revenueOf),
+        attractions,
+      },
+    });
+  } catch (error) {
+    return next(error);
   }
 }
 
@@ -535,38 +651,8 @@ async function approveBooking(req, res, next) {
       }
       const reservation = current.reservation;
 
-      // 1. Xác nhận DailyStock: heldQuantity -> bookedQuantity
       if (reservation.status !== 'CONFIRMED') {
-        await tx.dailyStock.updateMany({
-          where: {
-            ticketProductId: reservation.ticketProductId,
-            date: reservation.date,
-          },
-          data: {
-            heldQuantity: { decrement: reservation.quantity },
-            bookedQuantity: { increment: reservation.quantity },
-          },
-        });
-
-        // 2. Xác nhận TimeSlotStock nếu có
-        if (reservation.timeSlotId) {
-          await tx.timeSlotStock.updateMany({
-            where: {
-              timeSlotId: reservation.timeSlotId,
-              date: reservation.date,
-            },
-            data: {
-              heldQty: { decrement: reservation.quantity },
-              bookedQty: { increment: reservation.quantity },
-            },
-          });
-        }
-
-        // 3. Cập nhật Reservation -> CONFIRMED
-        await tx.reservation.update({
-          where: { id: reservation.id },
-          data: { status: 'CONFIRMED' },
-        });
+        await confirmReservationAndStock(tx, reservation);
       }
 
       // 4. Cập nhật Booking -> CONFIRMED
@@ -582,13 +668,12 @@ async function approveBooking(req, res, next) {
         where: { bookingId },
       });
       if (existingTickets === 0) {
-        await tx.ticketInstance.createMany({
-          data: Array.from({ length: reservation.quantity }, () => ({
-            bookingId,
-            ticketProductId: reservation.ticketProductId,
-            qrCodeToken: randomUUID(),
-          })),
-        });
+        await createTicketInstances(
+          tx,
+          bookingId,
+          reservation.ticketProductId,
+          reservation.quantity,
+        );
       }
     });
 
@@ -664,28 +749,7 @@ async function rejectBooking(req, res, next) {
       // 1. Hoàn trả DailyStock: bookedQuantity -> giảm, giải phóng lại slot
       //    Chỉ hoàn nếu reservation đã CONFIRMED (tức đã từng chuyển held -> booked)
       if (reservation.status === 'CONFIRMED') {
-        await tx.dailyStock.updateMany({
-          where: {
-            ticketProductId: reservation.ticketProductId,
-            date: reservation.date,
-          },
-          data: {
-            bookedQuantity: { decrement: reservation.quantity },
-          },
-        });
-
-        // 2. Hoàn trả TimeSlotStock nếu có
-        if (reservation.timeSlotId) {
-          await tx.timeSlotStock.updateMany({
-            where: {
-              timeSlotId: reservation.timeSlotId,
-              date: reservation.date,
-            },
-            data: {
-              bookedQty: { decrement: reservation.quantity },
-            },
-          });
-        }
+        await releaseInventory(tx, booking);
       } else if (reservation.status === 'HELD') {
         // Nếu còn HELD thì hoàn lại heldQuantity
         await tx.dailyStock.updateMany({
@@ -696,6 +760,14 @@ async function rejectBooking(req, res, next) {
           data: {
             heldQuantity: { decrement: reservation.quantity },
           },
+        });
+        await tx.attractionDailyStock.updateMany({
+          where: {
+            attractionId: reservation.ticketProduct.attractionId,
+            date: reservation.date,
+            heldQty: { gte: reservation.quantity },
+          },
+          data: { heldQty: { decrement: reservation.quantity } },
         });
 
         if (reservation.timeSlotId) {
@@ -776,6 +848,7 @@ module.exports = {
   getMyPartner,
   updateSettings,
   getDashboard,
+  getReports,
   getPartnerBookings,
   approveBooking,
   rejectBooking,

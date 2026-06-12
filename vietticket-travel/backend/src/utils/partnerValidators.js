@@ -25,6 +25,10 @@ function validateKyc(body) {
     return 'Tên doanh nghiệp không được vượt quá 150 ký tự.';
   }
 
+  if (!isNonEmptyString(body.businessLicenseUrl)) {
+    return 'Vui lòng tải lên giấy phép kinh doanh.';
+  }
+
   if (body.taxCode && !/^\d{10}(\d{3})?$/.test(String(body.taxCode).trim())) {
     return 'Mã số thuế phải gồm 10 hoặc 13 chữ số.';
   }

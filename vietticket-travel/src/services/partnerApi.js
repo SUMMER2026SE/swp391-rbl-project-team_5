@@ -1,10 +1,6 @@
 import { API_BASE_URL, apiRequest } from './api.js'
 
-// ============================================================
-// Lớp gọi API cho Partner Portal (Module 2).
-// Mỗi trang sẽ gọi các hàm này; nếu backend không phản hồi
-// (lỗi mạng) trang sẽ tự fallback về dữ liệu demo.
-// ============================================================
+// Lớp gọi API cho Partner Portal.
 
 // ----- Hồ sơ đối tác & KYC -----
 export function submitKyc(payload) {
@@ -44,6 +40,10 @@ export function updatePartnerSettings(payload) {
 
 export function getDashboard() {
   return apiRequest('/partners/dashboard', { method: 'GET' })
+}
+
+export function getReports(period = 'month') {
+  return apiRequest(`/partners/reports?period=${encodeURIComponent(period)}`, { method: 'GET' })
 }
 
 export function getCategories() {
@@ -106,6 +106,19 @@ export async function uploadAttractionImages(id, files) {
   return data
 }
 
+export function deleteAttractionImage(attractionId, imageId) {
+  return apiRequest(`/partners/attractions/${attractionId}/images/${imageId}`, {
+    method: 'DELETE',
+  })
+}
+
+export function setAttractionPrimaryImage(attractionId, imageId) {
+  return apiRequest(
+    `/partners/attractions/${attractionId}/images/${imageId}/primary`,
+    { method: 'PATCH' },
+  )
+}
+
 // ----- Vé -----
 export function listTickets(attractionId) {
   return apiRequest(`/partners/attractions/${attractionId}/tickets`, { method: 'GET' })
@@ -162,10 +175,4 @@ export function rejectBooking(id, reason) {
     method: 'PATCH',
     body: { reason },
   })
-}
-
-// Tiện ích: xác định lỗi mạng (backend không chạy) để fallback demo.
-// apiRequest ném lỗi có .status khi server trả lỗi HTTP; lỗi mạng thì không.
-export function isNetworkError(error) {
-  return !error || error.status === undefined
 }

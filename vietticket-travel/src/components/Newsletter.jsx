@@ -1,17 +1,28 @@
 import { useState } from 'react'
+import { toast } from 'react-toastify'
+import { apiRequest } from '../services/api'
 
 function Newsletter() {
   const [email, setEmail] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (!email.trim()) {
-      return
+    if (!email.trim() || isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      const response = await apiRequest('/newsletter/subscribe', {
+        method: 'POST',
+        body: { email: email.trim() },
+      })
+      toast.success(response.message)
+      setEmail('')
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsSubmitting(false)
     }
-
-    console.log('Email đăng ký nhận tin:', email.trim())
-    setEmail('')
   }
 
   return (
@@ -21,7 +32,7 @@ function Newsletter() {
           <div className="newsletter-content">
             <h2>
               Đăng ký để nhận ưu đãi du lịch Việt Nam, tin tức điểm tham quan
-              mới nhất và các ưu đãi vé độc quyền
+              mới nhất và thông tin ưu đãi từ các điểm tham quan
             </h2>
 
             <form className="newsletter-form" onSubmit={handleSubmit}>
@@ -41,8 +52,8 @@ function Newsletter() {
                   required
                 />
               </div>
-              <button className="button button--primary" type="submit">
-                Đăng ký
+              <button className="button button--primary" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Đang đăng ký...' : 'Đăng ký'}
               </button>
             </form>
           </div>

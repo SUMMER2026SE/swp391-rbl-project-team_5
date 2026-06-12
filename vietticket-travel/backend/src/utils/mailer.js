@@ -55,9 +55,13 @@ function createEmailTemplate({ title, preview, buttonText, link }) {
   `;
 }
 
-async function sendMail({ to, subject, html, text, fallbackLink, attachments = [] }) {
+async function sendMail({ to, subject, html, text, attachments = [] }) {
   if (!hasSmtpConfig()) {
-    console.log(`[VietTicket Travel] SMTP chưa cấu hình. Link demo cho ${to}: ${fallbackLink}`);
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn(
+        `[VietTicket Travel] SMTP chưa cấu hình; email tới ${to} chưa được gửi.`,
+      );
+    }
     return { sent: false, reason: 'SMTP_NOT_CONFIGURED' };
   }
 

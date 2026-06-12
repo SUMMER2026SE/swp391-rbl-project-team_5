@@ -47,7 +47,7 @@ function mockHappyPath(rows = [makeBookingRow()]) {
     { status: 'CONFIRMED', _count: { _all: 5 } },
     { status: 'CANCELLED', _count: { _all: 2 } },
   ]);
-  mockPrisma.booking.aggregate.mockResolvedValue({ _sum: { totalAmount: 2500000 } });
+  mockPrisma.payment.aggregate.mockResolvedValue({ _sum: { amount: 2500000 } });
 }
 
 afterEach(() => jest.clearAllMocks());
@@ -133,7 +133,7 @@ describe('getAdminBookings', () => {
     mockPrisma.booking.count.mockRejectedValue(new Error('DB error'));
     mockPrisma.booking.findMany.mockRejectedValue(new Error('DB error'));
     mockPrisma.booking.groupBy.mockRejectedValue(new Error('DB error'));
-    mockPrisma.booking.aggregate.mockRejectedValue(new Error('DB error'));
+    mockPrisma.payment.aggregate.mockRejectedValue(new Error('DB error'));
 
     const { req, res, next } = makeReqRes();
     await getAdminBookings(req, res, next);

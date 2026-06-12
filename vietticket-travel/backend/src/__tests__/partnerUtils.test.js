@@ -20,6 +20,9 @@ describe('partner mappings and validation', () => {
   });
 
   test('taxCode là trường không bắt buộc trong KYC', () => {
-    expect(validateKyc({ businessName: 'VietTicket Partner' })).toBe('');
+    expect(validateKyc({
+      businessName: 'VietTicket Partner',
+      businessLicenseUrl: 'http://localhost/api/upload/documents/user-1-license.pdf',
+    })).toBe('');
   });
 });
