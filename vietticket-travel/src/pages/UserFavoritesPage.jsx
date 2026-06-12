@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Header from '../components/Header.jsx'
 import Footer from '../components/Footer.jsx'
-import { appDownloadButtons, footerLinks } from '../data/landingData.js'
+import { footerLinks } from '../data/landingData.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 
 const regionFilters = ['Tất cả', 'Miền Bắc', 'Miền Trung', 'Miền Nam']
@@ -228,7 +228,7 @@ export default function UserFavoritesPage() {
         </div>
       </main>
 
-      <Footer links={footerLinks} appButtons={appDownloadButtons} />
+      <Footer links={footerLinks} />
     </React.Fragment>
   )
 }

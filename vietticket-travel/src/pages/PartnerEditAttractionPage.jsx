@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
+import CoordinateFields from '../components/partner/CoordinateFields.jsx'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
@@ -20,14 +21,6 @@ const DISTRICTS_MAP = {
   'Khánh Hòa': ['Nha Trang', 'Cam Ranh', 'Ninh Hòa'],
 }
 
-// Mock data — sẽ thay bằng API call theo id
-const MOCK_DATA = {
-  1: { name: 'Sun World Ba Na Hills', description: 'Khu vui chơi giải trí và nghỉ dưỡng nổi tiếng tại Đà Nẵng.', openTime: '08:00', closeTime: '17:00', province: 'Đà Nẵng', district: 'Hòa Vang', address: 'Thôn An Sơn, xã Hòa Ninh, Huyện Hòa Vang', lat: '15.9971', lng: '107.9878', status: 'active' },
-  2: { name: 'Vịnh Hạ Long Cruise', description: 'Du thuyền ngắm cảnh vịnh Hạ Long.', openTime: '07:30', closeTime: '18:00', province: 'Quảng Ninh', district: 'Hạ Long', address: 'Cảng Tuần Châu, TP. Hạ Long', lat: '20.9101', lng: '107.1839', status: 'active' },
-  3: { name: 'VinWonders Nha Trang', description: 'Công viên giải trí VinWonders tại đảo Hòn Tre.', openTime: '08:00', closeTime: '20:00', province: 'Khánh Hòa', district: 'Nha Trang', address: 'Đảo Hòn Tre, TP. Nha Trang', lat: '12.2104', lng: '109.2521', status: 'inactive' },
-  4: { name: 'Hội An Lantern Festival Tour', description: 'Tour tham quan đêm hội đèn lồng Hội An.', openTime: '18:00', closeTime: '22:00', province: 'Quảng Nam', district: 'Hội An', address: 'Phố Cổ Hội An, TP. Hội An', lat: '15.8801', lng: '108.3380', status: 'active' },
-}
-
 const MAX_IMAGES = 8
 const MAX_FILE_SIZE = 5 * 1024 * 1024
 
@@ -37,12 +30,13 @@ function PartnerEditAttractionPage() {
   const [activeTab, setActiveTab] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [form, setForm] = useState({ name: '', description: '', openTime: '', closeTime: '', province: '', district: '', address: '', lat: '', lng: '', status: 'active' })
+  const [form, setForm] = useState({ name: '', description: '', openTime: '', closeTime: '', province: '', district: '', address: '', lat: '', lng: '', status: 'active', category: '' })
+  const [categories, setCategories] = useState([])
   const [images, setImages] = useState([])
+  const [deletedImageIds, setDeletedImageIds] = useState([])
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef(null)
   const addMoreRef = useRef(null)
-  const descRef = useRef(null)
 
   useEffect(() => {
     document.title = 'Chỉnh sửa điểm tham quan | VietTicket B2B'
@@ -61,6 +55,7 @@ function PartnerEditAttractionPage() {
         lat: data.lat ?? '',
         lng: data.lng ?? '',
         status: data.status ?? 'active',
+        category: data.category ?? '',
       }))
       if (Array.isArray(data.images)) {
         setImages(
@@ -72,25 +67,18 @@ function PartnerEditAttractionPage() {
           })),
         )
       }
-      if (descRef.current) descRef.current.innerHTML = data.description || ''
       setIsLoading(false)
     }
     ;(async () => {
       try {
-        const res = await partnerApi.getAttraction(id)
-        applyData(res.attraction)
+        const [attractionResponse, categoryResponse] = await Promise.all([
+          partnerApi.getAttraction(id),
+          partnerApi.getCategories(),
+        ])
+        if (active) setCategories(categoryResponse.categories || [])
+        applyData(attractionResponse.attraction)
       } catch (err) {
-        if (partnerApi.isNetworkError(err)) {
-          // demo fallback khi không có server
-          const data = MOCK_DATA[Number(id)]
-          if (!data) {
-            if (active) { toast.error('Không tìm thấy điểm tham quan.'); navigate('/partner/attractions') }
-            return
-          }
-          applyData(data)
-        } else {
-          if (active) { toast.error(err.message); navigate('/partner/attractions') }
-        }
+        if (active) { toast.error(err.message); navigate('/partner/attractions') }
       }
     })()
     return () => { active = false }
@@ -113,20 +101,26 @@ function PartnerEditAttractionPage() {
   const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); processFiles(e.dataTransfer.files) }
 
   const handleDeleteImage = (imgId) => {
+    const deleted = images.find((img) => img.id === imgId)
+    if (deleted && !deleted.file) {
+      setDeletedImageIds((current) => [...current, deleted.id])
+    } else if (deleted?.previewUrl) {
+      URL.revokeObjectURL(deleted.previewUrl)
+    }
     setImages((prev) => {
       const next = prev.filter((img) => img.id !== imgId)
-      if (prev.find((img) => img.id === imgId)?.isThumbnail && next.length > 0) next[0] = { ...next[0], isThumbnail: true }
+      if (deleted?.isThumbnail && next.length > 0) next[0] = { ...next[0], isThumbnail: true }
       return next
     })
   }
 
   const handleSetThumbnail = (imgId) => setImages((prev) => prev.map((img) => ({ ...img, isThumbnail: img.id === imgId })))
 
-  const execCmd = (cmd) => { descRef.current?.focus(); document.execCommand(cmd, false, null) }
-
   const handleSave = async () => {
     if (!form.name.trim()) { toast.error('Vui lòng nhập tên điểm tham quan.'); setActiveTab(0); return }
+    if (!form.address.trim()) { toast.error('Vui lòng nhập địa chỉ chi tiết.'); setActiveTab(1); return }
     if (!form.province) { toast.error('Vui lòng chọn tỉnh / thành phố.'); setActiveTab(1); return }
+    if (!form.category) { toast.error('Vui lòng chọn danh mục điểm tham quan.'); setActiveTab(0); return }
     setIsSubmitting(true)
 
     const payload = {
@@ -140,25 +134,36 @@ function PartnerEditAttractionPage() {
       lat: form.lat,
       lng: form.lng,
       status: form.status,
+      category: form.category,
     }
 
     try {
       await partnerApi.updateAttraction(id, payload)
 
+      for (const imageId of deletedImageIds) {
+        await partnerApi.deleteAttractionImage(id, imageId)
+      }
+
       const newFiles = images.map((img) => img.file).filter(Boolean)
+      let uploadResponse
       if (newFiles.length > 0) {
-        await partnerApi.uploadAttractionImages(id, newFiles)
+        uploadResponse = await partnerApi.uploadAttractionImages(id, newFiles)
+      }
+
+      const primaryImage = images.find((image) => image.isThumbnail)
+      let primaryImageId = primaryImage?.id
+      if (primaryImage?.file) {
+        const newFileIndex = newFiles.indexOf(primaryImage.file)
+        primaryImageId = uploadResponse?.images?.[newFileIndex]?.id
+      }
+      if (primaryImageId) {
+        await partnerApi.setAttractionPrimaryImage(id, primaryImageId)
       }
 
       toast.success('Đã cập nhật điểm tham quan thành công!')
       navigate('/partner/attractions')
     } catch (err) {
-      if (partnerApi.isNetworkError(err)) {
-        toast.info('Chế độ demo (không có server) — thao tác được mô phỏng.')
-        navigate('/partner/attractions')
-      } else {
-        toast.error(err.message)
-      }
+      toast.error(err.message)
     } finally {
       setIsSubmitting(false)
     }
@@ -223,23 +228,24 @@ function PartnerEditAttractionPage() {
             <FormField label="Tên điểm tham quan" required>
               <input type="text" value={form.name} onChange={(e) => updateForm('name', e.target.value)} className="w-full rounded-lg border border-[#bec8ca] bg-white focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] px-4 py-3 text-sm text-[#191c1d] placeholder-[#6f797a] outline-none shadow-sm" />
             </FormField>
+            <FormField label="Danh mục" required>
+              <select value={form.category} onChange={(e) => updateForm('category', e.target.value)} className="w-full rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm text-[#191c1d] outline-none shadow-sm focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]">
+                <option value="">Chọn danh mục</option>
+                {categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}
+              </select>
+            </FormField>
             <FormField label="Mô tả">
-              <div className="border border-[#bec8ca] rounded-lg overflow-hidden shadow-sm">
-                <div className="bg-[#f2f4f5] border-b border-[#bec8ca] px-4 py-2 flex items-center gap-1">
-                  {[{ cmd: 'bold', icon: 'format_bold' }, { cmd: 'italic', icon: 'format_italic' }, { cmd: 'underline', icon: 'format_underlined' }].map(({ cmd, icon }) => (
-                    <button key={cmd} type="button" onMouseDown={(e) => { e.preventDefault(); execCmd(cmd) }} className="p-1.5 rounded hover:bg-[#e1e3e4] text-[#3f484a]">
-                      <span className="material-symbols-outlined text-[20px]">{icon}</span>
-                    </button>
-                  ))}
-                  <div className="w-px bg-[#bec8ca] mx-1 h-5" />
-                  {[{ cmd: 'insertUnorderedList', icon: 'format_list_bulleted' }, { cmd: 'insertOrderedList', icon: 'format_list_numbered' }].map(({ cmd, icon }) => (
-                    <button key={cmd} type="button" onMouseDown={(e) => { e.preventDefault(); execCmd(cmd) }} className="p-1.5 rounded hover:bg-[#e1e3e4] text-[#3f484a]">
-                      <span className="material-symbols-outlined text-[20px]">{icon}</span>
-                    </button>
-                  ))}
-                </div>
-                <div ref={descRef} contentEditable suppressContentEditableWarning onInput={(e) => updateForm('description', e.currentTarget.innerHTML)} className="w-full min-h-[120px] px-4 py-3 text-sm text-[#191c1d] outline-none" />
-              </div>
+              <textarea
+                value={form.description}
+                onChange={(e) => updateForm('description', e.target.value)}
+                rows={6}
+                maxLength={5000}
+                placeholder="Mô tả trải nghiệm, điểm nổi bật và thông tin hữu ích cho du khách."
+                className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm text-[#191c1d] outline-none shadow-sm focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+              />
+              <p className="mt-1 text-right text-xs text-[#6f797a]">
+                {form.description.length}/5000 ký tự
+              </p>
             </FormField>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <FormField label="Giờ mở cửa">
@@ -271,11 +277,16 @@ function PartnerEditAttractionPage() {
                 </select>
               </FormField>
             </div>
-            <FormField label="Địa chỉ chi tiết">
+            <FormField label="Địa chỉ chi tiết" required>
               <input type="text" value={form.address} onChange={(e) => updateForm('address', e.target.value)} className="w-full rounded-lg border border-[#bec8ca] bg-white focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] px-4 py-3 text-sm text-[#191c1d] outline-none shadow-sm" />
             </FormField>
-            <FormField label="Vị trí trên bản đồ">
-              <MapPlaceholder lat={form.lat} lng={form.lng} />
+            <FormField label="Tọa độ bản đồ">
+              <CoordinateFields
+                lat={form.lat}
+                lng={form.lng}
+                onLatChange={(value) => updateForm('lat', value)}
+                onLngChange={(value) => updateForm('lng', value)}
+              />
             </FormField>
             <TabNav onBack={() => setActiveTab(0)} onNext={() => setActiveTab(2)} />
           </section>
@@ -353,21 +364,6 @@ function TimeInput({ value, onChange }) {
     <div className="relative">
       <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#00629d] text-[20px] pointer-events-none">schedule</span>
       <input type="time" value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-lg border border-[#bec8ca] bg-white focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] pl-10 pr-4 py-3 text-sm text-[#191c1d] outline-none shadow-sm" />
-    </div>
-  )
-}
-
-function MapPlaceholder({ lat, lng }) {
-  return (
-    <div className="w-full h-[260px] rounded-xl overflow-hidden relative border border-[#bec8ca] shadow-sm bg-[#e1e3e4]">
-      <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuBM_qQYAkdTgQl8cSHBtcGqQsM-qoAJfHtfr3xTly5bnnbM2oVmWlpk2fgLnS9ulabLT7FjDiTezR_1muqWfE9-HlQAmVla58ik7qJeYyud8m99ssn09VJOJ1hCZPprMZbQYS7TAjXkKsZ6C4Qyc3P6jfyI_Exm7M_Tlf5SnYpU646T50QYFsy6OuectoO_efcQQ69eIpJgyWLDqX1L4Q4-eIs4aAP7N7zrTnVJyxFxJcLkeMrNKDcjuUhYiAd-0XVIEB5rqQILhPw" alt="Map" className="w-full h-full object-cover opacity-60" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full drop-shadow-md">
-        <span className="material-symbols-outlined text-[#ba1a1a] text-[40px]" style={{ fontVariationSettings: "'FILL' 1" }}>location_on</span>
-      </div>
-      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-md border border-[#bec8ca] shadow-sm flex items-center gap-2">
-        <span className="material-symbols-outlined text-[#6f797a] text-[16px]">my_location</span>
-        <span className="text-xs font-semibold text-[#191c1d]">Lat: {lat}, Lng: {lng}</span>
-      </div>
     </div>
   )
 }

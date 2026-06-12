@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
+import CoordinateFields from '../components/partner/CoordinateFields.jsx'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
@@ -36,9 +37,11 @@ function PartnerAddAttractionPage() {
     province: '',
     district: '',
     address: '',
-    lat: '16.0470',
-    lng: '108.2062',
+    lat: '',
+    lng: '',
+    category: '',
   })
+  const [categories, setCategories] = useState([])
 
   // Images state
   const [images, setImages] = useState([]) // { id, file, previewUrl, isThumbnail }
@@ -53,7 +56,16 @@ function PartnerAddAttractionPage() {
 
   useEffect(() => {
     document.title = 'Thêm điểm tham quan | VietTicket B2B'
+    let active = true
+    partnerApi.getCategories()
+      .then((response) => {
+        if (active) setCategories(response.categories || [])
+      })
+      .catch((error) => {
+        if (active) toast.error(error.message)
+      })
     return () => {
+      active = false
       // cleanup preview URLs
       imagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl))
     }
@@ -116,20 +128,26 @@ function PartnerAddAttractionPage() {
     )
   }
 
-  /* ── Description toolbar (minimal — toggles bold/italic/etc via execCommand) ── */
-  const descRef = useRef(null)
-  const execCmd = (cmd) => { descRef.current?.focus(); document.execCommand(cmd, false, null) }
-
   /* ── Submit ── */
-  const handlePublish = async () => {
+  const saveAttraction = async ({ submitForReview }) => {
     if (!form.name.trim()) {
       toast.error('Vui lòng nhập tên điểm tham quan.')
       setActiveTab(0)
       return
     }
+    if (!form.address.trim()) {
+      toast.error('Vui lòng nhập địa chỉ chi tiết.')
+      setActiveTab(1)
+      return
+    }
     if (!form.province) {
       toast.error('Vui lòng chọn tỉnh / thành phố.')
       setActiveTab(1)
+      return
+    }
+    if (!form.category) {
+      toast.error('Vui lòng chọn danh mục điểm tham quan.')
+      setActiveTab(0)
       return
     }
     setIsSubmitting(true)
@@ -156,10 +174,19 @@ function PartnerAddAttractionPage() {
 
       const files = images.map((img) => img.file).filter(Boolean)
       if (files.length > 0) {
-        await partnerApi.uploadAttractionImages(newId, files)
+        const uploadResponse = await partnerApi.uploadAttractionImages(newId, files)
+        const primaryIndex = images.findIndex((image) => image.isThumbnail)
+        const primaryImageId = uploadResponse.images?.[primaryIndex]?.id
+        if (primaryImageId) {
+          await partnerApi.setAttractionPrimaryImage(newId, primaryImageId)
+        }
       }
-      await partnerApi.submitAttraction(newId)
-      toast.success('Đã gửi điểm tham quan để admin xét duyệt!')
+      if (submitForReview) {
+        await partnerApi.submitAttraction(newId)
+        toast.success('Đã gửi điểm tham quan để admin xét duyệt!')
+      } else {
+        toast.success('Đã lưu điểm tham quan ở trạng thái bản nháp.')
+      }
       navigate('/partner/attractions')
     } catch (err) {
       toast.error(err.message)
@@ -168,9 +195,8 @@ function PartnerAddAttractionPage() {
     }
   }
 
-  const handleSaveDraft = () => {
-    toast.info('Đã lưu bản nháp.')
-  }
+  const handlePublish = () => saveAttraction({ submitForReview: true })
+  const handleSaveDraft = () => saveAttraction({ submitForReview: false })
 
   const districts = DISTRICTS_MAP[form.province] || []
 
@@ -191,6 +217,7 @@ function PartnerAddAttractionPage() {
         <div className="flex items-center gap-3">
           <button
             onClick={handleSaveDraft}
+            disabled={isSubmitting}
             className="px-6 py-2.5 rounded-lg border border-[#6f797a] text-[#191c1d] text-sm font-medium hover:bg-[#f2f4f5] transition-colors"
           >
             Lưu nháp
@@ -244,51 +271,31 @@ function PartnerAddAttractionPage() {
               />
             </FormField>
 
-            {/* Description (contentEditable mini rich-text) */}
+            {/* Description */}
             <FormField label="Mô tả">
-              <div className="border border-[#bec8ca] rounded-lg overflow-hidden shadow-sm">
-                {/* Toolbar */}
-                <div className="bg-[#f2f4f5] border-b border-[#bec8ca] px-4 py-2 flex items-center gap-1">
-                  {[
-                    { cmd: 'bold', icon: 'format_bold', title: 'In đậm' },
-                    { cmd: 'italic', icon: 'format_italic', title: 'In nghiêng' },
-                    { cmd: 'underline', icon: 'format_underlined', title: 'Gạch chân' },
-                  ].map(({ cmd, icon, title }) => (
-                    <button
-                      key={cmd}
-                      type="button"
-                      title={title}
-                      onMouseDown={(e) => { e.preventDefault(); execCmd(cmd) }}
-                      className="p-1.5 rounded hover:bg-[#e1e3e4] text-[#3f484a] transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">{icon}</span>
-                    </button>
-                  ))}
-                  <div className="w-px bg-[#bec8ca] mx-1 h-5" />
-                  {[
-                    { cmd: 'insertUnorderedList', icon: 'format_list_bulleted' },
-                    { cmd: 'insertOrderedList', icon: 'format_list_numbered' },
-                  ].map(({ cmd, icon }) => (
-                    <button
-                      key={cmd}
-                      type="button"
-                      onMouseDown={(e) => { e.preventDefault(); execCmd(cmd) }}
-                      className="p-1.5 rounded hover:bg-[#e1e3e4] text-[#3f484a] transition-colors"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">{icon}</span>
-                    </button>
-                  ))}
-                </div>
-                {/* Editable area */}
-                <div
-                  ref={descRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  onInput={(e) => updateForm('description', e.currentTarget.innerHTML)}
-                  data-placeholder="Mô tả điểm tham quan..."
-                  className="w-full min-h-[120px] px-4 py-3 text-sm text-[#191c1d] outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-[#6f797a]"
-                />
-              </div>
+              <textarea
+                value={form.description}
+                onChange={(e) => updateForm('description', e.target.value)}
+                rows={6}
+                maxLength={5000}
+                placeholder="Mô tả trải nghiệm, điểm nổi bật và thông tin hữu ích cho du khách."
+                className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm text-[#191c1d] outline-none shadow-sm focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+              />
+              <p className="mt-1 text-right text-xs text-[#6f797a]">
+                {form.description.length}/5000 ký tự
+              </p>
+            </FormField>
+            <FormField label="Danh mục" required>
+              <select
+                value={form.category}
+                onChange={(e) => updateForm('category', e.target.value)}
+                className="w-full rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm text-[#191c1d] outline-none shadow-sm focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+              >
+                <option value="">Chọn danh mục</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.name}>{category.name}</option>
+                ))}
+              </select>
             </FormField>
 
             {/* Opening / Closing Time */}
@@ -354,7 +361,7 @@ function PartnerAddAttractionPage() {
               </FormField>
             </div>
 
-            <FormField label="Địa chỉ chi tiết">
+            <FormField label="Địa chỉ chi tiết" required>
               <input
                 type="text"
                 value={form.address}
@@ -364,34 +371,13 @@ function PartnerAddAttractionPage() {
               />
             </FormField>
 
-            {/* Map placeholder */}
-            <FormField label="Vị trí trên bản đồ">
-              <div className="w-full h-[300px] rounded-xl overflow-hidden relative border border-[#bec8ca] shadow-sm bg-[#e1e3e4]">
-                <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuBM_qQYAkdTgQl8cSHBtcGqQsM-qoAJfHtfr3xTly5bnnbM2oVmWlpk2fgLnS9ulabLT7FjDiTezR_1muqWfE9-HlQAmVla58ik7qJeYyud8m99ssn09VJOJ1hCZPprMZbQYS7TAjXkKsZ6C4Qyc3P6jfyI_Exm7M_Tlf5SnYpU646T50QYFsy6OuectoO_efcQQ69eIpJgyWLDqX1L4Q4-eIs4aAP7N7zrTnVJyxFxJcLkeMrNKDcjuUhYiAd-0XVIEB5rqQILhPw"
-                  alt="Map placeholder"
-                  className="w-full h-full object-cover opacity-60"
-                />
-                {/* Pin */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full drop-shadow-md">
-                  <span
-                    className="material-symbols-outlined text-[#ba1a1a] text-[40px]"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    location_on
-                  </span>
-                </div>
-                {/* Coordinates */}
-                <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-md border border-[#bec8ca] shadow-sm flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[#6f797a] text-[16px]">my_location</span>
-                  <span className="text-xs font-semibold text-[#191c1d]">
-                    Lat: {form.lat}, Lng: {form.lng}
-                  </span>
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-[#3f484a]">
-                Tích hợp bản đồ tương tác sẽ được thêm sau khi kết nối API Google Maps.
-              </p>
+            <FormField label="Tọa độ bản đồ">
+              <CoordinateFields
+                lat={form.lat}
+                lng={form.lng}
+                onLatChange={(value) => updateForm('lat', value)}
+                onLngChange={(value) => updateForm('lng', value)}
+              />
             </FormField>
 
             <TabNav onBack={() => setActiveTab(0)} onNext={() => setActiveTab(2)} />

@@ -78,7 +78,7 @@ async function collectImages(queries) {
   const picked = [];
   for (const q of queries) {
     if (picked.length >= MAX_IMAGES) break;
-    let results = [];
+    let results;
     try {
       results = await searchCommonsImages(q);
     } catch (err) {

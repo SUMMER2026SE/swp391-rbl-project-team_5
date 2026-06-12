@@ -1,6 +1,11 @@
 const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
 const { sendAccountStatusEmail, sendPartnerReviewEmail, sendAttractionViolationEmail } = require('../utils/mailer');
+const {
+  buildTimeline,
+  getPeriodStart,
+  normalizePeriod,
+} = require('../services/analyticsService');
 
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
@@ -402,6 +407,7 @@ const ALLOWED_BOOKING_STATUSES = [
   'CONFIRMED',
   'CANCELLED',
   'COMPLETED',
+  'NO_SHOW',
   'REFUND_REQUESTED',
   'REFUNDED',
 ];
@@ -470,9 +476,12 @@ async function getAdminBookings(req, res, next) {
         }),
         prisma.booking.groupBy({ by: ['status'], _count: { _all: true } }),
         prisma.booking.count({ where: { refundRequired: true } }),
-        prisma.booking.aggregate({
-          where: { status: { in: ['CONFIRMED', 'COMPLETED'] } },
-          _sum: { totalAmount: true },
+        prisma.payment.aggregate({
+          where: {
+            status: 'SUCCESS',
+            booking: { status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] } },
+          },
+          _sum: { amount: true },
         }),
       ]);
 
@@ -516,9 +525,219 @@ async function getAdminBookings(req, res, next) {
       stats: {
         countsByStatus,
         refundRequired: refundRequiredCount,
-        grossRevenue: Number(revenueAgg._sum.totalAmount || 0),
+        grossRevenue: Number(revenueAgg._sum.amount || 0),
       },
     });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getDashboard(req, res, next) {
+  try {
+    const period = normalizePeriod(String(req.query.period || '').trim());
+    const startDate = getPeriodStart(period);
+
+    const [
+      totalUsers,
+      totalAttractions,
+      activeAttractions,
+      pendingPartnersCount,
+      newPartners,
+      periodBookings,
+      successfulPayments,
+      pendingPartners,
+      pendingAttractions,
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.attraction.count({ where: { archivedAt: null } }),
+      prisma.attraction.count({ where: { archivedAt: null, status: 'APPROVED' } }),
+      prisma.partnerProfile.count({ where: { status: 'PENDING' } }),
+      prisma.partnerProfile.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.booking.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.payment.findMany({
+        where: {
+          status: 'SUCCESS',
+          createdAt: { gte: startDate },
+          booking: { status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] } },
+        },
+        select: { amount: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.partnerProfile.findMany({
+        where: { status: 'PENDING' },
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          businessName: true,
+          createdAt: true,
+          user: { select: { fullName: true, email: true } },
+        },
+      }),
+      prisma.attraction.findMany({
+        where: { status: 'PENDING', archivedAt: null },
+        take: 6,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          city: true,
+          minTicketPrice: true,
+          createdAt: true,
+          images: {
+            orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+            take: 1,
+            select: { imageUrl: true },
+          },
+          partner: { select: { businessName: true } },
+        },
+      }),
+    ]);
+
+    const revenue = successfulPayments.reduce(
+      (sum, payment) => sum + Number(payment.amount),
+      0,
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        period,
+        stats: {
+          revenue,
+          totalUsers,
+          totalAttractions,
+          activeAttractions,
+          pendingPartners: pendingPartnersCount,
+          newPartners,
+          bookings: periodBookings,
+        },
+        trend: buildTimeline(successfulPayments, period, (payment) => payment.amount),
+        pendingPartners,
+        pendingAttractions: pendingAttractions.map((attraction) => ({
+          ...attraction,
+          minTicketPrice: attraction.minTicketPrice == null
+            ? null
+            : Number(attraction.minTicketPrice),
+          primaryImage: attraction.images[0]?.imageUrl || null,
+          images: undefined,
+        })),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function listCategories(req, res, next) {
+  try {
+    const categories = await prisma.category.findMany({
+      orderBy: { name: 'asc' },
+      include: {
+        _count: {
+          select: {
+            attractions: {
+              where: { attraction: { archivedAt: null } },
+            },
+          },
+        },
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: categories.map((category) => ({
+        id: category.id,
+        name: category.name,
+        description: category.description || '',
+        icon: category.icon || 'category',
+        isActive: category.isActive,
+        attractionCount: category._count.attractions,
+        createdAt: category.createdAt,
+      })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+function categoryPayload(body, { partial = false } = {}) {
+  const data = {};
+  if (!partial || body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (name.length < 2 || name.length > 80) {
+      return { error: 'Tên danh mục phải có từ 2 đến 80 ký tự.' };
+    }
+    data.name = name;
+  }
+  if (body.description !== undefined) {
+    const description = String(body.description || '').trim();
+    if (description.length > 300) {
+      return { error: 'Mô tả danh mục không được vượt quá 300 ký tự.' };
+    }
+    data.description = description || null;
+  }
+  if (body.icon !== undefined) {
+    const icon = String(body.icon || '').trim();
+    if (icon.length > 50) return { error: 'Tên biểu tượng không hợp lệ.' };
+    data.icon = icon || null;
+  }
+  if (body.isActive !== undefined) data.isActive = parseBoolean(body.isActive);
+  return { data };
+}
+
+async function createCategory(req, res, next) {
+  try {
+    const payload = categoryPayload(req.body);
+    if (payload.error) return res.status(400).json({ message: payload.error });
+    const category = await prisma.category.create({ data: payload.data });
+    return res.status(201).json({ success: true, data: category });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Tên danh mục đã tồn tại.' });
+    }
+    return next(error);
+  }
+}
+
+async function updateCategory(req, res, next) {
+  try {
+    const payload = categoryPayload(req.body, { partial: true });
+    if (payload.error) return res.status(400).json({ message: payload.error });
+    if (Object.keys(payload.data).length === 0) {
+      return res.status(400).json({ message: 'Không có dữ liệu cần cập nhật.' });
+    }
+    const category = await prisma.category.update({
+      where: { id: req.params.id },
+      data: payload.data,
+    });
+    return res.json({ success: true, data: category });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Tên danh mục đã tồn tại.' });
+    }
+    if (error.code === 'P2025') {
+      return res.status(404).json({ message: 'Không tìm thấy danh mục.' });
+    }
+    return next(error);
+  }
+}
+
+async function deleteCategory(req, res, next) {
+  try {
+    const category = await prisma.category.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { attractions: true } } },
+    });
+    if (!category) return res.status(404).json({ message: 'Không tìm thấy danh mục.' });
+    if (category._count.attractions > 0) {
+      return res.status(409).json({
+        message: 'Danh mục đang được sử dụng. Hãy chuyển sang trạng thái ẩn thay vì xóa.',
+      });
+    }
+    await prisma.category.delete({ where: { id: category.id } });
+    return res.json({ message: 'Đã xóa danh mục.' });
   } catch (error) {
     return next(error);
   }
@@ -533,5 +752,10 @@ module.exports = {
   reviewAttraction,
   hideAttraction,
   getAdminBookings,
+  getDashboard,
+  listCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
 };
 

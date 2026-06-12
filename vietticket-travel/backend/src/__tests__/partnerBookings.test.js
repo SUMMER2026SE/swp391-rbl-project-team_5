@@ -56,6 +56,7 @@ function makeBooking(statusOverride = 'PENDING_PARTNER') {
       status: statusOverride === 'CONFIRMED' ? 'CONFIRMED' : 'HELD',
       ticketProduct: {
         id: TICKET_ID,
+        attractionId: ATTRACTION_ID,
         name: 'Vé người lớn',
         attraction: {
           id: ATTRACTION_ID,
@@ -204,7 +205,9 @@ describe('getPartnerBookings', () => {
 function makeApproveTx(booking, { existingTicketCount = 0 } = {}) {
   return {
     dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    ticketProduct: { findUnique: jest.fn().mockResolvedValue({ attractionId: ATTRACTION_ID }) },
     reservation:   { update:     jest.fn().mockResolvedValue({}) },
     booking:       {
       findUnique: jest.fn().mockResolvedValue(booking),
@@ -380,6 +383,7 @@ describe('rejectBooking', () => {
   function makeRejectTx() {
     return {
       dailyStock:    { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       reservation:   { update:     jest.fn().mockResolvedValue({}) },
       booking:       { update:     jest.fn().mockResolvedValue({ id: BOOKING_ID, status: 'CANCELLED' }) },
@@ -657,7 +661,18 @@ describe('getDashboard', () => {
 
     // Booking tháng này
     mockPrisma.booking.findMany
-      .mockResolvedValueOnce([{ totalAmount: 300000 }, { totalAmount: 200000 }]) // bookingsThisMonth
+      .mockResolvedValueOnce([
+        {
+          createdAt: new Date(),
+          payments: [{ amount: 300000 }],
+          reservation: { quantity: 1 },
+        },
+        {
+          createdAt: new Date(),
+          payments: [{ amount: 200000 }],
+          reservation: { quantity: 1 },
+        },
+      ])
       .mockResolvedValueOnce([ // recentRaw
         {
           id: BOOKING_ID,
@@ -674,6 +689,7 @@ describe('getDashboard', () => {
         },
       ]);
     mockPrisma.booking.count.mockResolvedValue(2); // pendingBookings
+    mockPrisma.dailyStock.findMany.mockResolvedValue([]);
 
     const { req, res, next } = makeReqRes();
     await getDashboard(req, res, next);

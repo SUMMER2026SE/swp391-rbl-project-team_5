@@ -13,7 +13,7 @@ function isAllowedOrigin(origin) {
   if (allowedOrigins.includes(origin)) return true;
 
   if (process.env.NODE_ENV !== 'production') {
-    return /^http:\/\/(localhost|127\.0\.0\.1):51\d{2}$/.test(origin);
+    return /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin);
   }
 
   return false;

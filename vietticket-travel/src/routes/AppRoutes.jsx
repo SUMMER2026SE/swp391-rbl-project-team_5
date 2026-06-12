@@ -1,54 +1,72 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import ProtectedRoute from '../components/ProtectedRoute.jsx'
 import AdminRoute from '../components/AdminRoute.jsx'
-import AdminUserManagementPage from '../pages/AdminUserManagementPage.jsx'
-import AttractionDetailPage from '../pages/AttractionDetailPage.jsx'
-import BookingSuccessPage from '../pages/BookingSuccessPage.jsx'
-import ChangePasswordPage from '../pages/ChangePasswordPage.jsx'
-import CheckoutPage from '../pages/CheckoutPage.jsx'
-import ETicketPage from '../pages/ETicketPage.jsx'
-import EditProfilePage from '../pages/EditProfilePage.jsx'
-import ForgotPasswordPage from '../pages/ForgotPasswordPage.jsx'
-import HomePage from '../pages/HomePage.jsx'
-import LoginPage from '../pages/LoginPage.jsx'
-import MyTicketsPage from '../pages/MyTicketsPage.jsx'
-import PartnerAddAttractionPage from '../pages/PartnerAddAttractionPage.jsx'
-import PartnerAttractionsPage from '../pages/PartnerAttractionsPage.jsx'
-import PartnerBookingsPage from '../pages/PartnerBookingsPage.jsx'
-import PartnerDashboardPage from '../pages/PartnerDashboardPage.jsx'
-import PartnerEditAttractionPage from '../pages/PartnerEditAttractionPage.jsx'
-import PartnerKycPage from '../pages/PartnerKycPage.jsx'
-import PartnerPendingPage from '../pages/PartnerPendingPage.jsx'
-import PartnerRegisterPage from '../pages/PartnerRegisterPage.jsx'
-import PartnerReportsPage from '../pages/PartnerReportsPage.jsx'
-import PartnerSchedulePage from '../pages/PartnerSchedulePage.jsx'
-import PartnerSettingsPage from '../pages/PartnerSettingsPage.jsx'
-import PartnerTicketFormPage from '../pages/PartnerTicketFormPage.jsx'
-import PartnerTicketsPage from '../pages/PartnerTicketsPage.jsx'
-import ProfilePage from '../pages/ProfilePage.jsx'
-import RegisterPage from '../pages/RegisterPage.jsx'
-import ResetPasswordPage from '../pages/ResetPasswordPage.jsx'
-import SearchAttractionsPage from '../pages/SearchAttractionsPage.jsx'
-import SupportCenterPage from '../pages/SupportCenterPage.jsx'
-import MySupportTicketsPage from '../pages/MySupportTicketsPage.jsx'
-import UserFavoritesPage from '../pages/UserFavoritesPage.jsx'
-import VerifyEmailPage from '../pages/VerifyEmailPage.jsx'
-import AdminDashboard from '../pages/admin/AdminDashboard.jsx'
-import KycApprovalPage from '../pages/admin/KycApprovalPage.jsx'
-import AttractionApprovalPage from '../pages/admin/AttractionApprovalPage.jsx'
-import ViolationManagementPage from '../pages/admin/ViolationManagementPage.jsx'
-import CategoryManagementPage from '../pages/admin/CategoryManagementPage.jsx'
-import BookingManagementPage from '../pages/admin/BookingManagementPage.jsx'
-import CheckinPage from '../pages/staff/CheckinPage.jsx'
-import RefundManagementPage from '../pages/staff/RefundManagementPage.jsx'
-import SupportTicketsPage from '../pages/staff/SupportTicketsPage.jsx'
-import PartnerReviewsPage from '../pages/PartnerReviewsPage.jsx'
-import ReviewModerationPage from '../pages/admin/ReviewModerationPage.jsx'
+
+const AdminUserManagementPage = lazy(() => import('../pages/AdminUserManagementPage.jsx'))
+const AttractionDetailPage = lazy(() => import('../pages/AttractionDetailPage.jsx'))
+const BookingSuccessPage = lazy(() => import('../pages/BookingSuccessPage.jsx'))
+const ChangePasswordPage = lazy(() => import('../pages/ChangePasswordPage.jsx'))
+const CheckoutPage = lazy(() => import('../pages/CheckoutPage.jsx'))
+const ETicketPage = lazy(() => import('../pages/ETicketPage.jsx'))
+const EditProfilePage = lazy(() => import('../pages/EditProfilePage.jsx'))
+const ForgotPasswordPage = lazy(() => import('../pages/ForgotPasswordPage.jsx'))
+const HomePage = lazy(() => import('../pages/HomePage.jsx'))
+const LoginPage = lazy(() => import('../pages/LoginPage.jsx'))
+const MyTicketsPage = lazy(() => import('../pages/MyTicketsPage.jsx'))
+const PartnerAddAttractionPage = lazy(() => import('../pages/PartnerAddAttractionPage.jsx'))
+const PartnerAttractionsPage = lazy(() => import('../pages/PartnerAttractionsPage.jsx'))
+const PartnerBookingsPage = lazy(() => import('../pages/PartnerBookingsPage.jsx'))
+const PartnerDashboardPage = lazy(() => import('../pages/PartnerDashboardPage.jsx'))
+const PartnerEditAttractionPage = lazy(() => import('../pages/PartnerEditAttractionPage.jsx'))
+const PartnerKycPage = lazy(() => import('../pages/PartnerKycPage.jsx'))
+const PartnerPendingPage = lazy(() => import('../pages/PartnerPendingPage.jsx'))
+const PartnerRegisterPage = lazy(() => import('../pages/PartnerRegisterPage.jsx'))
+const PartnerReportsPage = lazy(() => import('../pages/PartnerReportsPage.jsx'))
+const PartnerSchedulePage = lazy(() => import('../pages/PartnerSchedulePage.jsx'))
+const PartnerSettingsPage = lazy(() => import('../pages/PartnerSettingsPage.jsx'))
+const PartnerTicketFormPage = lazy(() => import('../pages/PartnerTicketFormPage.jsx'))
+const PartnerTicketsPage = lazy(() => import('../pages/PartnerTicketsPage.jsx'))
+const ProfilePage = lazy(() => import('../pages/ProfilePage.jsx'))
+const RegisterPage = lazy(() => import('../pages/RegisterPage.jsx'))
+const ResetPasswordPage = lazy(() => import('../pages/ResetPasswordPage.jsx'))
+const SearchAttractionsPage = lazy(() => import('../pages/SearchAttractionsPage.jsx'))
+const SupportCenterPage = lazy(() => import('../pages/SupportCenterPage.jsx'))
+const MySupportTicketsPage = lazy(() => import('../pages/MySupportTicketsPage.jsx'))
+const UserFavoritesPage = lazy(() => import('../pages/UserFavoritesPage.jsx'))
+const VerifyEmailPage = lazy(() => import('../pages/VerifyEmailPage.jsx'))
+const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard.jsx'))
+const KycApprovalPage = lazy(() => import('../pages/admin/KycApprovalPage.jsx'))
+const AttractionApprovalPage = lazy(() => import('../pages/admin/AttractionApprovalPage.jsx'))
+const ViolationManagementPage = lazy(() => import('../pages/admin/ViolationManagementPage.jsx'))
+const CategoryManagementPage = lazy(() => import('../pages/admin/CategoryManagementPage.jsx'))
+const BookingManagementPage = lazy(() => import('../pages/admin/BookingManagementPage.jsx'))
+const CheckinPage = lazy(() => import('../pages/staff/CheckinPage.jsx'))
+const RefundManagementPage = lazy(() => import('../pages/staff/RefundManagementPage.jsx'))
+const SupportTicketsPage = lazy(() => import('../pages/staff/SupportTicketsPage.jsx'))
+const PartnerReviewsPage = lazy(() => import('../pages/PartnerReviewsPage.jsx'))
+const ReviewModerationPage = lazy(() => import('../pages/admin/ReviewModerationPage.jsx'))
+const StaticPage = lazy(() => import('../pages/StaticPage.jsx'))
+const NotFoundPage = lazy(() => import('../pages/NotFoundPage.jsx'))
 
 function AppRoutes() {
   return (
-    <Routes>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center" role="status">
+          <span className="material-symbols-outlined animate-spin text-[40px] text-[#00474d]">
+            progress_activity
+          </span>
+          <span className="sr-only">Đang tải trang</span>
+        </div>
+      }
+    >
+      <Routes>
       <Route path="/" element={<HomePage />} />
+      <Route path="/about" element={<StaticPage type="about" />} />
+      <Route path="/faq" element={<StaticPage type="faq" />} />
+      <Route path="/terms" element={<StaticPage type="terms" />} />
+      <Route path="/privacy" element={<StaticPage type="privacy" />} />
       <Route path="/attractions" element={<SearchAttractionsPage />} />
       <Route path="/attractions/:id" element={<AttractionDetailPage />} />
       <Route path="/login" element={<LoginPage />} />
@@ -343,7 +361,9 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
-    </Routes>
+      <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </Suspense>
   )
 }
 

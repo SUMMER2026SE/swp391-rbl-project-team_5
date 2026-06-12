@@ -97,6 +97,28 @@ async function releaseInventory(tx, booking) {
     throw error;
   }
 
+  const attractionId = reservation.ticketProduct?.attractionId
+    || (await tx.ticketProduct.findUnique({
+      where: { id: ticketProductId },
+      select: { attractionId: true },
+    }))?.attractionId;
+  const attractionStock = attractionId
+    ? await tx.attractionDailyStock.updateMany({
+        where: {
+          attractionId,
+          date,
+          bookedQty: { gte: quantity },
+        },
+        data: { bookedQty: { decrement: quantity } },
+      })
+    : { count: 0 };
+
+  if (attractionStock.count !== 1) {
+    const error = new Error('Không thể hoàn trả kho của điểm tham quan.');
+    error.statusCode = 409;
+    throw error;
+  }
+
   if (timeSlotId) {
     const timeSlotStock = await tx.timeSlotStock.updateMany({
       where: {

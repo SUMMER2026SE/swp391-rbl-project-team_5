@@ -17,7 +17,7 @@ function getClientIp(req) {
 }
 
 const REFUND_ACTIONS = new Set(['APPROVED', 'REJECTED']);
-const REFUND_STATUSES = new Set(['PENDING', 'APPROVED', 'REJECTED']);
+const REFUND_STATUSES = new Set(['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED']);
 
 function httpError(statusCode, message) {
   const error = new Error(message);
@@ -69,6 +69,9 @@ async function listRefundRequests(req, res, next) {
 }
 
 async function processRefundRequest(req, res, next) {
+  let refundClaimed = false;
+  let gatewayRefundDone = false;
+  let claimedRefundId = null;
   try {
     const { refundId } = req.params;
     const action = String(req.body?.action || '').trim().toUpperCase();
@@ -115,10 +118,23 @@ async function processRefundRequest(req, res, next) {
       throw httpError(409, 'Đơn đặt vé này đã được hoàn tiền.');
     }
 
+    const claimed = await prisma.refundRequest.updateMany({
+      where: { id: refundId, status: 'PENDING' },
+      data: {
+        status: 'PROCESSING',
+        processedById: req.user.id,
+        processingStartedAt: new Date(),
+      },
+    });
+    if (claimed.count !== 1) {
+      throw httpError(409, 'Yêu cầu này vừa được một nhân viên khác tiếp nhận xử lý.');
+    }
+    refundClaimed = true;
+    claimedRefundId = refundId;
+
     // 2) Khi DUYỆT: nếu đơn trả online qua VNPay -> gọi cổng hoàn tiền TRƯỚC.
     //    Nếu cổng từ chối -> dừng, KHÔNG đụng DB (đơn giữ nguyên REFUND_REQUESTED).
     let finalStaffNotes = staffNotes;
-    let gatewayRefundDone = false;
     if (action === 'APPROVED') {
       const onlinePayment = refundRequest.booking.payments.find((p) =>
         /vnpay/i.test(p.paymentGateway),
@@ -190,7 +206,7 @@ async function processRefundRequest(req, res, next) {
           },
         });
 
-        if (!fresh || fresh.status !== 'PENDING') {
+        if (!fresh || fresh.status !== 'PROCESSING') {
           throw httpError(409, 'Yêu cầu này đã được xử lý trước đó.');
         }
         if (fresh.booking.status === 'REFUNDED') {
@@ -226,6 +242,7 @@ async function processRefundRequest(req, res, next) {
             staffNotes: finalStaffNotes,
             processedById: req.user.id,
             processedAt: new Date(),
+            processingStartedAt: null,
           },
         });
 
@@ -233,6 +250,7 @@ async function processRefundRequest(req, res, next) {
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+      refundClaimed = false;
     } catch (txError) {
       if (gatewayRefundDone) {
         // Tiền ĐÃ hoàn qua cổng nhưng DB chưa cập nhật được -> cần đối soát thủ công.
@@ -259,6 +277,23 @@ async function processRefundRequest(req, res, next) {
 
     return res.json({ success: true, data: result.updated });
   } catch (error) {
+    if (refundClaimed && !gatewayRefundDone && claimedRefundId) {
+      try {
+        await prisma.refundRequest.updateMany({
+          where: { id: claimedRefundId, status: 'PROCESSING' },
+          data: {
+            status: 'PENDING',
+            processedById: null,
+            processingStartedAt: null,
+          },
+        });
+      } catch (releaseError) {
+        console.error(
+          `[staff-refund] Không thể trả yêu cầu ${claimedRefundId} về hàng đợi:`,
+          releaseError.message,
+        );
+      }
+    }
     if (error.statusCode) {
       return res.status(error.statusCode).json({
         success: false,

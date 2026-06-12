@@ -268,11 +268,11 @@ describe('createVNPayUrl', () => {
     expect(res.status).toHaveBeenCalledWith(500);
   });
 
-  test('thành công -> reset expiresAt, gắn TxnRef vào Payment, trả paymentUrl', async () => {
+  test('thành công -> reset expiresAt, tạo Payment attempt mới, trả paymentUrl', async () => {
     prisma.booking.findUnique.mockResolvedValue(bookingFixture());
     const tx = {
       reservation: { update: jest.fn().mockResolvedValue({}) },
-      payment: { update: jest.fn().mockResolvedValue({}), create: jest.fn() },
+      payment: { create: jest.fn().mockResolvedValue({}) },
     };
     prisma.$transaction.mockImplementation((cb) => cb(tx));
     const res = makeRes();
@@ -284,7 +284,7 @@ describe('createVNPayUrl', () => {
         data: expect.objectContaining({ expiresAt: expect.any(Date) }),
       }),
     );
-    expect(tx.payment.update).toHaveBeenCalledWith(
+    expect(tx.payment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ transactionId: expect.any(String), status: 'PENDING' }),
       }),

@@ -8,22 +8,10 @@ import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
-const MOCK_ATTRACTION_NAMES = {
-  1: 'Sun World Ba Na Hills', 2: 'Vịnh Hạ Long Cruise',
-  3: 'VinWonders Nha Trang', 4: 'Hội An Lantern Festival Tour',
-}
-
 const DAYS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
 const DAY_LABELS = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật']
 
 const MONTHS = ['Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12']
-
-const DEFAULT_SLOTS = [
-  { id: 's1', start: '08:00', end: '10:00', capacity: 50, isActive: true },
-  { id: 's2', start: '10:00', end: '12:00', capacity: 50, isActive: true },
-  { id: 's3', start: '13:00', end: '15:00', capacity: 40, isActive: true },
-  { id: 's4', start: '15:00', end: '17:00', capacity: 40, isActive: true },
-]
 
 // Days that have special overrides
 const DEFAULT_OVERRIDES = {
@@ -51,7 +39,7 @@ function PartnerSchedulePage() {
   const { id } = useParams()
   const navigate = useNavigate()
 
-  const attractionName = MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan'
+  const [attractionName, setAttractionName] = useState('Điểm tham quan')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('slots') // 'slots' | 'calendar'
@@ -61,7 +49,7 @@ function PartnerSchedulePage() {
   const [defaultCapacity, setDefaultCapacity] = useState(200)
 
   // Time slots
-  const [slots, setSlots] = useState(DEFAULT_SLOTS)
+  const [slots, setSlots] = useState([])
   const [newSlot, setNewSlot] = useState({ start: '', end: '', capacity: '' })
   const [slotError, setSlotError] = useState('')
 
@@ -80,8 +68,12 @@ function PartnerSchedulePage() {
     setIsLoading(true)
     ;(async () => {
       try {
-        const data = await partnerApi.getSchedule(id)
+        const [data, attractionData] = await Promise.all([
+          partnerApi.getSchedule(id),
+          partnerApi.getAttraction(id),
+        ])
         if (!active) return
+        setAttractionName(attractionData.attraction?.name || 'Điểm tham quan')
         const s = data.schedule || {}
         if (Array.isArray(s.openDays)) setOpenDays(s.openDays)
         if (typeof s.defaultCapacity === 'number') setDefaultCapacity(s.defaultCapacity)
@@ -89,11 +81,7 @@ function PartnerSchedulePage() {
         if (s.specialDates && typeof s.specialDates === 'object') setOverrides(s.specialDates)
       } catch (err) {
         if (!active) return
-        if (partnerApi.isNetworkError(err)) {
-          // Fallback demo: giữ nguyên state mặc định đã khởi tạo
-        } else {
-          toast.error(err.message)
-        }
+        toast.error(err.message)
       } finally {
         if (active) setIsLoading(false)
       }
@@ -161,11 +149,7 @@ function PartnerSchedulePage() {
       await partnerApi.saveSchedule(id, payload)
       toast.success('Đã lưu cấu hình lịch thành công!')
     } catch (err) {
-      if (partnerApi.isNetworkError(err)) {
-        toast.info('Chế độ demo (không có server) — thao tác được mô phỏng.')
-      } else {
-        toast.error(err.message)
-      }
+      toast.error(err.message)
     } finally {
       setIsSaving(false)
     }

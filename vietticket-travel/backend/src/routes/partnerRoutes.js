@@ -2,7 +2,10 @@ const express = require('express');
 const protect = require('../middleware/authMiddleware');
 const { requirePartner, requireApprovedPartner } = require('../middleware/partnerMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
-const { uploadAttractionImages } = require('../middleware/uploadMiddleware');
+const {
+  uploadAttractionImages,
+  validateUploadedFiles,
+} = require('../middleware/uploadMiddleware');
 const partnerController = require('../controllers/partnerController');
 const attractionController = require('../controllers/attractionController');
 const ticketController = require('../controllers/ticketController');
@@ -26,6 +29,7 @@ router.use(requireApprovedPartner);
 // Hồ sơ & tổng quan
 router.put('/settings', partnerController.updateSettings);
 router.get('/dashboard', partnerController.getDashboard);
+router.get('/reports', partnerController.getReports);
 router.get('/categories', attractionController.listCategories);
 
 // Điểm tham quan
@@ -37,7 +41,13 @@ router.delete('/attractions/:id', attractionController.deleteAttraction);
 router.post(
   '/attractions/:id/images',
   uploadAttractionImages.array('images', 10),
+  validateUploadedFiles,
   attractionController.uploadImages,
+);
+router.delete('/attractions/:id/images/:imageId', attractionController.deleteImage);
+router.patch(
+  '/attractions/:id/images/:imageId/primary',
+  attractionController.setPrimaryImage,
 );
 
 // Vé (gói vé)

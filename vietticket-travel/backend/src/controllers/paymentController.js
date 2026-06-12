@@ -46,7 +46,6 @@ async function createVNPayUrl(req, res, next) {
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { payments: { orderBy: { createdAt: 'desc' }, take: 1 } },
     });
     if (!booking || booking.userId !== req.user.id) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé.' });
@@ -71,29 +70,22 @@ async function createVNPayUrl(req, res, next) {
     // TxnRef chỉ gồm [a-z0-9] (bỏ dấu '-' của uuid) + timestamp -> duy nhất mỗi lần thử.
     const txnRef = `${bookingId.replace(/-/g, '')}${now.getTime()}`;
 
-    // Reset cửa sổ thanh toán + gắn TxnRef vào Payment để IPN/Return tra ngược.
+    // Mỗi lần thử thanh toán là một Payment bất biến. Link cũ vẫn có thể được
+    // VNPay callback an toàn, thay vì bị mất dấu khi người dùng bấm thử lại.
     await prisma.$transaction(async (tx) => {
       await tx.reservation.update({
         where: { id: booking.reservationId },
         data: { expiresAt },
       });
-      const payment = booking.payments[0];
-      if (payment) {
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: { transactionId: txnRef, paymentGateway: 'VNPAY', status: 'PENDING' },
-        });
-      } else {
-        await tx.payment.create({
-          data: {
-            bookingId,
-            amount: booking.totalAmount,
-            paymentGateway: 'VNPAY',
-            transactionId: txnRef,
-            status: 'PENDING',
-          },
-        });
-      }
+      await tx.payment.create({
+        data: {
+          bookingId,
+          amount: booking.totalAmount,
+          paymentGateway: 'VNPAY',
+          transactionId: txnRef,
+          status: 'PENDING',
+        },
+      });
     });
 
     const params = {

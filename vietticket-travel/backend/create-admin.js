@@ -1,12 +1,18 @@
 const bcrypt = require('bcrypt');
 const prisma = require('./src/config/prisma');
 
-const ADMIN_EMAIL = 'admin@vietticket.com';
-const ADMIN_PASSWORD = 'Admin@123456'; // Ensure this matches password policy (min 8 chars, mixed case, number, symbol)
-const ADMIN_FULLNAME = 'Super Admin';
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
+const ADMIN_FULLNAME = String(process.env.ADMIN_FULLNAME || 'VietTicket Admin').trim();
 
 async function createAdmin() {
   try {
+    if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+      throw new Error('Cần cấu hình ADMIN_EMAIL và ADMIN_PASSWORD trong biến môi trường.');
+    }
+    if (ADMIN_PASSWORD.length < 12) {
+      throw new Error('ADMIN_PASSWORD phải có ít nhất 12 ký tự.');
+    }
     console.log('Đang kết nối cơ sở dữ liệu...');
     await prisma.$connect();
 
@@ -56,7 +62,6 @@ async function createAdmin() {
     console.log('==================================================');
     console.log('TẠO TÀI KHOẢN ADMIN THÀNH CÔNG!');
     console.log(`Email đăng nhập: ${ADMIN_EMAIL}`);
-    console.log(`Mật khẩu:       ${ADMIN_PASSWORD}`);
     console.log(`Họ và tên:       ${adminUser.fullName}`);
     console.log('==================================================');
   } catch (error) {

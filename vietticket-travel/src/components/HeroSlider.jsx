@@ -19,6 +19,7 @@ function HeroSlider({ slides }) {
   }, [slides.length, stopAutoPlay])
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
     startAutoPlay()
     return () => stopAutoPlay()
   }, [startAutoPlay, stopAutoPlay])
@@ -38,31 +39,35 @@ function HeroSlider({ slides }) {
     startAutoPlay()
   }
 
+  const slide = slides[currentSlideIndex]
+
+  if (!slide) return null
+
   return (
     <section className="hero-slider group" aria-label="Hero slider Banners">
-      <div
-        className="slider-track"
-        style={{ transform: `translateX(-${currentSlideIndex * 100}%)` }}
-      >
-        {slides.map((slide, index) => (
-          <div className="slide" key={index} aria-hidden={index !== currentSlideIndex}>
-            <div className="slide__image-container">
-              <img src={slide.image.src} alt={slide.image.alt} className="slide__image" />
-              <div className="slide__overlay" />
-            </div>
-            <div className="slide__content container">
-              <div className="slide__copy">
-                <h1 className="slide__title">{slide.title}</h1>
-                <p className="slide__desc">{slide.description}</p>
-                <div className="slide__actions">
-                  <Link to="/attractions" className="button button--primary button--large">
-                    {slide.primaryCta}
-                  </Link>
-                </div>
+      <div className="slider-track">
+        <div className="slide">
+          <div className="slide__image-container">
+            <img
+              src={slide.image.src}
+              alt={slide.image.alt}
+              className="slide__image"
+              fetchPriority="high"
+            />
+            <div className="slide__overlay" />
+          </div>
+          <div className="slide__content container">
+            <div className="slide__copy">
+              <h1 className="slide__title">{slide.title}</h1>
+              <p className="slide__desc">{slide.description}</p>
+              <div className="slide__actions">
+                <Link to="/attractions" className="button button--primary button--large">
+                  {slide.primaryCta}
+                </Link>
               </div>
             </div>
           </div>
-        ))}
+        </div>
       </div>
 
       <button

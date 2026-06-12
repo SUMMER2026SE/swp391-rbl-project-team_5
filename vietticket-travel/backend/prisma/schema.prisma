@@ -147,6 +147,7 @@ enum BookingStatus {
   CONFIRMED
   CANCELLED
   COMPLETED
+  NO_SHOW
   REFUND_REQUESTED
   REFUNDED
 }
@@ -233,8 +234,10 @@ model Attraction {
   rejectionReason        String?
   averageRating          Float            @default(0.0)
   totalReviews           Int              @default(0)
+  minTicketPrice         Decimal?         @db.Decimal(12, 2)
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
+  archivedAt             DateTime?
 
   partner        PartnerProfile       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   images         AttractionImage[]
@@ -245,8 +248,12 @@ model Attraction {
   timeSlots      TimeSlot[] // Khung giờ cấp điểm tham quan (Module 2)
   specialDates   SpecialDate[] // Lịch đặc biệt (đóng cửa / đổi sức chứa)
 
+  dailyStocks AttractionDailyStock[]
+
   @@index([city])
   @@index([status])
+  @@index([archivedAt])
+  @@index([minTicketPrice])
 }
 
 model AttractionImage {
@@ -263,9 +270,22 @@ model Category {
   id          String   @id @default(uuid())
   name        String   @unique
   description String?
+  icon        String?
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   attractions AttractionCategory[]
+}
+
+model NewsletterSubscription {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  isActive     Boolean  @default(true)
+  subscribedAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([isActive])
 }
 
 model AttractionCategory {
@@ -291,12 +311,15 @@ model TicketProduct {
   refundFeeRate Decimal          @default(0.0) @db.Decimal(5, 2)
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
+  archivedAt    DateTime?
 
   attraction      Attraction       @relation(fields: [attractionId], references: [id], onDelete: Cascade)
   timeSlots       TimeSlot[]
   dailyStocks     DailyStock[]
   reservations    Reservation[]
   ticketInstances TicketInstance[]
+
+  @@index([archivedAt])
 }
 
 model TimeSlot {
@@ -341,6 +364,19 @@ model DailyStock {
   ticketProduct TicketProduct @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
 
   @@unique([ticketProductId, date])
+}
+
+model AttractionDailyStock {
+  id           String   @id @default(uuid())
+  attractionId String
+  date         DateTime @db.Date
+  capacity     Int
+  bookedQty    Int      @default(0)
+  heldQty      Int      @default(0)
+
+  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+
+  @@unique([attractionId, date])
 }
 
 model TimeSlotStock {
@@ -470,6 +506,7 @@ model Voucher {
 
 enum RefundStatus {
   PENDING
+  PROCESSING
   APPROVED
   REJECTED
 }
@@ -481,17 +518,18 @@ enum SupportStatus {
 }
 
 model RefundRequest {
-  id            String       @id @default(uuid())
-  bookingId     String       @unique
-  requestedById String
-  reason        String       @db.Text
-  amount        Decimal      @db.Decimal(12, 2)
-  status        RefundStatus @default(PENDING)
-  staffNotes    String?      @db.Text
-  processedById String?
-  createdAt     DateTime     @default(now())
-  processedAt   DateTime?
-  updatedAt     DateTime     @updatedAt
+  id                  String       @id @default(uuid())
+  bookingId           String       @unique
+  requestedById       String
+  reason              String       @db.Text
+  amount              Decimal      @db.Decimal(12, 2)
+  status              RefundStatus @default(PENDING)
+  staffNotes          String?      @db.Text
+  processedById       String?
+  processingStartedAt DateTime?
+  createdAt           DateTime     @default(now())
+  processedAt         DateTime?
+  updatedAt           DateTime     @updatedAt
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 

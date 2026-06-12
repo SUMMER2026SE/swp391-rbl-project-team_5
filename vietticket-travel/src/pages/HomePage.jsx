@@ -8,35 +8,36 @@ import PartnerCTASection from '../components/PartnerCTASection.jsx'
 import PopularDestinations from '../components/PopularDestinations.jsx'
 import ServiceCategories from '../components/ServiceCategories.jsx'
 import Testimonials from '../components/Testimonials.jsx'
+import Seo from '../components/Seo.jsx'
 import {
-  appDownloadButtons,
   bookingPreview,
   bookingSteps,
   footerLinks,
   heroContent,
   navLinks,
-  partners,
-  popularDestinations,
   serviceCategories,
   sliderSlides,
-  testimonials,
 } from '../data/landingData.js'
 
 function HomePage() {
   return (
     <>
+      <Seo
+        title="VietTicket Travel | Đặt vé tham quan Việt Nam"
+        description="Tìm kiếm, đặt và quản lý vé tham quan Việt Nam với thanh toán trực tuyến và vé QR."
+      />
       <Header links={navLinks} />
       <HeroSlider slides={sliderSlides} />
       <main>
         <HeroSection content={heroContent} />
         <ServiceCategories categories={serviceCategories} />
-        <PopularDestinations destinations={popularDestinations} />
+        <PopularDestinations />
         <BookingSteps steps={bookingSteps} preview={bookingPreview} />
-        <Testimonials testimonials={testimonials} partners={partners} />
+        <Testimonials />
         <PartnerCTASection />
         <Newsletter />
       </main>
-      <Footer links={footerLinks} appButtons={appDownloadButtons} />
+      <Footer links={footerLinks} />
     </>
   )
 }

@@ -31,24 +31,25 @@ describe('helpers cơ bản', () => {
 });
 
 describe('validateKyc', () => {
-  test('✅ Hợp lệ chỉ cần businessName', () => {
-    expect(validateKyc({ businessName: 'Cty A' })).toBe('');
+  const license = 'http://localhost/api/upload/documents/user-1-license.pdf';
+  test('✅ Hợp lệ khi có tên doanh nghiệp và giấy phép', () => {
+    expect(validateKyc({ businessName: 'Cty A', businessLicenseUrl: license })).toBe('');
   });
   test('❌ Thiếu businessName', () => {
     expect(validateKyc({})).not.toBe('');
   });
   test('❌ businessName quá dài (>150)', () => {
-    expect(validateKyc({ businessName: 'a'.repeat(151) })).not.toBe('');
+    expect(validateKyc({ businessName: 'a'.repeat(151), businessLicenseUrl: license })).not.toBe('');
   });
   test('❌ taxCode sai định dạng', () => {
-    expect(validateKyc({ businessName: 'A', taxCode: '123' })).not.toBe('');
+    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, taxCode: '123' })).not.toBe('');
   });
   test('✅ taxCode 10 hoặc 13 chữ số', () => {
-    expect(validateKyc({ businessName: 'A', taxCode: '0102030405' })).toBe('');
-    expect(validateKyc({ businessName: 'A', taxCode: '0102030405123' })).toBe('');
+    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, taxCode: '0102030405' })).toBe('');
+    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, taxCode: '0102030405123' })).toBe('');
   });
   test('❌ bankAccountNumber sai định dạng', () => {
-    expect(validateKyc({ businessName: 'A', bankAccountNumber: '12a' })).not.toBe('');
+    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, bankAccountNumber: '12a' })).not.toBe('');
   });
 });
 

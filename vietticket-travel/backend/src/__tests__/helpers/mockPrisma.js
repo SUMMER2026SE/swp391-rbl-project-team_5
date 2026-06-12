@@ -11,6 +11,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    count: jest.fn(),
   },
   attraction: {
     findUnique: jest.fn(),
@@ -28,11 +29,18 @@ const mockPrisma = {
   attractionImage: {
     create: jest.fn(),
     createMany: jest.fn(),
+    delete: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
   },
   category: {
+    findUnique: jest.fn(),
     findMany: jest.fn(),
     upsert: jest.fn(),
     create: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+    count: jest.fn(),
   },
   favoriteAttraction: {
     findUnique: jest.fn(),
@@ -47,10 +55,12 @@ const mockPrisma = {
     update: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
+    aggregate: jest.fn(),
   },
   timeSlot: {
     findMany: jest.fn(),
     deleteMany: jest.fn(),
+    updateMany: jest.fn(),
     createMany: jest.fn(),
     findUnique: jest.fn(),
     aggregate: jest.fn(),
@@ -66,8 +76,15 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
   },
+  attractionDailyStock: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
   timeSlotStock: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
     create: jest.fn(),
@@ -83,6 +100,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     count: jest.fn(),
     groupBy: jest.fn(),
     aggregate: jest.fn(),
@@ -92,14 +110,18 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   voucher: {
     findUnique: jest.fn(),
     updateMany: jest.fn(),
   },
   payment: {
+    findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
+    aggregate: jest.fn(),
   },
   ticketInstance: {
     create: jest.fn(),
@@ -128,7 +150,11 @@ const mockPrisma = {
     count: jest.fn(),
     groupBy: jest.fn(),
   },
+  newsletterSubscription: {
+    upsert: jest.fn(),
+  },
   $transaction: jest.fn(),
+  $queryRaw: jest.fn(),
 };
 
 module.exports = mockPrisma;

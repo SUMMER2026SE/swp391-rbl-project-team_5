@@ -5,24 +5,6 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import { useAuth } from '../context/useAuth.js'
 import * as partnerApi from '../services/partnerApi.js'
 
-// Mock stats — replace with API
-const MOCK_STATS = {
-  totalAttractions: 4,
-  activeAttractions: 3,
-  totalTickets: 6,
-  totalBookingsThisMonth: 128,
-  revenueThisMonth: 42500000,
-  pendingBookings: 5,
-}
-
-const MOCK_RECENT_BOOKINGS = [
-  { id: 'B001', attraction: 'Sun World Ba Na Hills', ticket: 'Vé người lớn', customer: 'Nguyễn Văn A', date: '2026-06-05', amount: 850000, status: 'confirmed' },
-  { id: 'B002', attraction: 'Sun World Ba Na Hills', ticket: 'Vé trẻ em', customer: 'Trần Thị B', date: '2026-06-05', amount: 550000, status: 'confirmed' },
-  { id: 'B003', attraction: 'Vịnh Hạ Long Cruise', ticket: 'Vé du thuyền 1 ngày', customer: 'Lê Văn C', date: '2026-06-04', amount: 1100000, status: 'pending' },
-  { id: 'B004', attraction: 'Hội An Lantern Festival', ticket: 'Vé tham quan đêm', customer: 'Phạm Thị D', date: '2026-06-04', amount: 120000, status: 'cancelled' },
-  { id: 'B005', attraction: 'Sun World Ba Na Hills', ticket: 'Vé gia định', customer: 'Hoàng Văn E', date: '2026-06-03', amount: 2500000, status: 'confirmed' },
-]
-
 const BOOKING_STATUS = {
   confirmed:       { label: 'Đã xác nhận',   cls: 'bg-[#E6F4EA] text-[#137333]' },
   pending:         { label: 'Chờ thanh toán', cls: 'bg-[#ffdea8] text-[#725000]' },
@@ -67,14 +49,9 @@ function PartnerDashboardPage() {
           }
         }
 
-        if (partnerApi.isNetworkError(err)) {
-          setStats(MOCK_STATS)
-          setBookings(MOCK_RECENT_BOOKINGS)
-        } else {
-          toast.error(err.message || 'Có lỗi xảy ra khi tải thông tin dashboard.')
-          setStats(MOCK_STATS)
-          setBookings(MOCK_RECENT_BOOKINGS)
-        }
+        toast.error(err.message || 'Có lỗi xảy ra khi tải thông tin dashboard.')
+        setStats(null)
+        setBookings([])
       } finally {
         if (!cancelled) setIsLoading(false)
       }
@@ -106,6 +83,10 @@ function PartnerDashboardPage() {
       {isLoading ? (
         <div className="flex items-center justify-center h-48">
           <span className="material-symbols-outlined animate-spin text-[40px] text-[#00474d]">progress_activity</span>
+        </div>
+      ) : !stats ? (
+        <div className="bg-white rounded-xl border border-[#e1e3e4] p-10 text-center text-[#6f797a]">
+          Không thể tải dữ liệu dashboard. Vui lòng thử lại sau.
         </div>
       ) : (
         <>
@@ -170,6 +151,13 @@ function PartnerDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {bookings.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-10 text-center text-[#6f797a]">
+                        Chưa có đơn đặt vé nào.
+                      </td>
+                    </tr>
+                  )}
                   {bookings.map((b, i) => (
                     <tr key={b.id} className={`border-t border-[#f2f4f5] hover:bg-[#f7f8f9] transition-colors ${i % 2 === 0 ? '' : ''}`}>
                       <td className="px-5 py-3.5 font-mono text-xs text-[#00629d] font-semibold">{b.id}</td>

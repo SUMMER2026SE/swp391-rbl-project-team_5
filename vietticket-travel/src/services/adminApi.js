@@ -31,5 +31,25 @@ export function hideAttraction(id, reason) {
   })
 }
 
+export function getDashboard(period = 'month') {
+  return apiRequest(`/admin/dashboard?period=${encodeURIComponent(period)}`, { method: 'GET' })
+}
+
+export function getCategories() {
+  return apiRequest('/admin/categories', { method: 'GET' })
+}
+
+export function createCategory(payload) {
+  return apiRequest('/admin/categories', { method: 'POST', body: payload })
+}
+
+export function updateCategory(id, payload) {
+  return apiRequest(`/admin/categories/${id}`, { method: 'PUT', body: payload })
+}
+
+export function deleteCategory(id) {
+  return apiRequest(`/admin/categories/${id}`, { method: 'DELETE' })
+}
+
 export const listPartners = getPartners;
 export const listAttractions = getAttractions;

@@ -4,24 +4,6 @@ import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
-// Mock data — thay bằng API call
-const MOCK_ATTRACTION_NAMES = { 1: 'Sun World Ba Na Hills', 2: 'Vịnh Hạ Long Cruise', 3: 'VinWonders Nha Trang', 4: 'Hội An Lantern Festival Tour' }
-
-const MOCK_TICKETS = {
-  1: [
-    { id: 't1', name: 'Vé người lớn', type: 'ADULT', originalPrice: 900000, sellingPrice: 850000, refundPolicy: 'PARTIAL', status: 'active' },
-    { id: 't2', name: 'Vé trẻ em (dưới 12 tuổi)', type: 'CHILD', originalPrice: 600000, sellingPrice: 550000, refundPolicy: 'FULL', status: 'active' },
-    { id: 't3', name: 'Vé gia đình (2 người lớn + 2 trẻ em)', type: 'FAMILY', originalPrice: 2800000, sellingPrice: 2500000, refundPolicy: 'NONE', status: 'inactive' },
-  ],
-  2: [
-    { id: 't4', name: 'Vé du thuyền 1 ngày', type: 'ADULT', originalPrice: 1200000, sellingPrice: 1100000, refundPolicy: 'PARTIAL', status: 'active' },
-  ],
-  3: [],
-  4: [
-    { id: 't5', name: 'Vé tham quan đêm', type: 'ADULT', originalPrice: 150000, sellingPrice: 120000, refundPolicy: 'FULL', status: 'active' },
-  ],
-}
-
 const TYPE_LABEL = { ADULT: 'Người lớn', CHILD: 'Trẻ em', FAMILY: 'Gia đình', GROUP: 'Nhóm' }
 const TYPE_COLOR = { ADULT: 'bg-[#cfe5ff] text-[#003558]', CHILD: 'bg-[#ffdea8] text-[#271900]', FAMILY: 'bg-[#E6F4EA] text-[#137333]', GROUP: 'bg-[#ffdad6] text-[#93000a]' }
 const REFUND_LABEL = { NONE: 'Không hoàn', PARTIAL: 'Hoàn 1 phần', FULL: 'Hoàn toàn bộ' }
@@ -48,17 +30,12 @@ function PartnerTicketsPage() {
       try {
         const data = await partnerApi.listTickets(id)
         if (!active) return
-        setAttractionName(data.attraction?.name || MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan')
+        setAttractionName(data.attraction?.name || 'Điểm tham quan')
         setTickets(data.tickets)
       } catch (err) {
         if (!active) return
-        if (partnerApi.isNetworkError(err)) {
-          // Fallback demo khi không có server
-          setAttractionName(MOCK_ATTRACTION_NAMES[Number(id)] || 'Điểm tham quan')
-          setTickets(MOCK_TICKETS[Number(id)] || [])
-        } else {
-          toast.error(err.message)
-        }
+        setTickets([])
+        toast.error(err.message)
       } finally {
         if (active) setIsLoading(false)
       }
@@ -73,18 +50,21 @@ function PartnerTicketsPage() {
       setDeleteTarget(null)
       toast.success('Đã xóa gói vé.')
     } catch (err) {
-      if (partnerApi.isNetworkError(err)) {
-        setTickets((prev) => prev.filter((t) => t.id !== ticketId))
-        setDeleteTarget(null)
-        toast.info('Chế độ demo (không có server) — thao tác được mô phỏng.')
-      } else {
-        toast.error(err.message)
-      }
+      toast.error(err.message)
     }
   }
 
-  const handleToggleStatus = (ticketId) => {
-    setTickets((prev) => prev.map((t) => t.id === ticketId ? { ...t, status: t.status === 'active' ? 'inactive' : 'active' } : t))
+  const handleToggleStatus = async (ticket) => {
+    const status = ticket.status === 'active' ? 'inactive' : 'active'
+    try {
+      const response = await partnerApi.updateTicket(ticket.id, { status })
+      setTickets((items) =>
+        items.map((item) => item.id === ticket.id ? response.ticket : item),
+      )
+      toast.success(status === 'active' ? 'Đã kích hoạt gói vé.' : 'Đã tạm dừng gói vé.')
+    } catch (error) {
+      toast.error(error.message)
+    }
   }
 
   const discount = (orig, sell) => Math.round((1 - sell / orig) * 100)
@@ -186,7 +166,7 @@ function PartnerTicketsPage() {
                 {/* Actions */}
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => handleToggleStatus(ticket.id)}
+                    onClick={() => handleToggleStatus(ticket)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${ticket.status === 'active' ? 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6] hover:bg-[#CEEAD6]' : 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca] hover:bg-[#d8dadb]'}`}
                   >
                     {ticket.status === 'active' ? 'Hoạt động' : 'Tạm dừng'}

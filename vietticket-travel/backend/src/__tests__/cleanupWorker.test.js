@@ -13,9 +13,11 @@ function makeTx({ reservation }) {
       update: jest.fn().mockResolvedValue({}),
     },
     dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     booking: { update: jest.fn().mockResolvedValue({}) },
     payment: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    voucher: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
   };
 }
 
@@ -47,7 +49,17 @@ describe('sweepExpiredReservations', () => {
         timeSlotId: 'slot-1',
         date: new Date('2026-06-20'),
         quantity: 2,
-        booking: { id: 'bk-1', status: 'PENDING_PAYMENT' },
+        booking: {
+          id: 'bk-1',
+          status: 'PENDING_PAYMENT',
+          email: 'a@example.com',
+          fullName: 'A',
+          voucherId: null,
+        },
+        ticketProduct: {
+          attractionId: 'attr-1',
+          attraction: { title: 'Điểm A' },
+        },
       },
     });
     prisma.$transaction.mockImplementation((cb) => cb(tx));
@@ -89,6 +101,10 @@ describe('sweepExpiredReservations', () => {
         date: new Date('2026-06-21'),
         quantity: 1,
         booking: null,
+        ticketProduct: {
+          attractionId: 'attr-2',
+          attraction: { title: 'Điểm B' },
+        },
       },
     });
     prisma.$transaction.mockImplementation((cb) => cb(tx));

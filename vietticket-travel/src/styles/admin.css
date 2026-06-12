@@ -2604,3 +2604,38 @@
     gap: 16px;
   }
 }
+
+.admin-form-input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(111, 121, 122, 0.45);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--adm-on-surface);
+  padding: 10px 12px;
+  outline: none;
+}
+
+.admin-form-input:focus {
+  border-color: var(--adm-primary-dark);
+  box-shadow: 0 0 0 3px rgba(0, 96, 104, 0.12);
+}
+
+.admin-status-badge {
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+}
+
+.admin-status-badge--approved {
+  background: rgba(0, 96, 104, 0.1);
+  color: var(--adm-primary-dark);
+}
+
+.admin-status-badge--inactive {
+  background: rgba(63, 72, 74, 0.1);
+  color: var(--adm-on-surface-variant);
+}

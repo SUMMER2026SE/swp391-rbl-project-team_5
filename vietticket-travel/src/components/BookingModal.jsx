@@ -37,16 +37,17 @@ const isSlotUnavailable = (slot) =>
   slot.available === false ||
   ['UNAVAILABLE', 'SOLD_OUT', 'DISABLED'].includes(slot.status)
 
-// Khung giờ còn ít vé hơn số đã chọn -> tự co lại (giữ tối thiểu 1 người lớn,
-// ưu tiên giảm vé trẻ em trước).
-const clampCountsToLimit = (prev, availableTickets) => {
+const clampQuantityToLimit = (quantity, availableTickets) => {
   const limit = typeof availableTickets === 'number' ? availableTickets : null
-  if (limit === null) return prev
-  const total = prev.adult + prev.child
-  if (total <= limit) return prev
-  const adult = Math.max(1, Math.min(prev.adult, limit))
-  const child = Math.max(0, limit - adult)
-  return { adult, child }
+  if (limit === null) return quantity
+  return Math.max(1, Math.min(quantity, limit))
+}
+
+const TICKET_TYPE_META = {
+  ADULT: { label: 'Vé người lớn', ageLabel: 'Áp dụng theo điều kiện của gói vé' },
+  CHILD: { label: 'Vé trẻ em', ageLabel: 'Vui lòng kiểm tra giới hạn độ tuổi trong mô tả' },
+  FAMILY: { label: 'Vé gia đình', ageLabel: 'Một vé tương ứng với một gói gia đình' },
+  GROUP: { label: 'Vé nhóm', ageLabel: 'Một vé tương ứng với một gói nhóm' },
 }
 
 export default function BookingModal({
@@ -60,7 +61,7 @@ export default function BookingModal({
   const [selectedDate, setSelectedDate] = useState(todayStr)
   const [selectedTimeSlotId, setSelectedTimeSlotId] = useState('')
   const [timeSlots, setTimeSlots] = useState([])
-  const [counts, setCounts] = useState({ adult: 1, child: 0 })
+  const [quantity, setQuantity] = useState(1)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
@@ -74,10 +75,11 @@ export default function BookingModal({
     'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
   ]
 
-  const adultPrice = Number(ticketProduct?.sellingPrice || ticketProduct?.price || 0)
-  const childPrice = adultPrice
-  const totalPrice = counts.adult * adultPrice + counts.child * childPrice
-  const totalQuantity = counts.adult + counts.child
+  const unitPrice = Number(ticketProduct?.sellingPrice || ticketProduct?.price || 0)
+  const totalPrice = quantity * unitPrice
+  const ticketTypeMeta =
+    TICKET_TYPE_META[String(ticketProduct?.type || 'ADULT').toUpperCase()]
+    || TICKET_TYPE_META.ADULT
   const ticketId = ticketProduct?.id
 
   // Số vé còn lại của khung giờ đang chọn — dùng để chặn chọn quá số lượng.
@@ -202,7 +204,8 @@ export default function BookingModal({
         const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
         setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
         if (availableSlot) {
-          setCounts((prev) => clampCountsToLimit(prev, availableSlot.availableTickets))
+          setQuantity((current) =>
+            clampQuantityToLimit(current, availableSlot.availableTickets))
         }
       } catch (error) {
         console.error('Lỗi lấy thông tin khung giờ trống:', error)
@@ -220,23 +223,19 @@ export default function BookingModal({
   const handleSelectSlot = (slot) => {
     setSelectedTimeSlotId(getSlotId(slot))
     setErrorMessage('')
-    setCounts((prev) => clampCountsToLimit(prev, slot?.availableTickets))
+    setQuantity((current) => clampQuantityToLimit(current, slot?.availableTickets))
   }
 
-  const handleQtyChange = (type, delta) => {
-    setCounts((prev) => {
-      const minVal = type === 'adult' ? 1 : 0
-      const next = Math.max(minVal, prev[type] + delta)
-      const other = type === 'adult' ? prev.child : prev.adult
-
-      // Không cho tổng số vé vượt quá số vé còn lại của khung giờ.
-      if (delta > 0 && maxQuantity !== null && next + other > maxQuantity) {
+  const handleQtyChange = (delta) => {
+    setQuantity((current) => {
+      const next = Math.max(1, current + delta)
+      if (delta > 0 && maxQuantity !== null && next > maxQuantity) {
         setErrorMessage(`Khung giờ này chỉ còn ${maxQuantity} vé.`)
-        return prev
+        return current
       }
 
       setErrorMessage('')
-      return { ...prev, [type]: next }
+      return next
     })
   }
 
@@ -253,7 +252,7 @@ export default function BookingModal({
       return
     }
 
-    if (maxQuantity !== null && totalQuantity > maxQuantity) {
+    if (maxQuantity !== null && quantity > maxQuantity) {
       setErrorMessage(`Khung giờ này chỉ còn ${maxQuantity} vé. Vui lòng giảm số lượng.`)
       return
     }
@@ -267,8 +266,8 @@ export default function BookingModal({
         body: {
           attractionId,
           date: selectedDate,
-          timeSlotId: selectedTimeSlotId,
-          quantity: counts.adult + counts.child,
+          timeSlotId: selectedSlot?.timeSlotId || null,
+          quantity,
         },
       })
       bookingService.reserveTicket(result.data?.reservationId || result.data?.id)
@@ -441,22 +440,13 @@ export default function BookingModal({
               </div>
 
               <TicketCountRow
-                ageLabel="Từ 13 tuổi trở lên"
-                count={counts.adult}
-                disableIncrement={maxQuantity !== null && totalQuantity >= maxQuantity}
-                label="Vé Người lớn"
+                ageLabel={ticketTypeMeta.ageLabel}
+                count={quantity}
+                disableIncrement={maxQuantity !== null && quantity >= maxQuantity}
+                label={ticketTypeMeta.label}
                 minValue={1}
-                onChange={(delta) => handleQtyChange('adult', delta)}
-                price={adultPrice}
-              />
-              <TicketCountRow
-                ageLabel="Dưới 12 tuổi"
-                count={counts.child}
-                disableIncrement={maxQuantity !== null && totalQuantity >= maxQuantity}
-                label="Vé Trẻ em"
-                minValue={0}
-                onChange={(delta) => handleQtyChange('child', delta)}
-                price={childPrice}
+                onChange={handleQtyChange}
+                price={unitPrice}
               />
               {maxQuantity !== null && (
                 <p className="text-xs font-semibold text-[#6e797a]">
@@ -470,15 +460,9 @@ export default function BookingModal({
             {/* Bảng giá chi tiết để khách biết mình trả tiền cho gì */}
             <div className="mb-4 space-y-1.5 text-sm">
               <div className="flex justify-between text-[#3e494a]">
-                <span>Vé Người lớn × {counts.adult}</span>
-                <span className="font-semibold">{formatCurrency(counts.adult * adultPrice)}</span>
+                <span>{ticketTypeMeta.label} × {quantity}</span>
+                <span className="font-semibold">{formatCurrency(totalPrice)}</span>
               </div>
-              {counts.child > 0 && (
-                <div className="flex justify-between text-[#3e494a]">
-                  <span>Vé Trẻ em × {counts.child}</span>
-                  <span className="font-semibold">{formatCurrency(counts.child * childPrice)}</span>
-                </div>
-              )}
             </div>
 
             <div className="mb-4 flex items-end justify-between gap-4 border-t border-dashed border-[#bdc9ca]/60 pt-4">

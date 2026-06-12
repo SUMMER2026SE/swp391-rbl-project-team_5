@@ -5,8 +5,9 @@ import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'
 import LocationMap from '../components/LocationMap.jsx'
 import Header from '../components/Header.jsx'
+import Seo from '../components/Seo.jsx'
 import { useAuth } from '../context/useAuth.js'
-import { appDownloadButtons, footerLinks } from '../data/landingData.js'
+import { footerLinks } from '../data/landingData.js'
 import { apiRequest } from '../services/api.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 import reviewService from '../services/reviewService.js'
@@ -222,7 +223,7 @@ export default function AttractionDetailPage() {
         <div className="min-h-[60vh] bg-[#f9f9fc] px-5 py-20 text-center text-[#3f484a]">
           Đang tải thông tin địa điểm...
         </div>
-        <Footer links={footerLinks} appButtons={appDownloadButtons} />
+        <Footer links={footerLinks} />
       </React.Fragment>
     )
   }
@@ -237,13 +238,17 @@ export default function AttractionDetailPage() {
             {errorMessage || 'Địa điểm này không tồn tại hoặc đã bị ẩn.'}
           </p>
         </div>
-        <Footer links={footerLinks} appButtons={appDownloadButtons} />
+        <Footer links={footerLinks} />
       </React.Fragment>
     )
   }
 
   return (
     <React.Fragment>
+      <Seo
+        title={attraction.title}
+        description={String(attraction.description || `Đặt vé ${attraction.title} trên VietTicket Travel`).slice(0, 160)}
+      />
       <Header links={detailNavLinks} />
       <nav aria-label="Breadcrumb" className="bg-white border-b border-[#bec8ca]/40">
         <div className="mx-auto max-w-[1280px] px-5 md:px-12 py-3 flex items-center gap-1.5 text-sm font-semibold text-[#3f484a]">
@@ -505,7 +510,7 @@ export default function AttractionDetailPage() {
         </div>
       </main>
 
-      <Footer links={footerLinks} appButtons={appDownloadButtons} />
+      <Footer links={footerLinks} />
 
       {isBookingOpen && selectedTicketProduct && (
         <BookingModal
