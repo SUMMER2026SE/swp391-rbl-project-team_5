@@ -189,6 +189,19 @@ async function main() {
     await seedVouchers();
     const partner = await seedPartner();
     await seedAttractions(partner);
+
+    console.log('Đang tính toán lại minTicketPrice cho các điểm tham quan...');
+    await prisma.$executeRawUnsafe(`
+      UPDATE "Attraction" a
+      SET "minTicketPrice" = (
+        SELECT MIN(tp."sellingPrice")
+        FROM "TicketProduct" tp
+        WHERE tp."attractionId" = a."id"
+          AND tp."status" = 'ACTIVE'
+          AND tp."archivedAt" IS NULL
+      );
+    `);
+
     console.log('==================================================');
     console.log('SEED THÀNH CÔNG!');
     console.log(`Đăng nhập đối tác: ${PARTNER_EMAIL} / ${PARTNER_PASSWORD}`);

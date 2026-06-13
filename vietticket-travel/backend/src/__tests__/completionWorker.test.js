@@ -6,6 +6,10 @@ jest.mock('../config/prisma', () => ({
   ticketInstance: {
     updateMany: jest.fn(),
   },
+  scheduledJobLock: {
+    upsert: jest.fn().mockResolvedValue({}),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+  },
   $transaction: jest.fn(),
 }));
 

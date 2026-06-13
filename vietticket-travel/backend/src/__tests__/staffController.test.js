@@ -70,6 +70,9 @@ function refundFixture(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   prisma.refundRequest.updateMany.mockResolvedValue({ count: 1 });
+  prisma.refundTransaction.create.mockResolvedValue({ id: 'refund-txn-1' });
+  prisma.refundTransaction.update.mockResolvedValue({ id: 'refund-txn-1' });
+  prisma.payment.update.mockResolvedValue({});
 });
 
 describe('listRefundRequests', () => {

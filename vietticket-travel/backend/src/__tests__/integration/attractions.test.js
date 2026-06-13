@@ -1,7 +1,7 @@
 const request = require('supertest');
 const app = require('../../app');
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
-const { generateTestToken } = require('../helpers/authHelper');
+const { generateTestToken, mockValidSession } = require('../helpers/authHelper');
 
 jest.mock('../../config/prisma', () => require('../helpers/mockPrisma'));
 const mockPrisma = require('../helpers/mockPrisma');
@@ -49,7 +49,8 @@ describe('POST /api/attractions (Partner only)', () => {
   test('❌ Trả 403 nếu role là CUSTOMER', async () => {
     const token = generateTestToken('user-001', 'CUSTOMER');
     // mock user lookup in protect middleware
-    mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-001', role: 'CUSTOMER', status: 'ACTIVE', profile: {} });
+    mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-001', role: 'CUSTOMER', status: 'ACTIVE', tokenVersion: 0, profile: {} });
+    mockValidSession(mockPrisma, 'user-001');
     const res = await request(app).post('/api/attractions').set('Authorization', `Bearer ${token}`).send({ title: 'Test' });
     expect(res.status).toBe(403);
   });

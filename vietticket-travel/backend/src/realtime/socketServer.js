@@ -47,16 +47,31 @@ async function authenticateSocket(socket, next) {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decoded.userId || decoded.id;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        partnerProfile: {
-          select: { id: true, status: true },
-        },
-      },
-    });
+    if (!userId || !decoded.sessionId) return next(new Error('Unauthorized'));
 
-    if (!user || user.status !== 'ACTIVE') {
+    const [user, session] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          partnerProfile: {
+            select: { id: true, status: true },
+          },
+        },
+      }),
+      prisma.authSession.findUnique({
+        where: { id: decoded.sessionId },
+      }),
+    ]);
+
+    if (
+      !user
+      || user.status !== 'ACTIVE'
+      || !session
+      || session.userId !== user.id
+      || session.revokedAt
+      || new Date(session.expiresAt) <= new Date()
+      || Number(decoded.tokenVersion || 0) !== Number(user.tokenVersion || 0)
+    ) {
       return next(new Error('Unauthorized'));
     }
 

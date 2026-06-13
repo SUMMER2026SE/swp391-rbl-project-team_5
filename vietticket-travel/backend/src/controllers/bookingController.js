@@ -65,6 +65,81 @@ function getAttractionLocation(attraction) {
     .join(', ');
 }
 
+function getTimeSlotLabel(timeSlot) {
+  return timeSlot
+    ? `${timeSlot.startTime} - ${timeSlot.endTime}`
+    : 'Theo ngày đã chọn';
+}
+
+function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
+  const product = reservation.ticketProduct;
+  const attraction = product.attraction;
+  const primaryImage = attraction.images?.[0]?.imageUrl || null;
+
+  return {
+    snapshotAt,
+    snapshotAttractionId: attraction.id,
+    snapshotAttractionTitle: attraction.title,
+    snapshotAttractionAddress: attraction.address || '',
+    snapshotAttractionCity: attraction.city || '',
+    snapshotAttractionDistrict: attraction.district || null,
+    snapshotAttractionImage: primaryImage,
+    snapshotTicketName: product.name,
+    snapshotTicketType: product.type || 'ADULT',
+    snapshotTicketDescription: product.description || null,
+    snapshotUnitPrice: product.sellingPrice,
+    snapshotRefundPolicy: product.refundPolicy || 'NON_REFUNDABLE',
+    snapshotRefundFeeRate: product.refundFeeRate || 0,
+    snapshotVisitDate: reservation.date,
+    snapshotTimeSlotLabel: reservation.timeSlot
+      ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
+      : null,
+  };
+}
+
+function getBookingSnapshotView(booking) {
+  const reservation = booking.reservation;
+  const product = reservation.ticketProduct;
+  const attraction = product.attraction;
+  const hasSnapshot =
+    Boolean(booking.snapshotAttractionTitle) ||
+    Boolean(booking.snapshotTicketName) ||
+    booking.snapshotVisitDate != null ||
+    booking.snapshotUnitPrice != null;
+
+  if (!hasSnapshot) {
+    return {
+      attractionId: attraction.id,
+      attractionTitle: attraction.title,
+      attractionLocation: getAttractionLocation(attraction),
+      attractionImage: attraction.images?.[0]?.imageUrl || '',
+      ticketName: product.name,
+      visitDate: reservation.date,
+      timeSlotLabel: getTimeSlotLabel(reservation.timeSlot),
+      unitPrice: product.sellingPrice,
+      refundPolicy: product.refundPolicy,
+      refundFeeRate: product.refundFeeRate,
+    };
+  }
+
+  return {
+    attractionId: booking.snapshotAttractionId || attraction.id,
+    attractionTitle: booking.snapshotAttractionTitle || attraction.title,
+    attractionLocation: [
+      booking.snapshotAttractionAddress || attraction.address,
+      booking.snapshotAttractionDistrict || attraction.district,
+      booking.snapshotAttractionCity || attraction.city,
+    ].filter(Boolean).join(', '),
+    attractionImage: booking.snapshotAttractionImage || attraction.images?.[0]?.imageUrl || '',
+    ticketName: booking.snapshotTicketName || product.name,
+    visitDate: booking.snapshotVisitDate || reservation.date,
+    timeSlotLabel: booking.snapshotTimeSlotLabel || getTimeSlotLabel(reservation.timeSlot),
+    unitPrice: booking.snapshotUnitPrice,
+    refundPolicy: booking.snapshotRefundPolicy || product.refundPolicy,
+    refundFeeRate: booking.snapshotRefundFeeRate ?? product.refundFeeRate,
+  };
+}
+
 function toReservationResponse(reservation) {
   const product = reservation.ticketProduct;
   const attraction = product.attraction;
@@ -82,9 +157,7 @@ function toReservationResponse(reservation) {
     ticketName: product.name,
     visitDate: dateOnly(reservation.date),
     timeSlotId: reservation.timeSlotId,
-    timeSlotLabel: reservation.timeSlot
-      ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
-      : 'Theo ngày đã chọn',
+    timeSlotLabel: getTimeSlotLabel(reservation.timeSlot),
     quantity: reservation.quantity,
     unitPrice: decimalToNumber(product.sellingPrice),
     subtotalAmount: decimalToNumber(subtotalAmount),
@@ -104,7 +177,7 @@ function toReservationResponse(reservation) {
 function toBookingResponse(booking) {
   const reservation = booking.reservation;
   const product = reservation.ticketProduct;
-  const attraction = product.attraction;
+  const snapshot = getBookingSnapshotView(booking);
   const latestPayment = booking.payments[0] || null;
 
   return {
@@ -112,18 +185,16 @@ function toBookingResponse(booking) {
     bookingId: booking.id,
     reservationId: reservation.id,
     ticketProductId: product.id,
-    attractionId: attraction.id,
-    attractionTitle: attraction.title,
-    attractionLocation: getAttractionLocation(attraction),
-    attractionImage: attraction.images[0]?.imageUrl || '',
-    ticketName: product.name,
-    visitDate: dateOnly(reservation.date),
+    attractionId: snapshot.attractionId,
+    attractionTitle: snapshot.attractionTitle,
+    attractionLocation: snapshot.attractionLocation,
+    attractionImage: snapshot.attractionImage,
+    ticketName: snapshot.ticketName,
+    visitDate: dateOnly(snapshot.visitDate),
     timeSlotId: reservation.timeSlotId,
-    timeSlotLabel: reservation.timeSlot
-      ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
-      : 'Theo ngày đã chọn',
+    timeSlotLabel: snapshot.timeSlotLabel,
     quantity: reservation.quantity,
-    unitPrice: decimalToNumber(product.sellingPrice),
+    unitPrice: decimalToNumber(snapshot.unitPrice),
     subtotalAmount: decimalToNumber(booking.subtotalAmount),
     subtotal: decimalToNumber(booking.subtotalAmount),
     discountAmount: decimalToNumber(booking.discountAmount),
@@ -143,6 +214,8 @@ function toBookingResponse(booking) {
     status: booking.status.toLowerCase().replace('pending_payment', 'unpaid'),
     paymentStatus: latestPayment?.status.toLowerCase() || 'pending',
     paymentMethod: booking.paymentMethod || '',
+    refundPolicy: snapshot.refundPolicy,
+    refundFeeRate: decimalToNumber(snapshot.refundFeeRate),
     expiresAt: reservation.expiresAt,
     createdAt: booking.createdAt,
     updatedAt: booking.updatedAt,
@@ -446,8 +519,18 @@ async function createBooking(req, res, next) {
         const reservation = await tx.reservation.findUnique({
           where: { id: reservationId },
           include: {
+            timeSlot: true,
             ticketProduct: {
-              include: { attraction: { select: { requiresManualApproval: true } } },
+              include: {
+                attraction: {
+                  include: {
+                    images: {
+                      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+                      take: 1,
+                    },
+                  },
+                },
+              },
             },
           },
         });
@@ -524,6 +607,7 @@ async function createBooking(req, res, next) {
             email,
             phone: phone || null,
             note: note || null,
+            ...buildBookingSnapshot(reservation, now),
           },
         });
 
@@ -560,4 +644,6 @@ module.exports = {
   // Helper dùng chung cho luồng thanh toán VNPay (L2) & duyệt vé đối tác (N2)
   confirmReservationAndStock,
   createTicketInstances,
+  buildBookingSnapshot,
+  getBookingSnapshotView,
 };

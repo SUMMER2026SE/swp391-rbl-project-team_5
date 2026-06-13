@@ -9,16 +9,19 @@ const {
 
 const TOKEN = 'qr-token-001';
 const BOOKING_ID = 'booking-001';
+const ATTRACTION_ID = 'attr-001';
 
 // Hôm nay theo giờ VN (logic giống todayInVietnam) để dựng vé "đúng ngày".
 const TODAY_VN = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 function makeReqRes(overrides = {}) {
   const req = {
-    user: { id: 'staff-001', email: 'staff@vietticket.vn' },
+    // role ADMIN → assertStaffAttractionAccess bỏ qua kiểm tra assignment.
+    user: { id: 'staff-001', email: 'staff@vietticket.vn', role: 'ADMIN' },
     params: {},
     query: {},
     body: {},
+    headers: {},
     ...overrides,
   };
   const res = {
@@ -41,13 +44,16 @@ function makeInstance({ ticketStatus = 'VALID', bookingStatus = 'CONFIRMED', vis
       status: bookingStatus,
       fullName: 'Nguyễn Văn A',
       phone: '0901234567',
+      // Dùng snapshotAttractionId để getTicketAttractionId có thể lấy attractionId.
+      snapshotAttractionId: ATTRACTION_ID,
       reservation: {
         date: new Date(`${visitDay}T00:00:00.000Z`),
         quantity: 2,
         timeSlot: { startTime: '08:00', endTime: '10:00' },
         ticketProduct: {
           name: 'Vé người lớn',
-          attraction: { title: 'Sun World' },
+          attractionId: ATTRACTION_ID,
+          attraction: { id: ATTRACTION_ID, title: 'Sun World' },
         },
       },
     },
@@ -135,11 +141,20 @@ describe('lookupTicketByQr', () => {
 });
 
 describe('checkInTicket', () => {
+  // makeTx cho checkInTicket — phải có staffAttractionAssignment và auditLog
+  // (vì assertStaffAttractionAccess và writeAuditLog chạy trong transaction).
+  // Với role ADMIN, assertStaffAttractionAccess return sớm → không cần findFirst.
   function makeTx(instance, updatedCount = 2) {
     return {
       ticketInstance: {
         findUnique: jest.fn().mockResolvedValue(instance),
         updateMany: jest.fn().mockResolvedValue({ count: updatedCount }),
+      },
+      staffAttractionAssignment: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'assign-1' }),
+      },
+      auditLog: {
+        create: jest.fn().mockResolvedValue({}),
       },
     };
   }
@@ -155,10 +170,12 @@ describe('checkInTicket', () => {
     const { req, res, next } = makeReqRes({ params: { token: TOKEN } });
     await checkInTicket(req, res, next);
 
-    expect(capturedTx.ticketInstance.updateMany).toHaveBeenCalledWith({
-      where: { bookingId: BOOKING_ID, status: 'VALID' },
-      data: { status: 'USED' },
-    });
+    expect(capturedTx.ticketInstance.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: instance.id, status: 'VALID' }),
+        data: expect.objectContaining({ status: 'USED' }),
+      }),
+    );
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         success: true,
@@ -227,7 +244,11 @@ describe('checkInTicket', () => {
 
   test('❌ Không tìm thấy vé: trả 404', async () => {
     mockPrisma.$transaction.mockImplementation(async (fn) =>
-      fn({ ticketInstance: { findUnique: jest.fn().mockResolvedValue(null), updateMany: jest.fn() } }),
+      fn({
+        ticketInstance: { findUnique: jest.fn().mockResolvedValue(null), updateMany: jest.fn() },
+        staffAttractionAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
+      }),
     );
 
     const { req, res } = makeReqRes({ params: { token: 'khong-ton-tai' } });
@@ -239,27 +260,35 @@ describe('checkInTicket', () => {
 
 describe('listTodayBookings', () => {
   test('✅ Trả về danh sách đơn hôm nay kèm trạng thái check-in', async () => {
+    // ADMIN → không cần staffAttractionAssignment.findMany.
+    mockPrisma.staffAttractionAssignment.findMany.mockResolvedValue([]);
     mockPrisma.booking.findMany.mockResolvedValue([
       {
         id: BOOKING_ID,
         fullName: 'Nguyễn Văn A',
         phone: '0901234567',
+        snapshotAttractionTitle: 'Sun World',
+        snapshotTicketName: 'Vé người lớn',
+        snapshotTimeSlotLabel: null,
         ticketInstances: [{ status: 'USED' }, { status: 'USED' }],
         reservation: {
           quantity: 2,
           timeSlot: null,
-          ticketProduct: { name: 'Vé người lớn', attraction: { title: 'Sun World' } },
+          ticketProduct: { name: 'Vé người lớn', attraction: { id: ATTRACTION_ID, title: 'Sun World' } },
         },
       },
       {
         id: 'booking-002',
         fullName: 'Trần Thị B',
         phone: null,
+        snapshotAttractionTitle: '',
+        snapshotTicketName: '',
+        snapshotTimeSlotLabel: null,
         ticketInstances: [{ status: 'VALID' }],
         reservation: {
           quantity: 1,
           timeSlot: { startTime: '14:00', endTime: '16:00' },
-          ticketProduct: { name: 'Vé trẻ em', attraction: { title: 'Sun World' } },
+          ticketProduct: { name: 'Vé trẻ em', attraction: { id: ATTRACTION_ID, title: 'Sun World' } },
         },
       },
     ]);

@@ -18,7 +18,7 @@ function todayInVietnam(now = new Date()) {
  * @returns {boolean}
  */
 function isBeforeRefundCutoff(booking, now = new Date()) {
-  const visitDate = booking?.reservation?.date;
+  const visitDate = booking?.snapshotVisitDate || booking?.reservation?.date;
   if (!visitDate) return false;
   const visitDay = new Date(visitDate).toISOString().slice(0, 10);
   return todayInVietnam(now) < visitDay;
@@ -33,8 +33,10 @@ function isBeforeRefundCutoff(booking, now = new Date()) {
 function calculateRefundAmount(booking) {
   const totalAmount = Number(booking?.totalAmount || 0);
   const ticketProduct = booking?.reservation?.ticketProduct;
+  const snapshotPolicy = booking?.snapshotRefundPolicy;
+  const snapshotFeeRate = booking?.snapshotRefundFeeRate;
 
-  if (!ticketProduct) {
+  if (!ticketProduct && !snapshotPolicy) {
     return {
       refundAmount: 0,
       feeAmount: totalAmount,
@@ -42,8 +44,8 @@ function calculateRefundAmount(booking) {
     };
   }
 
-  const policy = ticketProduct.refundPolicy;
-  const feeRate = Number(ticketProduct.refundFeeRate || 0);
+  const policy = snapshotPolicy || ticketProduct.refundPolicy;
+  const feeRate = Number(snapshotFeeRate ?? ticketProduct.refundFeeRate ?? 0);
 
   if (policy === 'FREE_CANCELLATION') {
     return {

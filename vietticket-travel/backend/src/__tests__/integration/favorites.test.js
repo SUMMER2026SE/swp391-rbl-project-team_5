@@ -1,6 +1,6 @@
 const request = require('supertest');
 const app = require('../../app');
-const { generateTestToken } = require('../helpers/authHelper');
+const { generateTestToken, mockValidSession } = require('../helpers/authHelper');
 
 jest.mock('../../config/prisma', () => require('../helpers/mockPrisma'));
 const mockPrisma = require('../helpers/mockPrisma');
@@ -14,8 +14,10 @@ function mockAuthenticatedUser() {
     id: 'user-001',
     role: 'CUSTOMER',
     status: 'ACTIVE',
+    tokenVersion: 0,
     profile: {},
   });
+  mockValidSession(mockPrisma, 'user-001');
 }
 
 describe('Favorites API', () => {

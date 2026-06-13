@@ -1,7 +1,13 @@
+'use strict';
+
 const prisma = require('../config/prisma');
 const { todayInVietnam } = require('./refundService');
+const { acquireJobLock, releaseJobLock, INSTANCE_ID } = require('./cleanupWorker');
 
 const DEFAULT_INTERVAL_MS = 10 * 60 * 1000; // chạy mỗi 10 phút
+const JOB_NAME = 'completion_bookings';
+// TTL = gấp đôi interval để lock tự hết hạn nếu process crash giữa chừng.
+const LOCK_TTL_MS = DEFAULT_INTERVAL_MS * 2;
 
 // Mốc 00:00 của NGÀY HÔM NAY THEO GIỜ VIỆT NAM, biểu diễn bằng UTC midnight
 // (reservation.date lưu dạng date-only = UTC midnight của ngày tham quan).
@@ -69,12 +75,29 @@ async function sweepCompletedBookings({ now = new Date() } = {}) {
   return completedResult.count;
 }
 
-// Khởi động vòng lặp định kỳ. Có cờ isRunning chống chạy chồng.
+// Khởi động vòng lặp định kỳ với distributed lock.
+// acquireJobLock/releaseJobLock được import từ cleanupWorker để tái sử dụng logic
+// và dùng chung INSTANCE_ID cho toàn process.
 function startCompletionWorker({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
-  let isRunning = false;
+  let isRunning = false; // chống chạy chồng trong cùng process
 
   const tick = async () => {
     if (isRunning) return;
+
+    // Thử acquire distributed lock trước khi làm việc.
+    let lockAcquired;
+    try {
+      lockAcquired = await acquireJobLock(JOB_NAME, LOCK_TTL_MS);
+    } catch (lockError) {
+      console.error('[completion] Không thể kiểm tra lock:', lockError.message);
+      return;
+    }
+
+    if (!lockAcquired) {
+      // Instance khác đang giữ lock → bỏ qua chu kỳ này.
+      return;
+    }
+
     isRunning = true;
     try {
       await sweepCompletedBookings();
@@ -82,12 +105,13 @@ function startCompletionWorker({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
       console.error('[completion] Lỗi vòng quét:', error.message);
     } finally {
       isRunning = false;
+      await releaseJobLock(JOB_NAME);
     }
   };
 
   const handle = setInterval(tick, intervalMs);
   if (typeof handle.unref === 'function') handle.unref(); // không chặn process thoát
-  console.log(`[completion] Worker đã khởi động (mỗi ${intervalMs / 1000}s).`);
+  console.log(`[completion] Worker đã khởi động (instance=${INSTANCE_ID}, mỗi ${intervalMs / 1000}s).`);
   return handle;
 }
 

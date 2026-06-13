@@ -1,7 +1,7 @@
 const request = require('supertest');
 const app = require('../app');
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
-const { generateTestToken } = require('./helpers/authHelper');
+const { generateTestToken, mockValidSession } = require('./helpers/authHelper');
 
 jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 const mockPrisma = require('./helpers/mockPrisma');
@@ -58,7 +58,8 @@ describe('Review Routes Integration Tests', () => {
 
     test('❌ Trả 403 nếu không phải CUSTOMER', async () => {
       const token = generateTestToken('user-01', 'PARTNER');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-01', role: 'PARTNER', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-01', role: 'PARTNER', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'user-01');
 
       const res = await request(app)
         .post('/api/reviews')
@@ -70,7 +71,8 @@ describe('Review Routes Integration Tests', () => {
 
     test('✅ Tạo review thành công cho booking COMPLETED chưa đánh giá', async () => {
       const token = generateTestToken('user-01', 'CUSTOMER');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-01', role: 'CUSTOMER', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-01', role: 'CUSTOMER', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'user-01');
       mockPrisma.booking.findUnique.mockResolvedValue({
         id: 'booking-01',
         userId: 'user-01',
@@ -111,7 +113,8 @@ describe('Review Routes Integration Tests', () => {
   describe('POST /api/reviews/:reviewId/reply', () => {
     test('✅ Đối tác phản hồi đánh giá thuộc attraction của mình thành công', async () => {
       const token = generateTestToken('partner-user-01', 'PARTNER');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'partner-user-01');
       mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-01', userId: 'partner-user-01', status: 'APPROVED' });
       mockPrisma.review.findUnique.mockResolvedValue({
         id: 'rev-01',
@@ -136,7 +139,8 @@ describe('Review Routes Integration Tests', () => {
 
     test('❌ Trả 403 nếu đối tác không sở hữu địa điểm được đánh giá', async () => {
       const token = generateTestToken('partner-user-01', 'PARTNER');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'partner-user-01');
       mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-01', userId: 'partner-user-01' });
       mockPrisma.review.findUnique.mockResolvedValue({
         id: 'rev-01',
@@ -157,7 +161,8 @@ describe('Review Routes Integration Tests', () => {
   describe('PATCH /api/reviews/:reviewId/moderate', () => {
     test('✅ Admin ẩn đánh giá vi phạm thành công', async () => {
       const token = generateTestToken('admin-01', 'ADMIN');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'admin-01', role: 'ADMIN', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'admin-01', role: 'ADMIN', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'admin-01');
       mockPrisma.review.findUnique.mockResolvedValue({
         id: 'rev-01',
         attractionId: 'attr-01'
@@ -185,7 +190,8 @@ describe('Review Routes Integration Tests', () => {
   describe('GET /api/partners/reviews', () => {
     test('✅ Lấy danh sách reviews của đối tác thành công', async () => {
       const token = generateTestToken('partner-user-01', 'PARTNER');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'partner-user-01');
       mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-01', userId: 'partner-user-01', status: 'APPROVED' });
       mockPrisma.review.findMany.mockResolvedValue([
         {
@@ -208,7 +214,8 @@ describe('Review Routes Integration Tests', () => {
 
     test('✅ Lấy thống kê reviews của đối tác thành công', async () => {
       const token = generateTestToken('partner-user-01', 'PARTNER');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'partner-user-01', role: 'PARTNER', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'partner-user-01');
       mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-01', userId: 'partner-user-01', status: 'APPROVED' });
       mockPrisma.review.findMany.mockResolvedValue([
         { rating: 5, isHidden: false, replyComment: null },
@@ -230,7 +237,8 @@ describe('Review Routes Integration Tests', () => {
   describe('GET /api/admin/reviews', () => {
     test('✅ Lấy danh sách reviews quản trị thành công', async () => {
       const token = generateTestToken('admin-01', 'ADMIN');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'admin-01', role: 'ADMIN', status: 'ACTIVE' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'admin-01', role: 'ADMIN', status: 'ACTIVE', tokenVersion: 0 });
+      mockValidSession(mockPrisma, 'admin-01');
       mockPrisma.review.findMany.mockResolvedValue([
         {
           id: 'rev-01',
