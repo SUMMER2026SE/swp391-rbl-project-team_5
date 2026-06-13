@@ -453,7 +453,7 @@ function PartnerRegisterPage() {
             <div className="flex items-start pt-2">
               <div className="flex items-center h-5">
                 <input
-                  className="w-4 h-4 border border-[#bec8ca] rounded bg-[#f8fafb] accent-[#006068]"
+                  className="w-4 h-4 accent-[#006068] cursor-pointer"
                   id="partner-terms"
                   name="terms"
                   type="checkbox"
