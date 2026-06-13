@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
 import heroImage from '../assets/halong_bay.webp'
+import * as partnerApi from '../services/partnerApi.js'
 import {
   validateEmail,
   validateFullName,
@@ -27,7 +28,7 @@ const strengthBarConfig = {
 
 function PartnerRegisterPage() {
   const navigate = useNavigate()
-  const { isAuthenticated, isAuthLoading, register } = useAuth()
+  const { isAuthenticated, isAuthLoading, register, user } = useAuth()
 
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -68,10 +69,28 @@ function PartnerRegisterPage() {
   }, [])
 
   useEffect(() => {
-    if (!isAuthLoading && isAuthenticated) {
-      navigate('/partner/dashboard', { replace: true })
+    if (isAuthLoading) return
+
+    if (isAuthenticated) {
+      if (user?.role === 'PARTNER') {
+        navigate('/partner/dashboard', { replace: true })
+      } else {
+        partnerApi
+          .getMyPartner()
+          .then((res) => {
+            const status = res.partner?.status
+            if (status === 'APPROVED') {
+              navigate('/partner/dashboard', { replace: true })
+            } else {
+              navigate('/partner/pending', { replace: true })
+            }
+          })
+          .catch(() => {
+            navigate('/partner/kyc', { replace: true })
+          })
+      }
     }
-  }, [isAuthenticated, isAuthLoading, navigate])
+  }, [isAuthenticated, isAuthLoading, user, navigate])
 
   const updateField = (field, value) => {
     setTouched((c) => ({ ...c, [field]: true }))

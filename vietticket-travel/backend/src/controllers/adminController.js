@@ -454,9 +454,18 @@ async function getAdminBookings(req, res, next) {
           include: {
             payments: {
               orderBy: { createdAt: 'desc' },
-              select: { paymentGateway: true, status: true, amount: true, createdAt: true },
+              select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true },
             },
             refundRequests: { select: { status: true } },
+            ticketInstances: {
+              select: {
+                id: true,
+                qrCodeToken: true,
+                status: true,
+                checkedInAt: true,
+                checkedInBy: { select: { fullName: true } },
+              },
+            },
             reservation: {
               include: {
                 timeSlot: true,
@@ -493,6 +502,7 @@ async function getAdminBookings(req, res, next) {
         customer: b.fullName,
         email: b.email,
         phone: b.phone,
+        note: b.note,
         attraction: b.reservation.ticketProduct.attraction.title,
         partner: b.reservation.ticketProduct.attraction.partner?.businessName || null,
         ticketName: b.reservation.ticketProduct.name,
@@ -500,11 +510,18 @@ async function getAdminBookings(req, res, next) {
         visitDate: new Date(b.reservation.date).toISOString().slice(0, 10),
         timeSlot: timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null,
         totalAmount: Number(b.totalAmount),
+        subtotalAmount: Number(b.subtotalAmount),
+        discountAmount: Number(b.discountAmount),
+        snapshotTicketType: b.snapshotTicketType,
+        snapshotUnitPrice: Number(b.snapshotUnitPrice),
         status: b.status,
         refundRequired: b.refundRequired,
         refundStatus: b.refundRequests[0]?.status || null,
         paymentGateway: latestPayment?.paymentGateway || null,
         paymentStatus: latestPayment?.status || null,
+        transactionId: latestPayment?.transactionId || null,
+        paidAt: latestPayment?.paidAt || null,
+        ticketInstances: b.ticketInstances || [],
         createdAt: b.createdAt,
       };
     });

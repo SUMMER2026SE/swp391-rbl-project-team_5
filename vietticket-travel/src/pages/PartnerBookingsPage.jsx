@@ -30,6 +30,7 @@ function PartnerBookingsPage() {
   const [pagination, setPagination]     = useState({ total: 0, totalPages: 1 })
   const [rejectTarget, setRejectTarget] = useState(null) // booking đang chờ nhập lý do từ chối
   const [rejectReason, setRejectReason] = useState('')
+  const [selectedBooking, setSelectedBooking] = useState(null)
 
   useEffect(() => {
     document.title = 'Quản lý Đặt vé | VietTicket B2B'
@@ -53,8 +54,16 @@ function PartnerBookingsPage() {
         status: statusFilter !== 'all' ? statusFilter : undefined,
         search: search || undefined,
       })
-      setBookings(res.data || [])
+      const list = res.data || []
+      setBookings(list)
       setPagination(res.pagination || { total: 0, totalPages: 1 })
+
+      // Cập nhật selectedBooking từ dữ liệu mới nhất nếu đang mở
+      setSelectedBooking((prev) => {
+        if (!prev) return null
+        const fresh = list.find((item) => item.id === prev.id)
+        return fresh || prev
+      })
     } catch (err) {
       toast.error(err.message || 'Không thể tải danh sách đặt vé.')
       setBookings([])
@@ -87,6 +96,9 @@ function PartnerBookingsPage() {
     try {
       await partnerApi.approveBooking(id)
       toast.success('Đã xác nhận đơn đặt vé.')
+      setSelectedBooking((prev) =>
+        prev && prev.id === id ? { ...prev, status: 'confirmed' } : prev,
+      )
       fetchBookings()
     } catch (err) {
       toast.error(err.message || 'Không thể xác nhận đơn.')
@@ -106,6 +118,9 @@ function PartnerBookingsPage() {
     try {
       await partnerApi.rejectBooking(rejectTarget.id, reason)
       toast.success('Đã từ chối đơn. Khách đã thanh toán sẽ được hoàn tiền đầy đủ.')
+      setSelectedBooking((prev) =>
+        prev && prev.id === rejectTarget.id ? { ...prev, status: 'cancelled' } : prev,
+      )
       setRejectTarget(null)
       setRejectReason('')
       fetchBookings()
@@ -216,28 +231,36 @@ function PartnerBookingsPage() {
                         <td className="px-5 py-3.5">
                           <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${si.cls}`}>{si.label}</span>
                         </td>
-                        <td className="px-5 py-3.5">
-                          {b.status === 'pending_partner' && (
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => handleConfirm(b.id)}
-                                disabled={isActing}
-                                className="px-3 py-1.5 bg-[#00474d] text-white text-xs font-medium rounded-lg hover:bg-[#136870] transition-colors disabled:opacity-50"
-                              >
-                                {isActing ? '…' : 'Duyệt đơn'}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setRejectTarget(b)
-                                  setRejectReason('')
-                                }}
-                                disabled={isActing}
-                                className="px-3 py-1.5 border border-[#ba1a1a] text-[#ba1a1a] text-xs font-medium rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
-                              >
-                                {isActing ? '…' : 'Từ chối'}
-                              </button>
-                            </div>
-                          )}
+                        <td className="px-5 py-3.5 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setSelectedBooking(b)}
+                              className="px-3 py-1.5 border border-[#bec8ca] text-[#3f484a] text-xs font-semibold rounded-lg hover:bg-[#f2f4f5] transition-colors"
+                            >
+                              Chi tiết
+                            </button>
+                            {b.status === 'pending_partner' && (
+                              <>
+                                <button
+                                  onClick={() => handleConfirm(b.id)}
+                                  disabled={isActing}
+                                  className="px-3 py-1.5 bg-[#00474d] text-white text-xs font-semibold rounded-lg hover:bg-[#136870] transition-colors disabled:opacity-50"
+                                >
+                                  {isActing ? '…' : 'Duyệt'}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setRejectTarget(b)
+                                    setRejectReason('')
+                                  }}
+                                  disabled={isActing}
+                                  className="px-3 py-1.5 border border-[#ba1a1a] text-[#ba1a1a] text-xs font-semibold rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
+                                >
+                                  {isActing ? '…' : 'Từ chối'}
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     )
@@ -298,10 +321,241 @@ function PartnerBookingsPage() {
         </>
       )}
 
+      {/* Modal chi tiết đặt vé */}
+      {selectedBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 overflow-y-auto">
+          <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl animate-fadeIn my-8">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-[#e1e3e4] pb-4 mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-[#191c1d] flex items-center gap-2">
+                  Chi tiết Đặt vé
+                  <span className="font-mono text-sm text-[#00629d] bg-[#cfe5ff] px-2 py-0.5 rounded">
+                    #{selectedBooking.id.toUpperCase()}
+                  </span>
+                </h3>
+                <p className="text-xs text-[#6f797a] mt-0.5">Ngày đặt: {selectedBooking.createdAt ? new Date(selectedBooking.createdAt).toLocaleString('vi-VN') : selectedBooking.date}</p>
+              </div>
+              <button
+                onClick={() => setSelectedBooking(null)}
+                className="w-8 h-8 rounded-full hover:bg-[#f2f4f5] flex items-center justify-center text-[#6f797a] transition-colors"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2">
+              {/* Trạng thái đơn */}
+              <div className="flex items-center justify-between p-3.5 bg-[#f8fafb] rounded-xl border border-[#e1e3e4]">
+                <div>
+                  <span className="text-xs font-semibold text-[#6f797a] block">Trạng thái hiện tại</span>
+                  <span className={`inline-block mt-1 px-3 py-1 rounded-full text-xs font-bold ${getBookingStatusMeta(selectedBooking.status).className}`}>
+                    {getBookingStatusMeta(selectedBooking.status).label}
+                  </span>
+                </div>
+                {selectedBooking.refundRequired && (
+                  <div className="text-right">
+                    <span className="text-xs font-semibold text-[#ba1a1a] block">⚠️ Yêu cầu hoàn tiền</span>
+                    <span className="text-xs text-[#6f797a]">Đang chờ Admin xử lý</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Grid 2 cột */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Thông tin khách hàng */}
+                <div className="border border-[#e1e3e4] rounded-xl p-4">
+                  <h4 className="text-sm font-bold text-[#191c1d] flex items-center gap-1.5 mb-3 border-b border-[#f2f4f5] pb-2">
+                    <span className="material-symbols-outlined text-[18px] text-[#00474d]">person</span>
+                    Thông tin Khách hàng
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Họ và tên</span>
+                      <span className="font-semibold text-[#191c1d]">{selectedBooking.customer}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Số điện thoại</span>
+                      <span className="font-mono text-[#191c1d]">{selectedBooking.phone || 'Chưa cung cấp'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Email</span>
+                      <span className="text-[#191c1d]">{selectedBooking.email || 'Chưa cung cấp'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Ghi chú từ khách hàng</span>
+                      <span className="text-[#191c1d] italic">{selectedBooking.note || 'Không có ghi chú'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Thông tin dịch vụ & vé */}
+                <div className="border border-[#e1e3e4] rounded-xl p-4">
+                  <h4 className="text-sm font-bold text-[#191c1d] flex items-center gap-1.5 mb-3 border-b border-[#f2f4f5] pb-2">
+                    <span className="material-symbols-outlined text-[18px] text-[#00474d]">confirmation_number</span>
+                    Thông tin dịch vụ & Vé
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Địa điểm</span>
+                      <span className="font-semibold text-[#191c1d]">{selectedBooking.attraction}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Gói vé</span>
+                      <span className="font-medium text-[#191c1d]">{selectedBooking.ticket}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Chi tiết vé & Đơn giá</span>
+                      <span className="text-[#191c1d]">
+                        {selectedBooking.snapshotTicketType === 'CHILD' ? 'Vé Trẻ em' : 'Vé Người lớn'}
+                        {' · '}
+                        {formatVND(selectedBooking.snapshotUnitPrice || (selectedBooking.amount / selectedBooking.qty))}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[#6f797a] text-xs block">Số lượng</span>
+                        <span className="font-semibold text-[#191c1d]">{selectedBooking.qty} vé</span>
+                      </div>
+                      <div>
+                        <span className="text-[#6f797a] text-xs block">Ngày tham quan</span>
+                        <span className="font-semibold text-[#191c1d]">{selectedBooking.visitDate}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a] text-xs block">Khung giờ</span>
+                      <span className="text-[#191c1d]">{selectedBooking.slot}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Thông tin thanh toán */}
+              <div className="border border-[#e1e3e4] rounded-xl p-4">
+                <h4 className="text-sm font-bold text-[#191c1d] flex items-center gap-1.5 mb-3 border-b border-[#f2f4f5] pb-2">
+                  <span className="material-symbols-outlined text-[18px] text-[#00474d]">payments</span>
+                  Chi tiết thanh toán
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-[#6f797a]">Giá gốc:</span>
+                      <span className="font-medium">{formatVND(selectedBooking.subtotalAmount || selectedBooking.amount)}</span>
+                    </div>
+                    <div className="flex justify-between text-[#ba1a1a]">
+                      <span className="text-[#6f797a]">Voucher giảm giá:</span>
+                      <span>-{formatVND(selectedBooking.discountAmount || 0)}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-[#f2f4f5] pt-2 font-bold text-[#00474d] text-base">
+                      <span>Tổng thanh toán:</span>
+                      <span>{formatVND(selectedBooking.amount)}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-1 bg-[#f8fafb] p-3 rounded-lg border border-[#e1e3e4] text-xs">
+                    <div>
+                      <span className="text-[#6f797a]">Phương thức:</span>{' '}
+                      <span className="font-semibold">{selectedBooking.paymentGateway || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a]">Trạng thái GD:</span>{' '}
+                      <span className="font-semibold text-[#137333] uppercase">{selectedBooking.paymentStatus || 'SUCCESS'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a]">Mã giao dịch:</span>{' '}
+                      <span className="font-mono">{selectedBooking.transactionId || 'Chưa cập nhật'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[#6f797a]">Thời gian:</span>{' '}
+                      <span>{selectedBooking.paidAt ? new Date(selectedBooking.paidAt).toLocaleString('vi-VN') : 'N/A'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Danh sách mã QR vé */}
+              <div className="border border-[#e1e3e4] rounded-xl p-4">
+                <h4 className="text-sm font-bold text-[#191c1d] flex items-center gap-1.5 mb-3 border-b border-[#f2f4f5] pb-2">
+                  <span className="material-symbols-outlined text-[18px] text-[#00474d]">qr_code</span>
+                  Danh sách Vé & Mã QR
+                </h4>
+                {selectedBooking.ticketInstances && selectedBooking.ticketInstances.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedBooking.ticketInstances.map((ticket, index) => {
+                      let ticketStatusLabel = 'Chưa sử dụng';
+                      let statusCls = 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]';
+                      if (ticket.status === 'USED') {
+                        ticketStatusLabel = 'Đã sử dụng';
+                        statusCls = 'bg-[#f2f4f5] text-[#6f797a] border-[#bec8ca]';
+                      } else if (ticket.status === 'REFUNDED') {
+                        ticketStatusLabel = 'Đã hoàn tiền';
+                        statusCls = 'bg-[#ffdad6] text-[#ba1a1a] border-[#ffb4ab]';
+                      }
+
+                      return (
+                        <div key={ticket.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-white rounded-lg border border-[#e1e3e4] text-sm gap-2">
+                          <div>
+                            <span className="font-semibold text-[#191c1d]">Vé #{index + 1}</span>
+                            <span className="font-mono text-xs text-[#6f797a] ml-2">({ticket.id})</span>
+                            {ticket.checkedInAt && (
+                              <p className="text-xs text-[#6f797a] mt-1">
+                                Check-in lúc: {new Date(ticket.checkedInAt).toLocaleString('vi-VN')}
+                                {ticket.checkedInBy?.fullName && ` bởi ${ticket.checkedInBy.fullName}`}
+                              </p>
+                            )}
+                          </div>
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${statusCls} self-start sm:self-auto`}>
+                            {ticketStatusLabel}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-sm text-[#6f797a] italic text-center py-4 bg-[#f8fafb] rounded-lg">
+                    Vé và mã QR sẽ tự động được cấp sau khi đối tác duyệt xác nhận đơn hàng này.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Footer / Actions */}
+            <div className="flex justify-end items-center gap-3 border-t border-[#e1e3e4] pt-4 mt-6">
+              <button
+                onClick={() => setSelectedBooking(null)}
+                className="px-4 py-2 border border-[#bec8ca] text-[#3f484a] text-sm font-semibold rounded-lg hover:bg-[#f2f4f5] transition-colors"
+              >
+                Đóng
+              </button>
+              {selectedBooking.status === 'pending_partner' && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setRejectTarget(selectedBooking)
+                      setRejectReason('')
+                    }}
+                    disabled={actionLoading === selectedBooking.id}
+                    className="px-4 py-2 border border-[#ba1a1a] text-[#ba1a1a] text-sm font-semibold rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
+                  >
+                    Từ chối đơn
+                  </button>
+                  <button
+                    onClick={() => handleConfirm(selectedBooking.id)}
+                    disabled={actionLoading === selectedBooking.id}
+                    className="px-5 py-2 bg-[#00474d] text-white text-sm font-semibold rounded-lg hover:bg-[#136870] transition-colors disabled:opacity-50"
+                  >
+                    {actionLoading === selectedBooking.id ? 'Đang duyệt…' : 'Duyệt đơn'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal nhập lý do từ chối đơn */}
       {rejectTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl animate-fadeIn">
             <h3 className="text-lg font-bold text-[#191c1d]">Từ chối đơn đặt vé</h3>
             <p className="mt-1 text-sm text-[#3f484a]">
               Đơn <span className="font-mono font-semibold text-[#00629d]">{rejectTarget.id.slice(0, 8).toUpperCase()}</span> của khách{' '}
@@ -328,7 +582,7 @@ function PartnerBookingsPage() {
                 disabled={actionLoading === rejectTarget.id}
                 className="px-4 py-2 rounded-lg border border-[#bec8ca] text-sm text-[#3f484a] hover:bg-[#f2f4f5] transition-colors disabled:opacity-50"
               >
-                Hủy bỏ
+                Hủy bộ
               </button>
               <button
                 onClick={handleCancel}
@@ -341,6 +595,7 @@ function PartnerBookingsPage() {
           </div>
         </div>
       )}
+      <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.animate-fadeIn{animation:fadeIn 0.2s ease-out forwards}`}</style>
     </PartnerLayout>
   )
 }

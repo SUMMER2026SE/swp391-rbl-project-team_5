@@ -13,7 +13,7 @@ import loginVisual from '../assets/sapa.webp'
 function getSafeRedirect(loggedInUser, redirectFrom) {
   const defaultForRole =
     loggedInUser?.role === 'ADMIN'
-      ? '/admin/users'
+      ? '/admin'
       : loggedInUser?.role === 'STAFF'
         ? '/staff/tickets'
         : loggedInUser?.role === 'PARTNER'

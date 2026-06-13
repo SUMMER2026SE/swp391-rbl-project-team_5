@@ -164,7 +164,7 @@ function AppRoutes() {
       <Route
         path="/partner/pending"
         element={
-          <ProtectedRoute allowedRoles={['PARTNER']}>
+          <ProtectedRoute allowedRoles={['CUSTOMER', 'PARTNER']}>
             <PartnerPendingPage />
           </ProtectedRoute>
         }
@@ -172,7 +172,7 @@ function AppRoutes() {
       <Route
         path="/partner/kyc"
         element={
-          <ProtectedRoute allowedRoles={['PARTNER']}>
+          <ProtectedRoute allowedRoles={['CUSTOMER', 'PARTNER']}>
             <PartnerKycPage />
           </ProtectedRoute>
         }

@@ -79,10 +79,48 @@ function PartnerKycPage() {
   useEffect(() => {
     document.title = 'Xác thực Đối tác & Hồ sơ Doanh nghiệp | VietTicket Travel'
     
-    // Nếu chưa đăng nhập, chuyển hướng về trang đăng nhập
     if (!user) {
       toast.info('Vui lòng đăng nhập để thực hiện xác thực đối tác.')
       navigate('/login', { state: { from: { pathname: '/partner/kyc' } } })
+      return
+    }
+
+    let active = true
+    partnerApi
+      .getMyPartner()
+      .then((res) => {
+        if (!active) return
+        const p = res.partner
+        if (p) {
+          setFormData({
+            businessName: p.businessName || '',
+            taxCode: p.taxCode || '',
+            registrationDate: '', // not stored in DB
+            representativeName: p.displayName || '',
+            representativePhone: p.phone || '',
+            businessAddress: '', // not stored in DB
+            bankName: p.bankName || '',
+            branchName: p.branchName || '',
+            bankAccountNumber: p.bankAccountNumber || '',
+            bankAccountName: p.bankAccountName || '',
+            swiftCode: p.swiftCode || '',
+            payoutCurrency: p.payoutCurrency || 'VND',
+            businessLicenseUrl: p.businessLicenseUrl || '',
+          })
+          if (p.bankName) {
+            setBankSearch(p.bankName)
+          }
+          if (p.businessLicenseUrl) {
+            setUploadedFile({ name: 'Giấy phép kinh doanh đã tải lên' })
+          }
+        }
+      })
+      .catch(() => {
+        // Ignored: profile not created yet is normal
+      })
+
+    return () => {
+      active = false
     }
   }, [user, navigate])
 
@@ -891,16 +929,13 @@ function PartnerKycPage() {
               {/* Terms Checkbox */}
               <div className="mt-8 pt-6 border-t border-[#e1e3e4]">
                 <label className="flex items-start gap-3 cursor-pointer group">
-                  <div className="relative flex items-center justify-center mt-0.5 flex-shrink-0">
+                  <div className="flex items-center h-5 mt-0.5 flex-shrink-0">
                     <input
-                      className="peer appearance-none w-5 h-5 border-2 border-[#6f797a] rounded cursor-pointer checked:bg-[#00474d] checked:border-[#00474d] transition-colors"
+                      className="w-5 h-5 border border-[#bec8ca] rounded bg-[#f8fafb] accent-[#00474d] cursor-pointer"
                       type="checkbox"
                       checked={agreedToTerms}
                       onChange={(e) => setAgreedToTerms(e.target.checked)}
                     />
-                    <span className="material-symbols-outlined absolute text-white text-[14px] pointer-events-none opacity-0 peer-checked:opacity-100 transition-opacity" style={{ fontVariationSettings: "'FILL' 1" }}>
-                      check
-                    </span>
                   </div>
                   <span className="text-sm text-[#3f484a] leading-tight select-none">
                     Tôi cam đoan mọi thông tin và tài liệu cung cấp là chính xác. Tôi đồng ý với{' '}

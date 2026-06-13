@@ -207,6 +207,15 @@ function PartnerPendingPage() {
 
           {/* Actions */}
           <div className="flex flex-col sm:flex-row gap-4 justify-center w-full">
+            {isRejected && (
+              <Link
+                to="/partner/kyc"
+                className="text-sm font-medium px-6 py-3 rounded-lg text-white bg-gradient-to-r from-[#00629d] to-[#006068] hover:opacity-90 transition-all duration-200 flex items-center justify-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[20px]">edit_note</span>
+                Cập nhật hồ sơ
+              </Link>
+            )}
             <a
               href="mailto:partners@vietticket.com"
               className="text-sm font-medium px-6 py-3 rounded-lg border border-[#6f797a] text-[#00474d] hover:bg-[#006068]/10 transition-colors duration-200 flex items-center justify-center gap-2"
