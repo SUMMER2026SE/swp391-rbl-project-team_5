@@ -6,18 +6,45 @@ import * as partnerApi from '../services/partnerApi.js'
 
 const ITEMS_PER_PAGE = 10
 
-function StatusBadge({ status }) {
-  if (status === 'active') {
-    return (
-      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-[#E6F4EA] text-[#137333] border border-[#CEEAD6]">
-        Hoạt động
-      </span>
-    )
+function StatusBadge({ status, rejectionReason }) {
+  let label = 'Tạm dừng'
+  let cls = 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'
+
+  if (status === 'APPROVED' || status === 'active') {
+    label = 'Hoạt động'
+    cls = 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]'
+  } else if (status === 'PENDING') {
+    label = 'Chờ duyệt'
+    cls = 'bg-[#fff3e0] text-[#b78103] border-[#ffe0b2]'
+  } else if (status === 'DRAFT') {
+    label = 'Bản nháp'
+    cls = 'bg-[#f0f2f5] text-[#4b5563] border-[#e5e7eb]'
+  } else if (status === 'REJECTED') {
+    label = 'Bị từ chối'
+    cls = 'bg-[#ffdad6] text-[#ba1a1a] border-[#ffb4ab]'
+  } else if (status === 'SUSPENDED') {
+    label = 'Bị đình chỉ'
+    cls = 'bg-[#ffdad6] text-[#ba1a1a] border-[#ffb4ab] font-bold'
   }
+
   return (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-[#e6e8e9] text-[#3f484a] border border-[#bec8ca]">
-      Tạm dừng
-    </span>
+    <div className="relative group/badge inline-block">
+      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${cls}`}>
+        {label}
+        {rejectionReason && (
+          <span className="material-symbols-outlined text-[14px] ml-1 text-[#ba1a1a] align-middle cursor-help">info</span>
+        )}
+      </span>
+      {rejectionReason && (
+        <div className="absolute z-30 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-[#191c1d] text-white text-xs rounded-xl shadow-lg opacity-0 pointer-events-none group-hover/badge:opacity-100 transition-opacity duration-200">
+          <p className="font-bold text-[#ffdad6] mb-1">
+            {status === 'SUSPENDED' ? 'Lý do đình chỉ:' : 'Lý do từ chối:'}
+          </p>
+          <p className="leading-relaxed font-normal">{rejectionReason}</p>
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#191c1d]" />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -35,24 +62,25 @@ function PartnerAttractionsPage() {
     document.title = 'Quản lý Điểm tham quan | VietTicket B2B'
   }, [])
 
+  const fetchAttractions = async () => {
+    try {
+      const data = await partnerApi.listAttractions()
+      setAttractions(data.attractions)
+    } catch (err) {
+      setAttractions([])
+      toast.error(err.message)
+    }
+  }
+
   useEffect(() => {
-    let active = true
-    ;(async () => {
-      try {
-        const data = await partnerApi.listAttractions()
-        if (active) setAttractions(data.attractions)
-      } catch (err) {
-        if (active) setAttractions([])
-        toast.error(err.message)
-      }
-    })()
-    return () => { active = false }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchAttractions()
   }, [])
 
   // Filter logic
   const filtered = attractions.filter((a) => {
     const matchSearch = a.name.toLowerCase().includes(search.toLowerCase())
-    const matchStatus = !statusFilter || a.status === statusFilter
+    const matchStatus = !statusFilter || a.dbStatus === statusFilter
     const matchCity = !cityFilter || a.city.toLowerCase().includes(cityFilter.toLowerCase())
     return matchSearch && matchStatus && matchCity
   })
@@ -85,6 +113,16 @@ function PartnerAttractionsPage() {
     navigate(`/partner/attractions/${id}/tickets`)
   }
 
+  const handleSubmitForReview = async (id) => {
+    try {
+      await partnerApi.submitAttraction(id)
+      toast.success('Đã gửi điểm tham quan để admin xét duyệt!')
+      fetchAttractions()
+    } catch (err) {
+      toast.error(err.message || 'Không thể gửi duyệt.')
+    }
+  }
+
   return (
     <PartnerLayout pageTitle="Attractions Management">
       {/* Page Header */}
@@ -103,7 +141,7 @@ function PartnerAttractionsPage() {
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white p-4 rounded-xl shadow-[0px_4px_20px_rgba(0,40,50,0.05)] flex flex-col lg:flex-row gap-4 items-center justify-between border border-[#e1e3e4]">
+      <div className="bg-white p-4 rounded-xl shadow-[0px_4px_20px_rgba(0,40,50,0.05)] flex flex-col lg:flex-row gap-4 items-center justify-between border border-[#e1e3e4] mt-6">
         <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto flex-1">
           {/* Search */}
           <div className="relative w-full sm:max-w-xs">
@@ -124,18 +162,21 @@ function PartnerAttractionsPage() {
             <select
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1) }}
-              className="px-4 py-2 bg-[#f8fafb] border border-[#bec8ca] rounded-lg focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] focus:outline-none transition-shadow text-sm text-[#191c1d] w-full sm:w-auto"
+              className="px-4 py-2 bg-[#f8fafb] border border-[#bec8ca] rounded-lg focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] focus:outline-none transition-shadow text-sm text-[#191c1d] w-full sm:w-auto bg-white"
             >
               <option value="">Trạng thái: Tất cả</option>
-              <option value="active">Hoạt động</option>
-              <option value="inactive">Tạm dừng</option>
+              <option value="APPROVED">Hoạt động</option>
+              <option value="PENDING">Chờ duyệt</option>
+              <option value="DRAFT">Bản nháp</option>
+              <option value="REJECTED">Bị từ chối</option>
+              <option value="SUSPENDED">Bị đình chỉ</option>
             </select>
 
             {/* City Filter */}
             <select
               value={cityFilter}
               onChange={(e) => { setCityFilter(e.target.value); setCurrentPage(1) }}
-              className="px-4 py-2 bg-[#f8fafb] border border-[#bec8ca] rounded-lg focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] focus:outline-none transition-shadow text-sm text-[#191c1d] w-full sm:w-auto"
+              className="px-4 py-2 bg-[#f8fafb] border border-[#bec8ca] rounded-lg focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] focus:outline-none transition-shadow text-sm text-[#191c1d] w-full sm:w-auto bg-white"
             >
               <option value="">Thành phố: Tất cả</option>
               <option value="Đà Nẵng">Đà Nẵng</option>
@@ -168,29 +209,33 @@ function PartnerAttractionsPage() {
       </div>
 
       {/* Table / Grid */}
-      {viewMode === 'table' ? (
-        <TableView
-          rows={paginated}
-          onView={handleView}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={filtered.length}
-          onPageChange={setCurrentPage}
-        />
-      ) : (
-        <GridView
-          rows={paginated}
-          onView={handleView}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-          currentPage={currentPage}
-          totalPages={totalPages}
-          totalItems={filtered.length}
-          onPageChange={setCurrentPage}
-        />
-      )}
+      <div className="mt-6 flex flex-col flex-1">
+        {viewMode === 'table' ? (
+          <TableView
+            rows={paginated}
+            onView={handleView}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onSubmit={handleSubmitForReview}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filtered.length}
+            onPageChange={setCurrentPage}
+          />
+        ) : (
+          <GridView
+            rows={paginated}
+            onView={handleView}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onSubmit={handleSubmitForReview}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filtered.length}
+            onPageChange={setCurrentPage}
+          />
+        )}
+      </div>
 
       {/* Delete Confirm Modal */}
       {deleteTarget && (
@@ -206,8 +251,8 @@ function PartnerAttractionsPage() {
               Bạn có chắc muốn xóa <strong>"{deleteTarget.name}"</strong>? Toàn bộ gói vé và lịch liên quan sẽ bị xóa theo. Thao tác này không thể hoàn tác.
             </p>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-lg border border-[#bec8ca] text-[#191c1d] text-sm font-medium hover:bg-[#f2f4f5] transition-colors">Hủy</button>
-              <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-white text-sm font-medium hover:bg-[#93000a] transition-colors">Xóa</button>
+              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-lg border border-[#bec8ca] text-[#191c1d] text-sm font-semibold hover:bg-[#f2f4f5] transition-colors">Hủy</button>
+              <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-white text-sm font-semibold hover:bg-[#93000a] transition-colors">Xóa</button>
             </div>
           </div>
         </div>
@@ -217,7 +262,7 @@ function PartnerAttractionsPage() {
 }
 
 /* ── Table View ── */
-function TableView({ rows, onView, onEdit, onDelete, currentPage, totalPages, totalItems, onPageChange }) {
+function TableView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, totalPages, totalItems, onPageChange }) {
   return (
     <div className="bg-white rounded-xl shadow-[0px_4px_20px_rgba(0,40,50,0.05)] border border-[#e1e3e4] overflow-hidden flex flex-col flex-1">
       <div className="overflow-x-auto flex-1">
@@ -271,13 +316,16 @@ function TableView({ rows, onView, onEdit, onDelete, currentPage, totalPages, to
                   <td className="px-6 py-4 text-base text-[#191c1d]">{a.hours}</td>
                   {/* Status */}
                   <td className="px-6 py-4">
-                    <StatusBadge status={a.status} />
+                    <StatusBadge status={a.dbStatus} rejectionReason={a.rejectionReason} />
                   </td>
                   {/* Actions */}
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <ActionBtn icon="visibility" title="Xem" onClick={() => onView(a.id)} hoverColor="hover:text-[#00474d]" />
-                      <ActionBtn icon="edit" title="Sửa" onClick={() => onEdit(a.id)} hoverColor="hover:text-[#00629d]" />
+                      {(a.dbStatus === 'DRAFT' || a.dbStatus === 'REJECTED') && (
+                        <ActionBtn icon="publish" title="Gửi duyệt" onClick={() => onSubmit(a.id)} hoverColor="hover:text-[#00474d]" hoverBg="hover:bg-[#e0f4f5]" />
+                      )}
+                      <ActionBtn icon="visibility" title="Xem vé" onClick={() => onView(a.id)} hoverColor="hover:text-[#00474d]" />
+                      <ActionBtn icon="edit" title="Sửa thông tin" onClick={() => onEdit(a.id)} hoverColor="hover:text-[#00629d]" />
                       <ActionBtn icon="delete" title="Xóa" onClick={() => onDelete(a.id, a.name)} hoverColor="hover:text-[#ba1a1a]" hoverBg="hover:bg-[#ffdad6]" />
                     </div>
                   </td>
@@ -293,7 +341,7 @@ function TableView({ rows, onView, onEdit, onDelete, currentPage, totalPages, to
 }
 
 /* ── Grid View ── */
-function GridView({ rows, onView, onEdit, onDelete, currentPage, totalPages, totalItems, onPageChange }) {
+function GridView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, totalPages, totalItems, onPageChange }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -319,7 +367,7 @@ function GridView({ rows, onView, onEdit, onDelete, currentPage, totalPages, tot
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <p className="text-sm font-bold text-[#191c1d] leading-tight">{a.name}</p>
-                  <StatusBadge status={a.status} />
+                  <StatusBadge status={a.dbStatus} rejectionReason={a.rejectionReason} />
                 </div>
                 <p className="text-xs text-[#3f484a] mb-1">{a.category}</p>
                 <p className="text-xs text-[#6f797a] flex items-center gap-1">
@@ -331,7 +379,10 @@ function GridView({ rows, onView, onEdit, onDelete, currentPage, totalPages, tot
                   {a.hours}
                 </p>
                 <div className="flex items-center gap-2 mt-3 pt-3 border-t border-[#f2f4f5]">
-                  <ActionBtn icon="visibility" title="Xem" onClick={() => onView(a.id)} hoverColor="hover:text-[#00474d]" />
+                  {(a.dbStatus === 'DRAFT' || a.dbStatus === 'REJECTED') && (
+                    <ActionBtn icon="publish" title="Gửi duyệt" onClick={() => onSubmit(a.id)} hoverColor="hover:text-[#00474d]" hoverBg="hover:bg-[#e0f4f5]" />
+                  )}
+                  <ActionBtn icon="visibility" title="Xem vé" onClick={() => onView(a.id)} hoverColor="hover:text-[#00474d]" />
                   <ActionBtn icon="edit" title="Sửa" onClick={() => onEdit(a.id)} hoverColor="hover:text-[#00629d]" />
                   <ActionBtn icon="delete" title="Xóa" onClick={() => onDelete(a.id, a.name)} hoverColor="hover:text-[#ba1a1a]" hoverBg="hover:bg-[#ffdad6]" />
                 </div>
@@ -381,7 +432,7 @@ function PaginationBar({ currentPage, totalPages, totalItems, onPageChange }) {
           <button
             key={p}
             onClick={() => onPageChange(p)}
-            className={`w-8 h-8 rounded-md text-xs font-medium transition-colors ${
+            className={`w-8 h-8 rounded-md text-xs font-semibold transition-colors ${
               p === currentPage
                 ? 'bg-[#cfe5ff] text-[#003558] font-bold'
                 : 'text-[#3f484a] hover:bg-[#eceeef]'

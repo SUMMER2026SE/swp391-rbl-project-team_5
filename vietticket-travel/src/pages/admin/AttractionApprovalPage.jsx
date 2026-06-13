@@ -55,6 +55,7 @@ export default function AttractionApprovalPage() {
   const [filterStatus, setFilterStatus] = useState('pending');
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
+  const [selectedAttraction, setSelectedAttraction] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -125,20 +126,7 @@ export default function AttractionApprovalPage() {
   }
 
   function handleViewDetail(attraction) {
-    window.alert(
-      `${attraction.name}\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Vị trí: ${attraction.location}\n` +
-      `Đối tác: ${attraction.partner} (${attraction.partnerId})\n` +
-      `Danh mục: ${attraction.category}\n` +
-      `Giá: ${attraction.price}\n` +
-      `Ngày gửi: ${attraction.date}\n` +
-      `Trạng thái: ${STATUS_LABEL[attraction.status] || attraction.status.toUpperCase()}\n` +
-      (attraction.status === 'rejected'
-        ? `Lý do từ chối: ${attraction.rejectReason || 'Không rõ'}\n`
-        : '') +
-      `\nMô tả:\n${attraction.description}`,
-    );
+    setSelectedAttraction(attraction);
   }
 
   const displayed = filterStatus === 'all'
@@ -338,6 +326,202 @@ export default function AttractionApprovalPage() {
           </div>
         ))}
       </div>
+
+      {selectedAttraction && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={() => setSelectedAttraction(null)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 16,
+              width: '100%',
+              maxWidth: 700,
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+              maxHeight: '90vh',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Image */}
+            <div style={{ position: 'relative', height: 240, width: '100%', flexShrink: 0 }}>
+              <img
+                src={selectedAttraction.image}
+                alt={selectedAttraction.name}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.2) 60%, transparent 100%)',
+                }}
+              />
+              <button
+                onClick={() => setSelectedAttraction(null)}
+                style={{
+                  position: 'absolute',
+                  top: 16,
+                  right: 16,
+                  background: 'rgba(255,255,255,0.9)',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: 36,
+                  height: 36,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  color: '#3f484a',
+                }}
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+              <div style={{ position: 'absolute', bottom: 20, left: 24, right: 24 }}>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <span
+                    style={{
+                      background: 'rgba(0,96,104,0.95)',
+                      color: '#fff',
+                      padding: '4px 12px',
+                      borderRadius: 9999,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {selectedAttraction.category}
+                  </span>
+                  <span className={`badge badge--${selectedAttraction.status}`} style={{ border: 'none', background: 'rgba(255,255,255,0.9)' }}>
+                    {STATUS_LABEL[selectedAttraction.status] || selectedAttraction.status.toUpperCase()}
+                  </span>
+                </div>
+                <h3 style={{ fontSize: 22, fontWeight: 700, color: '#fff', margin: 0 }}>
+                  {selectedAttraction.name}
+                </h3>
+              </div>
+            </div>
+
+            {/* Content Body */}
+            <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+                <div>
+                  <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Vị trí địa điểm</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 16, color: 'var(--adm-primary-dark)' }}>location_on</span>
+                    {selectedAttraction.location}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Đối tác sở hữu</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+                    {selectedAttraction.partner} (ID: {selectedAttraction.partnerId})
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Giá vé tối thiểu</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0, color: 'var(--adm-primary-dark)' }}>
+                    {selectedAttraction.price}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Ngày gửi yêu cầu</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+                    {selectedAttraction.date}
+                  </p>
+                </div>
+              </div>
+
+              {selectedAttraction.status === 'rejected' && selectedAttraction.rejectReason && (
+                <div style={{ background: 'var(--adm-error-container)', color: 'var(--adm-on-error-container)', padding: 16, borderRadius: 12, marginBottom: 24 }}>
+                  <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 4px' }}>Lý do từ chối</p>
+                  <p style={{ fontSize: 13, margin: 0 }}>{selectedAttraction.rejectReason}</p>
+                </div>
+              )}
+
+              <div style={{ borderTop: '1px solid #e1e3e4', paddingTop: 20 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 10px' }}>
+                  Mô tả địa điểm
+                </h4>
+                <p style={{ fontSize: 14, color: '#3f484a', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
+                  {selectedAttraction.description}
+                </p>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{ padding: '16px 24px', borderTop: '1px solid #e1e3e4', display: 'flex', justifyContent: 'flex-end', gap: 12, background: '#f5f7f8' }}>
+              <button
+                onClick={() => setSelectedAttraction(null)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 8,
+                  border: '1px solid #bec8ca',
+                  background: '#fff',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: '#3f484a',
+                }}
+              >
+                Đóng
+              </button>
+              {selectedAttraction.status === 'pending' && (
+                <>
+                  <button
+                    onClick={() => {
+                      handleReject(selectedAttraction.id);
+                      setSelectedAttraction(null);
+                    }}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: 'var(--adm-error)',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Từ chối
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleApprove(selectedAttraction.id);
+                      setSelectedAttraction(null);
+                    }}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: 'var(--adm-primary-dark)',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Phê duyệt
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   );
 }

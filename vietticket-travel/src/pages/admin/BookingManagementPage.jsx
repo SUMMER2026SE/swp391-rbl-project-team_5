@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import { apiRequest } from '../../services/api.js'
@@ -32,6 +33,17 @@ function formatVND(value) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value)
 }
 
+function formatDateTime(value) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
 function StatCard({ icon, iconClass, label, value }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
@@ -47,6 +59,7 @@ function StatCard({ icon, iconClass, label, value }) {
 }
 
 export default function BookingManagementPage() {
+  const navigate = useNavigate()
   const [bookings, setBookings] = useState([])
   const [stats, setStats] = useState({ countsByStatus: {}, refundRequired: 0, grossRevenue: 0 })
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 })
@@ -56,6 +69,7 @@ export default function BookingManagementPage() {
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [selectedBooking, setSelectedBooking] = useState(null)
 
   useEffect(() => {
     document.title = 'Quản lý Đặt vé & Thanh toán | VietTicket Admin'
@@ -203,12 +217,13 @@ export default function BookingManagementPage() {
                       <th className="px-5 py-3">Số tiền</th>
                       <th className="px-5 py-3">Thanh toán</th>
                       <th className="px-5 py-3">Trạng thái</th>
+                      <th className="px-5 py-3 text-right">Thao tác</th>
                     </tr>
                   </thead>
                   <tbody>
                     {bookings.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-5 py-14 text-center text-on-surface-variant">
+                        <td colSpan={8} className="px-5 py-14 text-center text-on-surface-variant">
                           Không tìm thấy đơn đặt vé nào.
                         </td>
                       </tr>
@@ -253,6 +268,15 @@ export default function BookingManagementPage() {
                                 <p className="mt-1 text-[11px] font-bold text-error">Cần hoàn tiền</p>
                               )}
                             </td>
+                            <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedBooking(b)}
+                                className="rounded-lg border border-outline-variant bg-transparent px-3 py-1.5 text-xs font-semibold text-on-surface hover:bg-surface-container-low"
+                              >
+                                Chi tiết
+                              </button>
+                            </td>
                           </tr>
                         )
                       })
@@ -291,6 +315,287 @@ export default function BookingManagementPage() {
           </>
         )}
       </div>
+
+      {selectedBooking && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={() => setSelectedBooking(null)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 16,
+              width: '100%',
+              maxWidth: 680,
+              padding: 32,
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              color: '#3f484a',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, borderBottom: '1px solid #e1e3e4', paddingBottom: 16 }}>
+              <div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--adm-primary-dark)', letterSpacing: '0.05em' }}>MÃ ĐƠN HÀNG: {selectedBooking.id.toUpperCase()}</span>
+                <h3 style={{ fontSize: 20, fontWeight: 700, color: '#1a1c1e', margin: '4px 0 0' }}>
+                  Chi tiết hóa đơn &amp; Vé đặt
+                </h3>
+              </div>
+              <button
+                onClick={() => setSelectedBooking(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#6f797a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            {/* Refund Required Alert Banner */}
+            {selectedBooking.refundRequired && (
+              <div style={{ background: 'rgba(186,26,26,0.1)', border: '1px solid rgba(186,26,26,0.2)', padding: '14px 20px', borderRadius: 12, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className="material-symbols-outlined" style={{ color: 'var(--adm-error)', fontVariationSettings: "'FILL' 1" }}>warning</span>
+                  <div>
+                    <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: 'var(--adm-error)' }}>Yêu cầu hoàn tiền chưa xử lý</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: 'rgba(186,26,26,0.8)' }}>Đơn này đã hủy hoặc gặp sự cố và cần được xử lý hoàn tiền.</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedBooking(null);
+                    navigate(`/staff/refunds?search=${selectedBooking.id}`);
+                  }}
+                  style={{
+                    background: 'var(--adm-error)',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'opacity 150ms',
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.opacity = '0.9'}
+                  onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
+                >
+                  Xử lý hoàn tiền
+                </button>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+              {/* Khách hàng */}
+              <div style={{ gridColumn: 'span 2' }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px', letterSpacing: '0.05em' }}>
+                  Thông tin khách hàng
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, background: '#f5f7f8', padding: 16, borderRadius: 12 }}>
+                  <div>
+                    <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Họ và tên</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#1a1c1e' }}>{selectedBooking.customer}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Số điện thoại</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#1a1c1e' }}>{selectedBooking.phone || '—'}</p>
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Email liên hệ</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#1a1c1e' }}>{selectedBooking.email}</p>
+                  </div>
+                  {selectedBooking.note && (
+                    <div style={{ gridColumn: 'span 2', borderTop: '1px solid #e1e3e4', paddingTop: 8, marginTop: 4 }}>
+                      <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Ghi chú của khách</p>
+                      <p style={{ fontSize: 13, margin: 0, fontStyle: 'italic', color: '#3f484a' }}>&ldquo;{selectedBooking.note}&rdquo;</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Vé đặt chi tiết */}
+              <div style={{ gridColumn: 'span 2', marginTop: 8 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px', letterSpacing: '0.05em' }}>
+                  Thông tin vé &amp; Địa điểm
+                </h4>
+                <div style={{ background: '#f5f7f8', padding: 16, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div>
+                    <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Tên địa điểm du lịch</p>
+                    <p style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--adm-primary-dark)' }}>{selectedBooking.attraction}</p>
+                    {selectedBooking.partner && (
+                      <p style={{ fontSize: 11, color: '#6f797a', margin: '2px 0 0' }}>Đối tác quản lý: {selectedBooking.partner}</p>
+                    )}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, borderTop: '1px solid #e1e3e4', paddingTop: 12 }}>
+                    <div>
+                      <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Gói vé &amp; Loại vé</p>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#1a1c1e' }}>
+                        {selectedBooking.ticketName} <span style={{ fontSize: 11, color: '#6f797a', fontWeight: 500 }}>({selectedBooking.snapshotTicketType})</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Số lượng</p>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#1a1c1e' }}>{selectedBooking.quantity} vé</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Ngày tham quan</p>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#1a1c1e' }}>{selectedBooking.visitDate}</p>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 11, color: '#6f797a', margin: '0 0 2px' }}>Khung giờ</p>
+                      <p style={{ fontSize: 13, fontWeight: 600, margin: 0, color: '#1a1c1e' }}>{selectedBooking.timeSlot || 'Cả ngày'}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Chi tiết tài chính */}
+              <div>
+                <h4 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px', letterSpacing: '0.05em' }}>
+                  Chi tiết thanh toán
+                </h4>
+                <div style={{ background: '#f5f7f8', padding: 16, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                    <span style={{ color: '#6f797a' }}>Giá gốc ({selectedBooking.quantity}x)</span>
+                    <span style={{ fontWeight: 500, color: '#1a1c1e' }}>{formatVND(selectedBooking.subtotalAmount || selectedBooking.totalAmount)}</span>
+                  </div>
+                  {selectedBooking.discountAmount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                      <span style={{ color: '#6f797a' }}>Giảm giá (Voucher)</span>
+                      <span style={{ fontWeight: 600, color: 'var(--adm-error)' }}>-{formatVND(selectedBooking.discountAmount)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid #e1e3e4', paddingTop: 8, marginTop: 4 }}>
+                    <span style={{ fontWeight: 700, color: '#1a1c1e' }}>Tổng tiền thu</span>
+                    <span style={{ fontWeight: 700, color: 'var(--adm-primary-dark)' }}>{formatVND(selectedBooking.totalAmount)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cổng thanh toán & Trạng thái */}
+              <div>
+                <h4 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px', letterSpacing: '0.05em' }}>
+                  Trạng thái thanh toán
+                </h4>
+                <div style={{ background: '#f5f7f8', padding: 16, borderRadius: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                    <span style={{ color: '#6f797a' }}>Cổng giao dịch</span>
+                    <span style={{ fontWeight: 600, color: '#1a1c1e' }}>{selectedBooking.paymentGateway || 'Chưa thực hiện'}</span>
+                  </div>
+                  {selectedBooking.transactionId && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                      <span style={{ color: '#6f797a' }}>Mã giao dịch</span>
+                      <span style={{ fontWeight: 600, color: '#1a1c1e', fontFamily: 'monospace', fontSize: 11 }}>{selectedBooking.transactionId}</span>
+                    </div>
+                  )}
+                  {selectedBooking.paidAt && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                      <span style={{ color: '#6f797a' }}>Thời gian</span>
+                      <span style={{ fontWeight: 500, color: '#1a1c1e' }}>{formatDateTime(selectedBooking.paidAt)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                    <span style={{ color: '#6f797a' }}>Trạng thái</span>
+                    <span style={{ fontWeight: 700, color: selectedBooking.paymentStatus === 'SUCCESS' ? '#10b981' : 'var(--adm-error)' }}>
+                      {selectedBooking.paymentStatus === 'SUCCESS' ? 'Đã thanh toán thành công' : selectedBooking.paymentStatus || 'Chưa thanh toán'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Danh sách QR Vé & Trạng thái Check-in */}
+              <div style={{ gridColumn: 'span 2', marginTop: 8 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px', letterSpacing: '0.05em' }}>
+                  Danh sách mã QR &amp; Kiểm vé
+                </h4>
+                <div style={{ overflowX: 'auto', border: '1px solid #e1e3e4', borderRadius: 12 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#f5f7f8', borderBottom: '1px solid #e1e3e4' }}>
+                        <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Mã vé (QR Code Token)</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Trạng thái</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Thời gian Check-in</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Nhân viên duyệt</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(!selectedBooking.ticketInstances || selectedBooking.ticketInstances.length === 0) ? (
+                        <tr>
+                          <td colSpan={4} style={{ padding: 16, textAlign: 'center', color: '#6f797a', fontStyle: 'italic' }}>
+                            Chưa phát hành mã QR vé cho đơn này (thanh toán chưa thành công).
+                          </td>
+                        </tr>
+                      ) : (
+                        selectedBooking.ticketInstances.map((t) => (
+                          <tr key={t.id} style={{ borderBottom: '1px solid #e1e3e4' }}>
+                            <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 12, fontWeight: 600, color: 'var(--adm-primary-dark)' }}>
+                              {t.qrCodeToken}
+                            </td>
+                            <td style={{ padding: '10px 16px' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: 9999,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                background: t.status === 'USED' ? 'rgba(16,185,129,0.1)' : t.status === 'REFUNDED' ? 'rgba(186,26,26,0.1)' : 'rgba(0,96,104,0.1)',
+                                color: t.status === 'USED' ? '#10b981' : t.status === 'REFUNDED' ? 'var(--adm-error)' : 'var(--adm-primary-dark)',
+                              }}>
+                                {t.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 16px', color: '#3f484a' }}>
+                              {t.checkedInAt ? formatDateTime(t.checkedInAt) : '—'}
+                            </td>
+                            <td style={{ padding: '10px 16px', color: '#3f484a', fontWeight: 500 }}>
+                              {t.checkedInBy?.fullName || '—'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ marginTop: 32, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #e1e3e4', paddingTop: 16 }}>
+              <button
+                onClick={() => setSelectedBooking(null)}
+                style={{
+                  padding: '10px 24px',
+                  borderRadius: 8,
+                  border: '1px solid #bec8ca',
+                  background: 'none',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: '#3f484a',
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   )
 }

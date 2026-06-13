@@ -83,6 +83,8 @@ function toAttractionListItem(attraction) {
     district: attraction.district || '',
     hours: formatHours(attraction.openTime, attraction.closeTime),
     status: attractionStatusToClient(attraction.status),
+    dbStatus: attraction.status,
+    rejectionReason: attraction.rejectionReason || null,
     image: primaryImageUrl(attraction.images),
   };
 }
@@ -101,6 +103,8 @@ function toAttractionDetail(attraction) {
     lat: attraction.latitude != null ? String(attraction.latitude) : '',
     lng: attraction.longitude != null ? String(attraction.longitude) : '',
     status: attractionStatusToClient(attraction.status),
+    dbStatus: attraction.status,
+    rejectionReason: attraction.rejectionReason || null,
     category: attraction.categories?.[0]?.category?.name || '',
     images: (attraction.images || []).map((img) => ({
       id: img.id,

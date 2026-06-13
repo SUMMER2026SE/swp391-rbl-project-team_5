@@ -5,7 +5,7 @@ import CoordinateFields from '../components/partner/CoordinateFields.jsx'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
-const TABS = ['General Info', 'Location & Map', 'Image Gallery']
+const TABS = ['Thông tin chung', 'Bản đồ & Vị trí', 'Thư viện ảnh']
 
 const PROVINCES = [
   'Hà Nội', 'TP. Hồ Chí Minh', 'Đà Nẵng', 'Hội An', 'Nha Trang',
@@ -30,7 +30,21 @@ function PartnerEditAttractionPage() {
   const [activeTab, setActiveTab] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [form, setForm] = useState({ name: '', description: '', openTime: '', closeTime: '', province: '', district: '', address: '', lat: '', lng: '', status: 'active', category: '' })
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    openTime: '',
+    closeTime: '',
+    province: '',
+    district: '',
+    address: '',
+    lat: '',
+    lng: '',
+    status: 'active',
+    dbStatus: 'DRAFT',
+    rejectionReason: null,
+    category: '',
+  })
   const [categories, setCategories] = useState([])
   const [images, setImages] = useState([])
   const [deletedImageIds, setDeletedImageIds] = useState([])
@@ -55,6 +69,8 @@ function PartnerEditAttractionPage() {
         lat: data.lat ?? '',
         lng: data.lng ?? '',
         status: data.status ?? 'active',
+        dbStatus: data.dbStatus ?? 'DRAFT',
+        rejectionReason: data.rejectionReason ?? null,
         category: data.category ?? '',
       }))
       if (Array.isArray(data.images)) {
@@ -98,6 +114,7 @@ function PartnerEditAttractionPage() {
   }
 
   const handleFileInput = (e) => { processFiles(e.target.files); e.target.value = '' }
+
   const handleDrop = (e) => { e.preventDefault(); setIsDragging(false); processFiles(e.dataTransfer.files) }
 
   const handleDeleteImage = (imgId) => {
@@ -116,7 +133,7 @@ function PartnerEditAttractionPage() {
 
   const handleSetThumbnail = (imgId) => setImages((prev) => prev.map((img) => ({ ...img, isThumbnail: img.id === imgId })))
 
-  const handleSave = async () => {
+  const handleSave = async ({ submitForReview = false } = {}) => {
     if (!form.name.trim()) { toast.error('Vui lòng nhập tên điểm tham quan.'); setActiveTab(0); return }
     if (!form.address.trim()) { toast.error('Vui lòng nhập địa chỉ chi tiết.'); setActiveTab(1); return }
     if (!form.province) { toast.error('Vui lòng chọn tỉnh / thành phố.'); setActiveTab(1); return }
@@ -160,7 +177,12 @@ function PartnerEditAttractionPage() {
         await partnerApi.setAttractionPrimaryImage(id, primaryImageId)
       }
 
-      toast.success('Đã cập nhật điểm tham quan thành công!')
+      if (submitForReview) {
+        await partnerApi.submitAttraction(id)
+        toast.success('Đã lưu thay đổi và gửi điểm tham quan để phê duyệt!')
+      } else {
+        toast.success('Đã cập nhật điểm tham quan thành công!')
+      }
       navigate('/partner/attractions')
     } catch (err) {
       toast.error(err.message)
@@ -170,6 +192,7 @@ function PartnerEditAttractionPage() {
   }
 
   const districts = DISTRICTS_MAP[form.province] || []
+  const canSubmitForReview = form.dbStatus === 'DRAFT' || form.dbStatus === 'REJECTED'
 
   if (isLoading) return (
     <PartnerLayout pageTitle="Edit Attraction">
@@ -181,38 +204,65 @@ function PartnerEditAttractionPage() {
 
   return (
     <PartnerLayout pageTitle="Edit Attraction">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 -mt-2 mb-2">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate('/partner/attractions')} className="p-2 rounded-full hover:bg-[#eceeef] transition-colors text-[#3f484a]">
-            <span className="material-symbols-outlined">arrow_back</span>
-          </button>
-          <div>
-            <h2 className="text-2xl md:text-3xl font-semibold text-[#191c1d]">Chỉnh sửa điểm tham quan</h2>
-            <p className="text-sm text-[#3f484a] mt-0.5">{form.name}</p>
-          </div>
+      {/* Title block */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-semibold text-[#191c1d]">Chỉnh sửa điểm tham quan</h2>
+          <p className="text-base text-[#3f484a] mt-1">Cập nhật thông tin chi tiết cho điểm trải nghiệm của bạn.</p>
         </div>
-        <div className="flex items-center gap-3">
-          {/* Status toggle */}
+        <div className="flex items-center gap-2 flex-shrink-0 self-stretch sm:self-auto justify-end">
           <button
             onClick={() => updateForm('status', form.status === 'active' ? 'inactive' : 'active')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${form.status === 'active' ? 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]' : 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'}`}
+            className={`px-4 py-2.5 rounded-lg text-xs font-semibold border transition-all flex items-center ${form.status === 'active' ? 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]' : 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'}`}
           >
             <span className="material-symbols-outlined text-[16px] align-middle mr-1">{form.status === 'active' ? 'toggle_on' : 'toggle_off'}</span>
             {form.status === 'active' ? 'Đang hoạt động' : 'Tạm dừng'}
           </button>
-          <button onClick={() => navigate('/partner/attractions')} className="px-5 py-2.5 rounded-lg border border-[#6f797a] text-[#191c1d] text-sm font-medium hover:bg-[#f2f4f5] transition-colors">Hủy</button>
-          <button onClick={handleSave} disabled={isSubmitting} className="px-6 py-2.5 rounded-lg bg-[#00474d] text-white text-sm font-medium hover:bg-[#136870] transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2">
-            {isSubmitting && <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>}
+          <button onClick={() => navigate('/partner/attractions')} className="px-5 py-2.5 rounded-lg border border-[#bec8ca] text-[#191c1d] text-sm font-semibold hover:bg-[#f2f4f5] transition-colors">Hủy</button>
+          <button onClick={() => handleSave({ submitForReview: false })} disabled={isSubmitting} className="px-5 py-2.5 rounded-lg border border-[#00474d] text-[#00474d] text-sm font-semibold hover:bg-[#e0f4f5] transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2">
             Lưu thay đổi
           </button>
+          {canSubmitForReview && (
+            <button onClick={() => handleSave({ submitForReview: true })} disabled={isSubmitting} className="px-5 py-2.5 rounded-lg bg-[#00474d] text-white text-sm font-semibold hover:bg-[#136870] transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2">
+              {isSubmitting && <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>}
+              Lưu & Gửi duyệt
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Banner cảnh báo của Admin */}
+      {form.dbStatus === 'REJECTED' && (
+        <div className="bg-[#ffdad6] text-[#ba1a1a] border border-[#ffb4ab] rounded-xl p-4 flex gap-3 items-start mb-6 animate-fadeIn">
+          <span className="material-symbols-outlined text-[22px] flex-shrink-0 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+          <div>
+            <p className="font-bold text-sm">Điểm tham quan này đã bị Admin từ chối phê duyệt</p>
+            <p className="text-xs mt-1 leading-relaxed">
+              <strong>Lý do từ chối:</strong> {form.rejectionReason || 'Vui lòng liên hệ bộ phận hỗ trợ đối tác để biết thêm chi tiết.'}
+            </p>
+            <p className="text-xs mt-2 italic font-medium">
+              Vui lòng cập nhật hoặc sửa đổi các thông tin không phù hợp theo lý do trên, sau đó bấm nút "Lưu & Gửi duyệt" để gửi yêu cầu phê duyệt lại cho Admin.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {form.dbStatus === 'SUSPENDED' && (
+        <div className="bg-[#ffdad6] text-[#ba1a1a] border border-[#ffb4ab] rounded-xl p-4 flex gap-3 items-start mb-6 animate-fadeIn">
+          <span className="material-symbols-outlined text-[22px] flex-shrink-0 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>report</span>
+          <div>
+            <p className="font-bold text-sm">Điểm tham quan này đang bị đình chỉ hoạt động</p>
+            <p className="text-xs mt-1 leading-relaxed">
+              <strong>Lý do đình chỉ (vi phạm):</strong> {form.rejectionReason || 'Vui lòng kiểm tra lại điều khoản dịch vụ.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Tabs */}
-      <div className="flex gap-8 border-b border-[#bec8ca]">
+      <div className="flex gap-8 border-b border-[#bec8ca] mb-6">
         {TABS.map((tab, i) => (
-          <button key={tab} onClick={() => setActiveTab(i)} className={`pb-4 text-sm font-medium transition-colors relative ${activeTab === i ? 'text-[#00474d] border-b-2 border-[#00474d] -mb-px' : 'text-[#3f484a] hover:text-[#191c1d]'}`}>
+          <button key={tab} onClick={() => setActiveTab(i)} className={`pb-4 text-sm font-semibold transition-colors relative ${activeTab === i ? 'text-[#00474d] border-b-2 border-[#00474d] -mb-px' : 'text-[#3f484a] hover:text-[#191c1d]'}`}>
             {tab}
           </button>
         ))}
@@ -302,9 +352,9 @@ function PartnerEditAttractionPage() {
               <div className="w-16 h-16 bg-[#006068] rounded-full flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
                 <span className="material-symbols-outlined text-white text-[32px]">cloud_upload</span>
               </div>
-              <h4 className="text-sm font-medium text-[#191c1d] mb-1">{isDragging ? 'Thả ảnh vào đây' : 'Nhấp để tải lên hoặc kéo thả'}</h4>
+              <h4 className="text-sm font-bold text-[#191c1d] mb-1">{isDragging ? 'Thả ảnh vào đây' : 'Nhấp để tải lên hoặc kéo thả'}</h4>
               <p className="text-sm text-[#3f484a]">PNG, JPG, GIF (tối đa 5MB, tối đa {MAX_IMAGES} ảnh)</p>
-              {images.length > 0 && <p className="mt-2 text-xs font-medium text-[#00474d]">{images.length}/{MAX_IMAGES} ảnh đã tải lên</p>}
+              {images.length > 0 && <p className="mt-2 text-xs font-semibold text-[#00474d]">{images.length}/{MAX_IMAGES} ảnh đã tải lên</p>}
             </div>
             {images.length > 0 && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -336,7 +386,15 @@ function PartnerEditAttractionPage() {
                 )}
               </div>
             )}
-            <TabNav onBack={() => setActiveTab(1)} isLast onPublish={handleSave} isSubmitting={isSubmitting} publishLabel="Lưu thay đổi" />
+            <TabNav
+              onBack={() => setActiveTab(1)}
+              isLast
+              onPublish={() => handleSave({ submitForReview: false })}
+              onPublishAndSubmit={() => handleSave({ submitForReview: true })}
+              showSubmitForReview={canSubmitForReview}
+              isSubmitting={isSubmitting}
+              publishLabel="Lưu thay đổi"
+            />
           </section>
         )}
       </div>
@@ -353,7 +411,7 @@ function SectionHeading({ children }) {
 function FormField({ label, required, children }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-[#191c1d] mb-2">{label}{required && <span className="text-[#ba1a1a] ml-1">*</span>}</label>
+      <label className="block text-sm font-semibold text-[#191c1d] mb-2">{label}{required && <span className="text-[#ba1a1a] ml-1">*</span>}</label>
       {children}
     </div>
   )
@@ -368,24 +426,33 @@ function TimeInput({ value, onChange }) {
   )
 }
 
-function TabNav({ onBack, onNext, isLast = false, onPublish, isSubmitting = false, publishLabel = 'Lưu thay đổi' }) {
+function TabNav({ onBack, onNext, isLast = false, onPublish, onPublishAndSubmit, showSubmitForReview = false, isSubmitting = false, publishLabel = 'Lưu thay đổi' }) {
   return (
-    <div className="flex justify-between pt-4 border-t border-[#f2f4f5]">
+    <div className="flex justify-between pt-4 border-t border-[#f2f4f5] gap-2">
       {onBack ? (
-        <button type="button" onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#6f797a] text-[#191c1d] text-sm font-medium hover:bg-[#f2f4f5] transition-colors">
+        <button type="button" onClick={onBack} className="flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#6f797a] text-[#191c1d] text-sm font-semibold hover:bg-[#f2f4f5] transition-colors">
           <span className="material-symbols-outlined text-[18px]">arrow_back</span>Quay lại
         </button>
       ) : <div />}
-      {isLast ? (
-        <button type="button" onClick={onPublish} disabled={isSubmitting} className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-[#00474d] text-white text-sm font-medium hover:bg-[#136870] transition-colors shadow-sm disabled:opacity-60">
-          {isSubmitting ? <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span> : <span className="material-symbols-outlined text-[18px]">save</span>}
-          {publishLabel}
-        </button>
-      ) : (
-        <button type="button" onClick={onNext} className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#00474d] text-white text-sm font-medium hover:bg-[#136870] transition-colors shadow-sm">
-          Tiếp theo<span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-        </button>
-      )}
+      <div className="flex gap-2">
+        {isLast ? (
+          <>
+            <button type="button" onClick={onPublish} disabled={isSubmitting} className="flex items-center gap-2 px-5 py-2.5 rounded-lg border border-[#bec8ca] text-[#3f484a] text-sm font-semibold hover:bg-[#f2f4f5] transition-colors disabled:opacity-60">
+              {publishLabel}
+            </button>
+            {showSubmitForReview && (
+              <button type="button" onClick={onPublishAndSubmit} disabled={isSubmitting} className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-[#00474d] text-white text-sm font-semibold hover:bg-[#136870] transition-colors shadow-sm disabled:opacity-60">
+                {isSubmitting ? <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span> : <span className="material-symbols-outlined text-[18px]">publish</span>}
+                Lưu & Gửi duyệt
+              </button>
+            )}
+          </>
+        ) : (
+          <button type="button" onClick={onNext} className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#00474d] text-white text-sm font-semibold hover:bg-[#136870] transition-colors shadow-sm">
+            Tiếp theo<span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+          </button>
+        )}
+      </div>
     </div>
   )
 }

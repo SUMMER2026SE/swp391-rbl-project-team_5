@@ -65,7 +65,9 @@ async function submitKyc(req, res, next) {
       where: { userId: req.user.id },
     });
 
-    if (existing) {
+    const isResubmission = existing && ['REJECTED', 'SUSPENDED'].includes(existing.status);
+
+    if (existing && !isResubmission) {
       return res.status(409).json({
         message: 'Bạn đã nộp hồ sơ đối tác trước đó.',
         partner: toPartnerResponse(existing, req.user),
@@ -86,14 +88,24 @@ async function submitKyc(req, res, next) {
       status: 'PENDING',
     };
 
-    const partner = await prisma.partnerProfile.create({ data });
+    let partner;
+    if (isResubmission) {
+      const updateData = { ...data, status: 'PENDING', rejectionReason: null };
+      delete updateData.userId;
+      partner = await prisma.partnerProfile.update({
+        where: { id: existing.id },
+        data: updateData,
+      });
+    } else {
+      partner = await prisma.partnerProfile.create({ data });
+    }
 
     const refreshedUser = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: { profile: true },
     });
 
-    return res.status(201).json({
+    return res.status(isResubmission ? 200 : 201).json({
       success: true,
       data: toPartnerResponse(partner, refreshedUser),
       message: 'Nộp hồ sơ đối tác thành công. Hồ sơ của bạn đang được xét duyệt.',
@@ -326,8 +338,23 @@ async function getDashboard(req, res, next) {
             orderBy: { createdAt: 'desc' },
             take: 5,
             include: {
+              payments: {
+                orderBy: { createdAt: 'desc' },
+                select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true },
+              },
+              refundRequests: { select: { status: true } },
+              ticketInstances: {
+                select: {
+                  id: true,
+                  qrCodeToken: true,
+                  status: true,
+                  checkedInAt: true,
+                  checkedInBy: { select: { fullName: true } },
+                },
+              },
               reservation: {
                 include: {
+                  timeSlot: true,
                   ticketProduct: {
                     include: { attraction: { select: { title: true } } },
                   },
@@ -336,15 +363,40 @@ async function getDashboard(req, res, next) {
             },
           });
 
-          recentBookings = recentRaw.map((b) => ({
-            id: b.id,
-            attraction: b.reservation.ticketProduct.attraction.title,
-            ticket: b.reservation.ticketProduct.name,
-            customer: b.fullName,
-            date: b.createdAt.toISOString().slice(0, 10),
-            amount: Number(b.totalAmount),
-            status: b.status.toLowerCase().replace('pending_payment', 'pending'),
-          }));
+          recentBookings = recentRaw.map((b) => {
+            const latestPayment = b.payments?.[0] || null;
+            return {
+              id: b.id,
+              attraction: b.reservation.ticketProduct.attraction.title,
+              ticket: b.reservation.ticketProduct.name,
+              customer: b.fullName,
+              email: b.email,
+              phone: b.phone || '',
+              note: b.note || '',
+              date: b.createdAt.toISOString().slice(0, 10),
+              visitDate: b.reservation.date instanceof Date
+                ? b.reservation.date.toISOString().slice(0, 10)
+                : String(b.reservation.date).slice(0, 10),
+              slot: b.reservation.timeSlot
+                ? `${b.reservation.timeSlot.startTime} – ${b.reservation.timeSlot.endTime}`
+                : 'Cả ngày',
+              qty: b.reservation.quantity,
+              amount: Number(b.totalAmount),
+              subtotalAmount: Number(b.subtotalAmount),
+              discountAmount: Number(b.discountAmount),
+              snapshotTicketType: b.snapshotTicketType,
+              snapshotUnitPrice: Number(b.snapshotUnitPrice),
+              status: b.status.toLowerCase().replace('pending_payment', 'pending'),
+              refundRequired: b.refundRequired,
+              refundStatus: b.refundRequests?.[0]?.status || null,
+              paymentGateway: latestPayment?.paymentGateway || null,
+              paymentStatus: latestPayment?.status || null,
+              transactionId: latestPayment?.transactionId || null,
+              paidAt: latestPayment?.paidAt || null,
+              ticketInstances: b.ticketInstances || [],
+              createdAt: b.createdAt,
+            };
+          });
         }
       }
     }
@@ -541,6 +593,20 @@ async function getPartnerBookings(req, res, next) {
         skip,
         take: limit,
         include: {
+          payments: {
+            orderBy: { createdAt: 'desc' },
+            select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true },
+          },
+          refundRequests: { select: { status: true } },
+          ticketInstances: {
+            select: {
+              id: true,
+              qrCodeToken: true,
+              status: true,
+              checkedInAt: true,
+              checkedInBy: { select: { fullName: true } },
+            },
+          },
           reservation: {
             include: {
               timeSlot: true,
@@ -554,23 +620,40 @@ async function getPartnerBookings(req, res, next) {
     ]);
 
     // Lọc theo search nếu có (client-side vì search đa trường)
-    let data = bookings.map((b) => ({
-      id: b.id,
-      attraction: b.reservation.ticketProduct.attraction.title,
-      ticket: b.reservation.ticketProduct.name,
-      customer: b.fullName,
-      phone: b.phone || '',
-      date: b.createdAt.toISOString().slice(0, 10),
-      visitDate: b.reservation.date instanceof Date
-        ? b.reservation.date.toISOString().slice(0, 10)
-        : String(b.reservation.date).slice(0, 10),
-      slot: b.reservation.timeSlot
-        ? `${b.reservation.timeSlot.startTime} – ${b.reservation.timeSlot.endTime}`
-        : 'Cả ngày',
-      qty: b.reservation.quantity,
-      amount: Number(b.totalAmount),
-      status: b.status.toLowerCase().replace('pending_payment', 'pending_partner'),
-    }));
+    let data = bookings.map((b) => {
+      const latestPayment = b.payments?.[0] || null;
+      return {
+        id: b.id,
+        attraction: b.reservation.ticketProduct.attraction.title,
+        ticket: b.reservation.ticketProduct.name,
+        customer: b.fullName,
+        email: b.email,
+        phone: b.phone || '',
+        note: b.note || '',
+        date: b.createdAt.toISOString().slice(0, 10),
+        visitDate: b.reservation.date instanceof Date
+          ? b.reservation.date.toISOString().slice(0, 10)
+          : String(b.reservation.date).slice(0, 10),
+        slot: b.reservation.timeSlot
+          ? `${b.reservation.timeSlot.startTime} – ${b.reservation.timeSlot.endTime}`
+          : 'Cả ngày',
+        qty: b.reservation.quantity,
+        amount: Number(b.totalAmount),
+        subtotalAmount: Number(b.subtotalAmount),
+        discountAmount: Number(b.discountAmount),
+        snapshotTicketType: b.snapshotTicketType,
+        snapshotUnitPrice: Number(b.snapshotUnitPrice),
+        status: b.status.toLowerCase().replace('pending_payment', 'pending_partner'),
+        refundRequired: b.refundRequired,
+        refundStatus: b.refundRequests?.[0]?.status || null,
+        paymentGateway: latestPayment?.paymentGateway || null,
+        paymentStatus: latestPayment?.status || null,
+        transactionId: latestPayment?.transactionId || null,
+        paidAt: latestPayment?.paidAt || null,
+        ticketInstances: b.ticketInstances || [],
+        createdAt: b.createdAt,
+      };
+    });
 
     if (search) {
       data = data.filter(

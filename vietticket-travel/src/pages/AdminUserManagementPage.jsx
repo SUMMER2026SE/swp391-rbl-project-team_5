@@ -1,30 +1,16 @@
 import '../styles/admin.css'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
 import { apiRequest } from '../services/api.js'
+import AdminSidebar from '../components/admin/AdminSidebar.jsx'
 
 const roleOptions = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF']
 const statusOptions = ['ACTIVE', 'LOCKED']
 
-const adminNavItems = [
-  { id: 'dashboard', label: 'Bảng điều khiển', icon: 'dashboard', href: '#' },
-  { id: 'users', label: 'Quản lý Người dùng', icon: 'group', href: '#', active: true },
-  { id: 'bookings', label: 'Quản lý Đặt vé', icon: 'confirmation_number', href: '#' },
-  { id: 'attractions', label: 'Điểm tham quan', icon: 'map', href: '#' },
-  { id: 'reports', label: 'Báo cáo & Thống kê', icon: 'analytics', href: '#' },
-  { id: 'settings', label: 'Cài đặt hệ thống', icon: 'settings', href: '#' },
-]
-
 function AdminUserManagementPage() {
-  const { user, logout } = useAuth()
-  const navigate = useNavigate()
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
+  const { user } = useAuth()
 
   const [users, setUsers] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -199,42 +185,7 @@ function AdminUserManagementPage() {
 
   return (
     <div className="admin-page">
-      <aside className="admin-sidebar" aria-label="Admin navigation">
-        <div className="admin-sidebar__brand">
-          <h1>VietTicket</h1>
-          <p>Quản trị Hệ thống</p>
-        </div>
-
-        <nav className="admin-sidebar__nav">
-          {adminNavItems.map((item) => (
-            <a
-              className={`admin-nav-link${item.active ? ' admin-nav-link--active' : ''}`}
-              href={item.href}
-              id={`admin-nav-${item.id}`}
-              key={item.id}
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
-            </a>
-          ))}
-        </nav>
-
-        <div className="admin-sidebar__footer">
-          <button
-            className="admin-nav-link admin-nav-link--button"
-            id="btn-admin-logout"
-            type="button"
-            onClick={handleLogout}
-          >
-            <span className="material-symbols-outlined" aria-hidden="true">
-              logout
-            </span>
-            <span>Đăng xuất</span>
-          </button>
-        </div>
-      </aside>
+      <AdminSidebar />
 
       <main className="admin-main">
         <header className="admin-topbar">

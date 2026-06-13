@@ -27,6 +27,15 @@ function mapPartner(partner) {
     status: String(partner.status || 'PENDING').toLowerCase(),
     rejectReason: partner.rejectionReason || '',
     businessLicenseUrl: partner.businessLicenseUrl || '',
+    taxCode: partner.taxCode || '',
+    bankName: partner.bankName || '',
+    branchName: partner.branchName || '',
+    bankAccountNumber: partner.bankAccountNumber || '',
+    bankAccountName: partner.bankAccountName || '',
+    swiftCode: partner.swiftCode || '',
+    payoutCurrency: partner.payoutCurrency || 'VND',
+    website: partner.website || '',
+    description: partner.description || '',
   };
 }
 
@@ -44,6 +53,7 @@ export default function KycApprovalPage() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
+  const [selectedPartner, setSelectedPartner] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -240,6 +250,23 @@ export default function KycApprovalPage() {
                             Đại diện: {partner.representative}
                           </div>
                         )}
+                        <button
+                          onClick={() => setSelectedPartner(partner)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            color: 'var(--adm-primary-dark)',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                            marginTop: 4,
+                            display: 'block',
+                          }}
+                        >
+                          Xem chi tiết hồ sơ
+                        </button>
                       </div>
                     </div>
                   </td>
@@ -369,6 +396,207 @@ export default function KycApprovalPage() {
           </div>
         </div>
       </div>
+
+      {selectedPartner && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(4px)',
+          }}
+          onClick={() => setSelectedPartner(null)}
+        >
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 16,
+              width: '100%',
+              maxWidth: 600,
+              padding: 32,
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, borderBottom: '1px solid #e1e3e4', paddingBottom: 16 }}>
+              <h3 style={{ fontSize: 20, fontWeight: 700, color: 'var(--adm-primary-dark)', margin: 0 }}>
+                Chi tiết hồ sơ đối tác
+              </h3>
+              <button
+                onClick={() => setSelectedPartner(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#6f797a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+              {/* Doanh nghiệp */}
+              <div style={{ gridColumn: 'span 2' }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px' }}>
+                  Thông tin doanh nghiệp
+                </h4>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Tên doanh nghiệp / Đối tác</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.name}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Mã số thuế</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.taxCode || '—'}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Người đại diện</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.representative || '—'}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Số điện thoại</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.phone}</p>
+              </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Email liên hệ</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.email}</p>
+              </div>
+
+              {/* Tài chính */}
+              <div style={{ gridColumn: 'span 2', marginTop: 16, paddingTop: 16, borderTop: '1px solid #e1e3e4' }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px' }}>
+                  Tài khoản ngân hàng thụ hưởng
+                </h4>
+              </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Ngân hàng</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.bankName || '—'}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Chi nhánh</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.branchName || '—'}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Mã SWIFT/BIC</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.swiftCode || '—'}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Số tài khoản</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.bankAccountNumber || '—'}</p>
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Tên chủ tài khoản</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.bankAccountName || '—'}</p>
+              </div>
+
+              {/* Pháp lý */}
+              <div style={{ gridColumn: 'span 2', marginTop: 16, paddingTop: 16, borderTop: '1px solid #e1e3e4' }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px' }}>
+                  Hồ sơ pháp lý
+                </h4>
+              </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 8px' }}>Giấy phép đăng ký kinh doanh</p>
+                {selectedPartner.businessLicenseUrl ? (
+                  <a
+                    href={selectedPartner.businessLicenseUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '10px 20px',
+                      borderRadius: 8,
+                      background: 'rgba(0,96,104,0.1)',
+                      color: 'var(--adm-primary-dark)',
+                      fontWeight: 600,
+                      fontSize: 14,
+                      textDecoration: 'none',
+                      transition: 'background 150ms',
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.background = 'rgba(0,96,104,0.15)'}
+                    onMouseOut={(e) => e.currentTarget.style.background = 'rgba(0,96,104,0.1)'}
+                  >
+                    <span className="material-symbols-outlined">download_for_offline</span>
+                    <span>Tải về / Xem giấy phép kinh doanh</span>
+                  </a>
+                ) : (
+                  <span style={{ color: 'var(--adm-error)', fontWeight: 500 }}>Chưa cập nhật giấy phép</span>
+                )}
+              </div>
+            </div>
+
+            <div style={{ marginTop: 32, display: 'flex', justifyContent: 'flex-end', gap: 12, borderTop: '1px solid #e1e3e4', paddingTop: 16 }}>
+              <button
+                onClick={() => setSelectedPartner(null)}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 8,
+                  border: '1px solid #bec8ca',
+                  background: 'none',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: '#3f484a',
+                }}
+              >
+                Đóng
+              </button>
+              {selectedPartner.status === 'pending' && (
+                <>
+                  <button
+                    onClick={() => {
+                      handleReject(selectedPartner.id, selectedPartner.name);
+                      setSelectedPartner(null);
+                    }}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: 'var(--adm-error)',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Từ chối
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleApprove(selectedPartner.id);
+                      setSelectedPartner(null);
+                    }}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: 'var(--adm-primary-dark)',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Phê duyệt
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   );
 }

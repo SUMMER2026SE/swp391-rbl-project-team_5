@@ -66,9 +66,16 @@ async function listAttractions(req, res, next) {
       where.title = { contains: search, mode: 'insensitive' };
     }
 
-    const status = String(req.query.status || '').trim().toLowerCase();
-    if (status === 'active') where.status = 'APPROVED';
-    else if (status === 'inactive') where.status = { not: 'APPROVED' };
+    const status = String(req.query.status || '').trim().toUpperCase();
+    if (status) {
+      if (['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'].includes(status)) {
+        where.status = status;
+      } else if (status === 'ACTIVE') {
+        where.status = 'APPROVED';
+      } else if (status === 'INACTIVE') {
+        where.status = { not: 'APPROVED' };
+      }
+    }
 
     const city = String(req.query.city || '').trim();
     if (city) where.city = city;
