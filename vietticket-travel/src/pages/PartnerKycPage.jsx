@@ -931,7 +931,7 @@ function PartnerKycPage() {
                 <label className="flex items-start gap-3 cursor-pointer group">
                   <div className="flex items-center h-5 mt-0.5 flex-shrink-0">
                     <input
-                      className="w-5 h-5 border border-[#bec8ca] rounded bg-[#f8fafb] accent-[#00474d] cursor-pointer"
+                      className="w-5 h-5 accent-[#00474d] cursor-pointer"
                       type="checkbox"
                       checked={agreedToTerms}
                       onChange={(e) => setAgreedToTerms(e.target.checked)}
