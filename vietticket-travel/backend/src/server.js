@@ -9,6 +9,7 @@ const {
 } = require('./realtime/socketServer');
 const { startCleanupWorker } = require('./utils/cleanupWorker');
 const { startCompletionWorker } = require('./utils/completionWorker');
+const { startRefundWorker } = require('./utils/refundWorker');
 
 const PORT = process.env.PORT || 5000;
 
@@ -24,6 +25,9 @@ const cleanupHandle = startCleanupWorker();
 
 // Worker chuyển đơn đã qua ngày tham quan sang COMPLETED (mở khoá luồng đánh giá).
 const completionHandle = startCompletionWorker();
+
+// Worker đối soát hoàn tiền VNPay tự động.
+const refundHandle = startRefundWorker();
 
 let shutdownPromise = null;
 
@@ -43,6 +47,7 @@ function shutdown({ exit = true } = {}) {
 
   clearInterval(cleanupHandle);
   clearInterval(completionHandle);
+  clearInterval(refundHandle);
 
   shutdownPromise = (async () => {
     await closeSocketServer();

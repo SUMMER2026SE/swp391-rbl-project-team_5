@@ -1,9 +1,79 @@
+'use strict';
+
+const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { sendHoldExpiredEmail } = require('./mailer');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000; // chạy mỗi 1 phút
-const DEFAULT_GRACE_MS = 3 * 60 * 1000; // chừa 3 phút cho IPN trả trễ (xem QĐ6)
+const DEFAULT_GRACE_MS = 3 * 60 * 1000; // chừa 3 phút cho IPN trả trễ
+const JOB_NAME = 'cleanup_expired_reservations';
+// TTL = thời gian tối đa worker được giữ lock (gấp đôi interval để an toàn).
+// Nếu process crash trong khi đang chạy, lock sẽ tự hết hạn sau TTL.
+const LOCK_TTL_MS = DEFAULT_INTERVAL_MS * 2;
+
+// ID duy nhất của process/instance hiện tại (hostname + PID + random để tránh trùng
+// khi scale ngang nhiều container trên cùng máy).
+const INSTANCE_ID = `${require('os').hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
+
+/**
+ * Cố gắng acquire distributed lock qua ScheduledJobLock.
+ * Dùng updateMany với điều kiện guard (lockedUntil < now HOẶC chính instance này)
+ * để đảm bảo chỉ một instance chạy tại một thời điểm khi scale ngang.
+ *
+ * Trả về true nếu acquire thành công, false nếu instance khác đang giữ lock.
+ */
+async function acquireJobLock(jobName, ttlMs) {
+  const now = new Date();
+  const lockedUntil = new Date(now.getTime() + ttlMs);
+
+  // Bước 1: Tạo bản ghi lock nếu chưa có (idempotent).
+  await prisma.scheduledJobLock.upsert({
+    where: { jobName },
+    update: {}, // không update gì nếu đã tồn tại
+    create: { jobName, lockedBy: null, lockedUntil: new Date(0) },
+  });
+
+  // Bước 2: Cố gắng chiếm lock. Chỉ thành công nếu lock đã hết hạn
+  // HOẶC chính instance này đang giữ (re-entrant an toàn).
+  const result = await prisma.scheduledJobLock.updateMany({
+    where: {
+      jobName,
+      OR: [
+        { lockedUntil: { lt: now } },   // lock đã hết hạn (kể cả null < now là false → chỉ catch null qua case trên)
+        { lockedUntil: null },           // chưa có ai giữ
+        { lockedBy: INSTANCE_ID },       // chính instance này giữ (re-acquire)
+      ],
+    },
+    data: {
+      lockedBy: INSTANCE_ID,
+      lockedUntil,
+      updatedAt: now,
+    },
+  });
+
+  return result.count === 1;
+}
+
+/**
+ * Giải phóng lock sau khi worker chạy xong.
+ * Chỉ release nếu chính instance này đang giữ (tránh xóa lock của instance khác).
+ */
+async function releaseJobLock(jobName) {
+  try {
+    await prisma.scheduledJobLock.updateMany({
+      where: { jobName, lockedBy: INSTANCE_ID },
+      data: {
+        lockedBy: null,
+        lockedUntil: new Date(0), // đặt về quá khứ để instance khác có thể lấy ngay
+        updatedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    // Release thất bại không nghiêm trọng — lock sẽ tự hết hạn sau TTL.
+    console.error(`[cleanup] Không thể release lock "${jobName}":`, error.message);
+  }
+}
 
 // Quét và giải phóng các Reservation HELD đã quá hạn (qua grace).
 // Tách riêng khỏi timer để test được. Trả về số reservation đã dọn.
@@ -127,12 +197,29 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
   return cleaned;
 }
 
-// Khởi động vòng lặp định kỳ. Có cờ isRunning chống chạy chồng.
+// Khởi động vòng lặp định kỳ với distributed lock.
 function startCleanupWorker({ intervalMs = DEFAULT_INTERVAL_MS, graceMs = DEFAULT_GRACE_MS } = {}) {
-  let isRunning = false;
+  let isRunning = false; // chống chạy chồng trong cùng process
 
   const tick = async () => {
     if (isRunning) return;
+
+    // Thử acquire distributed lock trước khi làm việc.
+    // Nếu instance khác đang chạy (scale ngang) → skip.
+    let lockAcquired;
+    try {
+      lockAcquired = await acquireJobLock(JOB_NAME, LOCK_TTL_MS);
+    } catch (lockError) {
+      // Nếu DB lỗi khi lấy lock → skip an toàn, không gây crash worker.
+      console.error('[cleanup] Không thể kiểm tra lock:', lockError.message);
+      return;
+    }
+
+    if (!lockAcquired) {
+      // Instance khác đang giữ lock → bỏ qua chu kỳ này.
+      return;
+    }
+
     isRunning = true;
     try {
       await sweepExpiredReservations({ graceMs });
@@ -140,12 +227,13 @@ function startCleanupWorker({ intervalMs = DEFAULT_INTERVAL_MS, graceMs = DEFAUL
       console.error('[cleanup] Lỗi vòng quét:', error.message);
     } finally {
       isRunning = false;
+      await releaseJobLock(JOB_NAME);
     }
   };
 
   const handle = setInterval(tick, intervalMs);
   if (typeof handle.unref === 'function') handle.unref(); // không chặn process thoát
-  console.log(`[cleanup] Worker đã khởi động (mỗi ${intervalMs / 1000}s, grace ${graceMs / 1000}s).`);
+  console.log(`[cleanup] Worker đã khởi động (instance=${INSTANCE_ID}, mỗi ${intervalMs / 1000}s, grace ${graceMs / 1000}s).`);
   return handle;
 }
 
@@ -154,4 +242,9 @@ module.exports = {
   startCleanupWorker,
   DEFAULT_INTERVAL_MS,
   DEFAULT_GRACE_MS,
+  // Export để test
+  acquireJobLock,
+  releaseJobLock,
+  INSTANCE_ID,
+  JOB_NAME,
 };

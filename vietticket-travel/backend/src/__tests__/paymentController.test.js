@@ -72,16 +72,24 @@ function setupTx({
       findUnique: jest.fn().mockResolvedValue({
         id: 'booking-1',
         status: bookingStatus,
-        payments,
+        payments: payments.map((p) => ({ id: p.id || 'pay-1', ...p })),
         reservation: { id: 'res-1', ticketProductId: 'tkt-1', quantity: 2, status: reservationStatus },
       }),
       update: jest.fn().mockResolvedValue({}),
     },
     payment: { update: jest.fn().mockResolvedValue({}) },
+    refundRequest: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'ref-req-1' }),
+    },
+    refundTransaction: {
+      upsert: jest.fn().mockResolvedValue({}),
+    },
   };
   prisma.$transaction.mockImplementation((cb) => cb(tx));
   return tx;
 }
+
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -218,6 +226,7 @@ describe('createVNPayUrl', () => {
     process.env = savedEnv;
   });
 
+  // bookingFixture đủ điều kiện qua tất cả guard của createVNPayUrl
   function bookingFixture(over = {}) {
     return {
       id: 'booking-1',
@@ -226,10 +235,18 @@ describe('createVNPayUrl', () => {
       status: 'PENDING_PAYMENT',
       reservationId: 'res-1',
       totalAmount: 100000,
-      payments: [{ id: 'pay-1' }],
+      payments: [{ id: 'pay-1', status: 'PENDING', isDuplicate: false }],
+      reservation: {
+        id: 'res-1',
+        status: 'HELD',
+        paymentDeadline: new Date(Date.now() + 10 * 60 * 1000), // 10 phút nữa
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        paymentAttemptCount: 0,
+      },
       ...over,
     };
   }
+
   function makeReq() {
     return {
       user: { id: 'user-1' },
@@ -260,6 +277,21 @@ describe('createVNPayUrl', () => {
     expect(res.status).toHaveBeenCalledWith(409);
   });
 
+  test('409 khi reservation đã hết hạn thanh toán', async () => {
+    prisma.booking.findUnique.mockResolvedValue(bookingFixture({
+      reservation: {
+        id: 'res-1',
+        status: 'HELD',
+        paymentDeadline: new Date(Date.now() - 1000), // đã qua
+        expiresAt: new Date(Date.now() - 1000),
+        paymentAttemptCount: 0,
+      },
+    }));
+    const res = makeRes();
+    await createVNPayUrl(makeReq(), res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+
   test('500 khi thiếu cấu hình VNPay', async () => {
     delete process.env.VNP_HASHSECRET;
     prisma.booking.findUnique.mockResolvedValue(bookingFixture());
@@ -268,20 +300,21 @@ describe('createVNPayUrl', () => {
     expect(res.status).toHaveBeenCalledWith(500);
   });
 
-  test('thành công -> reset expiresAt, tạo Payment attempt mới, trả paymentUrl', async () => {
+  test('thành công -> tăng attemptCount, tạo Payment mới, trả paymentUrl', async () => {
     prisma.booking.findUnique.mockResolvedValue(bookingFixture());
     const tx = {
-      reservation: { update: jest.fn().mockResolvedValue({}) },
+      // Code dùng updateMany với guard để atomic increment + tránh race condition
+      reservation: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       payment: { create: jest.fn().mockResolvedValue({}) },
     };
     prisma.$transaction.mockImplementation((cb) => cb(tx));
     const res = makeRes();
     await createVNPayUrl(makeReq(), res, jest.fn());
 
-    expect(tx.reservation.update).toHaveBeenCalledWith(
+    expect(tx.reservation.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'res-1' },
-        data: expect.objectContaining({ expiresAt: expect.any(Date) }),
+        where: expect.objectContaining({ id: 'res-1', status: 'HELD' }),
+        data: expect.objectContaining({ paymentAttemptCount: { increment: 1 } }),
       }),
     );
     expect(tx.payment.create).toHaveBeenCalledWith(

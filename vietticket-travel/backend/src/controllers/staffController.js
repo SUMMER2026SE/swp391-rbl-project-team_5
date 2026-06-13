@@ -5,6 +5,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { releaseInventory, todayInVietnam } = require('../utils/refundService');
 const { refundViaVnpay } = require('./paymentController');
+const { writeAuditLog } = require('../utils/auditLog');
 const {
   sendRefundStatusEmail,
   sendReissueTicketEmail,
@@ -23,6 +24,32 @@ function httpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+}
+
+function getTicketAttractionId(instance) {
+  return instance.booking?.reservation?.ticketProduct?.attraction?.id
+    || instance.booking?.reservation?.ticketProduct?.attractionId
+    || instance.booking?.snapshotAttractionId
+    || null;
+}
+
+async function assertStaffAttractionAccess(client, user, attractionId) {
+  if (user.role === 'ADMIN') return;
+  if (!attractionId) {
+    throw httpError(403, 'Không xác định được địa điểm của vé.');
+  }
+
+  const assignment = await client.staffAttractionAssignment.findFirst({
+    where: {
+      staffId: user.id,
+      attractionId,
+      revokedAt: null,
+    },
+    select: { id: true },
+  });
+  if (!assignment) {
+    throw httpError(403, 'Bạn không được phân công check-in tại địa điểm này.');
+  }
 }
 
 async function listRefundRequests(req, res, next) {
@@ -72,6 +99,7 @@ async function processRefundRequest(req, res, next) {
   let refundClaimed = false;
   let gatewayRefundDone = false;
   let claimedRefundId = null;
+  let refundTransactionId = null;
   try {
     const { refundId } = req.params;
     const action = String(req.body?.action || '').trim().toUpperCase();
@@ -145,6 +173,25 @@ async function processRefundRequest(req, res, next) {
         const amount = Number(refundRequest.amount);
         // 02 = hoàn toàn phần, 03 = hoàn một phần (khi có phí hủy).
         const transactionType = amount >= total ? '02' : '03';
+        const gatewayRequestId = randomUUID();
+        const refundTransaction = await prisma.refundTransaction.create({
+          data: {
+            bookingId: refundRequest.booking.id,
+            paymentId: onlinePayment.id,
+            refundRequestId: refundRequest.id,
+            gatewayRequestId,
+            transactionType,
+            amount,
+            status: 'PROCESSING',
+            reason: refundRequest.reason,
+            processedById: req.user.id,
+            rawRequest: {
+              originalTransactionId: onlinePayment.transactionId,
+              orderInfo: `Hoan tien don hang ${refundRequest.booking.id}`,
+            },
+          },
+        });
+        refundTransactionId = refundTransaction.id;
 
         const gateway = await refundViaVnpay({
           payment: onlinePayment,
@@ -153,9 +200,18 @@ async function processRefundRequest(req, res, next) {
           createBy: req.user.email,
           ipAddr: getClientIp(req),
           orderInfo: `Hoan tien don hang ${refundRequest.booking.id}`,
+          requestId: gatewayRequestId,
         });
 
         if (!gateway.success) {
+          await prisma.refundTransaction.update({
+            where: { id: refundTransaction.id },
+            data: {
+              status: 'FAILED',
+              rawResponse: gateway.raw,
+              processedAt: new Date(),
+            },
+          });
           throw httpError(
             502,
             `Cổng VNPay từ chối hoàn tiền (mã ${gateway.responseCode || 'N/A'}).` +
@@ -164,6 +220,10 @@ async function processRefundRequest(req, res, next) {
         }
 
         gatewayRefundDone = true;
+        await prisma.refundTransaction.update({
+          where: { id: refundTransaction.id },
+          data: { rawResponse: gateway.raw },
+        });
         const noteRefundOk = `VNPay refund OK (RequestNo gốc: ${onlinePayment.rawResponse?.vnp_TransactionNo || 'N/A'})`;
         finalStaffNotes = [staffNotes, noteRefundOk].filter(Boolean).join(' | ');
 
@@ -251,8 +311,31 @@ async function processRefundRequest(req, res, next) {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
       refundClaimed = false;
+      if (refundTransactionId) {
+        await prisma.refundTransaction.update({
+          where: { id: refundTransactionId },
+          data: {
+            status: 'SUCCESS',
+            processedAt: new Date(),
+          },
+        });
+      }
     } catch (txError) {
       if (gatewayRefundDone) {
+        if (refundTransactionId) {
+          await prisma.refundTransaction.update({
+            where: { id: refundTransactionId },
+            data: {
+              status: 'NEEDS_RECONCILIATION',
+              processedAt: new Date(),
+            },
+          }).catch((persistError) => {
+            console.error(
+              '[staff-refund] Không thể đánh dấu giao dịch cần đối soát:',
+              persistError.message,
+            );
+          });
+        }
         // Tiền ĐÃ hoàn qua cổng nhưng DB chưa cập nhật được -> cần đối soát thủ công.
         console.error(
           `[staff-refund][ĐỐI SOÁT] Cổng VNPay đã hoàn tiền cho booking ${refundRequest.booking.id} ` +
@@ -389,7 +472,8 @@ function normalizeQrToken(raw) {
 function toCheckinTicket(instance) {
   const booking = instance.booking;
   const reservation = booking.reservation;
-  const visitDay = new Date(reservation.date).toISOString().slice(0, 10);
+  const visitDate = booking.snapshotVisitDate || reservation.date;
+  const visitDay = new Date(visitDate).toISOString().slice(0, 10);
   const timeSlot = reservation.timeSlot;
 
   return {
@@ -398,19 +482,25 @@ function toCheckinTicket(instance) {
     ticketStatus: instance.status,
     customer: booking.fullName,
     phone: booking.phone,
-    attraction: reservation.ticketProduct.attraction.title,
-    ticketName: reservation.ticketProduct.name,
+    attraction:
+      booking.snapshotAttractionTitle
+      || reservation.ticketProduct.attraction.title,
+    ticketName: booking.snapshotTicketName || reservation.ticketProduct.name,
     quantity: reservation.quantity,
     visitDate: visitDay,
-    timeSlot: timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null,
-    checkedInAt: instance.status === 'USED' ? instance.updatedAt : null,
+    timeSlot:
+      booking.snapshotTimeSlotLabel
+      || (timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null),
+    checkedInAt: instance.checkedInAt || null,
   };
 }
 
 // Lý do KHÔNG được check-in (null = hợp lệ). Thứ tự ưu tiên để thông báo chính xác.
 function getCheckinBlockReason(instance, now = new Date()) {
   const booking = instance.booking;
-  const visitDay = new Date(booking.reservation.date).toISOString().slice(0, 10);
+  const visitDay = new Date(
+    booking.snapshotVisitDate || booking.reservation.date,
+  ).toISOString().slice(0, 10);
   const today = todayInVietnam(now);
 
   if (instance.status === 'USED') {
@@ -449,7 +539,9 @@ async function lookupTicketByQr(req, res, next) {
             reservation: {
               include: {
                 timeSlot: true,
-                ticketProduct: { include: { attraction: { select: { title: true } } } },
+                ticketProduct: {
+                  include: { attraction: { select: { id: true, title: true } } },
+                },
               },
             },
           },
@@ -463,6 +555,12 @@ async function lookupTicketByQr(req, res, next) {
         error: { message: 'Không tìm thấy vé với mã này. Kiểm tra lại mã QR hoặc nhập tay mã vé.' },
       });
     }
+
+    await assertStaffAttractionAccess(
+      prisma,
+      req.user,
+      getTicketAttractionId(instance),
+    );
 
     const blockReason = getCheckinBlockReason(instance);
     return res.json({
@@ -497,7 +595,9 @@ async function checkInTicket(req, res, next) {
                 reservation: {
                   include: {
                     timeSlot: true,
-                    ticketProduct: { include: { attraction: { select: { title: true } } } },
+                    ticketProduct: {
+                      include: { attraction: { select: { id: true, title: true } } },
+                    },
                   },
                 },
               },
@@ -509,6 +609,9 @@ async function checkInTicket(req, res, next) {
           throw httpError(404, 'Không tìm thấy vé với mã này.');
         }
 
+        const attractionId = getTicketAttractionId(instance);
+        await assertStaffAttractionAccess(tx, req.user, attractionId);
+
         const blockReason = getCheckinBlockReason(instance);
         if (blockReason) {
           throw httpError(409, blockReason);
@@ -516,15 +619,33 @@ async function checkInTicket(req, res, next) {
 
         // updateMany với guard status VALID: hai nhân viên quét cùng lúc thì chỉ
         // một request thực sự check-in, request sau thấy count = 0 -> đã dùng.
+        const checkedInAt = new Date();
         const updated = await tx.ticketInstance.updateMany({
-          where: { bookingId: instance.bookingId, status: 'VALID' },
-          data: { status: 'USED' },
+          where: { id: instance.id, status: 'VALID' },
+          data: {
+            status: 'USED',
+            checkedInAt,
+            checkedInById: req.user.id,
+          },
         });
         if (updated.count === 0) {
           throw httpError(409, 'Vé này vừa được check-in bởi một nhân viên khác.');
         }
 
-        return { instance, checkedInCount: updated.count };
+        await writeAuditLog({
+          client: tx,
+          req,
+          actorId: req.user.id,
+          action: 'TICKET_CHECKED_IN',
+          entityType: 'TicketInstance',
+          entityId: instance.id,
+          metadata: {
+            bookingId: instance.bookingId,
+            attractionId,
+          },
+        });
+
+        return { instance, checkedInCount: updated.count, checkedInAt };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -536,7 +657,7 @@ async function checkInTicket(req, res, next) {
         ...toCheckinTicket(result.instance),
         ticketStatus: 'USED',
         checkedInCount: result.checkedInCount,
-        checkedInAt: new Date(),
+        checkedInAt: result.checkedInAt,
         checkedInBy: req.user.email,
       },
     });
@@ -557,11 +678,29 @@ async function listTodayBookings(req, res, next) {
   try {
     const today = todayInVietnam();
     const todayDate = new Date(`${today}T00:00:00.000Z`);
+    let assignedAttractionIds = null;
+
+    if (req.user.role !== 'ADMIN') {
+      const assignments = await prisma.staffAttractionAssignment.findMany({
+        where: { staffId: req.user.id, revokedAt: null },
+        select: { attractionId: true },
+      });
+      assignedAttractionIds = assignments.map((assignment) => assignment.attractionId);
+    }
 
     const bookings = await prisma.booking.findMany({
       where: {
         status: { in: ['CONFIRMED', 'COMPLETED'] },
-        reservation: { date: todayDate },
+        reservation: {
+          date: todayDate,
+          ...(assignedAttractionIds
+            ? {
+                ticketProduct: {
+                  attractionId: { in: assignedAttractionIds },
+                },
+              }
+            : {}),
+        },
       },
       orderBy: { createdAt: 'asc' },
       include: {
@@ -569,7 +708,9 @@ async function listTodayBookings(req, res, next) {
         reservation: {
           include: {
             timeSlot: true,
-            ticketProduct: { include: { attraction: { select: { title: true } } } },
+            ticketProduct: {
+              include: { attraction: { select: { id: true, title: true } } },
+            },
           },
         },
       },
@@ -583,10 +724,14 @@ async function listTodayBookings(req, res, next) {
         bookingId: b.id,
         customer: b.fullName,
         phone: b.phone,
-        attraction: b.reservation.ticketProduct.attraction.title,
-        ticketName: b.reservation.ticketProduct.name,
+        attraction:
+          b.snapshotAttractionTitle
+          || b.reservation.ticketProduct.attraction.title,
+        ticketName: b.snapshotTicketName || b.reservation.ticketProduct.name,
         quantity: b.reservation.quantity,
-        timeSlot: timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null,
+        timeSlot:
+          b.snapshotTimeSlotLabel
+          || (timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null),
         checkedIn: usedCount > 0 && validCount === 0,
         usedCount,
         validCount,
@@ -607,6 +752,118 @@ async function listTodayBookings(req, res, next) {
   }
 }
 
+async function listStaffAssignments(req, res, next) {
+  try {
+    const staff = await prisma.user.findUnique({
+      where: { id: req.params.staffId },
+      select: { id: true, email: true, fullName: true, role: true },
+    });
+    if (!staff || staff.role !== 'STAFF') {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản nhân viên.' });
+    }
+
+    const assignments = await prisma.staffAttractionAssignment.findMany({
+      where: { staffId: staff.id, revokedAt: null },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        attraction: {
+          select: { id: true, title: true, city: true, status: true },
+        },
+      },
+    });
+
+    return res.json({ success: true, data: { staff, assignments } });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function replaceStaffAssignments(req, res, next) {
+  try {
+    const attractionIds = Array.isArray(req.body?.attractionIds)
+      ? [...new Set(req.body.attractionIds.map((id) => String(id).trim()).filter(Boolean))]
+      : null;
+    if (!attractionIds) {
+      return res.status(400).json({ message: 'attractionIds phải là một mảng.' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const staff = await tx.user.findUnique({
+        where: { id: req.params.staffId },
+        select: { id: true, role: true },
+      });
+      if (!staff || staff.role !== 'STAFF') {
+        throw httpError(404, 'Không tìm thấy tài khoản nhân viên.');
+      }
+
+      const attractionCount = await tx.attraction.count({
+        where: {
+          id: { in: attractionIds },
+          archivedAt: null,
+          status: 'APPROVED',
+        },
+      });
+      if (attractionCount !== attractionIds.length) {
+        throw httpError(400, 'Có địa điểm không tồn tại hoặc chưa được phê duyệt.');
+      }
+
+      await tx.staffAttractionAssignment.updateMany({
+        where: {
+          staffId: staff.id,
+          revokedAt: null,
+          attractionId: { notIn: attractionIds },
+        },
+        data: { revokedAt: new Date() },
+      });
+
+      for (const attractionId of attractionIds) {
+        await tx.staffAttractionAssignment.upsert({
+          where: {
+            staffId_attractionId: {
+              staffId: staff.id,
+              attractionId,
+            },
+          },
+          update: {
+            revokedAt: null,
+            createdById: req.user.id,
+          },
+          create: {
+            staffId: staff.id,
+            attractionId,
+            createdById: req.user.id,
+          },
+        });
+      }
+
+      await writeAuditLog({
+        client: tx,
+        req,
+        actorId: req.user.id,
+        action: 'STAFF_ASSIGNMENTS_REPLACED',
+        entityType: 'User',
+        entityId: staff.id,
+        metadata: { attractionIds },
+      });
+
+      return staff;
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        staffId: result.id,
+        attractionIds,
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    return next(error);
+  }
+}
+
 module.exports = {
   listRefundRequests,
   processRefundRequest,
@@ -614,4 +871,6 @@ module.exports = {
   lookupTicketByQr,
   checkInTicket,
   listTodayBookings,
+  listStaffAssignments,
+  replaceStaffAssignments,
 };

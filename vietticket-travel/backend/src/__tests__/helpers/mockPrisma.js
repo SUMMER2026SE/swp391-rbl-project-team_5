@@ -33,6 +33,12 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
   },
+  staffAttractionAssignment: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    updateMany: jest.fn(),
+    upsert: jest.fn(),
+  },
   category: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
@@ -122,6 +128,30 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
     aggregate: jest.fn(),
+  },
+  refundTransaction: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    upsert: jest.fn(),
+  },
+  authSession: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  scheduledJobLock: {
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    upsert: jest.fn(),
+  },
+  auditLog: {
+    create: jest.fn(),
   },
   ticketInstance: {
     create: jest.fn(),

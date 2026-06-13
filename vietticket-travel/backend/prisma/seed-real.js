@@ -230,9 +230,19 @@ async function main() {
           console.log(`  • Google: bỏ qua "${a.title}" do lỗi: ${err.message}`);
         }
       }
-    } else {
-      console.log('\n[Google] Bỏ qua enrich (chưa đặt GOOGLE_API_KEY) — dùng ảnh placeholder.');
     }
+
+    console.log('\nĐang tính toán lại minTicketPrice cho tất cả điểm tham quan...');
+    await prisma.$executeRawUnsafe(`
+      UPDATE "Attraction" a
+      SET "minTicketPrice" = (
+        SELECT MIN(tp."sellingPrice")
+        FROM "TicketProduct" tp
+        WHERE tp."attractionId" = a."id"
+          AND tp."status" = 'ACTIVE'
+          AND tp."archivedAt" IS NULL
+      );
+    `);
 
     console.log('\n==================================================');
     console.log('SEED DỮ LIỆU THẬT THÀNH CÔNG!');

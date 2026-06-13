@@ -523,6 +523,7 @@ async function reserveTickets(req, res, next) {
           quantity,
           status: 'HELD',
           expiresAt,
+          paymentDeadline: expiresAt,
         },
       });
 

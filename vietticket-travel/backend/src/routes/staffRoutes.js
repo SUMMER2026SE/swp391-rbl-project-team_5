@@ -10,11 +10,17 @@ const {
   lookupTicketByQr,
   checkInTicket,
   listTodayBookings,
+  listStaffAssignments,
+  replaceStaffAssignments,
 } = require('../controllers/staffController');
 
 const router = express.Router();
 
-router.use(protect, restrictTo('STAFF', 'ADMIN'));
+router.use(protect);
+router.get('/assignments/:staffId', restrictTo('ADMIN'), listStaffAssignments);
+router.put('/assignments/:staffId', restrictTo('ADMIN'), replaceStaffAssignments);
+
+router.use(restrictTo('STAFF', 'ADMIN'));
 router.get('/refunds', listRefundRequests);
 router.patch('/refunds/:refundId', processRefundRequest);
 router.post('/bookings/:bookingId/reissue', reissueTicket);

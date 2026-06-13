@@ -2,7 +2,7 @@ const { OAuth2Client } = require('google-auth-library');
 const bcrypt = require('bcrypt');
 const prisma = require('../config/prisma');
 const { setAuthCookie, clearAuthCookie } = require('../utils/authCookie');
-const generateToken = require('../utils/generateToken');
+const { createAuthSession } = require('../utils/authSession');
 const { sendPasswordResetEmail, sendVerificationEmail } = require('../utils/mailer');
 const {
   addMinutes,
@@ -51,8 +51,8 @@ async function findUserForResponse(userId) {
   });
 }
 
-function issueAuthSession(res, user) {
-  const token = generateToken(user);
+async function issueAuthSession(req, res, user) {
+  const { token } = await createAuthSession(req, user);
   setAuthCookie(res, token);
 }
 
@@ -269,7 +269,7 @@ async function login(req, res, next) {
       });
     }
 
-    issueAuthSession(res, user);
+    await issueAuthSession(req, res, user);
 
     return res.json({
       message: 'Đăng nhập thành công.',
@@ -396,7 +396,7 @@ async function googleLogin(req, res, next) {
       });
     }
 
-    issueAuthSession(res, user);
+    await issueAuthSession(req, res, user);
 
     return res.json({
       message: 'Đăng nhập Google thành công.',
@@ -478,11 +478,18 @@ async function resetPassword(req, res, next) {
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: resetToken.userId },
-        data: { passwordHash },
+        data: {
+          passwordHash,
+          tokenVersion: { increment: 1 },
+        },
       });
 
       await tx.passwordResetToken.deleteMany({
         where: { userId: resetToken.userId },
+      });
+      await tx.authSession.updateMany({
+        where: { userId: resetToken.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
       });
     });
 
