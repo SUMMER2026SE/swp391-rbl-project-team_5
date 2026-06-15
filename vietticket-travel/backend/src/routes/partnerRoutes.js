@@ -38,6 +38,7 @@ router.post('/attractions', attractionController.createAttraction);
 router.get('/attractions/:id', attractionController.getAttraction);
 router.put('/attractions/:id', attractionController.updateAttraction);
 router.delete('/attractions/:id', attractionController.deleteAttraction);
+router.patch('/attractions/:id/publication', attractionController.setPublicationStatus);
 router.post(
   '/attractions/:id/images',
   uploadAttractionImages.array('images', 10),

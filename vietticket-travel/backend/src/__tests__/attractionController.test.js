@@ -73,7 +73,7 @@ describe('searchAttractions', () => {
 
 describe('getAttractionDetail', () => {
   test('✅ Trả về chi tiết nếu tìm thấy và status APPROVED', async () => {
-    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', title: 'Suối Tiên', status: 'APPROVED', images: [], categories: [], ticketProducts: [] });
+    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', title: 'Suối Tiên', status: 'APPROVED', publicationStatus: 'ACTIVE', images: [], categories: [], ticketProducts: [] });
     const req = { params: { id: 'attr-001' } };
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
     const next = jest.fn();

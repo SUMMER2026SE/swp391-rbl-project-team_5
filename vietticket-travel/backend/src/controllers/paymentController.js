@@ -149,17 +149,8 @@ async function createVNPayUrl(req, res, next) {
   }
 }
 
-// GET /api/payments/vnpay-ipn — VNPay gọi server-to-server (KHÔNG auth)
-// Luôn trả HTTP 200 kèm { RspCode, Message }.
-async function vnpayIpn(req, res) {
-  try {
-    const secret = process.env.VNP_HASHSECRET;
-    const query = { ...req.query };
-
-    if (!verifyVnpaySignature(query, secret)) {
-      return res.status(200).json({ RspCode: '97', Message: 'Invalid signature' });
-    }
-
+// Dùng chung cho IPN và return. Chữ ký phải được xác thực trước khi gọi.
+async function reconcileVnpayPayment(query) {
     const txnRef = String(query.vnp_TxnRef || '');
     const responseCode = String(query.vnp_ResponseCode || '');
     const transactionStatus = String(query.vnp_TransactionStatus || '');
@@ -182,12 +173,12 @@ async function vnpayIpn(req, res) {
       },
     });
     if (!payment || !payment.booking) {
-      return res.status(200).json({ RspCode: '01', Message: 'Order not found' });
+      return { code: '01', msg: 'Order not found', bookingId: '' };
     }
 
     const booking = payment.booking;
     if (vnpAmount !== String(amountToVnp(booking.totalAmount))) {
-      return res.status(200).json({ RspCode: '04', Message: 'Invalid amount' });
+      return { code: '04', msg: 'Invalid amount', bookingId: booking.id };
     }
 
     const needsApproval =
@@ -203,14 +194,18 @@ async function vnpayIpn(req, res) {
 
         const currentPayment = current.payments.find((p) => p.id === payment.id);
         if (currentPayment?.status === 'SUCCESS') {
-          return { code: '02', msg: 'Order already confirmed', bookingStatus: null };
+          return {
+            code: '02',
+            msg: 'Order already confirmed',
+            bookingStatus: current.status,
+          };
         }
 
         const successfulPayment = current.payments.find(
           (p) => p.status === 'SUCCESS' && p.id !== payment.id && !p.isDuplicate,
         );
         const reservation = current.reservation;
-        let bookingStatus = null;
+        let bookingStatus = current.status;
 
         if (isSuccess) {
           if (successfulPayment) {
@@ -264,7 +259,7 @@ async function vnpayIpn(req, res) {
             return {
               code: '00',
               msg: 'Duplicate payment recorded for refund',
-              bookingStatus: null,
+              bookingStatus,
             };
           }
 
@@ -306,6 +301,7 @@ async function vnpayIpn(req, res) {
               where: { id: current.id },
               data: { status: 'CANCELLED', refundRequired: true },
             });
+            bookingStatus = 'CANCELLED';
           }
         } else {
           // Thất bại: chỉ đánh dấu Payment FAILED, GIỮ Booking PENDING_PAYMENT
@@ -350,6 +346,21 @@ async function vnpayIpn(req, res) {
       }
     }
 
+    return { ...result, bookingId: booking.id };
+}
+
+// GET /api/payments/vnpay-ipn — VNPay gọi server-to-server (KHÔNG auth).
+// Luôn trả HTTP 200 kèm { RspCode, Message }.
+async function vnpayIpn(req, res) {
+  try {
+    const secret = process.env.VNP_HASHSECRET;
+    const query = { ...req.query };
+
+    if (!verifyVnpaySignature(query, secret)) {
+      return res.status(200).json({ RspCode: '97', Message: 'Invalid signature' });
+    }
+
+    const result = await reconcileVnpayPayment(query);
     return res.status(200).json({ RspCode: result.code, Message: result.msg });
   } catch (error) {
     // Serialization failure / lỗi bất ngờ -> trả mã != 00 để VNPay gọi lại.
@@ -359,7 +370,8 @@ async function vnpayIpn(req, res) {
 }
 
 // GET /api/payments/vnpay-return — VNPay redirect trình duyệt khách về.
-// CHỈ verify chữ ký rồi redirect sang FE; KHÔNG ghi DB (IPN lo việc đó).
+// Return hợp lệ cũng đối soát như fallback idempotent cho môi trường local/private,
+// nơi VNPay không thể gọi IPN vào localhost.
 async function vnpayReturn(req, res, next) {
   try {
     const secret = process.env.VNP_HASHSECRET;
@@ -371,15 +383,22 @@ async function vnpayReturn(req, res, next) {
     const responseCode = String(query.vnp_ResponseCode || '');
 
     let bookingId = '';
+    let reconciliation = null;
     if (valid && txnRef) {
-      const payment = await prisma.payment.findUnique({
-        where: { transactionId: txnRef },
-        select: { bookingId: true },
-      });
-      bookingId = payment?.bookingId || '';
+      reconciliation = await reconcileVnpayPayment(query);
+      bookingId = reconciliation.bookingId || '';
     }
 
-    const status = !valid ? 'invalid' : responseCode === '00' ? 'success' : 'failed';
+    const reconciled =
+      reconciliation
+      && ['00', '02'].includes(reconciliation.code)
+      && reconciliation.bookingStatus !== 'CANCELLED';
+    const status =
+      !valid || (responseCode === '00' && !reconciled)
+        ? 'invalid'
+        : responseCode === '00'
+          ? 'success'
+          : 'failed';
     const url =
       `${frontend}/booking-success?bookingId=${encodeURIComponent(bookingId)}` +
       `&status=${status}&vnp_ResponseCode=${encodeURIComponent(responseCode)}`;

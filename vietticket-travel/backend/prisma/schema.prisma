@@ -139,6 +139,12 @@ enum AttractionStatus {
   SUSPENDED
 }
 
+enum AttractionPublicationStatus {
+  PAUSED
+  ACTIVE
+  ARCHIVED
+}
+
 enum TicketStatus {
   ACTIVE
   INACTIVE
@@ -263,27 +269,35 @@ model StaffAttractionAssignment {
 }
 
 model Attraction {
-  id                     String           @id @default(uuid())
+  id                     String                      @id @default(uuid())
   partnerId              String
   title                  String
-  description            String           @db.Text
+  description            String                      @db.Text
   address                String
   city                   String
   district               String?
   openTime               String? // Giờ mở cửa, định dạng "HH:MM"
   closeTime              String? // Giờ đóng cửa, định dạng "HH:MM"
   openDays               String? // 7 ngày trong tuần dạng CSV bool, vd "1,1,1,1,1,0,0"
-  defaultCapacity        Int              @default(100)
-  requiresManualApproval Boolean          @default(false) // Đơn đặt vé cần đối tác duyệt thủ công
+  defaultCapacity        Int                         @default(100)
+  requiresManualApproval Boolean                     @default(false) // Đơn đặt vé cần đối tác duyệt thủ công
   latitude               Float?
   longitude              Float?
-  status                 AttractionStatus @default(DRAFT)
+  status                 AttractionStatus            @default(DRAFT)
+  publicationStatus      AttractionPublicationStatus @default(PAUSED)
   rejectionReason        String?
-  averageRating          Float            @default(0.0)
-  totalReviews           Int              @default(0)
-  minTicketPrice         Decimal?         @db.Decimal(12, 2)
-  createdAt              DateTime         @default(now())
-  updatedAt              DateTime         @updatedAt
+  draftData              Json?
+  submittedData          Json?
+  revision               Int                         @default(0)
+  submittedAt            DateTime?
+  reviewedAt             DateTime?
+  reviewedById           String?
+  publishedAt            DateTime?
+  averageRating          Float                       @default(0.0)
+  totalReviews           Int                         @default(0)
+  minTicketPrice         Decimal?                    @db.Decimal(12, 2)
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
   archivedAt             DateTime?
 
   partner        PartnerProfile       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
@@ -300,6 +314,7 @@ model Attraction {
 
   @@index([city])
   @@index([status])
+  @@index([publicationStatus])
   @@index([archivedAt])
   @@index([minTicketPrice])
 }

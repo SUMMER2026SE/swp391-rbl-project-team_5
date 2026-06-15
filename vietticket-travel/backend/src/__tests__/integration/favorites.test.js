@@ -48,6 +48,8 @@ describe('Favorites API', () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({
       id: 'attr-001',
       status: 'APPROVED',
+      publicationStatus: 'ACTIVE',
+      archivedAt: null,
     });
     mockPrisma.favoriteAttraction.findUnique.mockResolvedValue(null);
     mockPrisma.favoriteAttraction.create.mockResolvedValue({

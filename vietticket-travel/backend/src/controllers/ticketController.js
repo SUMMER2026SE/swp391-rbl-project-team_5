@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const { Prisma } = require('@prisma/client');
+const { randomUUID } = require('crypto');
 const {
   ticketStatusFromClient,
   refundPolicyFromClient,
@@ -14,12 +15,30 @@ const {
   getSlotCapacity,
 } = require('../services/availabilityService');
 const { refreshAttractionMinPrice } = require('../services/catalogService');
+const {
+  assertPartnerCanEdit,
+  hasPublishedVersion,
+  buildAttractionSnapshot,
+} = require('../services/attractionWorkflowService');
+const { writeAuditLog } = require('../utils/auditLog');
+
+const attractionInclude = {
+  images: true,
+  categories: { include: { category: true } },
+  ticketProducts: { where: { archivedAt: null } },
+  timeSlots: { where: { ticketProductId: null, isActive: true } },
+  specialDates: true,
+};
 
 // Tìm vé và xác minh thuộc về đối tác hiện tại (qua điểm tham quan)
 async function findOwnedTicket(ticketId, partnerId) {
   const ticket = await prisma.ticketProduct.findUnique({
     where: { id: ticketId },
-    include: { attraction: { select: { partnerId: true } } },
+    include: {
+      attraction: {
+        select: { id: true, partnerId: true, status: true, archivedAt: true, publishedAt: true, draftData: true },
+      },
+    },
   });
 
   if (!ticket || ticket.archivedAt || ticket.attraction.partnerId !== partnerId) {
@@ -49,6 +68,15 @@ async function listTickets(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
 
+    if (hasPublishedVersion(attraction)) {
+      const draft = attraction.draftData || buildAttractionSnapshot(attraction);
+      const tickets = draft.tickets || [];
+      return res.json({
+        attraction: { id: attraction.id, name: attraction.title },
+        tickets: tickets.map(toTicket),
+      });
+    }
+
     const tickets = await prisma.ticketProduct.findMany({
       where: { attractionId: attraction.id, archivedAt: null },
       orderBy: { createdAt: 'asc' },
@@ -71,6 +99,8 @@ async function createTicket(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
 
+    assertPartnerCanEdit(attraction);
+
     const validationError = validateTicket(req.body, { partial: false });
     if (validationError) {
       return res.status(400).json({ message: validationError });
@@ -82,10 +112,54 @@ async function createTicket(req, res, next) {
     if (!data.refundPolicy) data.refundPolicy = 'NON_REFUNDABLE';
     if (!data.description) data.description = '';
 
+    if (hasPublishedVersion(attraction)) {
+      const draft = attraction.draftData || buildAttractionSnapshot(attraction);
+      const tickets = draft.tickets || [];
+      const ticketId = `draft-${randomUUID()}`;
+      const newTicket = {
+        id: ticketId,
+        name: data.name,
+        type: data.type,
+        description: data.description,
+        originalPrice: data.originalPrice,
+        sellingPrice: data.sellingPrice,
+        status: data.status,
+        refundPolicy: data.refundPolicy,
+        refundFeeRate: Number(req.body.refundFeeRate || 0),
+      };
+      tickets.push(newTicket);
+      draft.tickets = tickets;
+
+      await prisma.attraction.update({
+        where: { id: attraction.id },
+        data: { draftData: draft, status: 'DRAFT', rejectionReason: null },
+      });
+
+      await writeAuditLog({
+        req,
+        action: 'ATTRACTION_TICKET_CREATED',
+        entityType: 'ATTRACTION',
+        entityId: attraction.id,
+        metadata: { ticketId, isDraft: true },
+      });
+
+      return res.status(201).json({
+        message: 'Tạo gói vé thành công.',
+        ticket: toTicket(newTicket),
+      });
+    }
+
     const ticket = await prisma.ticketProduct.create({
       data: { ...data, attractionId: attraction.id },
     });
     await refreshAttractionMinPrice(prisma, attraction.id);
+    await writeAuditLog({
+      req,
+      action: 'ATTRACTION_TICKET_CREATED',
+      entityType: 'ATTRACTION',
+      entityId: attraction.id,
+      metadata: { ticketId: ticket.id },
+    });
 
     return res.status(201).json({
       message: 'Tạo gói vé thành công.',
@@ -99,10 +173,32 @@ async function createTicket(req, res, next) {
 // GET /api/partners/tickets/:ticketId
 async function getTicket(req, res, next) {
   try {
-    const ticket = await findOwnedTicket(req.params.ticketId, req.partner.id);
+    const ticketId = req.params.ticketId;
+    if (ticketId.startsWith('draft-')) {
+      const attractions = await prisma.attraction.findMany({
+        where: { partnerId: req.partner.id, archivedAt: null },
+      });
+      for (const a of attractions) {
+        const draft = a.draftData;
+        if (draft && Array.isArray(draft.tickets)) {
+          const t = draft.tickets.find((tk) => tk.id === ticketId);
+          if (t) return res.json({ ticket: toTicket(t) });
+        }
+      }
+      return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
+    }
+
+    const ticket = await findOwnedTicket(ticketId, req.partner.id);
     if (!ticket) {
       return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
     }
+
+    if (hasPublishedVersion(ticket.attraction)) {
+      const draft = ticket.attraction.draftData || buildAttractionSnapshot(ticket.attraction);
+      const t = (draft.tickets || []).find((tk) => tk.id === ticketId);
+      if (t) return res.json({ ticket: toTicket(t) });
+    }
+
     return res.json({ ticket: toTicket(ticket) });
   } catch (error) {
     next(error);
@@ -112,25 +208,141 @@ async function getTicket(req, res, next) {
 // PUT /api/partners/tickets/:ticketId
 async function updateTicket(req, res, next) {
   try {
-    const existing = await findOwnedTicket(req.params.ticketId, req.partner.id);
-    if (!existing) {
-      return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
-    }
-
+    const ticketId = req.params.ticketId;
     const validationError = validateTicket(req.body, { partial: true });
     if (validationError) {
       return res.status(400).json({ message: validationError });
     }
 
-    // Kiểm tra chéo giá khi chỉ cập nhật một trong hai
-    const original = req.body.originalPrice !== undefined
-      ? Number(req.body.originalPrice)
-      : Number(existing.originalPrice);
-    const selling = req.body.sellingPrice !== undefined
-      ? Number(req.body.sellingPrice)
-      : Number(existing.sellingPrice);
+    if (ticketId.startsWith('draft-')) {
+      const attractions = await prisma.attraction.findMany({
+        where: { partnerId: req.partner.id, archivedAt: null },
+      });
+      let attraction = null;
+      let draft = null;
+      let ticketIndex = -1;
+      for (const a of attractions) {
+        const d = a.draftData;
+        if (d && Array.isArray(d.tickets)) {
+          const idx = d.tickets.findIndex((tk) => tk.id === ticketId);
+          if (idx !== -1) {
+            attraction = a;
+            draft = d;
+            ticketIndex = idx;
+            break;
+          }
+        }
+      }
+      if (!attraction) {
+        return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
+      }
+
+      assertPartnerCanEdit(attraction);
+
+      const current = draft.tickets[ticketIndex];
+      const original = req.body.originalPrice !== undefined ? Number(req.body.originalPrice) : current.originalPrice;
+      const selling = req.body.sellingPrice !== undefined ? Number(req.body.sellingPrice) : current.sellingPrice;
+      if (selling > original) {
+        return res.status(400).json({ message: 'Giá bán không được lớn hơn giá gốc.' });
+      }
+
+      const updatedTicket = {
+        ...current,
+        name: req.body.name !== undefined ? String(req.body.name).trim() : current.name,
+        type: req.body.type !== undefined ? String(req.body.type).toUpperCase() : current.type,
+        description: req.body.description !== undefined ? String(req.body.description || '').trim() : current.description,
+        originalPrice: original,
+        sellingPrice: selling,
+        status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
+        refundPolicy: req.body.refundPolicy !== undefined ? refundPolicyFromClient(req.body.refundPolicy) : current.refundPolicy,
+        refundFeeRate: req.body.refundFeeRate !== undefined ? Number(req.body.refundFeeRate) : current.refundFeeRate,
+      };
+
+      draft.tickets[ticketIndex] = updatedTicket;
+      await prisma.attraction.update({
+        where: { id: attraction.id },
+        data: { draftData: draft, status: 'DRAFT', rejectionReason: null },
+      });
+
+      await writeAuditLog({
+        req,
+        action: 'ATTRACTION_TICKET_UPDATED',
+        entityType: 'ATTRACTION',
+        entityId: attraction.id,
+        metadata: { ticketId, isDraft: true },
+      });
+
+      return res.json({
+        message: 'Cập nhật gói vé thành công.',
+        ticket: toTicket(updatedTicket),
+      });
+    }
+
+    const existing = await findOwnedTicket(ticketId, req.partner.id);
+    if (!existing) {
+      return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
+    }
+
+    assertPartnerCanEdit(existing.attraction);
+
+    const original = req.body.originalPrice !== undefined ? Number(req.body.originalPrice) : Number(existing.originalPrice);
+    const selling = req.body.sellingPrice !== undefined ? Number(req.body.sellingPrice) : Number(existing.sellingPrice);
     if (selling > original) {
       return res.status(400).json({ message: 'Giá bán không được lớn hơn giá gốc.' });
+    }
+
+    if (hasPublishedVersion(existing.attraction)) {
+      const draft = existing.attraction.draftData || buildAttractionSnapshot(existing.attraction);
+      const tickets = draft.tickets || [];
+      const idx = tickets.findIndex((tk) => tk.id === ticketId);
+      const current = idx !== -1 ? tickets[idx] : {
+        id: existing.id,
+        name: existing.name,
+        type: existing.type,
+        description: existing.description || '',
+        originalPrice: Number(existing.originalPrice),
+        sellingPrice: Number(existing.sellingPrice),
+        status: existing.status,
+        refundPolicy: existing.refundPolicy,
+        refundFeeRate: Number(existing.refundFeeRate),
+      };
+
+      const updatedTicket = {
+        ...current,
+        name: req.body.name !== undefined ? String(req.body.name).trim() : current.name,
+        type: req.body.type !== undefined ? String(req.body.type).toUpperCase() : current.type,
+        description: req.body.description !== undefined ? String(req.body.description || '').trim() : current.description,
+        originalPrice: original,
+        sellingPrice: selling,
+        status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
+        refundPolicy: req.body.refundPolicy !== undefined ? refundPolicyFromClient(req.body.refundPolicy) : current.refundPolicy,
+        refundFeeRate: req.body.refundFeeRate !== undefined ? Number(req.body.refundFeeRate) : current.refundFeeRate,
+      };
+
+      if (idx !== -1) {
+        tickets[idx] = updatedTicket;
+      } else {
+        tickets.push(updatedTicket);
+      }
+
+      draft.tickets = tickets;
+      await prisma.attraction.update({
+        where: { id: existing.attractionId },
+        data: { draftData: draft, status: 'DRAFT', rejectionReason: null },
+      });
+
+      await writeAuditLog({
+        req,
+        action: 'ATTRACTION_TICKET_UPDATED',
+        entityType: 'ATTRACTION',
+        entityId: existing.attractionId,
+        metadata: { ticketId: existing.id, isDraft: true },
+      });
+
+      return res.json({
+        message: 'Cập nhật gói vé thành công.',
+        ticket: toTicket(updatedTicket),
+      });
     }
 
     const ticket = await prisma.ticketProduct.update({
@@ -138,6 +350,13 @@ async function updateTicket(req, res, next) {
       data: buildTicketData(req.body),
     });
     await refreshAttractionMinPrice(prisma, existing.attractionId);
+    await writeAuditLog({
+      req,
+      action: 'ATTRACTION_TICKET_UPDATED',
+      entityType: 'ATTRACTION',
+      entityId: existing.attractionId,
+      metadata: { ticketId: existing.id },
+    });
 
     return res.json({
       message: 'Cập nhật gói vé thành công.',
@@ -151,9 +370,73 @@ async function updateTicket(req, res, next) {
 // DELETE /api/partners/tickets/:ticketId
 async function deleteTicket(req, res, next) {
   try {
-    const existing = await findOwnedTicket(req.params.ticketId, req.partner.id);
+    const ticketId = req.params.ticketId;
+    if (ticketId.startsWith('draft-')) {
+      const attractions = await prisma.attraction.findMany({
+        where: { partnerId: req.partner.id, archivedAt: null },
+      });
+      let attraction = null;
+      let draft = null;
+      for (const a of attractions) {
+        const d = a.draftData;
+        if (d && Array.isArray(d.tickets)) {
+          const idx = d.tickets.findIndex((tk) => tk.id === ticketId);
+          if (idx !== -1) {
+            attraction = a;
+            draft = d;
+            break;
+          }
+        }
+      }
+      if (!attraction) {
+        return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
+      }
+
+      assertPartnerCanEdit(attraction);
+
+      draft.tickets = draft.tickets.filter((tk) => tk.id !== ticketId);
+      await prisma.attraction.update({
+        where: { id: attraction.id },
+        data: { draftData: draft, status: 'DRAFT', rejectionReason: null },
+      });
+
+      await writeAuditLog({
+        req,
+        action: 'ATTRACTION_TICKET_ARCHIVED',
+        entityType: 'ATTRACTION',
+        entityId: attraction.id,
+        metadata: { ticketId, isDraft: true },
+      });
+
+      return res.json({ message: 'Đã xóa gói vé khỏi bản nháp.' });
+    }
+
+    const existing = await findOwnedTicket(ticketId, req.partner.id);
     if (!existing) {
       return res.status(404).json({ message: 'Không tìm thấy gói vé.' });
+    }
+
+    assertPartnerCanEdit(existing.attraction);
+
+    if (hasPublishedVersion(existing.attraction)) {
+      const draft = existing.attraction.draftData || buildAttractionSnapshot(existing.attraction);
+      const tickets = draft.tickets || [];
+      draft.tickets = tickets.filter((tk) => tk.id !== ticketId);
+
+      await prisma.attraction.update({
+        where: { id: existing.attractionId },
+        data: { draftData: draft, status: 'DRAFT', rejectionReason: null },
+      });
+
+      await writeAuditLog({
+        req,
+        action: 'ATTRACTION_TICKET_ARCHIVED',
+        entityType: 'ATTRACTION',
+        entityId: existing.attractionId,
+        metadata: { ticketId: existing.id, isDraft: true },
+      });
+
+      return res.json({ message: 'Đã xóa gói vé khỏi bản nháp.' });
     }
 
     await prisma.ticketProduct.update({
@@ -161,6 +444,13 @@ async function deleteTicket(req, res, next) {
       data: { archivedAt: new Date(), status: 'INACTIVE' },
     });
     await refreshAttractionMinPrice(prisma, existing.attractionId);
+    await writeAuditLog({
+      req,
+      action: 'ATTRACTION_TICKET_ARCHIVED',
+      entityType: 'ATTRACTION',
+      entityId: existing.attractionId,
+      metadata: { ticketId: existing.id },
+    });
 
     return res.json({ message: 'Đã lưu trữ gói vé. Lịch sử đặt vé được giữ nguyên.' });
   } catch (error) {
@@ -190,13 +480,18 @@ async function createTicketProduct(req, res, next) {
     if (!userId) return res.status(401).json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Unauthorized' } });
 
     const attractionId = req.params.attractionId;
-    const attraction = await prisma.attraction.findUnique({ where: { id: attractionId } });
+    const attraction = await prisma.attraction.findUnique({
+      where: { id: attractionId },
+      include: attractionInclude,
+    });
     if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
 
     const partner = await prisma.partnerProfile.findUnique({ where: { userId } });
     if (!partner || partner.id !== attraction.partnerId) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Không có quyền thao tác' } });
     }
+
+    assertPartnerCanEdit(attraction);
 
     const { name, description, originalPrice, sellingPrice, refundPolicy } = req.body || {};
     if (!name || !description || originalPrice == null || sellingPrice == null) {
@@ -206,6 +501,40 @@ async function createTicketProduct(req, res, next) {
     const validPolicies = ['NON_REFUNDABLE', 'FREE_CANCELLATION', 'REFUND_WITH_FEE'];
     if (refundPolicy && !validPolicies.includes(refundPolicy)) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'refundPolicy is invalid' } });
+    }
+
+    if (hasPublishedVersion(attraction)) {
+      const draft = attraction.draftData || buildAttractionSnapshot(attraction);
+      const tickets = draft.tickets || [];
+      const ticketId = `draft-${randomUUID()}`;
+      const newTicket = {
+        id: ticketId,
+        name,
+        type: req.body.type || 'ADULT',
+        description,
+        originalPrice: Number(originalPrice),
+        sellingPrice: Number(sellingPrice),
+        status: 'ACTIVE',
+        refundPolicy: refundPolicy || 'NON_REFUNDABLE',
+        refundFeeRate: Number(req.body.refundFeeRate || 0),
+      };
+      tickets.push(newTicket);
+      draft.tickets = tickets;
+
+      await prisma.attraction.update({
+        where: { id: attraction.id },
+        data: { draftData: draft, status: 'DRAFT', rejectionReason: null },
+      });
+
+      await writeAuditLog({
+        req,
+        action: 'ATTRACTION_TICKET_CREATED',
+        entityType: 'ATTRACTION',
+        entityId: attraction.id,
+        metadata: { ticketId, isDraft: true },
+      });
+
+      return res.status(201).json({ success: true, data: { id: ticketId, name, status: 'ACTIVE' } });
     }
 
     const product = await prisma.ticketProduct.create({
@@ -226,6 +555,7 @@ async function createTicketProduct(req, res, next) {
     return next(error);
   }
 }
+
 
 // PUT /api/tickets/:ticketProductId/time-slots — thiết lập khung giờ (MPhu)
 async function setupTimeSlots(req, res, next) {

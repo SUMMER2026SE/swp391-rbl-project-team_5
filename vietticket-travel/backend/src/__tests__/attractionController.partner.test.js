@@ -39,7 +39,7 @@ describe('listAttractions (Partner Portal)', () => {
     }));
   });
 
-  test('✅ status=active map sang APPROVED trong where', async () => {
+  test('✅ status=active lọc theo publicationStatus ACTIVE', async () => {
     mockPrisma.attraction.findMany.mockResolvedValue([]);
     mockPrisma.attraction.count.mockResolvedValue(0);
     mockPrisma.$transaction.mockImplementation((ops) => Promise.all(ops));
@@ -50,7 +50,7 @@ describe('listAttractions (Partner Portal)', () => {
     expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         partnerId: 'partner-001',
-        status: 'APPROVED',
+        publicationStatus: 'ACTIVE',
         city: 'TP. HCM',
         title: { contains: 'Suoi', mode: 'insensitive' },
       }),
@@ -97,7 +97,7 @@ describe('createAttraction', () => {
       attraction: { create },
       attractionCategory: { createMany: jest.fn(), deleteMany: jest.fn(), create: jest.fn() },
       attractionImage: { createMany: jest.fn() },
-      category: { upsert: jest.fn().mockResolvedValue({ id: 'cat-001' }) },
+      category: { findFirst: jest.fn().mockResolvedValue({ id: 'cat-001', name: 'Công viên' }) },
     };
     mockPrisma.$transaction.mockImplementation((cb) => cb(tx));
     mockPrisma.attraction.findUnique.mockResolvedValue({
@@ -138,14 +138,14 @@ describe('createAttraction', () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
-  test('✅ Gắn category qua tên (upsert + nối)', async () => {
+  test('✅ Gắn category active có sẵn qua tên', async () => {
     const { tx } = setupCreate();
     const req = {
       partner: PARTNER,
       body: { name: 'Suối Tiên', address: '120 Xa lộ', province: 'TP. HCM', category: 'Công viên' },
     };
     await createAttraction(req, createRes(), jest.fn());
-    expect(tx.category.upsert).toHaveBeenCalled();
+    expect(tx.category.findFirst).toHaveBeenCalled();
     expect(tx.attractionCategory.create).toHaveBeenCalled();
   });
 });
@@ -159,12 +159,20 @@ describe('updateAttraction', () => {
     expect(res.status).toHaveBeenCalledWith(404);
   });
 
-  test('❌ Chặn tự kích hoạt (active) khi chưa được admin duyệt', async () => {
+  test('✅ Bỏ qua status client, không cho client tự đổi moderation state', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', partnerId: 'partner-001', status: 'DRAFT' });
+    const tx = {
+      attraction: { update: jest.fn() },
+      attractionCategory: { deleteMany: jest.fn(), create: jest.fn() },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
     const req = { partner: PARTNER, params: { id: 'attr-001' }, body: { status: 'active' } };
     const res = createRes();
     await updateAttraction(req, res, jest.fn());
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(tx.attraction.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'DRAFT' }),
+    }));
+    expect(res.json).toHaveBeenCalled();
   });
 
   test('✅ Cập nhật thành công khi hợp lệ', async () => {
@@ -180,18 +188,77 @@ describe('updateAttraction', () => {
     expect(tx.attraction.update).toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ attraction: expect.any(Object) }));
   });
+
+  test('✅ Sửa địa điểm đã public chỉ tạo draft, không ghi đè dữ liệu live', async () => {
+    const live = {
+      id: 'attr-live',
+      partnerId: 'partner-001',
+      title: 'Tên đang bán',
+      description: 'Mô tả đang bán',
+      address: 'Địa chỉ cũ',
+      city: 'TP. HCM',
+      status: 'APPROVED',
+      publicationStatus: 'ACTIVE',
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+      images: [{ id: 'img-1', imageUrl: '/live.jpg', isPrimary: true }],
+      categories: [{ category: { id: 'cat-1', name: 'Công viên' } }],
+    };
+    mockPrisma.attraction.findUnique
+      .mockResolvedValueOnce(live)
+      .mockResolvedValueOnce({
+        ...live,
+        status: 'DRAFT',
+        draftData: { title: 'Tên mới', images: [] },
+      });
+    mockPrisma.attraction.update.mockResolvedValue({});
+
+    const res = createRes();
+    await updateAttraction(
+      { partner: PARTNER, params: { id: 'attr-live' }, body: { name: 'Tên mới' } },
+      res,
+      jest.fn(),
+    );
+
+    expect(mockPrisma.attraction.update).toHaveBeenCalledWith({
+      where: { id: 'attr-live' },
+      data: expect.objectContaining({
+        status: 'DRAFT',
+        draftData: expect.objectContaining({ title: 'Tên mới' }),
+      }),
+    });
+    expect(mockPrisma.attraction.update.mock.calls[0][0].data.title).toBeUndefined();
+  });
+
+  test('❌ Khóa chỉnh sửa khi phiên bản đang PENDING', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      status: 'PENDING',
+      images: [],
+      categories: [],
+    });
+    const next = jest.fn();
+    await updateAttraction(
+      { partner: PARTNER, params: { id: 'attr-001' }, body: { name: 'Không được sửa' } },
+      createRes(),
+      next,
+    );
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 409 }));
+    expect(mockPrisma.attraction.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('deleteAttraction', () => {
   test('✅ Xóa khi sở hữu', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', partnerId: 'partner-001' });
+    mockPrisma.booking.count.mockResolvedValue(0);
     mockPrisma.attraction.update.mockResolvedValue({});
     const req = { partner: PARTNER, params: { id: 'attr-001' } };
     const res = createRes();
     await deleteAttraction(req, res, jest.fn());
     expect(mockPrisma.attraction.update).toHaveBeenCalledWith({
       where: { id: 'attr-001' },
-      data: { archivedAt: expect.any(Date), status: 'SUSPENDED' },
+      data: { archivedAt: expect.any(Date), publicationStatus: 'ARCHIVED' },
     });
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: expect.any(String) }));
   });
@@ -202,6 +269,22 @@ describe('deleteAttraction', () => {
     const res = createRes();
     await deleteAttraction(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  test('❌ Không lưu trữ khi còn booking tương lai', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+    });
+    mockPrisma.booking.count.mockResolvedValue(2);
+    const res = createRes();
+    await deleteAttraction(
+      { partner: PARTNER, params: { id: 'attr-001' } },
+      res,
+      jest.fn(),
+    );
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(mockPrisma.attraction.update).not.toHaveBeenCalled();
   });
 });
 
@@ -331,13 +414,61 @@ describe('submitAttraction (gửi duyệt)', () => {
 
   test('✅ DRAFT -> PENDING', async () => {
     mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });
-    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', partnerId: 'partner-001', status: 'DRAFT' });
-    mockPrisma.attraction.update.mockResolvedValue({ id: 'attr-001', status: 'PENDING' });
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      status: 'DRAFT',
+      revision: 0,
+      title: 'Suối Tiên',
+      description: 'Mô tả đầy đủ về trải nghiệm tham quan dành cho mọi du khách.',
+      address: '120 Xa lộ',
+      city: 'TP. HCM',
+      openTime: '08:00',
+      closeTime: '17:00',
+      latitude: 10.8,
+      longitude: 106.7,
+      images: [{ id: 'img-1', imageUrl: '/a.jpg', isPrimary: true }],
+      categories: [{ category: { id: 'cat-1', name: 'Công viên' } }],
+      ticketProducts: [{ id: 't-1', name: 'Vé', originalPrice: 100, sellingPrice: 80, status: 'ACTIVE', refundPolicy: 'NON_REFUNDABLE', refundFeeRate: 0 }],
+      timeSlots: [{ id: 's-1', startTime: '08:00', endTime: '17:00', maxCapacity: 100, isActive: true }],
+    });
+    const tx = {
+      attraction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'attr-001', status: 'PENDING' }),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
     const req = baseReq('DRAFT');
     const res = createRes();
     await submitAttraction(req, res, jest.fn());
-    expect(mockPrisma.attraction.update).toHaveBeenCalledWith({ where: { id: 'attr-001' }, data: { status: 'PENDING' } });
+    expect(tx.attraction.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: 'attr-001', status: { in: ['DRAFT', 'REJECTED'] } }),
+      data: expect.objectContaining({ status: 'PENDING', revision: { increment: 1 } }),
+    }));
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test('❌ Không gửi duyệt khi hồ sơ thiếu thông tin bắt buộc', async () => {
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      status: 'DRAFT',
+      title: 'Thiếu dữ liệu',
+      description: '',
+      address: 'x',
+      city: 'TP. HCM',
+      images: [],
+      categories: [],
+    });
+    const res = createRes();
+    await submitAttraction(baseReq('DRAFT'), res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'INCOMPLETE_ATTRACTION' }),
+    }));
   });
 
   test('❌ Trả 403 khi không sở hữu địa điểm', async () => {

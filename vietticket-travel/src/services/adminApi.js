@@ -12,9 +12,15 @@ export function reviewPartner(id, action, rejectionReason) {
   })
 }
 
-export function getAttractions(status) {
-  const query = status && status !== 'all' ? `?status=${status.toUpperCase()}` : ''
-  return apiRequest(`/admin/attractions${query}`, { method: 'GET' })
+export function getAttractions(params = {}) {
+  const normalized = typeof params === 'string' ? { status: params } : params
+  const query = new URLSearchParams()
+  if (normalized.status && normalized.status !== 'all') query.set('status', normalized.status.toUpperCase())
+  if (normalized.page) query.set('page', normalized.page)
+  if (normalized.limit) query.set('limit', normalized.limit)
+  if (normalized.search) query.set('search', normalized.search)
+  const qs = query.toString()
+  return apiRequest(`/admin/attractions${qs ? `?${qs}` : ''}`, { method: 'GET' })
 }
 
 export function reviewAttraction(id, action, rejectionReason) {

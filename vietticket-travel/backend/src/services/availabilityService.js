@@ -40,7 +40,8 @@ async function getBookableSchedule(client, ticketProductId, date) {
     product.status !== 'ACTIVE' ||
     product.archivedAt ||
     !attraction ||
-    attraction.status !== 'APPROVED' ||
+    attraction.publicationStatus !== 'ACTIVE' ||
+    attraction.status === 'SUSPENDED' ||
     attraction.archivedAt
   ) {
     const error = new Error('Gói vé hiện không khả dụng.');

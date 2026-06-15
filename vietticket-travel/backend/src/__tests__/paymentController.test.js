@@ -19,12 +19,17 @@ const {
   confirmReservationAndStock,
   createTicketInstances,
 } = require('../controllers/bookingController');
-const { vnpayIpn, createVNPayUrl } = require('../controllers/paymentController');
+const {
+  vnpayIpn,
+  vnpayReturn,
+  createVNPayUrl,
+} = require('../controllers/paymentController');
 
 function makeRes() {
   const res = {};
   res.status = jest.fn(() => res);
   res.json = jest.fn(() => res);
+  res.redirect = jest.fn(() => res);
   return res;
 }
 
@@ -205,6 +210,30 @@ describe('vnpayIpn', () => {
       expect.objectContaining({ data: { status: 'CANCELLED', refundRequired: true } }),
     );
     expect(res.json).toHaveBeenCalledWith({ RspCode: '00', Message: 'Confirm success' });
+  });
+});
+
+describe('vnpayReturn', () => {
+  test('return hợp lệ xử lý thanh toán khi IPN không gọi được vào localhost', async () => {
+    verifyVnpaySignature.mockReturnValue(true);
+    prisma.payment.findUnique.mockResolvedValue(paymentFixture({ requiresManualApproval: true }));
+    const tx = setupTx();
+    const res = makeRes();
+    const next = jest.fn();
+
+    await vnpayReturn({ query: baseQuery() }, res, next);
+
+    expect(tx.payment.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'SUCCESS' }) }),
+    );
+    expect(confirmReservationAndStock).toHaveBeenCalled();
+    expect(tx.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: 'PENDING_PARTNER' } }),
+    );
+    expect(res.redirect).toHaveBeenCalledWith(
+      expect.stringContaining('status=success'),
+    );
+    expect(next).not.toHaveBeenCalled();
   });
 });
 

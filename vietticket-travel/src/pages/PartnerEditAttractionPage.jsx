@@ -30,6 +30,7 @@ function PartnerEditAttractionPage() {
   const [activeTab, setActiveTab] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isPublicationUpdating, setIsPublicationUpdating] = useState(false)
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -41,6 +42,8 @@ function PartnerEditAttractionPage() {
     lat: '',
     lng: '',
     status: 'active',
+    publicationStatus: 'PAUSED',
+    hasPublishedVersion: false,
     dbStatus: 'DRAFT',
     rejectionReason: null,
     category: '',
@@ -69,6 +72,8 @@ function PartnerEditAttractionPage() {
         lat: data.lat ?? '',
         lng: data.lng ?? '',
         status: data.status ?? 'active',
+        publicationStatus: data.publicationStatus ?? 'PAUSED',
+        hasPublishedVersion: Boolean(data.hasPublishedVersion),
         dbStatus: data.dbStatus ?? 'DRAFT',
         rejectionReason: data.rejectionReason ?? null,
         category: data.category ?? '',
@@ -133,11 +138,33 @@ function PartnerEditAttractionPage() {
 
   const handleSetThumbnail = (imgId) => setImages((prev) => prev.map((img) => ({ ...img, isThumbnail: img.id === imgId })))
 
+  const handlePublicationToggle = async () => {
+    const nextStatus = form.publicationStatus === 'ACTIVE' ? 'PAUSED' : 'ACTIVE'
+    setIsPublicationUpdating(true)
+    try {
+      await partnerApi.setAttractionPublication(id, nextStatus)
+      setForm((current) => ({
+        ...current,
+        publicationStatus: nextStatus,
+        status: nextStatus === 'ACTIVE' ? 'active' : 'inactive',
+      }))
+      toast.success(nextStatus === 'ACTIVE' ? 'Đã mở bán địa điểm.' : 'Đã tạm dừng bán địa điểm.')
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsPublicationUpdating(false)
+    }
+  }
+
   const handleSave = async ({ submitForReview = false } = {}) => {
     if (!form.name.trim()) { toast.error('Vui lòng nhập tên điểm tham quan.'); setActiveTab(0); return }
     if (!form.address.trim()) { toast.error('Vui lòng nhập địa chỉ chi tiết.'); setActiveTab(1); return }
     if (!form.province) { toast.error('Vui lòng chọn tỉnh / thành phố.'); setActiveTab(1); return }
     if (!form.category) { toast.error('Vui lòng chọn danh mục điểm tham quan.'); setActiveTab(0); return }
+    if (submitForReview && form.description.trim().length < 50) { toast.error('Mô tả cần ít nhất 50 ký tự trước khi gửi duyệt.'); setActiveTab(0); return }
+    if (submitForReview && (!form.openTime || !form.closeTime || form.openTime >= form.closeTime)) { toast.error('Vui lòng nhập giờ mở cửa và đóng cửa hợp lệ.'); setActiveTab(0); return }
+    if (submitForReview && (!form.lat || !form.lng)) { toast.error('Vui lòng bổ sung tọa độ bản đồ trước khi gửi duyệt.'); setActiveTab(1); return }
+    if (submitForReview && images.length === 0) { toast.error('Vui lòng tải lên ít nhất một ảnh trước khi gửi duyệt.'); setActiveTab(2); return }
     setIsSubmitting(true)
 
     const payload = {
@@ -150,7 +177,6 @@ function PartnerEditAttractionPage() {
       address: form.address,
       lat: form.lat,
       lng: form.lng,
-      status: form.status,
       category: form.category,
     }
 
@@ -193,6 +219,7 @@ function PartnerEditAttractionPage() {
 
   const districts = DISTRICTS_MAP[form.province] || []
   const canSubmitForReview = form.dbStatus === 'DRAFT' || form.dbStatus === 'REJECTED'
+  const isReviewLocked = form.dbStatus === 'PENDING' || form.dbStatus === 'SUSPENDED'
 
   if (isLoading) return (
     <PartnerLayout pageTitle="Edit Attraction">
@@ -212,14 +239,15 @@ function PartnerEditAttractionPage() {
         </div>
         <div className="flex items-center gap-2 flex-shrink-0 self-stretch sm:self-auto justify-end">
           <button
-            onClick={() => updateForm('status', form.status === 'active' ? 'inactive' : 'active')}
+            onClick={handlePublicationToggle}
+            disabled={isPublicationUpdating || !form.hasPublishedVersion || form.dbStatus === 'SUSPENDED'}
             className={`px-4 py-2.5 rounded-lg text-xs font-semibold border transition-all flex items-center ${form.status === 'active' ? 'bg-[#E6F4EA] text-[#137333] border-[#CEEAD6]' : 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'}`}
           >
             <span className="material-symbols-outlined text-[16px] align-middle mr-1">{form.status === 'active' ? 'toggle_on' : 'toggle_off'}</span>
             {form.status === 'active' ? 'Đang hoạt động' : 'Tạm dừng'}
           </button>
           <button onClick={() => navigate('/partner/attractions')} className="px-5 py-2.5 rounded-lg border border-[#bec8ca] text-[#191c1d] text-sm font-semibold hover:bg-[#f2f4f5] transition-colors">Hủy</button>
-          <button onClick={() => handleSave({ submitForReview: false })} disabled={isSubmitting} className="px-5 py-2.5 rounded-lg border border-[#00474d] text-[#00474d] text-sm font-semibold hover:bg-[#e0f4f5] transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2">
+          <button onClick={() => handleSave({ submitForReview: false })} disabled={isSubmitting || isReviewLocked} className="px-5 py-2.5 rounded-lg border border-[#00474d] text-[#00474d] text-sm font-semibold hover:bg-[#e0f4f5] transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2">
             Lưu thay đổi
           </button>
           {canSubmitForReview && (
@@ -247,6 +275,18 @@ function PartnerEditAttractionPage() {
         </div>
       )}
 
+      {form.dbStatus === 'PENDING' && (
+        <div className="bg-[#e0f4f5] text-[#00474d] border border-[#9cd4d9] rounded-xl p-4 flex gap-3 items-start mb-6 animate-fadeIn">
+          <span className="material-symbols-outlined text-[22px] flex-shrink-0 mt-0.5">hourglass_top</span>
+          <div>
+            <p className="font-bold text-sm">Thông tin đang được Admin xem xét</p>
+            <p className="text-xs mt-1 leading-relaxed">
+              Nội dung đã gửi được khóa để tránh thay đổi trong lúc duyệt. Bạn vẫn có thể tạm dừng phiên bản đang xuất bản nếu cần xử lý vận hành khẩn cấp.
+            </p>
+          </div>
+        </div>
+      )}
+
       {form.dbStatus === 'SUSPENDED' && (
         <div className="bg-[#ffdad6] text-[#ba1a1a] border border-[#ffb4ab] rounded-xl p-4 flex gap-3 items-start mb-6 animate-fadeIn">
           <span className="material-symbols-outlined text-[22px] flex-shrink-0 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>report</span>
@@ -269,7 +309,10 @@ function PartnerEditAttractionPage() {
       </div>
 
       {/* Form Card */}
-      <div className="bg-white rounded-xl shadow-sm border border-[#e1e3e4] p-6 md:p-8 space-y-10">
+      <fieldset
+        disabled={isReviewLocked}
+        className={`bg-white rounded-xl shadow-sm border border-[#e1e3e4] p-6 md:p-8 space-y-10 ${isReviewLocked ? 'opacity-70' : ''}`}
+      >
 
         {/* Tab 0: General Info */}
         {activeTab === 0 && (
@@ -397,7 +440,7 @@ function PartnerEditAttractionPage() {
             />
           </section>
         )}
-      </div>
+      </fieldset>
       <div className="h-8" />
       <style>{`@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.animate-fadeIn{animation:fadeIn 0.25s ease-out forwards}`}</style>
     </PartnerLayout>

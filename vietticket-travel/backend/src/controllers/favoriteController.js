@@ -41,7 +41,11 @@ async function listFavorites(req, res, next) {
     const favorites = await prisma.favoriteAttraction.findMany({
       where: {
         userId: req.user.id,
-        attraction: { status: 'APPROVED' },
+        attraction: {
+          publicationStatus: 'ACTIVE',
+          status: { not: 'SUSPENDED' },
+          archivedAt: null,
+        },
       },
       include: favoriteAttractionInclude,
       orderBy: { createdAt: 'desc' },
@@ -65,10 +69,20 @@ async function toggleFavorite(req, res, next) {
 
     const attraction = await prisma.attraction.findUnique({
       where: { id: attractionId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        publicationStatus: true,
+        archivedAt: true,
+      },
     });
 
-    if (!attraction || attraction.status !== 'APPROVED') {
+    if (
+      !attraction
+      || attraction.archivedAt
+      || attraction.publicationStatus !== 'ACTIVE'
+      || attraction.status === 'SUSPENDED'
+    ) {
       return res.status(404).json({
         success: false,
         error: {

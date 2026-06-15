@@ -34,12 +34,25 @@ function mapAttraction(attraction) {
     partner: attraction.partner?.businessName || 'Không rõ đối tác',
     partnerId: attraction.partner?.id || '—',
     category: attraction.category?.name || 'Chưa phân loại',
-    date: formatDate(attraction.createdAt),
+    date: formatDate(attraction.submittedAt || attraction.createdAt),
+    submittedAt: attraction.submittedAt,
+    reviewedAt: attraction.reviewedAt,
+    reviewedByName: attraction.reviewedByName,
+    revision: attraction.revision || 0,
+    publicationStatus: attraction.publicationStatus,
     description: attraction.description || 'Chưa có mô tả.',
     price: formatCurrency(attraction.minPrice),
     status: String(attraction.status || 'DRAFT').toLowerCase(),
     rejectReason: attraction.rejectionReason || '',
     image: attraction.primaryImage || FALLBACK_IMAGE,
+    images: attraction.images || [],
+    tickets: attraction.ticketProducts || [],
+    schedule: attraction.schedule || {},
+    openTime: attraction.openTime,
+    closeTime: attraction.closeTime,
+    latitude: attraction.latitude,
+    longitude: attraction.longitude,
+    reviewHistory: attraction.reviewHistory || [],
   };
 }
 
@@ -56,6 +69,8 @@ export default function AttractionApprovalPage() {
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
   const [selectedAttraction, setSelectedAttraction] = useState(null);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -63,7 +78,7 @@ export default function AttractionApprovalPage() {
     async function loadAttractions() {
       setLoading(true);
       try {
-        const result = await adminApi.listAttractions();
+        const result = await adminApi.listAttractions({ limit: 100 });
         if (active) setAttractions((result.data || []).map(mapAttraction));
       } catch (error) {
         if (active) toast.error(error.message);
@@ -96,28 +111,32 @@ export default function AttractionApprovalPage() {
     }
   }
 
-  async function handleReject(id) {
-    const name = attractions.find((item) => item.id === id)?.name;
-    const reason = window.prompt(`Lý do từ chối địa điểm "${name}":`, '');
-    if (reason === null) return;
+  function handleReject(id) {
+    setRejectTarget(attractions.find((item) => item.id === id) || null);
+    setRejectionReason('');
+  }
 
-    const rejectionReason = reason.trim();
-    if (!rejectionReason) {
+  async function submitRejection() {
+    const reason = rejectionReason.trim();
+    if (!reason) {
       toast.error('Vui lòng nhập lý do từ chối.');
       return;
     }
 
-    setActionId(id);
+    const target = rejectTarget;
+    setActionId(target.id);
     try {
-      await adminApi.reviewAttraction(id, 'REJECTED', rejectionReason);
+      await adminApi.reviewAttraction(target.id, 'REJECTED', reason);
       setAttractions((current) =>
         current.map((item) =>
-          item.id === id
-            ? { ...item, status: 'rejected', rejectReason: rejectionReason }
+          item.id === target.id
+            ? { ...item, status: 'rejected', rejectReason: reason }
             : item,
         ),
       );
-      toast.error(`Đã từ chối địa điểm: ${name}`);
+      toast.info(`Đã từ chối địa điểm: ${target.name}`);
+      setRejectTarget(null);
+      setSelectedAttraction(null);
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -442,6 +461,44 @@ export default function AttractionApprovalPage() {
                     {selectedAttraction.date}
                   </p>
                 </div>
+                <div>
+                  <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Giờ hoạt động</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+                    {selectedAttraction.openTime || '—'} - {selectedAttraction.closeTime || '—'}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Tọa độ / phiên bản</p>
+                  <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
+                    {selectedAttraction.latitude ?? '—'}, {selectedAttraction.longitude ?? '—'} · v{selectedAttraction.revision}
+                  </p>
+                </div>
+              </div>
+
+              {selectedAttraction.images.length > 1 && (
+                <div style={{ marginBottom: 24 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 700, color: '#6f797a', margin: '0 0 10px' }}>THƯ VIỆN ẢNH</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                    {selectedAttraction.images.map((image) => (
+                      <img key={image.id} src={image.url} alt="" style={{ width: '100%', height: 80, objectFit: 'cover', borderRadius: 8 }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginBottom: 24 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, color: '#6f797a', margin: '0 0 10px' }}>VÉ VÀ SỨC CHỨA</h4>
+                <p style={{ fontSize: 13, margin: '0 0 8px' }}>
+                  Sức chứa mặc định: <strong>{selectedAttraction.schedule.defaultCapacity ?? '—'}</strong>
+                </p>
+                {selectedAttraction.tickets.length === 0 ? (
+                  <p style={{ fontSize: 13, color: '#ba1a1a', margin: 0 }}>Chưa cấu hình gói vé hoạt động.</p>
+                ) : selectedAttraction.tickets.map((ticket) => (
+                  <div key={ticket.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderTop: '1px solid #eef0f1', fontSize: 13 }}>
+                    <span>{ticket.name} ({ticket.type})</span>
+                    <strong>{formatCurrency(ticket.sellingPrice)}</strong>
+                  </div>
+                ))}
               </div>
 
               {selectedAttraction.status === 'rejected' && selectedAttraction.rejectReason && (
@@ -459,6 +516,17 @@ export default function AttractionApprovalPage() {
                   {selectedAttraction.description}
                 </p>
               </div>
+
+              {selectedAttraction.reviewHistory.length > 0 && (
+                <div style={{ borderTop: '1px solid #e1e3e4', paddingTop: 20, marginTop: 20 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 700, color: '#6f797a', margin: '0 0 10px' }}>LỊCH SỬ KIỂM DUYỆT</h4>
+                  {selectedAttraction.reviewHistory.slice(0, 5).map((entry) => (
+                    <p key={entry.id} style={{ fontSize: 12, margin: '6px 0', color: '#3f484a' }}>
+                      {formatDate(entry.createdAt)} · {entry.action}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Footer Actions */}
@@ -481,10 +549,7 @@ export default function AttractionApprovalPage() {
               {selectedAttraction.status === 'pending' && (
                 <>
                   <button
-                    onClick={() => {
-                      handleReject(selectedAttraction.id);
-                      setSelectedAttraction(null);
-                    }}
+                    onClick={() => handleReject(selectedAttraction.id)}
                     style={{
                       padding: '10px 20px',
                       borderRadius: 8,
@@ -518,6 +583,41 @@ export default function AttractionApprovalPage() {
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {rejectTarget && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 1100, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setRejectTarget(null)}
+        >
+          <div
+            style={{ background: '#fff', width: '100%', maxWidth: 520, borderRadius: 16, padding: 24, boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 8px', fontSize: 20 }}>Từ chối phiên bản địa điểm</h3>
+            <p style={{ margin: '0 0 16px', color: '#5f6b6d', fontSize: 14 }}>
+              Ghi rõ nội dung cần sửa cho "{rejectTarget.name}". Lý do này sẽ được lưu vào lịch sử và gửi email cho partner.
+            </p>
+            <textarea
+              value={rejectionReason}
+              onChange={(event) => setRejectionReason(event.target.value)}
+              rows={5}
+              maxLength={1000}
+              placeholder="Ví dụ: Mô tả chưa đủ rõ, ảnh đại diện không đúng địa điểm..."
+              style={{ width: '100%', resize: 'vertical', border: '1px solid #bec8ca', borderRadius: 10, padding: 12, font: 'inherit', boxSizing: 'border-box' }}
+            />
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="admin-pagination__btn" onClick={() => setRejectTarget(null)}>Hủy</button>
+              <button
+                className="btn-reject"
+                disabled={actionId === rejectTarget.id || !rejectionReason.trim()}
+                onClick={submitRejection}
+              >
+                {actionId === rejectTarget.id ? 'Đang xử lý...' : 'Xác nhận từ chối'}
+              </button>
             </div>
           </div>
         </div>

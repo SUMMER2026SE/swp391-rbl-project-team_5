@@ -6,7 +6,10 @@
 
 // --- Trạng thái điểm tham quan ---
 // FE chỉ dùng 'active' | 'inactive'; DB dùng AttractionStatus đầy đủ.
-function attractionStatusToClient(dbStatus) {
+function attractionStatusToClient(dbStatus, publicationStatus) {
+  if (publicationStatus) {
+    return publicationStatus === 'ACTIVE' ? 'active' : 'inactive';
+  }
   return dbStatus === 'APPROVED' ? 'active' : 'inactive';
 }
 
@@ -69,44 +72,83 @@ function primaryImageUrl(images = []) {
   return primary ? primary.imageUrl : null;
 }
 
+function getWorkingSnapshot(attraction) {
+  return attraction.draftData && typeof attraction.draftData === 'object'
+    ? attraction.draftData
+    : null;
+}
+
+function snapshotImages(snapshot) {
+  return (snapshot?.images || []).map((image) => ({
+    id: image.id,
+    imageUrl: image.url || image.imageUrl,
+    isPrimary: Boolean(image.isPrimary),
+  }));
+}
+
 // ============================================================
 // Bộ chuyển đổi bản ghi DB -> shape mà từng trang FE mong đợi
 // ============================================================
 
 // Dạng dòng trong bảng danh sách (PartnerAttractionsPage)
 function toAttractionListItem(attraction) {
+  const draft = getWorkingSnapshot(attraction);
+  const images = draft ? snapshotImages(draft) : attraction.images;
   return {
     id: attraction.id,
-    name: attraction.title,
-    category: attraction.categories?.[0]?.category?.name || '',
-    city: attraction.city,
-    district: attraction.district || '',
-    hours: formatHours(attraction.openTime, attraction.closeTime),
-    status: attractionStatusToClient(attraction.status),
+    name: draft?.title ?? attraction.title,
+    category: draft?.category?.name || attraction.categories?.[0]?.category?.name || '',
+    city: draft?.city ?? attraction.city,
+    district: draft?.district ?? attraction.district ?? '',
+    hours: formatHours(
+      draft?.openTime ?? attraction.openTime,
+      draft?.closeTime ?? attraction.closeTime,
+    ),
+    status: attractionStatusToClient(attraction.status, attraction.publicationStatus),
     dbStatus: attraction.status,
+    publicationStatus: attraction.publicationStatus || (
+      attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
+    ),
+    hasPublishedVersion: Boolean(attraction.publishedAt),
+    hasUnpublishedChanges: Boolean(draft),
+    submittedAt: attraction.submittedAt || null,
+    reviewedAt: attraction.reviewedAt || null,
     rejectionReason: attraction.rejectionReason || null,
-    image: primaryImageUrl(attraction.images),
+    image: primaryImageUrl(images),
   };
 }
 
 // Dạng chi tiết để load vào form (PartnerEditAttractionPage)
 function toAttractionDetail(attraction) {
+  const draft = getWorkingSnapshot(attraction);
+  const images = draft ? snapshotImages(draft) : attraction.images;
   return {
     id: attraction.id,
-    name: attraction.title,
-    description: attraction.description || '',
-    openTime: attraction.openTime || '',
-    closeTime: attraction.closeTime || '',
-    province: attraction.city,
-    district: attraction.district || '',
-    address: attraction.address,
-    lat: attraction.latitude != null ? String(attraction.latitude) : '',
-    lng: attraction.longitude != null ? String(attraction.longitude) : '',
-    status: attractionStatusToClient(attraction.status),
+    name: draft?.title ?? attraction.title,
+    description: draft?.description ?? attraction.description ?? '',
+    openTime: draft?.openTime ?? attraction.openTime ?? '',
+    closeTime: draft?.closeTime ?? attraction.closeTime ?? '',
+    province: draft?.city ?? attraction.city,
+    district: draft?.district ?? attraction.district ?? '',
+    address: draft?.address ?? attraction.address,
+    lat: (draft?.latitude ?? attraction.latitude) != null
+      ? String(draft?.latitude ?? attraction.latitude)
+      : '',
+    lng: (draft?.longitude ?? attraction.longitude) != null
+      ? String(draft?.longitude ?? attraction.longitude)
+      : '',
+    status: attractionStatusToClient(attraction.status, attraction.publicationStatus),
     dbStatus: attraction.status,
+    publicationStatus: attraction.publicationStatus || (
+      attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
+    ),
+    hasPublishedVersion: Boolean(attraction.publishedAt),
+    hasUnpublishedChanges: Boolean(draft),
+    submittedAt: attraction.submittedAt || null,
+    reviewedAt: attraction.reviewedAt || null,
     rejectionReason: attraction.rejectionReason || null,
-    category: attraction.categories?.[0]?.category?.name || '',
-    images: (attraction.images || []).map((img) => ({
+    category: draft?.category?.name || attraction.categories?.[0]?.category?.name || '',
+    images: (images || []).map((img) => ({
       id: img.id,
       url: img.imageUrl,
       isPrimary: img.isPrimary,

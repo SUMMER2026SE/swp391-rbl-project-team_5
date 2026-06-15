@@ -8,6 +8,7 @@ afterEach(() => jest.clearAllMocks());
 const attraction = {
   id: 'attr-001',
   status: 'APPROVED',
+  publicationStatus: 'ACTIVE',
   archivedAt: null,
   openDays: '1,1,1,1,1,1,1',
   defaultCapacity: 100,
