@@ -91,6 +91,8 @@ async function createAttraction(partner, a) {
       openDays: a.openDays || '1,1,1,1,1,1,1',
       defaultCapacity: a.defaultCapacity || 100,
       status: 'APPROVED', // bắt buộc để hiện ở trang tìm kiếm công khai
+      publicationStatus: 'ACTIVE',
+      publishedAt: new Date(),
       categories: a.category
         ? {
             create: [

@@ -40,7 +40,11 @@ describe('listFavorites', () => {
       expect.objectContaining({
         where: {
           userId: 'user-001',
-          attraction: { status: 'APPROVED' },
+          attraction: {
+            publicationStatus: 'ACTIVE',
+            status: { not: 'SUSPENDED' },
+            archivedAt: null,
+          },
         },
       }),
     );
@@ -71,6 +75,8 @@ describe('toggleFavorite', () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({
       id: 'attr-001',
       status: 'APPROVED',
+      publicationStatus: 'ACTIVE',
+      archivedAt: null,
     });
     mockPrisma.favoriteAttraction.findUnique.mockResolvedValue(null);
     mockPrisma.favoriteAttraction.create.mockResolvedValue({
@@ -98,6 +104,8 @@ describe('toggleFavorite', () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({
       id: 'attr-001',
       status: 'APPROVED',
+      publicationStatus: 'ACTIVE',
+      archivedAt: null,
     });
     mockPrisma.favoriteAttraction.findUnique.mockResolvedValue({
       userId: 'user-001',
@@ -129,6 +137,7 @@ describe('toggleFavorite', () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({
       id: 'attr-001',
       status: 'PENDING',
+      publicationStatus: 'PAUSED',
     });
 
     const req = { user: { id: 'user-001' }, params: { id: 'attr-001' } };

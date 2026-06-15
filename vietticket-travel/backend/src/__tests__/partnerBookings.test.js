@@ -653,7 +653,7 @@ describe('rejectBooking', () => {
 describe('getDashboard', () => {
   test('✅ Trả về stats đầy đủ khi có dữ liệu thật', async () => {
     mockPrisma.attraction.findMany.mockResolvedValue([
-      { id: ATTRACTION_ID, status: 'APPROVED' },
+      { id: ATTRACTION_ID, status: 'APPROVED', publicationStatus: 'ACTIVE' },
     ]);
     mockPrisma.ticketProduct.count.mockResolvedValue(3);
     mockPrisma.ticketProduct.findMany.mockResolvedValue([{ id: TICKET_ID }]);

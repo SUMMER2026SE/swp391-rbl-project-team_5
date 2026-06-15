@@ -215,6 +215,50 @@ async function sendAttractionViolationEmail({ to, partnerName, attractionTitle, 
   });
 }
 
+async function sendAttractionReviewEmail({
+  to,
+  partnerName,
+  attractionTitle,
+  action,
+  rejectionReason,
+}) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/partner/attractions`;
+  const safePartner = escapeHtml(partnerName || 'Đối tác');
+  const safeAttraction = escapeHtml(attractionTitle || 'địa điểm');
+
+  if (action === 'APPROVED') {
+    return sendMail({
+      to,
+      subject: `Địa điểm đã được phê duyệt - ${attractionTitle}`,
+      text: `Địa điểm ${attractionTitle} đã được phê duyệt và công khai. Truy cập: ${link}`,
+      html: createEmailTemplate({
+        title: 'Địa điểm đã được phê duyệt',
+        preview: `Xin chào ${safePartner}, phiên bản mới của "${safeAttraction}" đã được phê duyệt và công khai.`,
+        buttonText: 'Quản lý địa điểm',
+        link,
+      }),
+    });
+  }
+
+  if (action === 'REJECTED') {
+    const safeReason = escapeHtml(rejectionReason || 'Không có lý do cụ thể.');
+    return sendMail({
+      to,
+      subject: `Địa điểm cần chỉnh sửa - ${attractionTitle}`,
+      text: `Phiên bản ${attractionTitle} chưa được phê duyệt. Lý do: ${rejectionReason}`,
+      html: createEmailTemplate({
+        title: 'Địa điểm cần được chỉnh sửa',
+        preview: `Xin chào ${safePartner}, phiên bản mới của "${safeAttraction}" chưa được phê duyệt.<br /><br /><strong>Lý do:</strong> ${safeReason}`,
+        buttonText: 'Chỉnh sửa địa điểm',
+        link,
+      }),
+    });
+  }
+
+  return { sent: false, reason: 'INVALID_ACTION' };
+}
+
 async function sendTicketConfirmationEmail({ booking, pdfBuffer }) {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const ticketLink = `${frontendUrl}/tickets/${booking.id}`;
@@ -429,6 +473,7 @@ module.exports = {
   sendPasswordResetEmail,
   sendVerificationEmail,
   sendPartnerReviewEmail,
+  sendAttractionReviewEmail,
   sendAttractionViolationEmail,
   sendTicketConfirmationEmail,
   sendRefundRequestReceivedEmail,

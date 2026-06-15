@@ -27,6 +27,7 @@ function PartnerAddAttractionPage() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [draftId, setDraftId] = useState(null)
 
   // Form state
   const [form, setForm] = useState({
@@ -150,6 +151,26 @@ function PartnerAddAttractionPage() {
       setActiveTab(0)
       return
     }
+    if (submitForReview && form.description.trim().length < 50) {
+      toast.error('Mô tả cần ít nhất 50 ký tự trước khi gửi duyệt.')
+      setActiveTab(0)
+      return
+    }
+    if (submitForReview && (!form.openTime || !form.closeTime || form.openTime >= form.closeTime)) {
+      toast.error('Vui lòng nhập giờ mở cửa và đóng cửa hợp lệ.')
+      setActiveTab(0)
+      return
+    }
+    if (submitForReview && (!form.lat || !form.lng)) {
+      toast.error('Vui lòng bổ sung tọa độ bản đồ trước khi gửi duyệt.')
+      setActiveTab(1)
+      return
+    }
+    if (submitForReview && images.length === 0) {
+      toast.error('Vui lòng tải lên ít nhất một ảnh trước khi gửi duyệt.')
+      setActiveTab(2)
+      return
+    }
     setIsSubmitting(true)
 
     const payload = {
@@ -166,17 +187,38 @@ function PartnerAddAttractionPage() {
     }
 
     try {
-      const created = await partnerApi.createAttraction(payload)
-      const newId = created?.attraction?.id
+      const saved = draftId
+        ? await partnerApi.updateAttraction(draftId, payload)
+        : await partnerApi.createAttraction(payload)
+      const newId = draftId || saved?.attraction?.id
       if (!newId) {
         throw new Error('Máy chủ không trả về mã điểm tham quan vừa tạo.')
       }
 
+      setDraftId(newId)
+
       const files = images.map((img) => img.file).filter(Boolean)
       if (files.length > 0) {
         const uploadResponse = await partnerApi.uploadAttractionImages(newId, files)
-        const primaryIndex = images.findIndex((image) => image.isThumbnail)
-        const primaryImageId = uploadResponse.images?.[primaryIndex]?.id
+        const uploadedImages = uploadResponse.images || []
+        setImages((current) => current.map((image) => {
+          if (!image.file) return image
+          const uploadedIndex = files.indexOf(image.file)
+          const uploaded = uploadedImages[uploadedIndex]
+          return uploaded
+            ? {
+                ...image,
+                id: uploaded.id,
+                previewUrl: uploaded.url,
+                file: null,
+                isThumbnail: uploaded.isPrimary || image.isThumbnail,
+              }
+            : image
+        }))
+        const primaryImage = images.find((image) => image.isThumbnail)
+        const primaryImageId = primaryImage?.file
+          ? uploadedImages[files.indexOf(primaryImage.file)]?.id
+          : primaryImage?.id
         if (primaryImageId) {
           await partnerApi.setAttractionPrimaryImage(newId, primaryImageId)
         }

@@ -6,7 +6,7 @@ import * as partnerApi from '../services/partnerApi.js'
 
 const ITEMS_PER_PAGE = 10
 
-function StatusBadge({ status, rejectionReason }) {
+function StatusBadge({ status, publicationStatus, rejectionReason }) {
   let label = 'Tạm dừng'
   let cls = 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'
 
@@ -25,6 +25,14 @@ function StatusBadge({ status, rejectionReason }) {
   } else if (status === 'SUSPENDED') {
     label = 'Bị đình chỉ'
     cls = 'bg-[#ffdad6] text-[#ba1a1a] border-[#ffb4ab] font-bold'
+  }
+
+  if ((status === 'APPROVED' || status === 'active') && publicationStatus === 'PAUSED') {
+    label = 'Tạm dừng bán'
+    cls = 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'
+  }
+  if (status === 'DRAFT' && publicationStatus === 'ACTIVE') {
+    label = 'Có bản nháp mới'
   }
 
   return (
@@ -55,6 +63,12 @@ function PartnerAttractionsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [cityFilter, setCityFilter] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
+  const [pagination, setPagination] = useState({
+    total: 0,
+    totalPages: 1,
+  })
+  const [isLoading, setIsLoading] = useState(true)
+  const [refreshToken, setRefreshToken] = useState(0)
   const [viewMode, setViewMode] = useState('table') // 'table' | 'grid'
   const [deleteTarget, setDeleteTarget] = useState(null) // { id, name }
 
@@ -62,31 +76,47 @@ function PartnerAttractionsPage() {
     document.title = 'Quản lý Điểm tham quan | VietTicket B2B'
   }, [])
 
-  const fetchAttractions = async () => {
-    try {
-      const data = await partnerApi.listAttractions()
-      setAttractions(data.attractions)
-    } catch (err) {
-      setAttractions([])
-      toast.error(err.message)
-    }
-  }
-
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchAttractions()
-  }, [])
+    let isCancelled = false
+    const timeoutId = window.setTimeout(async () => {
+      setIsLoading(true)
+      try {
+        const data = await partnerApi.listAttractions({
+          page: currentPage,
+          limit: ITEMS_PER_PAGE,
+          search: search.trim(),
+          status: statusFilter,
+          city: cityFilter,
+        })
+        if (isCancelled) return
 
-  // Filter logic
-  const filtered = attractions.filter((a) => {
-    const matchSearch = a.name.toLowerCase().includes(search.toLowerCase())
-    const matchStatus = !statusFilter || a.dbStatus === statusFilter
-    const matchCity = !cityFilter || a.city.toLowerCase().includes(cityFilter.toLowerCase())
-    return matchSearch && matchStatus && matchCity
-  })
+        const nextPagination = data.pagination || {}
+        const totalPages = Math.max(1, Number(nextPagination.totalPages) || 1)
+        if (currentPage > totalPages) {
+          setCurrentPage(totalPages)
+          return
+        }
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE))
-  const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+        setAttractions(data.attractions || [])
+        setPagination({
+          total: Number(nextPagination.total) || 0,
+          totalPages,
+        })
+      } catch (err) {
+        if (isCancelled) return
+        setAttractions([])
+        setPagination({ total: 0, totalPages: 1 })
+        toast.error(err.message)
+      } finally {
+        if (!isCancelled) setIsLoading(false)
+      }
+    }, search.trim() ? 300 : 0)
+
+    return () => {
+      isCancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [currentPage, search, statusFilter, cityFilter, refreshToken])
 
   const handleDelete = (id, name) => {
     setDeleteTarget({ id, name })
@@ -96,8 +126,12 @@ function PartnerAttractionsPage() {
     const target = deleteTarget
     try {
       await partnerApi.deleteAttraction(target.id)
-      setAttractions((prev) => prev.filter((a) => a.id !== target.id))
-      toast.success(`Đã xóa "${target.name}".`)
+      toast.success(`Đã lưu trữ "${target.name}".`)
+      if (attractions.length === 1 && currentPage > 1) {
+        setCurrentPage((page) => page - 1)
+      } else {
+        setRefreshToken((token) => token + 1)
+      }
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -117,7 +151,7 @@ function PartnerAttractionsPage() {
     try {
       await partnerApi.submitAttraction(id)
       toast.success('Đã gửi điểm tham quan để admin xét duyệt!')
-      fetchAttractions()
+      setRefreshToken((token) => token + 1)
     } catch (err) {
       toast.error(err.message || 'Không thể gửi duyệt.')
     }
@@ -212,27 +246,29 @@ function PartnerAttractionsPage() {
       <div className="mt-6 flex flex-col flex-1">
         {viewMode === 'table' ? (
           <TableView
-            rows={paginated}
+            rows={attractions}
             onView={handleView}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onSubmit={handleSubmitForReview}
             currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={filtered.length}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
             onPageChange={setCurrentPage}
+            isLoading={isLoading}
           />
         ) : (
           <GridView
-            rows={paginated}
+            rows={attractions}
             onView={handleView}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onSubmit={handleSubmitForReview}
             currentPage={currentPage}
-            totalPages={totalPages}
-            totalItems={filtered.length}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.total}
             onPageChange={setCurrentPage}
+            isLoading={isLoading}
           />
         )}
       </div>
@@ -245,14 +281,14 @@ function PartnerAttractionsPage() {
               <div className="w-10 h-10 rounded-full bg-[#ffdad6] flex items-center justify-center">
                 <span className="material-symbols-outlined text-[#ba1a1a]">delete</span>
               </div>
-              <h3 className="text-base font-bold text-[#191c1d]">Xóa điểm tham quan</h3>
+              <h3 className="text-base font-bold text-[#191c1d]">Lưu trữ điểm tham quan</h3>
             </div>
             <p className="text-sm text-[#3f484a] mb-6">
-              Bạn có chắc muốn xóa <strong>"{deleteTarget.name}"</strong>? Toàn bộ gói vé và lịch liên quan sẽ bị xóa theo. Thao tác này không thể hoàn tác.
+              Bạn có chắc muốn lưu trữ <strong>"{deleteTarget.name}"</strong>? Lịch sử vé, booking và thanh toán vẫn được giữ nguyên. Hệ thống sẽ từ chối nếu còn booking cho ngày tham quan sắp tới.
             </p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-lg border border-[#bec8ca] text-[#191c1d] text-sm font-semibold hover:bg-[#f2f4f5] transition-colors">Hủy</button>
-              <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-white text-sm font-semibold hover:bg-[#93000a] transition-colors">Xóa</button>
+              <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-white text-sm font-semibold hover:bg-[#93000a] transition-colors">Lưu trữ</button>
             </div>
           </div>
         </div>
@@ -262,7 +298,7 @@ function PartnerAttractionsPage() {
 }
 
 /* ── Table View ── */
-function TableView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, totalPages, totalItems, onPageChange }) {
+function TableView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, totalPages, totalItems, onPageChange, isLoading }) {
   return (
     <div className="bg-white rounded-xl shadow-[0px_4px_20px_rgba(0,40,50,0.05)] border border-[#e1e3e4] overflow-hidden flex flex-col flex-1">
       <div className="overflow-x-auto flex-1">
@@ -277,7 +313,13 @@ function TableView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, tota
             </tr>
           </thead>
           <tbody className="divide-y divide-[#e1e3e4] bg-white">
-            {rows.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={5} className="px-6 py-16 text-center text-[#6f797a] text-sm">
+                  Đang tải danh sách...
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-6 py-16 text-center text-[#6f797a] text-sm">
                   <span className="material-symbols-outlined text-4xl block mb-2 text-[#bec8ca]">search_off</span>
@@ -316,7 +358,7 @@ function TableView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, tota
                   <td className="px-6 py-4 text-base text-[#191c1d]">{a.hours}</td>
                   {/* Status */}
                   <td className="px-6 py-4">
-                    <StatusBadge status={a.dbStatus} rejectionReason={a.rejectionReason} />
+                    <StatusBadge status={a.dbStatus} publicationStatus={a.publicationStatus} rejectionReason={a.rejectionReason} />
                   </td>
                   {/* Actions */}
                   <td className="px-6 py-4 text-right">
@@ -341,11 +383,15 @@ function TableView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, tota
 }
 
 /* ── Grid View ── */
-function GridView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, totalPages, totalItems, onPageChange }) {
+function GridView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, totalPages, totalItems, onPageChange, isLoading }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {rows.length === 0 ? (
+        {isLoading ? (
+          <div className="col-span-full py-16 text-center text-[#6f797a] text-sm bg-white rounded-xl border border-[#e1e3e4]">
+            Đang tải danh sách...
+          </div>
+        ) : rows.length === 0 ? (
           <div className="col-span-full py-16 text-center text-[#6f797a] text-sm bg-white rounded-xl border border-[#e1e3e4]">
             <span className="material-symbols-outlined text-4xl block mb-2 text-[#bec8ca]">search_off</span>
             Không tìm thấy điểm tham quan nào.
@@ -367,7 +413,7 @@ function GridView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, total
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <p className="text-sm font-bold text-[#191c1d] leading-tight">{a.name}</p>
-                  <StatusBadge status={a.dbStatus} rejectionReason={a.rejectionReason} />
+                  <StatusBadge status={a.dbStatus} publicationStatus={a.publicationStatus} rejectionReason={a.rejectionReason} />
                 </div>
                 <p className="text-xs text-[#3f484a] mb-1">{a.category}</p>
                 <p className="text-xs text-[#6f797a] flex items-center gap-1">
@@ -412,8 +458,10 @@ function ActionBtn({ icon, title, onClick, hoverColor = 'hover:text-[#191c1d]', 
 }
 
 function PaginationBar({ currentPage, totalPages, totalItems, onPageChange }) {
+  const firstPage = Math.max(1, Math.min(currentPage - 2, totalPages - 4))
+  const lastPage = Math.min(totalPages, firstPage + 4)
   const pages = []
-  for (let i = 1; i <= Math.min(totalPages, 5); i++) pages.push(i)
+  for (let i = firstPage; i <= lastPage; i++) pages.push(i)
 
   return (
     <div className="px-6 py-4 border-t border-[#e1e3e4] flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -441,7 +489,6 @@ function PaginationBar({ currentPage, totalPages, totalItems, onPageChange }) {
             {p}
           </button>
         ))}
-        {totalPages > 5 && <span className="text-[#3f484a] px-1">...</span>}
         <button
           disabled={currentPage === totalPages}
           onClick={() => onPageChange(currentPage + 1)}

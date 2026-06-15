@@ -56,12 +56,24 @@ function validateAttraction(body, { partial = false } = {}) {
     return 'Vui lòng chọn tỉnh/thành phố.';
   }
 
+  if (has('name') && String(body.name || '').trim().length > 200) {
+    return 'Tên địa điểm không được vượt quá 200 ký tự.';
+  }
+
+  if (has('description') && String(body.description || '').trim().length > 5000) {
+    return 'Mô tả không được vượt quá 5000 ký tự.';
+  }
+
   if (has('openTime') && body.openTime && !isValidTime(body.openTime)) {
     return 'Giờ mở cửa không hợp lệ (định dạng HH:MM).';
   }
 
   if (has('closeTime') && body.closeTime && !isValidTime(body.closeTime)) {
     return 'Giờ đóng cửa không hợp lệ (định dạng HH:MM).';
+  }
+
+  if (body.openTime && body.closeTime && body.openTime >= body.closeTime) {
+    return 'Giờ đóng cửa phải sau giờ mở cửa.';
   }
 
   if (has('lat') && body.lat !== '' && body.lat != null) {

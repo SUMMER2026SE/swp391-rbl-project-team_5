@@ -1,6 +1,17 @@
 const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
-const { sendAccountStatusEmail, sendPartnerReviewEmail, sendAttractionViolationEmail } = require('../utils/mailer');
+const {
+  sendAccountStatusEmail,
+  sendPartnerReviewEmail,
+  sendAttractionReviewEmail,
+  sendAttractionViolationEmail,
+} = require('../utils/mailer');
+const { writeAuditLog } = require('../utils/auditLog');
+const {
+  applyApprovedSnapshot,
+  clearJsonField,
+  validateSubmissionSnapshot,
+} = require('../services/attractionWorkflowService');
 const {
   buildTimeline,
   getPeriodStart,
@@ -226,11 +237,71 @@ async function getPartners(req, res, next) {
   }
 }
 
+function mapModerationAttraction(attraction, auditLogs, reviewerNames) {
+  const snapshot = attraction.status === 'PENDING' && attraction.submittedData
+    ? attraction.submittedData
+    : null;
+  const images = snapshot?.images || (attraction.images || []).map((image) => ({
+    id: image.id,
+    url: image.imageUrl,
+    isPrimary: image.isPrimary,
+  }));
+  const category = snapshot?.category || attraction.categories?.[0]?.category || null;
+
+  return {
+    id: attraction.id,
+    title: snapshot?.title ?? attraction.title,
+    description: snapshot?.description ?? attraction.description,
+    address: snapshot?.address ?? attraction.address,
+    city: snapshot?.city ?? attraction.city,
+    district: snapshot?.district ?? attraction.district,
+    openTime: snapshot?.openTime ?? attraction.openTime,
+    closeTime: snapshot?.closeTime ?? attraction.closeTime,
+    latitude: snapshot?.latitude ?? attraction.latitude,
+    longitude: snapshot?.longitude ?? attraction.longitude,
+    status: attraction.status,
+    publicationStatus: attraction.publicationStatus,
+    rejectionReason: attraction.rejectionReason,
+    revision: attraction.revision,
+    submittedAt: attraction.submittedAt,
+    reviewedAt: attraction.reviewedAt,
+    reviewedById: attraction.reviewedById,
+    reviewedByName: reviewerNames.get(attraction.reviewedById) || null,
+    publishedAt: attraction.publishedAt,
+    averageRating: attraction.averageRating,
+    totalReviews: attraction.totalReviews,
+    createdAt: attraction.createdAt,
+    partner: attraction.partner,
+    images,
+    primaryImage: images.find((image) => image.isPrimary)?.url || images[0]?.url || null,
+    category,
+    minPrice: attraction.ticketProducts?.[0]
+      ? Number(attraction.ticketProducts[0].sellingPrice)
+      : null,
+    ticketProducts: (attraction.ticketProducts || []).map((ticket) => ({
+      ...ticket,
+      originalPrice: Number(ticket.originalPrice),
+      sellingPrice: Number(ticket.sellingPrice),
+      refundFeeRate: Number(ticket.refundFeeRate),
+    })),
+    schedule: {
+      openDays: attraction.openDays,
+      defaultCapacity: attraction.defaultCapacity,
+      timeSlots: attraction.timeSlots || [],
+      specialDates: attraction.specialDates || [],
+    },
+    reviewHistory: auditLogs,
+  };
+}
+
 async function getAttractions(req, res, next) {
   try {
+    const page = parsePositiveInteger(req.query.page, DEFAULT_PAGE);
+    const limit = Math.min(parsePositiveInteger(req.query.limit, DEFAULT_LIMIT), MAX_LIMIT);
+    const skip = (page - 1) * limit;
     const status = String(req.query.status || '').trim().toUpperCase();
     const search = String(req.query.search || '').trim();
-    const where = {};
+    const where = { archivedAt: null };
 
     if (status && !ALLOWED_ATTRACTION_STATUSES.includes(status)) {
       return res.status(400).json({
@@ -238,80 +309,88 @@ async function getAttractions(req, res, next) {
         error: { code: 'VALIDATION_ERROR', message: 'Attraction status is invalid' },
       });
     }
-
     if (status) where.status = status;
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
         { city: { contains: search, mode: 'insensitive' } },
-        {
-          partner: {
-            businessName: { contains: search, mode: 'insensitive' },
-          },
-        },
+        { partner: { businessName: { contains: search, mode: 'insensitive' } } },
       ];
     }
 
-    const attractions = await prisma.attraction.findMany({
-      where,
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        address: true,
-        city: true,
-        status: true,
-        rejectionReason: true,
-        averageRating: true,
-        totalReviews: true,
-        createdAt: true,
-        partner: {
-          select: {
-            id: true,
-            businessName: true,
-          },
-        },
-        images: {
-          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-          take: 1,
-          select: { imageUrl: true },
-        },
-        categories: {
-          take: 1,
-          select: {
-            category: { select: { id: true, name: true } },
-          },
-        },
-        ticketProducts: {
-          where: { status: 'ACTIVE' },
-          orderBy: { sellingPrice: 'asc' },
-          take: 1,
-          select: { sellingPrice: true },
+    const include = {
+      partner: {
+        select: {
+          id: true,
+          businessName: true,
+          user: { select: { email: true, fullName: true } },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      images: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+      categories: { include: { category: true } },
+      ticketProducts: {
+        where: { status: 'ACTIVE', archivedAt: null },
+        orderBy: { sellingPrice: 'asc' },
+      },
+      timeSlots: {
+        where: { ticketProductId: null, isActive: true },
+        orderBy: { startTime: 'asc' },
+      },
+      specialDates: { orderBy: { date: 'asc' } },
+    };
+
+    const [attractions, total] = await prisma.$transaction([
+      prisma.attraction.findMany({
+        where,
+        include,
+        orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.attraction.count({ where }),
+    ]);
+
+    const ids = attractions.map((attraction) => attraction.id);
+    const reviewerIds = attractions
+      .map((attraction) => attraction.reviewedById)
+      .filter(Boolean);
+    const [logs = [], reviewers = []] = await Promise.all([
+      ids.length
+        ? prisma.auditLog.findMany({
+            where: { entityType: 'ATTRACTION', entityId: { in: ids } },
+            orderBy: { createdAt: 'desc' },
+          })
+        : [],
+      reviewerIds.length
+        ? prisma.user.findMany({
+            where: { id: { in: [...new Set(reviewerIds)] } },
+            select: { id: true, fullName: true },
+          })
+        : [],
+    ]);
+    const logsByAttraction = new Map();
+    for (const log of logs) {
+      const current = logsByAttraction.get(log.entityId) || [];
+      current.push(log);
+      logsByAttraction.set(log.entityId, current);
+    }
+    const reviewerNames = new Map(reviewers.map((user) => [user.id, user.fullName]));
+    const data = attractions.map((attraction) => mapModerationAttraction(
+      attraction,
+      logsByAttraction.get(attraction.id) || [],
+      reviewerNames,
+    ));
+
+    return res.status(200).json({
+      success: true,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
     });
-
-    const data = attractions.map((attraction) => ({
-      id: attraction.id,
-      title: attraction.title,
-      description: attraction.description,
-      address: attraction.address,
-      city: attraction.city,
-      status: attraction.status,
-      rejectionReason: attraction.rejectionReason,
-      averageRating: attraction.averageRating,
-      totalReviews: attraction.totalReviews,
-      createdAt: attraction.createdAt,
-      partner: attraction.partner,
-      primaryImage: attraction.images[0]?.imageUrl || null,
-      category: attraction.categories[0]?.category || null,
-      minPrice: attraction.ticketProducts[0]
-        ? Number(attraction.ticketProducts[0].sellingPrice)
-        : null,
-    }));
-
-    return res.status(200).json({ success: true, data });
   } catch (error) {
     return next(error);
   }
@@ -362,16 +441,150 @@ async function reviewAttraction(req, res, next) {
   try {
     const id = req.params.id;
     const { action, rejectionReason } = req.body || {};
-    if (!['APPROVED', 'REJECTED'].includes(action)) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'action must be APPROVED or REJECTED' } });
-    if (action === 'REJECTED' && (!rejectionReason || String(rejectionReason).trim() === '')) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'rejectionReason is required when rejecting' } });
+    if (!['APPROVED', 'REJECTED'].includes(action)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'action must be APPROVED or REJECTED' },
+      });
+    }
+    const reason = String(rejectionReason || '').trim();
+    if (action === 'REJECTED' && !reason) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'rejectionReason is required when rejecting',
+        },
+      });
+    }
 
-    const attraction = await prisma.attraction.findUnique({ where: { id } });
-    if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
+    const attraction = await prisma.attraction.findUnique({
+      where: { id },
+      include: { partner: { include: { user: true } } },
+    });
+    if (!attraction || attraction.archivedAt) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Attraction not found' },
+      });
+    }
+    if (attraction.status !== 'PENDING' || !attraction.submittedData) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATE',
+          message: 'Chỉ có thể duyệt một phiên bản đang ở trạng thái PENDING.',
+        },
+      });
+    }
 
-    const status = action === 'APPROVED' ? 'APPROVED' : 'REJECTED';
-    await prisma.attraction.update({ where: { id }, data: { status, rejectionReason: action === 'REJECTED' ? rejectionReason : null } });
+    const snapshot = attraction.submittedData;
+    const missing = validateSubmissionSnapshot(snapshot);
+    if (action === 'APPROVED' && missing.length > 0) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'INCOMPLETE_SUBMISSION',
+          message: `Phiên bản gửi duyệt không còn hợp lệ: ${missing.join(', ')}.`,
+        },
+      });
+    }
+    if (action === 'APPROVED' && snapshot.category?.id) {
+      const category = await prisma.category.findUnique({
+        where: { id: snapshot.category.id },
+      });
+      if (!category?.isActive) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'CATEGORY_UNAVAILABLE',
+            message: 'Danh mục của địa điểm đã ngừng hoạt động. Vui lòng từ chối để partner chọn lại.',
+          },
+        });
+      }
+    }
 
-    return res.status(200).json({ success: true, message: `Trạng thái địa điểm được cập nhật thành ${action}` });
+    const reviewedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      const lock = await tx.attraction.updateMany({
+        where: {
+          id,
+          status: 'PENDING',
+          revision: attraction.revision,
+          archivedAt: null,
+        },
+        data: { reviewedAt, reviewedById: req.user?.id || null },
+      });
+      if (lock.count !== 1) {
+        const error = new Error('Phiên bản này đã được xử lý bởi một admin khác.');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      if (action === 'APPROVED') {
+        await applyApprovedSnapshot(tx, id, snapshot);
+        await tx.attraction.update({
+          where: { id },
+          data: {
+            status: 'APPROVED',
+            publicationStatus: 'ACTIVE',
+            rejectionReason: null,
+            draftData: clearJsonField(),
+            submittedData: clearJsonField(),
+            reviewedAt,
+            reviewedById: req.user?.id || null,
+            publishedAt: reviewedAt,
+          },
+        });
+      } else {
+        await tx.attraction.update({
+          where: { id },
+          data: {
+            status: 'REJECTED',
+            rejectionReason: reason,
+            draftData: snapshot,
+            submittedData: clearJsonField(),
+            reviewedAt,
+            reviewedById: req.user?.id || null,
+          },
+        });
+      }
+
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: action === 'APPROVED'
+          ? 'ATTRACTION_APPROVED'
+          : 'ATTRACTION_REJECTED',
+        entityType: 'ATTRACTION',
+        entityId: id,
+        metadata: {
+          revision: attraction.revision,
+          rejectionReason: action === 'REJECTED' ? reason : null,
+          snapshot,
+        },
+      });
+    });
+
+    const recipient = attraction.partner?.user?.email;
+    if (recipient) {
+      sendAttractionReviewEmail({
+        to: recipient,
+        partnerName: attraction.partner.businessName,
+        attractionTitle: snapshot.title || attraction.title,
+        action,
+        rejectionReason: reason,
+      }).catch((error) => {
+        console.error('[Admin] sendAttractionReviewEmail error:', error);
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: action === 'APPROVED'
+        ? 'Đã phê duyệt và công khai phiên bản địa điểm.'
+        : 'Đã từ chối phiên bản và gửi lý do cho đối tác.',
+    });
   } catch (error) {
     return next(error);
   }
@@ -386,7 +599,23 @@ async function hideAttraction(req, res, next) {
     const attraction = await prisma.attraction.findUnique({ where: { id }, include: { partner: { include: { user: true } } } });
     if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
 
-    await prisma.attraction.update({ where: { id }, data: { status: 'SUSPENDED' } });
+    await prisma.attraction.update({
+      where: { id },
+      data: {
+        status: 'SUSPENDED',
+        publicationStatus: 'PAUSED',
+        rejectionReason: String(reason).trim(),
+        reviewedAt: new Date(),
+        reviewedById: req.user?.id || null,
+      },
+    });
+    await writeAuditLog({
+      req,
+      action: 'ATTRACTION_SUSPENDED',
+      entityType: 'ATTRACTION',
+      entityId: id,
+      metadata: { reason: String(reason).trim() },
+    });
 
     // send email but don't block
     if (attraction.partner && attraction.partner.user && attraction.partner.user.email) {
@@ -568,7 +797,13 @@ async function getDashboard(req, res, next) {
     ] = await Promise.all([
       prisma.user.count(),
       prisma.attraction.count({ where: { archivedAt: null } }),
-      prisma.attraction.count({ where: { archivedAt: null, status: 'APPROVED' } }),
+      prisma.attraction.count({
+        where: {
+          archivedAt: null,
+          publicationStatus: 'ACTIVE',
+          status: { not: 'SUSPENDED' },
+        },
+      }),
       prisma.partnerProfile.count({ where: { status: 'PENDING' } }),
       prisma.partnerProfile.count({ where: { createdAt: { gte: startDate } } }),
       prisma.booking.count({ where: { createdAt: { gte: startDate } } }),

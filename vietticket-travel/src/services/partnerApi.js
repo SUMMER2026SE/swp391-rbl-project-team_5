@@ -82,6 +82,13 @@ export function deleteAttraction(id) {
   return apiRequest(`/partners/attractions/${id}`, { method: 'DELETE' })
 }
 
+export function setAttractionPublication(id, publicationStatus) {
+  return apiRequest(`/partners/attractions/${id}/publication`, {
+    method: 'PATCH',
+    body: { publicationStatus },
+  })
+}
+
 // Upload nhiều ảnh (multipart) — không dùng apiRequest vì cần FormData
 export async function uploadAttractionImages(id, files) {
   const formData = new FormData()

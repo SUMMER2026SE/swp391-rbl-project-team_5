@@ -114,7 +114,6 @@ async function seedAttractions(partner) {
   }
 
   const themePark = await prisma.category.findUnique({ where: { name: 'Theme Park & Resort' } });
-  const nature = await prisma.category.findUnique({ where: { name: 'Nature & Sightseeing' } });
 
   const banaHills = await prisma.attraction.create({
     data: {
@@ -129,7 +128,15 @@ async function seedAttractions(partner) {
       defaultCapacity: 200,
       openDays: '1,1,1,1,1,1,1',
       status: 'APPROVED',
+      publicationStatus: 'ACTIVE',
+      publishedAt: new Date(),
       categories: themePark ? { create: { categoryId: themePark.id } } : undefined,
+      images: {
+        create: [{
+          imageUrl: 'https://picsum.photos/seed/banahills/1024/640',
+          isPrimary: true,
+        }],
+      },
       ticketProducts: {
         create: [
           {
@@ -161,24 +168,7 @@ async function seedAttractions(partner) {
     },
   });
 
-  await prisma.attraction.create({
-    data: {
-      partnerId: partner.id,
-      title: 'Vịnh Hạ Long Cruise',
-      description: 'Du thuyền ngắm vịnh di sản thế giới.',
-      address: 'Cảng Tuần Châu',
-      city: 'Quảng Ninh',
-      district: 'Cảng Tuần Châu',
-      openTime: '07:30',
-      closeTime: '18:00',
-      defaultCapacity: 100,
-      openDays: '1,1,1,1,1,1,1',
-      status: 'APPROVED',
-      categories: nature ? { create: { categoryId: nature.id } } : undefined,
-    },
-  });
-
-  console.log(`✓ Đã tạo 2 điểm tham quan mẫu (gồm vé & khung giờ cho Ba Na Hills #${banaHills.id.slice(0, 8)}).`);
+  console.log(`✓ Đã tạo điểm tham quan mẫu Ba Na Hills, gồm vé và khung giờ (#${banaHills.id.slice(0, 8)}).`);
 }
 
 async function main() {

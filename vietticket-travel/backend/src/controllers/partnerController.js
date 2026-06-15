@@ -223,7 +223,7 @@ async function getDashboard(req, res, next) {
 
     const attractions = await prisma.attraction.findMany({
       where: { partnerId, archivedAt: null },
-      select: { id: true, status: true },
+      select: { id: true, status: true, publicationStatus: true },
     });
 
     const attractionIds = attractions.map((a) => a.id);
@@ -403,7 +403,9 @@ async function getDashboard(req, res, next) {
 
     const stats = {
       totalAttractions: attractions.length,
-      activeAttractions: attractions.filter((a) => a.status === 'APPROVED').length,
+      activeAttractions: attractions.filter(
+        (a) => a.publicationStatus === 'ACTIVE' && a.status !== 'SUSPENDED',
+      ).length,
       totalTickets,
       totalBookingsThisMonth,
       revenueThisMonth,

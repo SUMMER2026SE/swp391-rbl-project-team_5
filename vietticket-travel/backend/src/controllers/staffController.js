@@ -800,7 +800,8 @@ async function replaceStaffAssignments(req, res, next) {
         where: {
           id: { in: attractionIds },
           archivedAt: null,
-          status: 'APPROVED',
+          publicationStatus: 'ACTIVE',
+          status: { not: 'SUSPENDED' },
         },
       });
       if (attractionCount !== attractionIds.length) {

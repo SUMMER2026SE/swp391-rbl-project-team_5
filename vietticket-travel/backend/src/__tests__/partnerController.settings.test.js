@@ -48,8 +48,8 @@ describe('updateSettings', () => {
 describe('getDashboard', () => {
   test('✅ Trả thống kê tổng quan từ dữ liệu thực', async () => {
     mockPrisma.attraction.findMany.mockResolvedValue([
-      { id: 'attr-001', status: 'APPROVED' },
-      { id: 'attr-002', status: 'DRAFT' },
+      { id: 'attr-001', status: 'APPROVED', publicationStatus: 'ACTIVE' },
+      { id: 'attr-002', status: 'DRAFT', publicationStatus: 'PAUSED' },
     ]);
     mockPrisma.ticketProduct.count.mockResolvedValue(5);
 

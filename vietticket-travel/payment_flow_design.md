@@ -20,7 +20,7 @@
 | 1 | **Một mốc thời hạn duy nhất**: `Reservation.expiresAt`. |
 | 2 | **Reset cửa sổ thanh toán trong L1 (mỗi lần tạo URL)**: trong `createVNPayUrl`, set `reservation.expiresAt = now + 10 phút`. Đặt ở đây (không ở `createBooking`) để hỗ trợ thử lại thanh toán — mỗi lần retry có cửa sổ mới và `vnp_ExpireDate` tươi. |
 | 3 | **`vnp_ExpireDate` = `reservation.expiresAt`** → VNPay tự từ chối giao dịch sau hạn ⇒ triệt tiêu ca tương tranh thường gặp. |
-| 4 | **IPN là nguồn ghi DB duy nhất**. Return URL chỉ đọc-để-hiển thị. `PATCH payment-status` bị khóa cho vnpay. Cả IPN & Worker đều dùng transaction **Serializable** + guard; ai commit trước thắng. |
+| 4 | **IPN là nguồn ghi DB chính**. Return URL có chữ ký hợp lệ chạy cùng logic đối soát idempotent làm fallback cho môi trường local/private. `PATCH payment-status` vẫn bị khóa cho vnpay. Cả callback & Worker đều dùng transaction **Serializable** + guard; ai commit trước thắng. |
 | 5 | **Idempotency theo `Payment.status === 'SUCCESS'`, KHÔNG theo `Booking.status`** (xem §1.1). |
 | 6 | **Worker có grace period**: chỉ quét `expiresAt < now - GRACE` (GRACE = 2–3 phút) để IPN trả trễ kịp đáp xuống trước → giảm ca `refundRequired`. |
 | 7 | **Ca biên "đã trả nhưng vé đã bị thu hồi"**: ghi `Payment=SUCCESS`, `Booking=CANCELLED`, `refundRequired=true`, log + (tùy) email admin; trả `RspCode "00"` cho VNPay. |
@@ -81,7 +81,7 @@ Lệnh: `npx prisma migrate dev --name add_manual_approval_and_refund`
 VNP_TMNCODE=
 VNP_HASHSECRET=
 VNP_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-VNP_RETURNURL=http://localhost:5173/booking-success
+VNP_RETURNURL=http://localhost:5000/api/payments/vnpay-return
 VNP_IPNURL=http://localhost:5000/api/payments/vnpay-ipn
 ```
 
@@ -104,7 +104,8 @@ VNP_IPNURL=http://localhost:5000/api/payments/vnpay-ipn
    - Trả `{ RspCode:"00", Message:"Confirm success" }`. **Luôn HTTP 200** kèm `{RspCode, Message}` (kể cả nhánh lỗi 01/04/97, trừ serialization failure thì trả mã ≠00 để VNPay gọi lại).
 
 ### Return: `GET /api/payments/vnpay-return` (KHÔNG auth)
-- Chỉ verify `vnp_SecureHash` và trả kết quả để FE hiển thị. **Không ghi DB.**
+- Verify `vnp_SecureHash`, chạy cùng logic đối soát idempotent với IPN rồi redirect sang FE.
+- Đây là fallback khi VNPay không thể gọi IPN vào `localhost`; production vẫn phải cấu hình IPN bằng URL HTTPS công khai.
 
 ### Refactor kèm theo
 - Export `confirmReservationAndStock`, `createTicketInstances` từ `bookingController.js`.

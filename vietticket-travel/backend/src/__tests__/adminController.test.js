@@ -2,6 +2,7 @@ jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 jest.mock('../utils/mailer', () => ({
   sendAccountStatusEmail: jest.fn(),
   sendPartnerReviewEmail: jest.fn(),
+  sendAttractionReviewEmail: jest.fn(),
   sendAttractionViolationEmail: jest.fn(),
 }));
 
@@ -30,6 +31,9 @@ describe('getAttractions', () => {
         ticketProducts: [{ sellingPrice: 120000 }],
       },
     ]);
+    mockPrisma.attraction.count.mockResolvedValue(1);
+    mockPrisma.auditLog.findMany.mockResolvedValue([]);
+    mockPrisma.$transaction.mockImplementation((operations) => Promise.all(operations));
 
     const req = { query: { status: 'PENDING' } };
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
@@ -38,10 +42,12 @@ describe('getAttractions', () => {
     await getAttractions(req, res, next);
 
     expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { status: 'PENDING' } }),
+      expect.objectContaining({
+        where: { status: 'PENDING', archivedAt: null },
+      }),
     );
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       success: true,
       data: [
         expect.objectContaining({
@@ -50,7 +56,8 @@ describe('getAttractions', () => {
           minPrice: 120000,
         }),
       ],
-    });
+      pagination: expect.objectContaining({ total: 1 }),
+    }));
   });
 
   test('từ chối status không hợp lệ', async () => {

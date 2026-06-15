@@ -2,6 +2,7 @@ jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 jest.mock('../utils/mailer', () => ({
   sendAccountStatusEmail: jest.fn().mockResolvedValue(),
   sendPartnerReviewEmail: jest.fn().mockResolvedValue(),
+  sendAttractionReviewEmail: jest.fn().mockResolvedValue(),
   sendAttractionViolationEmail: jest.fn().mockResolvedValue(),
 }));
 
@@ -89,15 +90,74 @@ describe('reviewPartner', () => {
 
 describe('reviewAttraction', () => {
   test('✅ APPROVED cập nhật trạng thái APPROVED', async () => {
-    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001' });
-    mockPrisma.attraction.update.mockResolvedValue({});
-    const req = { params: { id: 'attr-001' }, body: { action: 'APPROVED' } };
+    const submittedData = {
+      title: 'Suối Tiên',
+      description: 'Mô tả đầy đủ về trải nghiệm tham quan dành cho mọi du khách.',
+      address: '120 Xa lộ',
+      city: 'TP. HCM',
+      openTime: '08:00',
+      closeTime: '17:00',
+      latitude: 10.8,
+      longitude: 106.7,
+      category: { id: 'cat-1', name: 'Công viên' },
+      images: [{ id: 'img-1', url: '/a.jpg', isPrimary: true }],
+      tickets: [{ id: 't-1', name: 'Vé', originalPrice: 100, sellingPrice: 80, status: 'ACTIVE', refundPolicy: 'NON_REFUNDABLE', refundFeeRate: 0 }],
+      schedule: {
+        openDays: [true, true, true, true, true, true, true],
+        defaultCapacity: 100,
+        timeSlots: [{ id: 's-1', start: '08:00', end: '17:00', capacity: 100, isActive: true }],
+        specialDates: {},
+      },
+    };
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      title: 'Suối Tiên',
+      status: 'PENDING',
+      revision: 2,
+      submittedData,
+      partner: { businessName: 'Cty A', user: { email: 'a@x.com' } },
+    });
+    mockPrisma.category.findUnique.mockResolvedValue({ id: 'cat-1', isActive: true });
+    const tx = {
+      attraction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn(),
+      },
+      attractionCategory: { deleteMany: jest.fn(), create: jest.fn() },
+      attractionImage: { deleteMany: jest.fn(), createMany: jest.fn() },
+      ticketProduct: {
+        findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
+      },
+      timeSlot: {
+        updateMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      specialDate: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+    const req = {
+      user: { id: 'admin-1' },
+      params: { id: 'attr-001' },
+      body: { action: 'APPROVED' },
+    };
     const res = createRes();
     await reviewAttraction(req, res, jest.fn());
-    expect(mockPrisma.attraction.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ status: 'APPROVED', rejectionReason: null }),
+    expect(tx.attraction.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'APPROVED',
+        publicationStatus: 'ACTIVE',
+        rejectionReason: null,
+      }),
     }));
     expect(res.status).toHaveBeenCalledWith(200);
+    expect(mailer.sendAttractionReviewEmail).toHaveBeenCalled();
   });
 
   test('❌ REJECTED yêu cầu lý do', async () => {
@@ -114,6 +174,48 @@ describe('reviewAttraction', () => {
     await reviewAttraction(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(404);
   });
+
+  test('❌ Chặn duyệt lặp khi revision đã được admin khác xử lý', async () => {
+    const submittedData = {
+      title: 'Suối Tiên',
+      description: 'Mô tả đầy đủ về trải nghiệm tham quan dành cho mọi du khách.',
+      address: '120 Xa lộ',
+      city: 'TP. HCM',
+      openTime: '08:00',
+      closeTime: '17:00',
+      latitude: 10.8,
+      longitude: 106.7,
+      category: { id: 'cat-1', name: 'Công viên' },
+      images: [{ id: 'img-1', url: '/a.jpg', isPrimary: true }],
+      tickets: [{ id: 't-1', name: 'Vé', originalPrice: 100, sellingPrice: 80, status: 'ACTIVE', refundPolicy: 'NON_REFUNDABLE', refundFeeRate: 0 }],
+      schedule: {
+        openDays: [true, true, true, true, true, true, true],
+        defaultCapacity: 100,
+        timeSlots: [{ id: 's-1', start: '08:00', end: '17:00', capacity: 100, isActive: true }],
+        specialDates: {},
+      },
+    };
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      title: 'Suối Tiên',
+      status: 'PENDING',
+      revision: 3,
+      submittedData,
+      partner: { businessName: 'Cty A', user: { email: 'a@x.com' } },
+    });
+    mockPrisma.category.findUnique.mockResolvedValue({ id: 'cat-1', isActive: true });
+    const tx = {
+      attraction: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+    const next = jest.fn();
+    await reviewAttraction(
+      { user: { id: 'admin-2' }, params: { id: 'attr-001' }, body: { action: 'APPROVED' } },
+      createRes(),
+      next,
+    );
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 409 }));
+  });
 });
 
 describe('hideAttraction', () => {
@@ -128,7 +230,11 @@ describe('hideAttraction', () => {
     await hideAttraction(req, res, jest.fn());
 
     expect(mockPrisma.attraction.update).toHaveBeenCalledWith(expect.objectContaining({
-      data: { status: 'SUSPENDED' },
+      data: expect.objectContaining({
+        status: 'SUSPENDED',
+        publicationStatus: 'PAUSED',
+        rejectionReason: 'Vé lậu trái phép',
+      }),
     }));
     expect(mailer.sendAttractionViolationEmail).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);

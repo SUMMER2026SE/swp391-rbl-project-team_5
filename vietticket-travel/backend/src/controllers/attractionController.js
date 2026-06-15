@@ -14,6 +14,9 @@ const MAX_LIMIT = 50;
 const attractionInclude = {
   images: true,
   categories: { include: { category: true } },
+  ticketProducts: { where: { archivedAt: null } },
+  timeSlots: { where: { ticketProductId: null, isActive: true } },
+  specialDates: true,
 };
 
 function parsePositiveInt(value, fallback) {
@@ -40,11 +43,15 @@ async function setCategory(tx, attractionId, categoryName) {
   const name = String(categoryName || '').trim();
   if (!name) return;
 
-  const category = await tx.category.upsert({
-    where: { name },
-    update: {},
-    create: { name },
-  });
+  const { resolveActiveCategory } = require('../services/attractionWorkflowService');
+  let category = await resolveActiveCategory(tx, name);
+  if (!category) {
+    category = await tx.category.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+  }
 
   await tx.attractionCategory.deleteMany({ where: { attractionId } });
   await tx.attractionCategory.create({
@@ -71,9 +78,9 @@ async function listAttractions(req, res, next) {
       if (['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'].includes(status)) {
         where.status = status;
       } else if (status === 'ACTIVE') {
-        where.status = 'APPROVED';
+        where.publicationStatus = 'ACTIVE';
       } else if (status === 'INACTIVE') {
-        where.status = { not: 'APPROVED' };
+        where.publicationStatus = { not: 'ACTIVE' };
       }
     }
 
@@ -210,10 +217,20 @@ async function createAttraction(req, res, next) {
 // PUT /api/partners/attractions/:id
 async function updateAttraction(req, res, next) {
   try {
-    const existing = await findOwnedAttraction(req.params.id, req.partner.id, {});
+    const {
+      assertPartnerCanEdit,
+      hasPublishedVersion,
+      buildAttractionSnapshot,
+      mergeSnapshot,
+      resolveActiveCategory,
+    } = require('../services/attractionWorkflowService');
+
+    const existing = await findOwnedAttraction(req.params.id, req.partner.id, attractionInclude);
     if (!existing) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
+
+    assertPartnerCanEdit(existing);
 
     const validationError = validateAttraction(req.body, { partial: true });
     if (validationError) {
@@ -221,18 +238,42 @@ async function updateAttraction(req, res, next) {
     }
 
     const data = buildAttractionData(req.body);
-    if (data.status === 'APPROVED' && existing.status !== 'APPROVED') {
-      return res.status(400).json({
-        message: 'Địa điểm phải được gửi duyệt và được admin phê duyệt trước khi hoạt động.',
+
+    if (hasPublishedVersion(existing)) {
+      let cat = null;
+      if (req.body.category !== undefined) {
+        cat = await resolveActiveCategory(prisma, req.body.category);
+        if (!cat && req.body.category) {
+          cat = await prisma.category.upsert({
+            where: { name: req.body.category },
+            update: {},
+            create: { name: req.body.category },
+          });
+        }
+      }
+
+      const snapshot = existing.draftData || buildAttractionSnapshot(existing);
+      const merged = mergeSnapshot(snapshot, data, cat);
+
+      await prisma.attraction.update({
+        where: { id: existing.id },
+        data: {
+          draftData: merged,
+          status: 'DRAFT',
+          rejectionReason: null,
+        },
+      });
+    } else {
+      data.status = 'DRAFT';
+      data.rejectionReason = null;
+
+      await prisma.$transaction(async (tx) => {
+        await tx.attraction.update({ where: { id: existing.id }, data });
+        if (req.body.category !== undefined) {
+          await setCategory(tx, existing.id, req.body.category);
+        }
       });
     }
-
-    await prisma.$transaction(async (tx) => {
-      await tx.attraction.update({ where: { id: existing.id }, data });
-      if (req.body.category !== undefined) {
-        await setCategory(tx, existing.id, req.body.category);
-      }
-    });
 
     const full = await prisma.attraction.findUnique({
       where: { id: existing.id },
@@ -256,9 +297,25 @@ async function deleteAttraction(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
 
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const bookingCount = await prisma.booking.count({
+      where: {
+        snapshotAttractionId: existing.id,
+        snapshotVisitDate: { gte: today },
+        status: { in: ['CONFIRMED', 'PENDING_PARTNER'] },
+      },
+    });
+
+    if (bookingCount > 0) {
+      return res.status(409).json({
+        message: 'Không thể lưu trữ điểm tham quan vì vẫn còn đơn đặt vé chưa sử dụng trong tương lai.',
+      });
+    }
+
     await prisma.attraction.update({
       where: { id: existing.id },
-      data: { archivedAt: new Date(), status: 'SUSPENDED' },
+      data: { archivedAt: new Date(), publicationStatus: 'ARCHIVED' },
     });
 
     return res.json({
@@ -388,9 +445,15 @@ async function listCategories(req, res, next) {
   }
 }
 
-// POST /api/attractions — tạo điểm tham quan (public-partner flow từ MPhu)
+// POST /api/attractions/:id/submit — gửi duyệt (từ MPhu)
 async function submitAttraction(req, res, next) {
   try {
+    const {
+      buildAttractionSnapshot,
+      validateSubmissionSnapshot,
+    } = require('../services/attractionWorkflowService');
+    const { writeAuditLog } = require('../utils/auditLog');
+
     const userId = req.user && req.user.id;
     if (!userId) return res.status(401).json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Unauthorized' } });
 
@@ -398,7 +461,10 @@ async function submitAttraction(req, res, next) {
     if (!partner) return res.status(403).json({ success: false, error: { code: 'NO_PARTNER_PROFILE', message: 'Partner profile not found' } });
 
     const attractionId = req.params.id;
-    const attraction = await prisma.attraction.findUnique({ where: { id: attractionId } });
+    const attraction = await prisma.attraction.findUnique({
+      where: { id: attractionId },
+      include: attractionInclude,
+    });
     if (!attraction || attraction.archivedAt) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
 
     if (attraction.partnerId !== partner.id) return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Không có quyền thao tác trên địa điểm này' } });
@@ -407,9 +473,56 @@ async function submitAttraction(req, res, next) {
       return res.status(400).json({ success: false, error: { code: 'INVALID_STATUS', message: "Không thể gửi duyệt khi trạng thái hiện tại không phải DRAFT hoặc REJECTED" } });
     }
 
-    const updated = await prisma.attraction.update({ where: { id: attractionId }, data: { status: 'PENDING' } });
+    const snapshot = attraction.draftData || buildAttractionSnapshot(attraction);
+    const missing = validateSubmissionSnapshot(snapshot);
+    if (missing.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INCOMPLETE_ATTRACTION',
+          message: `Hồ sơ điểm tham quan thiếu thông tin bắt buộc: ${missing.join(', ')}.`,
+        },
+      });
+    }
 
-    return res.status(200).json({ success: true, data: { id: updated.id, status: updated.status } });
+    const submittedAt = new Date();
+    let updated = null;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.attraction.updateMany({
+        where: {
+          id: attractionId,
+          status: { in: ['DRAFT', 'REJECTED'] },
+        },
+        data: {
+          status: 'PENDING',
+          revision: { increment: 1 },
+          submittedAt,
+          submittedData: snapshot,
+        },
+      });
+
+      updated = await tx.attraction.findUnique({
+        where: { id: attractionId },
+      });
+
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'ATTRACTION_SUBMITTED',
+        entityType: 'ATTRACTION',
+        entityId: attractionId,
+        metadata: { revision: updated?.revision || attraction.revision + 1, snapshot },
+      });
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        id: updated ? updated.id : attractionId,
+        status: updated ? updated.status : 'PENDING',
+      },
+    });
   } catch (error) {
     return next(error);
   }
@@ -659,12 +772,57 @@ async function getAttractionDetail(req, res, next) {
   }
 }
 
+// PATCH /api/partners/attractions/:id/publication — bật/tắt bán vé điểm tham quan
+async function setPublicationStatus(req, res, next) {
+  try {
+    const attraction = await findOwnedAttraction(req.params.id, req.partner.id, {});
+    if (!attraction) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Không tìm thấy điểm tham quan.' } });
+    }
+
+    if (!attraction.publishedAt) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_STATE', message: 'Điểm tham quan chưa từng được phê duyệt.' },
+      });
+    }
+
+    if (attraction.status === 'SUSPENDED') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Điểm tham quan đang bị đình chỉ.' },
+      });
+    }
+
+    const { publicationStatus } = req.body || {};
+    if (!['ACTIVE', 'PAUSED'].includes(publicationStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Trạng thái phát hành không hợp lệ. Chỉ chấp nhận ACTIVE hoặc PAUSED.' },
+      });
+    }
+
+    await prisma.attraction.update({
+      where: { id: attraction.id },
+      data: { publicationStatus },
+    });
+
+    return res.json({
+      success: true,
+      message: publicationStatus === 'ACTIVE' ? 'Đã kích hoạt hoạt động điểm bán vé.' : 'Đã tạm dừng bán vé điểm tham quan.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   listAttractions,
   getAttraction,
   createAttraction,
   updateAttraction,
   deleteAttraction,
+  setPublicationStatus,
   uploadImages,
   deleteImage,
   setPrimaryImage,
