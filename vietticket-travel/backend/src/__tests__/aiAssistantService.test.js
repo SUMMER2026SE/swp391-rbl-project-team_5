@@ -59,6 +59,40 @@ describe('AI catalog', () => {
       }),
     );
   });
+
+  test('maps common city aliases and Vietnamese interests to catalog filters', async () => {
+    mockPrisma.attraction.findMany.mockResolvedValue([]);
+
+    await getCatalogSummary({
+      city: 'Da Nang',
+      category: 'thi\u00ean nhi\u00ean, v\u0103n h\u00f3a',
+      limit: 3,
+    });
+
+    const where = mockPrisma.attraction.findMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ city: { contains: '\u0110\u00e0 N\u1eb5ng', mode: 'insensitive' } }),
+      ]),
+    );
+    expect(where.categories.some.OR).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: { name: { contains: 'Nature & Sightseeing', mode: 'insensitive' } } }),
+        expect.objectContaining({ category: { name: { contains: 'Cultural Experience', mode: 'insensitive' } } }),
+      ]),
+    );
+  });
+
+  test('falls back to city catalog when interest filters have no matches', async () => {
+    mockPrisma.attraction.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makeAttraction('a1', 100000)]);
+
+    const catalog = await getCatalogSummary({ city: 'Da Nang', category: 'Museum', limit: 3 });
+
+    expect(catalog).toHaveLength(1);
+    expect(mockPrisma.attraction.findMany.mock.calls[1][0].where.categories).toBeUndefined();
+  });
 });
 
 describe('recommendAttractions', () => {
