@@ -41,6 +41,7 @@ describe('listFavorites', () => {
         where: {
           userId: 'user-001',
           attraction: {
+            publishedAt: { not: null },
             publicationStatus: 'ACTIVE',
             status: { not: 'SUSPENDED' },
             archivedAt: null,
@@ -76,6 +77,7 @@ describe('toggleFavorite', () => {
       id: 'attr-001',
       status: 'APPROVED',
       publicationStatus: 'ACTIVE',
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
       archivedAt: null,
     });
     mockPrisma.favoriteAttraction.findUnique.mockResolvedValue(null);
@@ -105,6 +107,7 @@ describe('toggleFavorite', () => {
       id: 'attr-001',
       status: 'APPROVED',
       publicationStatus: 'ACTIVE',
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
       archivedAt: null,
     });
     mockPrisma.favoriteAttraction.findUnique.mockResolvedValue({

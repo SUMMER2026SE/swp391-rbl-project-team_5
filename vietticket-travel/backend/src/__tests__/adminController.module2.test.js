@@ -126,6 +126,7 @@ describe('reviewAttraction', () => {
       attractionCategory: { deleteMany: jest.fn(), create: jest.fn() },
       attractionImage: { deleteMany: jest.fn(), createMany: jest.fn() },
       ticketProduct: {
+        aggregate: jest.fn().mockResolvedValue({ _min: { sellingPrice: 80 } }),
         findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn(),
         update: jest.fn(),

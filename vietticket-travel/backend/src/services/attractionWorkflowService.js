@@ -154,6 +154,7 @@ function hasPublishedVersion(attraction) {
 function isPubliclyAvailable(attraction) {
   return (
     attraction?.publicationStatus === 'ACTIVE'
+    && Boolean(attraction.publishedAt)
     && !attraction.archivedAt
     && attraction.status !== 'SUSPENDED'
   );

@@ -455,6 +455,10 @@ async function validateAndApplyVoucher(req, res, next) {
       subtotalAmount,
       new Date(),
     );
+    const totalAmount = subtotalAmount.minus(discountAmount);
+    if (!totalAmount.isPositive()) {
+      return res.status(400).json({ message: 'Tổng tiền sau ưu đãi phải lớn hơn 0.' });
+    }
 
     return res.json({
       success: true,
@@ -472,7 +476,7 @@ async function validateAndApplyVoucher(req, res, next) {
           expiryDate: voucher.expiryDate,
         },
         discountAmount: decimalToNumber(discountAmount),
-        totalAmount: decimalToNumber(subtotalAmount.minus(discountAmount)),
+        totalAmount: decimalToNumber(totalAmount),
       },
     });
   } catch (error) {
@@ -570,6 +574,11 @@ async function createBooking(req, res, next) {
           now,
         );
         const totalAmount = subtotalAmount.minus(discountAmount);
+        if (!totalAmount.isPositive()) {
+          const error = new Error('Tổng tiền sau ưu đãi phải lớn hơn 0.');
+          error.statusCode = 400;
+          throw error;
+        }
 
         if (voucher) {
           const usageWhere =

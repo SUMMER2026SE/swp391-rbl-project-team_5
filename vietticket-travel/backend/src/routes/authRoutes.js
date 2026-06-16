@@ -32,7 +32,7 @@ router.post('/verify-email', authRateLimit, verifyEmail);
 router.post('/resend-verification', authRateLimit, resendVerification);
 router.post('/login', authRateLimit, login);
 router.post('/google', authRateLimit, googleLogin);
-router.post('/logout', logout);
+router.post('/logout', protect, logout);
 router.post('/forgot-password', authRateLimit, forgotPassword);
 router.post('/reset-password', authRateLimit, resetPassword);
 router.get('/me', protect, getMe);

@@ -154,7 +154,7 @@ function ETicketPage() {
                 type="button"
               >
                 <span className="material-symbols-outlined" aria-hidden="true">download</span>
-                Tải vé PDF
+                In / Lưu PDF
               </button>
             </div>
           </div>

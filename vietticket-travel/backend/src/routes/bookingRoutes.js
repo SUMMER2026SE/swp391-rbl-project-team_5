@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.get('/', protect, restrictTo('CUSTOMER'), listBookings);
 router.post('/', protect, restrictTo('CUSTOMER'), createBooking);
-router.post('/apply-voucher', protect, validateAndApplyVoucher);
+router.post('/apply-voucher', protect, restrictTo('CUSTOMER'), validateAndApplyVoucher);
 router.get(
   '/reservations/:reservationId',
   protect,

@@ -199,7 +199,7 @@ function PartnerAttractionsPage() {
               className="px-4 py-2 bg-[#f8fafb] border border-[#bec8ca] rounded-lg focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] focus:outline-none transition-shadow text-sm text-[#191c1d] w-full sm:w-auto bg-white"
             >
               <option value="">Trạng thái: Tất cả</option>
-              <option value="APPROVED">Hoạt động</option>
+              <option value="ACTIVE">Hoạt động</option>
               <option value="PENDING">Chờ duyệt</option>
               <option value="DRAFT">Bản nháp</option>
               <option value="REJECTED">Bị từ chối</option>

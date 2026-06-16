@@ -17,6 +17,7 @@ const {
   getPeriodStart,
   normalizePeriod,
 } = require('../services/analyticsService');
+const { refreshAttractionMinPrice } = require('../services/catalogService');
 
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
@@ -528,6 +529,7 @@ async function reviewAttraction(req, res, next) {
 
       if (action === 'APPROVED') {
         await applyApprovedSnapshot(tx, id, snapshot);
+        await refreshAttractionMinPrice(tx, id);
         await tx.attraction.update({
           where: { id },
           data: {
@@ -722,6 +724,7 @@ async function getAdminBookings(req, res, next) {
         prisma.payment.aggregate({
           where: {
             status: 'SUCCESS',
+            isDuplicate: false,
             booking: { status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] } },
           },
           _sum: { amount: true },
@@ -805,6 +808,7 @@ async function getDashboard(req, res, next) {
       prisma.attraction.count({
         where: {
           archivedAt: null,
+          publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
           status: { not: 'SUSPENDED' },
         },
@@ -815,6 +819,7 @@ async function getDashboard(req, res, next) {
       prisma.payment.findMany({
         where: {
           status: 'SUCCESS',
+          isDuplicate: false,
           createdAt: { gte: startDate },
           booking: { status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] } },
         },

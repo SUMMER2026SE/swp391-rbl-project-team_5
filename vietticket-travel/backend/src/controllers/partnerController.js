@@ -252,12 +252,12 @@ async function getDashboard(req, res, next) {
       const revenueBookings = await prisma.booking.findMany({
         where: {
           status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
-          payments: { some: { status: 'SUCCESS' } },
+          payments: { some: { status: 'SUCCESS', isDuplicate: false } },
           reservation: { ticketProduct: { attraction: { partnerId } } },
         },
         select: {
           createdAt: true,
-          payments: { where: { status: 'SUCCESS' }, select: { amount: true } },
+          payments: { where: { status: 'SUCCESS', isDuplicate: false }, select: { amount: true } },
           reservation: { select: { quantity: true } },
         },
       });
@@ -301,7 +301,7 @@ async function getDashboard(req, res, next) {
           pendingBookings = await prisma.booking.count({
             where: {
               reservationId: { in: reservationIds },
-              status: 'PENDING_PAYMENT',
+              status: 'PENDING_PARTNER',
             },
           });
 
@@ -434,7 +434,7 @@ async function getReports(req, res, next) {
       where: {
         createdAt: { gte: startDate },
         status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
-        payments: { some: { status: 'SUCCESS' } },
+        payments: { some: { status: 'SUCCESS', isDuplicate: false } },
         reservation: {
           ticketProduct: {
             attraction: { partnerId: req.partner.id },
@@ -444,7 +444,7 @@ async function getReports(req, res, next) {
       select: {
         createdAt: true,
         payments: {
-          where: { status: 'SUCCESS' },
+          where: { status: 'SUCCESS', isDuplicate: false },
           select: { amount: true },
         },
         reservation: {
@@ -804,7 +804,7 @@ async function rejectBooking(req, res, next) {
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        payments: { where: { status: 'SUCCESS' }, select: { id: true } },
+        payments: { where: { status: 'SUCCESS', isDuplicate: false }, select: { id: true } },
         refundRequests: { select: { id: true } },
         reservation: {
           include: {
