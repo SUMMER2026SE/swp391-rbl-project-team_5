@@ -4,6 +4,7 @@ import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import Seo from '../components/Seo.jsx'
+import AIItineraryPlanner from '../components/AIItineraryPlanner.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { footerLinks } from '../data/landingData.js'
 import { apiRequest } from '../services/api.js'
@@ -321,6 +322,7 @@ export default function SearchAttractionsPage() {
         description="Khám phá và so sánh giá vé các điểm tham quan tại Việt Nam trên VietTicket Travel."
       />
       <Header links={searchNavLinks} />
+      <AIItineraryPlanner />
       <main className="min-h-screen bg-[#f8fafb] px-5 py-8 text-[#191c1d] md:px-16">
         <div className="mx-auto max-w-[1280px]">
           <section className="mb-6">

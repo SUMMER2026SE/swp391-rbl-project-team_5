@@ -8,6 +8,7 @@ import PartnerCTASection from '../components/PartnerCTASection.jsx'
 import PopularDestinations from '../components/PopularDestinations.jsx'
 import ServiceCategories from '../components/ServiceCategories.jsx'
 import Testimonials from '../components/Testimonials.jsx'
+import AIRecommendSection from '../components/AIRecommendSection.jsx'
 import Seo from '../components/Seo.jsx'
 import {
   bookingPreview,
@@ -32,6 +33,7 @@ function HomePage() {
         <HeroSection content={heroContent} />
         <ServiceCategories categories={serviceCategories} />
         <PopularDestinations />
+        <AIRecommendSection />
         <BookingSteps steps={bookingSteps} preview={bookingPreview} />
         <Testimonials />
         <PartnerCTASection />
