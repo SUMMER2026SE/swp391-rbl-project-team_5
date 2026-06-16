@@ -27,7 +27,17 @@ FRONTEND_URL="http://localhost:5173"
 BACKEND_URL="http://localhost:5000"
 ```
 
-Optional integrations: SMTP, Google OAuth, VNPay sandbox.
+Optional integrations: SMTP, Google OAuth, VNPay sandbox, Gemini/OpenAI for AI assistant.
+
+For the AI assistant, fill at least one provider key:
+
+```env
+AI_PRIMARY_PROVIDER="gemini"
+GEMINI_API_KEY=""
+GEMINI_MODEL="gemini-2.0-flash"
+OPENAI_API_KEY=""
+OPENAI_MODEL="gpt-4o-mini"
+```
 
 ## Database
 

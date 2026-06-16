@@ -23,7 +23,13 @@ async function getCatalogSummary(filters = {}) {
   const { city, category, limit = 60 } = filters;
 
   const where = {
-    status: 'APPROVED',
+    publishedAt: { not: null },
+    publicationStatus: 'ACTIVE',
+    archivedAt: null,
+    status: { not: 'SUSPENDED' },
+    ticketProducts: {
+      some: { status: 'ACTIVE', archivedAt: null },
+    },
     ...(city ? { city: { contains: city, mode: 'insensitive' } } : {}),
     ...(category
       ? { categories: { some: { category: { name: { contains: category, mode: 'insensitive' } } } } }
