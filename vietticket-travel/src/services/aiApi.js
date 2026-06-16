@@ -14,9 +14,9 @@ export async function aiRecommend({ budget, people, city, interests }) {
   })
 }
 
-export async function aiItinerary({ city, days, people, interests }) {
+export async function aiItinerary({ city, days, people, interests, budget }) {
   return apiRequest('/ai/itinerary', {
     method: 'POST',
-    body: { city, days, people, interests },
+    body: { city, days, people, interests, budget },
   })
 }
