@@ -140,6 +140,15 @@ function validateTicket(body, { partial = false } = {}) {
     }
   }
 
+  // refundFeeRate là PHÂN SỐ trong [0,1] (vd 0.1 = 10%). Chặn giá trị sai đơn vị
+  // (vd nhập 10 nghĩa là 10% -> phí 1000% -> khách nhận 0đ).
+  if (has('refundFeeRate') && body.refundFeeRate !== null && body.refundFeeRate !== '') {
+    const feeRate = Number(body.refundFeeRate);
+    if (!Number.isFinite(feeRate) || feeRate < 0 || feeRate > 1) {
+      return 'Phí hoàn/hủy phải là tỉ lệ trong khoảng 0 đến 1 (vd 0.1 = 10%).';
+    }
+  }
+
   return '';
 }
 

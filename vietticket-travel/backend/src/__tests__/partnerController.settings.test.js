@@ -52,6 +52,7 @@ describe('getDashboard', () => {
       { id: 'attr-002', status: 'DRAFT', publicationStatus: 'PAUSED' },
     ]);
     mockPrisma.ticketProduct.count.mockResolvedValue(5);
+    mockPrisma.booking.findMany.mockResolvedValue([]);
 
     const req = { partner: PARTNER };
     const res = createRes();
@@ -69,6 +70,7 @@ describe('getDashboard', () => {
 
   test('✅ Không gọi count khi partner chưa có attraction nào', async () => {
     mockPrisma.attraction.findMany.mockResolvedValue([]);
+    mockPrisma.booking.findMany.mockResolvedValue([]);
     const req = { partner: PARTNER };
     const res = createRes();
     await getDashboard(req, res, jest.fn());

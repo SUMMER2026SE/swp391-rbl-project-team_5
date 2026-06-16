@@ -45,7 +45,7 @@ describe('getPartners', () => {
 
 describe('reviewPartner', () => {
   test('✅ APPROVED nâng quyền user lên PARTNER + gửi email', async () => {
-    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-001', userId: 'user-001', businessName: 'Cty A', user: { email: 'a@x.com' } });
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-001', userId: 'user-001', businessName: 'Cty A', status: 'PENDING', user: { email: 'a@x.com' } });
     mockPrisma.$transaction.mockResolvedValue([{}, {}]);
     const req = { params: { id: 'p-001' }, body: { action: 'APPROVED' } };
     const res = createRes();
@@ -64,7 +64,7 @@ describe('reviewPartner', () => {
   });
 
   test('✅ REJECTED kèm lý do hợp lệ', async () => {
-    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-001', userId: 'user-001', businessName: 'Cty A', user: { email: 'a@x.com' } });
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-001', userId: 'user-001', businessName: 'Cty A', status: 'PENDING', user: { email: 'a@x.com' } });
     mockPrisma.$transaction.mockResolvedValue([{}, {}]);
     const req = { params: { id: 'p-001' }, body: { action: 'REJECTED', rejectionReason: 'Hồ sơ thiếu giấy phép' } };
     const res = createRes();

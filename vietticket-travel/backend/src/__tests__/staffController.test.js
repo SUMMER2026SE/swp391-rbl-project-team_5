@@ -256,9 +256,14 @@ describe('reissueTicket', () => {
         findUnique: jest.fn().mockResolvedValue({
           id: 'booking-1',
           status: 'CONFIRMED',
+          snapshotAttractionId: 'attr-1',
           user: { fullName: 'Nguyen Van A', email: 'a@example.com' },
           ticketInstances: [oldTicket],
         }),
+      },
+      // Nhân viên được phân công địa điểm của đơn -> qua kiểm tra phạm vi.
+      staffAttractionAssignment: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'assign-1' }),
       },
       ticketInstance: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),

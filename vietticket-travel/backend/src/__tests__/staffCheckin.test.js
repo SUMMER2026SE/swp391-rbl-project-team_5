@@ -172,7 +172,7 @@ describe('checkInTicket', () => {
 
     expect(capturedTx.ticketInstance.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ id: instance.id, status: 'VALID' }),
+        where: expect.objectContaining({ bookingId: instance.bookingId, status: 'VALID' }),
         data: expect.objectContaining({ status: 'USED' }),
       }),
     );

@@ -406,6 +406,11 @@ async function reviewPartner(req, res, next) {
     const partner = await prisma.partnerProfile.findUnique({ where: { id }, include: { user: true } });
     if (!partner) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Partner profile not found' } });
 
+    // Chỉ xét duyệt hồ sơ đang chờ; tránh REJECTED lặp lại làm hạ role partner đã được duyệt.
+    if (partner.status !== 'PENDING') {
+      return res.status(409).json({ success: false, error: { code: 'INVALID_STATUS', message: 'Chỉ có thể xét duyệt hồ sơ đang ở trạng thái chờ duyệt.' } });
+    }
+
     if (action === 'APPROVED') {
       await prisma.$transaction([
         prisma.partnerProfile.update({ where: { id }, data: { status: 'APPROVED', rejectionReason: null } }),

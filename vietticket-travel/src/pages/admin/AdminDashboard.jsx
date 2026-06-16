@@ -137,6 +137,7 @@ export default function AdminDashboard() {
                       className={period === item.value ? 'active' : ''}
                       key={item.value}
                       onClick={() => {
+                        if (item.value === period) return
                         setLoading(true)
                         setPeriod(item.value)
                       }}

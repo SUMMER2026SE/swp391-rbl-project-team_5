@@ -55,7 +55,7 @@ function CheckoutPage() {
   const [isApplyingVoucher, setIsApplyingVoucher] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
-  const [now, setNow] = useState(0)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     let active = true

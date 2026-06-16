@@ -119,6 +119,18 @@ async function saveSchedule(req, res, next) {
       }
     }
 
+    // Chặn các khung giờ chồng lấn nhau (nếu cho qua sẽ đếm trùng sức chứa trong ngày).
+    const sortedSlots = [...timeSlots].sort((a, b) =>
+      String(a.start).localeCompare(String(b.start)),
+    );
+    for (let i = 1; i < sortedSlots.length; i += 1) {
+      if (String(sortedSlots[i].start) < String(sortedSlots[i - 1].end)) {
+        return res.status(400).json({
+          message: `Khung giờ ${sortedSlots[i].start}–${sortedSlots[i].end} bị chồng lấn với khung giờ khác.`,
+        });
+      }
+    }
+
     // --- Xác thực ngày đặc biệt ---
     for (const dateKey of Object.keys(specialDates)) {
       if (!isValidDate(dateKey)) {

@@ -5,6 +5,11 @@ const { reserveTickets, checkAvailability } = require('../controllers/ticketCont
 
 afterEach(() => jest.clearAllMocks());
 
+// Ngày tham quan động (mai theo giờ VN) để test không phụ thuộc ngày chạy.
+const VISIT_DATE = new Date(Date.now() + 7 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000)
+  .toISOString()
+  .slice(0, 10);
+
 const attraction = {
   id: 'attr-001',
   status: 'APPROVED',
@@ -39,7 +44,7 @@ describe('reserveTickets - chống overbooking', () => {
   function makeReq(body = {}) {
     return {
       params: { ticketProductId: 'tkt-001' },
-      body: { date: '2026-06-15', quantity: 2, ...body },
+      body: { date: VISIT_DATE, quantity: 2, ...body },
       user: mockUser,
     };
   }
