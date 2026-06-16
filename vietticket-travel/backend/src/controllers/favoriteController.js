@@ -42,6 +42,7 @@ async function listFavorites(req, res, next) {
       where: {
         userId: req.user.id,
         attraction: {
+          publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
           status: { not: 'SUSPENDED' },
           archivedAt: null,
@@ -73,6 +74,7 @@ async function toggleFavorite(req, res, next) {
         id: true,
         status: true,
         publicationStatus: true,
+        publishedAt: true,
         archivedAt: true,
       },
     });
@@ -80,6 +82,7 @@ async function toggleFavorite(req, res, next) {
     if (
       !attraction
       || attraction.archivedAt
+      || !attraction.publishedAt
       || attraction.publicationStatus !== 'ACTIVE'
       || attraction.status === 'SUSPENDED'
     ) {

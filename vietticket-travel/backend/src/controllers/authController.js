@@ -511,9 +511,20 @@ async function getMe(req, res, next) {
   }
 }
 
-function logout(req, res) {
-  clearAuthCookie(res);
-  return res.json({ message: 'Đăng xuất thành công.' });
+async function logout(req, res, next) {
+  try {
+    if (req.authSession?.id) {
+      await prisma.authSession.updateMany({
+        where: { id: req.authSession.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+
+    clearAuthCookie(res);
+    return res.json({ message: 'Đăng xuất thành công.' });
+  } catch (error) {
+    next(error);
+  }
 }
 
 module.exports = {

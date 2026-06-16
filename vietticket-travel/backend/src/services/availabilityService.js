@@ -40,6 +40,7 @@ async function getBookableSchedule(client, ticketProductId, date) {
     product.status !== 'ACTIVE' ||
     product.archivedAt ||
     !attraction ||
+    !attraction.publishedAt ||
     attraction.publicationStatus !== 'ACTIVE' ||
     attraction.status === 'SUSPENDED' ||
     attraction.archivedAt

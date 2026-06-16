@@ -179,7 +179,8 @@ async function generateJSON(systemPrompt, userPrompt, options = {}) {
     return { data, provider };
   } catch (err) {
     throw new Error(
-      `Không parse được JSON từ provider "${provider}": ${err.message}\nNội dung trả về: ${cleaned.slice(0, 500)}`
+      `Không parse được JSON từ provider "${provider}": ${err.message}\nNội dung trả về: ${cleaned.slice(0, 500)}`,
+      { cause: err },
     );
   }
 }

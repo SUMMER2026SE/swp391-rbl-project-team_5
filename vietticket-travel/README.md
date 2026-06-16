@@ -1,16 +1,82 @@
-# React + Vite
+# VietTicket Travel
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Travel attraction ticket platform built with React/Vite, Express, Prisma, and PostgreSQL.
 
-Currently, two official plugins are available:
+## Modules
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Customer: search attractions, favorites, reservation, booking, vouchers, VNPay payment, e-ticket QR, reviews, refund requests, support chat.
+- Partner: KYC, attraction/ticket/schedule management, manual booking approval, dashboard and reports.
+- Staff: refund processing, ticket check-in, support handling, assigned attraction access.
+- Admin: user, partner KYC, attraction moderation, category, booking, review, and dashboard management.
 
-## React Compiler
+## Local Setup
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Install frontend dependencies:
 
-## Expanding the ESLint configuration
+```bash
+npm install
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+2. Configure frontend environment:
+
+```bash
+cp .env.example .env
+```
+
+For local development, keep:
+
+```env
+VITE_API_URL=http://localhost:5000/api
+VITE_SOCKET_URL=http://localhost:5000
+```
+
+3. Configure backend:
+
+```bash
+cd backend
+npm install
+cp .env.example .env
+```
+
+Fill `DATABASE_URL`, `JWT_SECRET`, and optional SMTP/Google/VNPay values in `backend/.env`.
+
+4. Prepare database:
+
+```bash
+cd backend
+npx prisma migrate dev
+npm run db:seed
+npm run create-admin
+```
+
+5. Run both apps in separate terminals:
+
+```bash
+cd backend
+npm run dev
+```
+
+```bash
+npm run dev
+```
+
+Frontend runs on `http://localhost:5173`; backend API runs on `http://localhost:5000/api`.
+
+## Verification
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+```bash
+cd backend
+npm run test
+```
+
+## Environment Notes
+
+- Do not commit real `.env` files or private keys.
+- Leave `VITE_API_URL` empty only when frontend and backend are deployed behind the same domain/proxy and `/api` is routed to the backend.
+- Uploaded images and private documents are stored outside source code; do not delete upload folders during maintenance.

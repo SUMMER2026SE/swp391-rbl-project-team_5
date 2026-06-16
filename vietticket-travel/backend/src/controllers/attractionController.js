@@ -579,7 +579,12 @@ async function searchAttractions(req, res, next) {
     }
 
     // Chỉ hiển thị địa điểm đang phát hành công khai (ẩn địa điểm đã tạm dừng bán vé).
-    const where = { status: 'APPROVED', publicationStatus: 'ACTIVE', archivedAt: null };
+    const where = {
+      publishedAt: { not: null },
+      publicationStatus: 'ACTIVE',
+      archivedAt: null,
+      status: { not: 'SUSPENDED' },
+    };
     const andConditions = [];
 
     if (city) {
@@ -702,9 +707,10 @@ async function getMapPoints(req, res, next) {
   try {
     const items = await prisma.attraction.findMany({
       where: {
-        status: 'APPROVED',
+        publishedAt: { not: null },
         publicationStatus: 'ACTIVE',
         archivedAt: null,
+        status: { not: 'SUSPENDED' },
         latitude: { not: null },
         longitude: { not: null },
       },
@@ -756,7 +762,8 @@ async function getAttractionDetail(req, res, next) {
     if (
       !attraction
       || attraction.archivedAt
-      || attraction.status !== 'APPROVED'
+      || !attraction.publishedAt
+      || attraction.status === 'SUSPENDED'
       || attraction.publicationStatus !== 'ACTIVE'
     ) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });

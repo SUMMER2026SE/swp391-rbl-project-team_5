@@ -66,6 +66,10 @@ async function createVNPayUrl(req, res, next) {
       return res.status(409).json({ message: 'Đơn không ở trạng thái chờ thanh toán.' });
     }
 
+    if (Number(booking.totalAmount) <= 0) {
+      return res.status(400).json({ message: 'Tổng tiền thanh toán phải lớn hơn 0.' });
+    }
+
     if (booking.payments.some((payment) => payment.status === 'SUCCESS' && !payment.isDuplicate)) {
       return res.status(409).json({ message: 'Đơn này đã thanh toán thành công.' });
     }

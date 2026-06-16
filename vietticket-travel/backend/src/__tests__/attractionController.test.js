@@ -60,7 +60,8 @@ describe('searchAttractions', () => {
     expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          status: 'APPROVED',
+          publishedAt: { not: null },
+          status: { not: 'SUSPENDED' },
           publicationStatus: 'ACTIVE',
           archivedAt: null,
         }),
@@ -82,7 +83,7 @@ describe('searchAttractions', () => {
 
 describe('getAttractionDetail', () => {
   test('✅ Trả về chi tiết nếu tìm thấy và status APPROVED', async () => {
-    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', title: 'Suối Tiên', status: 'APPROVED', publicationStatus: 'ACTIVE', images: [], categories: [], ticketProducts: [] });
+    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', title: 'Suối Tiên', status: 'APPROVED', publicationStatus: 'ACTIVE', publishedAt: new Date('2026-06-01T00:00:00.000Z'), images: [], categories: [], ticketProducts: [] });
     const req = { params: { id: 'attr-001' } };
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
     const next = jest.fn();

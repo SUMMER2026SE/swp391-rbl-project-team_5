@@ -128,7 +128,7 @@ async function processRefundRequest(req, res, next) {
           include: {
             user: { select: { fullName: true, email: true } },
             payments: {
-              where: { status: 'SUCCESS' },
+              where: { status: 'SUCCESS', isDuplicate: false },
               orderBy: { createdAt: 'desc' },
             },
           },
@@ -144,6 +144,10 @@ async function processRefundRequest(req, res, next) {
     }
     if (refundRequest.booking.status === 'REFUNDED') {
       throw httpError(409, 'Đơn đặt vé này đã được hoàn tiền.');
+    }
+
+    if (action === 'REJECTED' && refundRequest.booking.refundRequired) {
+      throw httpError(400, 'Không thể từ chối yêu cầu hoàn tiền bắt buộc.');
     }
 
     const claimed = await prisma.refundRequest.updateMany({
@@ -818,6 +822,7 @@ async function replaceStaffAssignments(req, res, next) {
         where: {
           id: { in: attractionIds },
           archivedAt: null,
+          publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
           status: { not: 'SUSPENDED' },
         },
