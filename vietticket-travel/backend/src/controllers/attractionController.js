@@ -561,7 +561,8 @@ async function searchAttractions(req, res, next) {
       });
     }
 
-    const where = { status: 'APPROVED', archivedAt: null };
+    // Chỉ hiển thị địa điểm đang phát hành công khai (ẩn địa điểm đã tạm dừng bán vé).
+    const where = { status: 'APPROVED', publicationStatus: 'ACTIVE', archivedAt: null };
     const andConditions = [];
 
     if (city) {
@@ -685,6 +686,7 @@ async function getMapPoints(req, res, next) {
     const items = await prisma.attraction.findMany({
       where: {
         status: 'APPROVED',
+        publicationStatus: 'ACTIVE',
         archivedAt: null,
         latitude: { not: null },
         longitude: { not: null },
@@ -734,7 +736,12 @@ async function getAttractionDetail(req, res, next) {
       },
     });
 
-    if (!attraction || attraction.archivedAt || attraction.status !== 'APPROVED') {
+    if (
+      !attraction
+      || attraction.archivedAt
+      || attraction.status !== 'APPROVED'
+      || attraction.publicationStatus !== 'ACTIVE'
+    ) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
     }
 
