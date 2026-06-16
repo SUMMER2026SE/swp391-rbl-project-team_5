@@ -47,6 +47,7 @@ function PartnerEditAttractionPage() {
     dbStatus: 'DRAFT',
     rejectionReason: null,
     category: '',
+    requiresManualApproval: false,
   })
   const [categories, setCategories] = useState([])
   const [images, setImages] = useState([])
@@ -77,6 +78,7 @@ function PartnerEditAttractionPage() {
         dbStatus: data.dbStatus ?? 'DRAFT',
         rejectionReason: data.rejectionReason ?? null,
         category: data.category ?? '',
+        requiresManualApproval: Boolean(data.requiresManualApproval),
       }))
       if (Array.isArray(data.images)) {
         setImages(
@@ -178,6 +180,7 @@ function PartnerEditAttractionPage() {
       lat: form.lat,
       lng: form.lng,
       category: form.category,
+      requiresManualApproval: form.requiresManualApproval,
     }
 
     try {
@@ -326,6 +329,38 @@ function PartnerEditAttractionPage() {
                 <option value="">Chọn danh mục</option>
                 {categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}
               </select>
+            </FormField>
+            <FormField label="Chính sách xác nhận đặt vé">
+              <div className="grid gap-3 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => updateForm('requiresManualApproval', true)}
+                  className={`rounded-xl border-2 p-4 text-left transition ${
+                    form.requiresManualApproval
+                      ? 'border-[#00474d] bg-[#00474d]/5'
+                      : 'border-[#e1e3e4] bg-white hover:border-[#bec8ca]'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold text-[#191c1d]">Partner xác nhận thủ công</span>
+                  <span className="mt-1 block text-xs text-[#3f484a]">
+                    Khách thanh toán xong, đơn chờ đối tác duyệt trước khi phát hành vé QR.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateForm('requiresManualApproval', false)}
+                  className={`rounded-xl border-2 p-4 text-left transition ${
+                    !form.requiresManualApproval
+                      ? 'border-[#00474d] bg-[#00474d]/5'
+                      : 'border-[#e1e3e4] bg-white hover:border-[#bec8ca]'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold text-[#191c1d]">Xác nhận tự động</span>
+                  <span className="mt-1 block text-xs text-[#3f484a]">
+                    Vé QR được phát hành ngay sau khi thanh toán thành công.
+                  </span>
+                </button>
+              </div>
             </FormField>
             <FormField label="Mô tả">
               <textarea

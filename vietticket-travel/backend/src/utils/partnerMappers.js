@@ -109,6 +109,7 @@ function toAttractionListItem(attraction) {
     publicationStatus: attraction.publicationStatus || (
       attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
     ),
+    requiresManualApproval: Boolean(attraction.requiresManualApproval),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,
@@ -142,6 +143,7 @@ function toAttractionDetail(attraction) {
     publicationStatus: attraction.publicationStatus || (
       attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
     ),
+    requiresManualApproval: Boolean(attraction.requiresManualApproval),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,

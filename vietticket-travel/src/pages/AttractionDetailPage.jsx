@@ -50,6 +50,19 @@ const formatCurrency = (value) => {
   return `${new Intl.NumberFormat('vi-VN').format(amount)} VND`
 }
 
+const getRefundPolicyLabel = (ticket) => {
+  if (ticket?.refundPolicy === 'FREE_CANCELLATION') {
+    return 'Hoàn tiền 100%'
+  }
+  if (ticket?.refundPolicy === 'REFUND_WITH_FEE') {
+    const feeRate = Number(ticket?.refundFeeRate || 0)
+    return feeRate > 0
+      ? `Hoàn một phần, phí hủy ${Math.round(feeRate * 100)}%`
+      : 'Hoàn một phần theo chính sách'
+  }
+  return 'Không hoàn tiền'
+}
+
 const getImageUrl = (image) => (typeof image === 'string' ? image : image?.imageUrl)
 
 const normalizeImages = (attraction) => {
@@ -520,6 +533,7 @@ export default function AttractionDetailPage() {
           attractionTitle={attraction.title}
           isOpen={isBookingOpen}
           onClose={() => setIsBookingOpen(false)}
+          requiresManualApproval={Boolean(attraction.requiresManualApproval)}
           ticketProduct={selectedTicketProduct}
         />
       )}
@@ -542,9 +556,13 @@ function IntroTab({ attraction }) {
       </p>
       <div className="grid grid-cols-1 gap-4 pt-4 sm:grid-cols-2">
         <FeatureBox
-          description="Nhận vé sau khi đặt thành công"
+          description={
+            attraction.requiresManualApproval
+              ? 'Vé QR được phát hành sau khi đối tác xác nhận đơn'
+              : 'Nhận vé QR sau khi thanh toán thành công'
+          }
           icon="verified_user"
-          title="Xác nhận tức thì"
+          title={attraction.requiresManualApproval ? 'Đối tác xác nhận' : 'Xác nhận tức thì'}
         />
         <FeatureBox
           description="Chọn ngày và khung giờ phù hợp"
@@ -921,7 +939,7 @@ function TicketProductCard({ isFeatured, onChoose, onQuantityChange, quantity, t
         <div>
           <h3 className="font-bold text-[#1a1c1e]">{ticket.name}</h3>
           <span className="mt-1 inline-flex rounded-full bg-[#feb700]/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-normal text-[#6b4b00]">
-            {ticket.refundPolicy === 'NON_REFUNDABLE' ? 'Không hoàn tiền' : 'Hoàn tiền 100%'}
+            {getRefundPolicyLabel(ticket)}
           </span>
         </div>
         <div className="text-right">

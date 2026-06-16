@@ -64,6 +64,25 @@ describe('calculateRefundAmount', () => {
     });
   });
 
+  test('uses a default fee when partial refund has no configured rate', () => {
+    expect(calculateRefundAmount(bookingWithPolicy('REFUND_WITH_FEE'))).toEqual({
+      refundAmount: 50000,
+      feeAmount: 50000,
+      policyLabel: 'REFUND_WITH_FEE (50% fee)',
+    });
+  });
+
+  test('supports snapshot refund policy without loading ticket product', () => {
+    expect(calculateRefundAmount({
+      totalAmount: 100000,
+      snapshotRefundPolicy: 'REFUND_WITH_FEE',
+    })).toEqual({
+      refundAmount: 50000,
+      feeAmount: 50000,
+      policyLabel: 'REFUND_WITH_FEE (50% fee)',
+    });
+  });
+
   test('returns zero when the ticket is non-refundable', () => {
     expect(calculateRefundAmount(bookingWithPolicy('NON_REFUNDABLE'))).toEqual({
       refundAmount: 0,

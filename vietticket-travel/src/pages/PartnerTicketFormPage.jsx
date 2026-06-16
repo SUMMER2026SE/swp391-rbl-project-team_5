@@ -18,8 +18,8 @@ const TICKET_TYPES = [
 
 const REFUND_POLICIES = [
   { value: 'NONE',    label: 'Không hoàn tiền',         desc: 'Không hỗ trợ hoàn tiền trong bất kỳ trường hợp nào.', color: 'border-[#ba1a1a] bg-[#ffdad6]/30 text-[#ba1a1a]' },
-  { value: 'PARTIAL', label: 'Hoàn tiền một phần',       desc: 'Hoàn 50% giá vé nếu huỷ trước 24 giờ.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
-  { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% giá vé nếu huỷ trước 48 giờ.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
+  { value: 'PARTIAL', label: 'Hoàn tiền một phần',       desc: 'Có hỗ trợ hoàn tiền một phần theo chính sách của đối tác.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
+  { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% giá vé nếu hủy trước ngày tham quan.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
 ]
 
 function PartnerTicketFormPage() {
