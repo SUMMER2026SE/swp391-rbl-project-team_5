@@ -70,18 +70,6 @@ async function chatWithUser(message, history = []) {
 // 2. Gợi ý địa điểm + combo vé theo budget & số người
 // ------------------------------------------------------------
 
-const RECOMMEND_ATTRACTIONS_PROMPT = `
-Bạn là tư vấn viên du lịch. Chọn TỐI ĐA 3 điểm tham quan phù hợp nhất từ danh sách.
-Trả về JSON ngắn gọn, KHÔNG giải thích thêm:
-{"recommendedAttractions":[{"attractionId":"...","title":"...","reason":"..."}]}
-`.trim();
-
-const RECOMMEND_COMBO_PROMPT = `
-Tư vấn viên vé tham quan. Chọn combo vé tối ưu cho khách trong budget.
-Trả về JSON ngắn gọn, KHÔNG giải thích:
-{"combos":[{"attractionId":"...","attractionTitle":"...","items":[{"ticketId":"...","ticketName":"...","quantity":1,"unitPrice":0,"subtotal":0}],"totalPrice":0}],"overallSummary":"..."}
-`.trim();
-
 /**
  * Gợi ý địa điểm tham quan + combo vé theo budget và số người.
  *
@@ -120,10 +108,8 @@ async function recommendAttractions({ budget, people, city, interests }) {
     reason: `Đánh giá ${a.rating}/5, giá từ ${a.minPrice ? a.minPrice.toLocaleString('vi-VN') : '?'}đ/người`,
   }));
 
-  let provider = 'rule-based';
-
   // Bước 2: tính combo vé bằng code (không dùng LLM để tránh token limit)
-  provider = 'rule-based';
+  const provider = 'rule-based';
   const selectedIds = recommended.map((r) => r.attractionId);
   const selectedCatalog = catalog.filter((a) => selectedIds.includes(a.id));
 
@@ -165,45 +151,6 @@ async function recommendAttractions({ budget, people, city, interests }) {
 // ------------------------------------------------------------
 // 3. Tạo kế hoạch tham quan nhiều ngày
 // ------------------------------------------------------------
-
-const ITINERARY_SYSTEM_PROMPT = `
-Bạn là hướng dẫn viên du lịch chuyên nghiệp của VietTicket Travel.
-Nhiệm vụ: dựa trên DANH SÁCH ĐIỂM THAM QUAN được cung cấp (kèm giờ mở/đóng cửa, giá vé),
-hãy xây dựng một KẾ HOẠCH THAM QUAN chi tiết theo số ngày khách yêu cầu.
-
-QUY TẮC QUAN TRỌNG:
-- CHỈ dùng các điểm tham quan có trong danh sách được cung cấp (dùng đúng attractionId, title).
-- Mỗi ngày nên có 1-3 điểm tham quan, sắp xếp theo thời gian hợp lý (sáng/chiều/tối),
-  lưu ý giờ mở/đóng cửa (openTime/closeTime) của từng điểm.
-- Không lặp lại 1 điểm tham quan ở nhiều ngày trừ khi danh sách quá ít điểm.
-- Ước tính sơ bộ tổng chi phí vé dựa trên minPrice * số người, ghi vào "estimatedCost".
-- Trả lời CHỈ bằng JSON theo đúng schema sau, không thêm text nào khác ngoài JSON:
-
-{
-  "title": "Tên kế hoạch (ví dụ: Khám phá Đà Nẵng 3 ngày 2 đêm)",
-  "days": [
-    {
-      "day": 1,
-      "theme": "chủ đề ngắn cho ngày này",
-      "activities": [
-        {
-          "attractionId": "...",
-          "title": "...",
-          "timeSlot": "Sáng | Chiều | Tối",
-          "suggestedTime": "08:00 - 12:00",
-          "notes": "gợi ý ngắn gọn cho hoạt động này"
-        }
-      ]
-    }
-  ],
-  "estimatedCost": {
-    "perPerson": 0,
-    "total": 0,
-    "note": "ghi chú về cách ước tính (chỉ tính giá vé, chưa gồm ăn uống/di chuyển)"
-  },
-  "tips": ["mẹo du lịch ngắn gọn 1", "mẹo 2"]
-}
-`.trim();
 
 /**
  * Tạo kế hoạch tham quan nhiều ngày.
@@ -288,7 +235,7 @@ async function generateItinerary({ city, days, people = 1, interests }) {
     title = llmData.title || title;
     tips = llmData.tips || [];
     provider = llmProvider;
-  } catch (_) {
+  } catch {
     // fallback: giữ title/tips mặc định nếu LLM lỗi
   }
 

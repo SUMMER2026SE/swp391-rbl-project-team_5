@@ -5,29 +5,27 @@ import { aiChat } from '../services/aiApi.js'
 const WELCOME_MESSAGE =
   'Xin chào! Tôi là trợ lý VietTicket. Tôi có thể giúp bạn về chính sách đặt vé, hoàn vé, thanh toán. Bạn cần hỗ trợ gì?'
 
+function getInitialMessages() {
+  try {
+    const saved = localStorage.getItem('vietticket_chat_history')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load chat history:', error)
+  }
+
+  return [{ id: 'welcome', sender: 'bot', text: WELCOME_MESSAGE }]
+}
+
 function ChatbotWidget() {
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(getInitialMessages)
   const [inputValue, setInputValue] = useState('')
   const [loading, setLoading] = useState(false)
-
-  // Load messages from localStorage on component mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('vietticket_chat_history')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed)
-          return
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load chat history:', error)
-    }
-    // Fallback to welcome message
-    setMessages([{ id: 'welcome', sender: 'bot', text: WELCOME_MESSAGE }])
-  }, [])
 
   // Save messages to localStorage whenever they change
   useEffect(() => {
@@ -83,7 +81,7 @@ function ChatbotWidget() {
           .filter((message) => message.id !== loadingMessage.id)
           .concat({ id: `bot-${Date.now()}`, sender: 'bot', text: reply }),
       )
-    } catch (error) {
+    } catch {
       setMessages((current) => current.filter((message) => message.id !== loadingMessage.id))
       toast.error('Trợ lý tạm thời không khả dụng, vui lòng thử lại sau.')
     } finally {
