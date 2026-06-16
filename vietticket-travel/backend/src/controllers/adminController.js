@@ -327,6 +327,11 @@ async function reviewPartner(req, res, next) {
     const partner = await prisma.partnerProfile.findUnique({ where: { id }, include: { user: true } });
     if (!partner) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Partner profile not found' } });
 
+    // Chỉ xét duyệt hồ sơ đang chờ; tránh REJECTED lặp lại làm hạ role partner đã được duyệt.
+    if (partner.status !== 'PENDING') {
+      return res.status(409).json({ success: false, error: { code: 'INVALID_STATUS', message: 'Chỉ có thể xét duyệt hồ sơ đang ở trạng thái chờ duyệt.' } });
+    }
+
     if (action === 'APPROVED') {
       await prisma.$transaction([
         prisma.partnerProfile.update({ where: { id }, data: { status: 'APPROVED', rejectionReason: null } }),
@@ -367,6 +372,12 @@ async function reviewAttraction(req, res, next) {
 
     const attraction = await prisma.attraction.findUnique({ where: { id } });
     if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
+
+    // Chỉ duyệt địa điểm đang chờ duyệt; không cho phép "duyệt lại" địa điểm đã APPROVED
+    // hoặc đã bị SUSPENDED (vi phạm) — tránh vô hiệu hoá lệnh tạm ẩn.
+    if (!['PENDING', 'DRAFT'].includes(attraction.status)) {
+      return res.status(409).json({ success: false, error: { code: 'INVALID_STATUS', message: 'Chỉ có thể duyệt địa điểm đang chờ duyệt.' } });
+    }
 
     const status = action === 'APPROVED' ? 'APPROVED' : 'REJECTED';
     await prisma.attraction.update({ where: { id }, data: { status, rejectionReason: action === 'REJECTED' ? rejectionReason : null } });

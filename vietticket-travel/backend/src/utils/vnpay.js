@@ -51,7 +51,10 @@ function verifyVnpaySignature(query, secret) {
     .createHmac('sha512', secret)
     .update(Buffer.from(signData, 'utf-8'))
     .digest('hex');
-  return secureHash === signed;
+  // So sánh hằng-thời-gian để tránh rò rỉ theo thời gian khi xác thực chữ ký.
+  const a = Buffer.from(String(secureHash).toLowerCase(), 'utf-8');
+  const b = Buffer.from(signed, 'utf-8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 // --- Hoàn tiền (refund) ---

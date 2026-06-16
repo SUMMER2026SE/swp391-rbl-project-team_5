@@ -244,6 +244,37 @@ async function getDashboard(req, res, next) {
     let occupancyRate = 0;
     let recentBookings = [];
 
+    // Doanh thu tính theo partner và KHÔNG lọc archived để KHỚP với getReports
+    // (tránh lệch số liệu khi partner đã lưu trữ địa điểm/vé từng có đơn đã thanh toán).
+    {
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const revenueBookings = await prisma.booking.findMany({
+        where: {
+          status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
+          payments: { some: { status: 'SUCCESS' } },
+          reservation: { ticketProduct: { attraction: { partnerId } } },
+        },
+        select: {
+          createdAt: true,
+          payments: { where: { status: 'SUCCESS' }, select: { amount: true } },
+          reservation: { select: { quantity: true } },
+        },
+      });
+      revenueBookings.forEach((b) => {
+        const amount = b.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+        const qty = b.reservation ? b.reservation.quantity : 0;
+        totalRevenue += amount;
+        totalTicketsSold += qty;
+        const createdAtDate = b.createdAt ? new Date(b.createdAt) : now;
+        if (createdAtDate >= startOfMonth) {
+          revenueThisMonth += amount;
+          ticketsSoldThisMonth += qty;
+          totalBookingsThisMonth += 1;
+        }
+      });
+    }
+
     if (attractionIds.length > 0) {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -265,42 +296,7 @@ async function getDashboard(req, res, next) {
         const reservationIds = reservations ? reservations.map((r) => r.id) : [];
 
         if (reservationIds.length > 0) {
-          // Chỉ doanh thu đã thu tiền và chưa bị hủy/hoàn mới được ghi nhận.
-          const bookings = await prisma.booking.findMany({
-            where: {
-              reservationId: { in: reservationIds },
-              status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
-              payments: { some: { status: 'SUCCESS' } },
-            },
-            select: {
-              createdAt: true,
-              payments: {
-                where: { status: 'SUCCESS' },
-                select: { amount: true },
-              },
-              reservation: {
-                select: { quantity: true },
-              },
-            },
-          });
-
-          bookings.forEach((b) => {
-            const amount = b.payments.reduce(
-              (sum, payment) => sum + Number(payment.amount),
-              0,
-            );
-            const qty = b.reservation ? b.reservation.quantity : 0;
-            totalRevenue += amount;
-            totalTicketsSold += qty;
-
-            const createdAtDate = b.createdAt ? new Date(b.createdAt) : now;
-            if (createdAtDate >= startOfMonth) {
-              revenueThisMonth += amount;
-              ticketsSoldThisMonth += qty;
-              totalBookingsThisMonth += 1;
-            }
-          });
-
+          // (Doanh thu đã được tính theo partner ở trên — KHỚP getReports.)
           // Đơn chờ duyệt (PENDING_PAYMENT)
           pendingBookings = await prisma.booking.count({
             where: {
@@ -585,6 +581,22 @@ async function getPartnerBookings(req, res, next) {
           : { not: 'PENDING_PAYMENT' },
     };
 
+    // Search đa trường phải nằm trong query DB để count & phân trang khớp với kết quả
+    // (trước đây lọc sau phân trang -> total sai và bỏ sót kết quả ở trang khác).
+    if (search) {
+      where.OR = [
+        { id: { contains: search, mode: 'insensitive' } },
+        { fullName: { contains: search, mode: 'insensitive' } },
+        {
+          reservation: {
+            ticketProduct: {
+              attraction: { title: { contains: search, mode: 'insensitive' } },
+            },
+          },
+        },
+      ];
+    }
+
     const [total, bookings] = await Promise.all([
       prisma.booking.count({ where }),
       prisma.booking.findMany({
@@ -619,8 +631,7 @@ async function getPartnerBookings(req, res, next) {
       }),
     ]);
 
-    // Lọc theo search nếu có (client-side vì search đa trường)
-    let data = bookings.map((b) => {
+    const data = bookings.map((b) => {
       const latestPayment = b.payments?.[0] || null;
       return {
         id: b.id,
@@ -655,14 +666,7 @@ async function getPartnerBookings(req, res, next) {
       };
     });
 
-    if (search) {
-      data = data.filter(
-        (b) =>
-          b.id.toLowerCase().includes(search) ||
-          b.customer.toLowerCase().includes(search) ||
-          b.attraction.toLowerCase().includes(search),
-      );
-    }
+    // (search đã được áp dụng trong query DB ở trên)
 
     return res.json({
       success: true,

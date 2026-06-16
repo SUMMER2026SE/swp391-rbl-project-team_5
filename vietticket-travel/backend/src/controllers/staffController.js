@@ -398,12 +398,27 @@ async function reissueTicket(req, res, next) {
           include: {
             user: { select: { fullName: true, email: true } },
             ticketInstances: { where: { status: 'VALID' } },
+            reservation: {
+              include: {
+                ticketProduct: {
+                  include: { attraction: { select: { id: true } } },
+                },
+              },
+            },
           },
         });
 
         if (!booking) {
           throw httpError(404, 'Không tìm thấy đơn đặt vé.');
         }
+
+        // Chỉ staff được phân công địa điểm của đơn (hoặc admin) mới được cấp lại vé.
+        const attractionId =
+          booking.reservation?.ticketProduct?.attraction?.id
+          || booking.snapshotAttractionId
+          || null;
+        await assertStaffAttractionAccess(tx, req.user, attractionId);
+
         if (!['CONFIRMED', 'COMPLETED'].includes(booking.status)) {
           throw httpError(409, 'Chỉ có thể cấp lại vé cho đơn đã xác nhận.');
         }
@@ -620,8 +635,10 @@ async function checkInTicket(req, res, next) {
         // updateMany với guard status VALID: hai nhân viên quét cùng lúc thì chỉ
         // một request thực sự check-in, request sau thấy count = 0 -> đã dùng.
         const checkedInAt = new Date();
+        // E-ticket hiển thị MỘT mã QR cho cả đơn -> check-in TẤT CẢ vé VALID của booking,
+        // không chỉ instance vừa quét (tránh đơn nhiều vé không bao giờ check-in đủ).
         const updated = await tx.ticketInstance.updateMany({
-          where: { id: instance.id, status: 'VALID' },
+          where: { bookingId: instance.bookingId, status: 'VALID' },
           data: {
             status: 'USED',
             checkedInAt,

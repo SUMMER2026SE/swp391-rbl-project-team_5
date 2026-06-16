@@ -226,6 +226,11 @@ async function updateAttraction(req, res, next) {
         message: 'Địa điểm phải được gửi duyệt và được admin phê duyệt trước khi hoạt động.',
       });
     }
+    // Địa điểm đang bị tạm ẩn (vi phạm) không được tự gỡ trạng thái qua sửa nội dung
+    // (buildAttractionData map status -> DRAFT). Giữ nguyên SUSPENDED; gỡ ẩn là việc của admin.
+    if (existing.status === 'SUSPENDED') {
+      delete data.status;
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.attraction.update({ where: { id: existing.id }, data });

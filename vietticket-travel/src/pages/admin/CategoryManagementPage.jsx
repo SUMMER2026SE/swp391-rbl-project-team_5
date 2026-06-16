@@ -27,7 +27,7 @@ export default function CategoryManagementPage() {
   const loadCategories = async () => {
     try {
       const response = await getCategories()
-      setCategories(response.data)
+      setCategories(response.data || [])
     } catch (error) {
       toast.error(error.message)
     } finally {
@@ -39,7 +39,7 @@ export default function CategoryManagementPage() {
     let active = true
     getCategories()
       .then((response) => {
-        if (active) setCategories(response.data)
+        if (active) setCategories(response.data || [])
       })
       .catch((error) => toast.error(error.message))
       .finally(() => {
@@ -60,7 +60,7 @@ export default function CategoryManagementPage() {
   )
 
   const activeCount = categories.filter((item) => item.isActive).length
-  const attractionCount = categories.reduce((sum, item) => sum + item.attractionCount, 0)
+  const attractionCount = categories.reduce((sum, item) => sum + (item.attractionCount || 0), 0)
 
   const resetForm = () => {
     setEditingId(null)

@@ -29,7 +29,7 @@ const formatDate = (value) => {
 }
 
 const getRemainingTime = (expiresAt, now) =>
-  now === 0 ? 10 * 60 * 1000 : Math.max(0, new Date(expiresAt).getTime() - now)
+  Math.max(0, new Date(expiresAt).getTime() - now)
 
 const formatCountdown = (milliseconds) => {
   const totalSeconds = Math.ceil(milliseconds / 1000)
@@ -43,7 +43,7 @@ function MyTicketsPage() {
   const socket = useSocket()
   const [activeTab, setActiveTab] = useState('all')
   const [bookings, setBookings] = useState([])
-  const [now, setNow] = useState(0)
+  const [now, setNow] = useState(() => Date.now())
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
   const [selectedReviewBooking, setSelectedReviewBooking] = useState(null)

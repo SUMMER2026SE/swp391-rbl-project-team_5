@@ -53,9 +53,9 @@ function AdminUserManagementPage() {
         })
         const data = await apiRequest(`/admin/users?${queryParams.toString()}`)
         if (isMounted) {
-          setUsers(data.users)
-          setTotal(data.pagination.total)
-          setStatsData(data.stats)
+          setUsers(data.users || [])
+          setTotal(data.pagination?.total || 0)
+          setStatsData(data.stats || null)
         }
       } catch (error) {
         toast.error(error.message || 'Không thể tải danh sách người dùng.')
