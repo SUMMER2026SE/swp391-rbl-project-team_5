@@ -24,6 +24,33 @@ const { generateJSON, generateText } = require('./llmClient');
 const { getCatalogSummary } = require('./aiCatalogService');
 const { PLATFORM_POLICY_TEXT } = require('./platformPolicy');
 
+const AI_UNAVAILABLE_REPLY =
+  'Trợ lý AI hiện chưa được cấu hình hoặc đang tạm thời không khả dụng. Bạn vẫn có thể xem chính sách đặt vé, hoàn vé trong phần trợ giúp hoặc tạo Support Ticket để nhân viên hỗ trợ trực tiếp.';
+
+function getCheapestTicket(attraction) {
+  if (!Array.isArray(attraction?.tickets) || attraction.tickets.length === 0) {
+    return null;
+  }
+
+  return attraction.tickets.reduce(
+    (min, ticket) => (Number(ticket.price) < Number(min.price) ? ticket : min),
+    attraction.tickets[0],
+  );
+}
+
+function estimateAttractionGroupCost(attraction, people) {
+  const cheapest = getCheapestTicket(attraction);
+  return cheapest ? Number(cheapest.price) * people : Number.POSITIVE_INFINITY;
+}
+
+function takeNextAffordableAttraction(attractions, people, remainingBudget) {
+  const index = attractions.findIndex((attraction) =>
+    estimateAttractionGroupCost(attraction, people) <= remainingBudget
+  );
+  if (index === -1) return null;
+  return attractions.splice(index, 1)[0];
+}
+
 const CHATBOT_SYSTEM_PROMPT = `
 Bạn là trợ lý ảo của VietTicket Travel — nền tảng đặt vé tham quan trực tuyến tại Việt Nam.
 Nhiệm vụ: tư vấn khách hàng về dịch vụ, chính sách đặt vé/hoàn vé/thanh toán, và hỗ trợ chung.
@@ -46,9 +73,15 @@ async function chatWithUser(message, history = []) {
     throw new Error('Nội dung tin nhắn không được để trống');
   }
 
-  const trimmedHistory = history.slice(-10);
+  const trimmedHistory = history
+    .filter((item) => item && ['user', 'assistant'].includes(item.role))
+    .slice(-10);
   const historyText = trimmedHistory
-    .map((h) => `${h.role === 'user' ? 'Khách' : 'Trợ lý'}: ${h.content}`)
+    .map((h) => {
+      const content = String(h.content || h.message || h.text || '').trim();
+      return content ? `${h.role === 'user' ? 'Khách' : 'Trợ lý'}: ${content}` : '';
+    })
+    .filter(Boolean)
     .join('\n');
 
   const userPrompt = [
@@ -58,12 +91,17 @@ async function chatWithUser(message, history = []) {
     .filter(Boolean)
     .join('\n');
 
-  const { text, provider } = await generateText(CHATBOT_SYSTEM_PROMPT, userPrompt, {
-    temperature: 0.5,
-    maxOutputTokens: 1024,
-  });
+  try {
+    const { text, provider } = await generateText(CHATBOT_SYSTEM_PROMPT, userPrompt, {
+      temperature: 0.5,
+      maxOutputTokens: 1024,
+    });
 
-  return { reply: text.trim(), provider };
+    return { reply: text.trim(), provider };
+  } catch (error) {
+    console.error('[aiAssistant] Chat provider unavailable:', error.message);
+    return { reply: AI_UNAVAILABLE_REPLY, provider: 'fallback' };
+  }
 }
 
 // ------------------------------------------------------------
@@ -95,48 +133,50 @@ async function recommendAttractions({ budget, people, city, interests }) {
 
   // Bước 1: chọn địa điểm bằng rule-based scoring (không dùng LLM để tránh token limit)
   const scored = catalog.map((a) => {
+    const cheapestTicket = getCheapestTicket(a);
+    const groupPrice = cheapestTicket ? cheapestTicket.price * people : null;
     let score = (a.rating || 0) * 10 + (a.totalReviews || 0) * 0.01;
-    if (a.minPrice && a.minPrice * people <= budget) score += 20;
-    return { ...a, score };
+    if (groupPrice && groupPrice <= budget) score += 20;
+    return { ...a, cheapestTicket, groupPrice, score };
   });
   scored.sort((a, b) => b.score - a.score);
-  const top3 = scored.slice(0, 3);
 
-  const recommended = top3.map((a) => ({
+  const provider = 'rule-based';
+  const selected = [];
+  let remainingBudget = budget;
+
+  for (const attraction of scored) {
+    if (selected.length >= 3) break;
+    if (!attraction.cheapestTicket || !attraction.groupPrice) continue;
+    if (attraction.groupPrice > remainingBudget) continue;
+
+    selected.push(attraction);
+    remainingBudget -= attraction.groupPrice;
+  }
+
+  const recommended = selected.map((a) => ({
     attractionId: a.id,
     title: a.title,
-    reason: `Đánh giá ${a.rating}/5, giá từ ${a.minPrice ? a.minPrice.toLocaleString('vi-VN') : '?'}đ/người`,
+    reason: `Đánh giá ${a.rating || 0}/5, giá từ ${a.cheapestTicket.price.toLocaleString('vi-VN')}đ/người`,
   }));
 
-  // Bước 2: tính combo vé bằng code (không dùng LLM để tránh token limit)
-  const provider = 'rule-based';
-  const selectedIds = recommended.map((r) => r.attractionId);
-  const selectedCatalog = catalog.filter((a) => selectedIds.includes(a.id));
-
-  const combos = selectedCatalog
-    .filter((a) => a.tickets && a.tickets.length > 0)
-    .map((a) => {
-      // Chọn vé rẻ nhất có sẵn
-      const cheapest = a.tickets.reduce((min, t) => t.price < min.price ? t : min, a.tickets[0]);
-      const quantity = people;
-      const subtotal = cheapest.price * quantity;
-      return {
-        attractionId: a.id,
-        attractionTitle: a.title,
-        items: [{
-          ticketId: cheapest.id,
-          ticketName: cheapest.name,
-          quantity,
-          unitPrice: cheapest.price,
-          subtotal,
-        }],
-        totalPrice: subtotal,
-      };
-    })
-    .filter((c) => c.totalPrice <= budget); // chỉ giữ combo trong budget
+  const combos = selected.map((a) => ({
+    attractionId: a.id,
+    attractionTitle: a.title,
+    items: [{
+      ticketId: a.cheapestTicket.id,
+      ticketName: a.cheapestTicket.name,
+      quantity: people,
+      unitPrice: a.cheapestTicket.price,
+      subtotal: a.groupPrice,
+    }],
+    totalPrice: a.groupPrice,
+  }));
 
   const grandTotal = combos.reduce((sum, c) => sum + c.totalPrice, 0);
-  const overallSummary = `Đề xuất ${combos.length} điểm tham quan với tổng chi phí vé ước tính ${grandTotal.toLocaleString('vi-VN')}đ cho ${people} người (ngân sách ${budget.toLocaleString('vi-VN')}đ).`;
+  const overallSummary = combos.length > 0
+    ? `Đề xuất ${combos.length} điểm tham quan với tổng chi phí vé ước tính ${grandTotal.toLocaleString('vi-VN')}đ cho ${people} người, trong ngân sách ${budget.toLocaleString('vi-VN')}đ.`
+    : `Chưa tìm thấy combo vé phù hợp trong ngân sách ${budget.toLocaleString('vi-VN')}đ cho ${people} người. Bạn có thể tăng ngân sách hoặc thử khu vực khác.`;
 
   return {
     data: {
@@ -162,7 +202,7 @@ async function recommendAttractions({ budget, people, city, interests }) {
  * @param {string} [params.interests] - Sở thích/loại hình tham quan ưa thích.
  * @returns {Promise<{ data: object, provider: string }>}
  */
-async function generateItinerary({ city, days, people = 1, interests }) {
+async function generateItinerary({ city, days, budget, people = 1, interests }) {
   if (!city || !city.trim()) throw new Error('Vui lòng cung cấp khu vực/thành phố (city)');
   if (!days || days <= 0) throw new Error('Vui lòng cung cấp số ngày (days) hợp lệ');
 
@@ -186,11 +226,18 @@ async function generateItinerary({ city, days, people = 1, interests }) {
   const times = ['08:00 - 11:30', '13:00 - 17:00'];
   const available = [...catalog];
   const dayPlans = [];
+  const budgetLimit = Number(budget);
+  let remainingBudget = Number.isFinite(budgetLimit) && budgetLimit > 0
+    ? budgetLimit
+    : Number.POSITIVE_INFINITY;
 
   for (let d = 1; d <= days; d++) {
     const activities = [];
     for (let s = 0; s < maxPerDay && available.length > 0; s++) {
-      const attraction = available.shift();
+      const attraction = takeNextAffordableAttraction(available, people, remainingBudget);
+      if (!attraction) break;
+      const cost = estimateAttractionGroupCost(attraction, people);
+      remainingBudget -= cost;
       activities.push({
         attractionId: attraction.id,
         title: attraction.title,
@@ -215,7 +262,9 @@ async function generateItinerary({ city, days, people = 1, interests }) {
   const estimatedCost = {
     perPerson: totalCostPerPerson,
     total: totalCostPerPerson * people,
-    note: 'Chỉ tính giá vé tham quan, chưa gồm ăn uống và di chuyển',
+    note: Number.isFinite(budgetLimit) && budgetLimit > 0
+      ? `Chỉ tính giá vé tham quan, chưa gồm ăn uống và di chuyển. Ngân sách dự kiến: ${budgetLimit.toLocaleString('vi-VN')}đ.`
+      : 'Chỉ tính giá vé tham quan, chưa gồm ăn uống và di chuyển',
   };
 
   // Dùng LLM chỉ để generate title + tips (output ngắn, ít token)

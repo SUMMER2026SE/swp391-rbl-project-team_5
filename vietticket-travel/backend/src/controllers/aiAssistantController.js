@@ -87,13 +87,14 @@ async function recommend(req, res, next) {
 
 /**
  * POST /api/ai/itinerary
- * Body: { city: string, days: number, people?: number, interests?: string }
+ * Body: { city: string, days: number, people?: number, budget?: number, interests?: string }
  */
 async function itinerary(req, res, next) {
   try {
-    const { city, days, people, interests } = req.body || {};
+    const { city, days, people, budget, interests } = req.body || {};
 
     const daysNum = Number(days);
+    const budgetNum = budget == null || budget === '' ? undefined : Number(budget);
 
     if (!city || typeof city !== 'string') {
       return res.status(400).json({
@@ -108,10 +109,18 @@ async function itinerary(req, res, next) {
       });
     }
 
+    if (budgetNum !== undefined && (!Number.isFinite(budgetNum) || budgetNum <= 0)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thiếu hoặc sai trường "budget" (số tiền, VND).',
+      });
+    }
+
     const result = await generateItinerary({
       city,
       days: daysNum,
       people: people ? Number(people) : 1,
+      budget: budgetNum,
       interests: interests ? String(interests) : undefined,
     });
 

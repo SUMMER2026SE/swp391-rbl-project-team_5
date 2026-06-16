@@ -45,7 +45,7 @@ function ChatbotWidget() {
         .slice(-20)
         .map((message) => ({
           role: message.sender === 'user' ? 'user' : 'assistant',
-          message: message.text,
+          content: message.text,
         })),
     [messages],
   )
