@@ -24,6 +24,14 @@ function parsePositiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed >= 1 ? parsed : fallback;
 }
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    return ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+  return Boolean(value);
+}
+
 // Tìm điểm tham quan và xác minh thuộc về đối tác hiện tại
 async function findOwnedAttraction(attractionId, partnerId, include = attractionInclude) {
   const attraction = await prisma.attraction.findUnique({
@@ -135,6 +143,9 @@ function buildAttractionData(body) {
   if (body.lng !== undefined) {
     data.longitude = body.lng === '' || body.lng == null ? null : Number(body.lng);
   }
+  if (body.requiresManualApproval !== undefined) {
+    data.requiresManualApproval = parseBoolean(body.requiresManualApproval);
+  }
   if (body.status !== undefined) data.status = attractionStatusFromClient(body.status);
   return data;
 }
@@ -238,6 +249,11 @@ async function updateAttraction(req, res, next) {
     }
 
     const data = buildAttractionData(req.body);
+    const operationalData = {};
+    if (data.requiresManualApproval !== undefined) {
+      operationalData.requiresManualApproval = data.requiresManualApproval;
+      delete data.requiresManualApproval;
+    }
 
     if (hasPublishedVersion(existing)) {
       let cat = null;
@@ -258,6 +274,7 @@ async function updateAttraction(req, res, next) {
       await prisma.attraction.update({
         where: { id: existing.id },
         data: {
+          ...operationalData,
           draftData: merged,
           status: 'DRAFT',
           rejectionReason: null,
@@ -268,7 +285,7 @@ async function updateAttraction(req, res, next) {
       data.rejectionReason = null;
 
       await prisma.$transaction(async (tx) => {
-        await tx.attraction.update({ where: { id: existing.id }, data });
+        await tx.attraction.update({ where: { id: existing.id }, data: { ...data, ...operationalData } });
         if (req.body.category !== undefined) {
           await setCategory(tx, existing.id, req.body.category);
         }
@@ -771,6 +788,7 @@ async function getAttractionDetail(req, res, next) {
       averageRating: attraction.averageRating,
       totalReviews: attraction.totalReviews,
       createdAt: attraction.createdAt,
+      requiresManualApproval: attraction.requiresManualApproval,
     };
 
     return res.status(200).json({ success: true, data: result });

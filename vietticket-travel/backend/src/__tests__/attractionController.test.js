@@ -57,6 +57,15 @@ describe('searchAttractions', () => {
 
     await searchAttractions(req, res, next);
 
+    expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: 'APPROVED',
+          publicationStatus: 'ACTIVE',
+          archivedAt: null,
+        }),
+      }),
+    );
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
   });

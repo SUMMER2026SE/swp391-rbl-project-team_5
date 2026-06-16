@@ -53,6 +53,7 @@ const TICKET_TYPE_META = {
 export default function BookingModal({
   isOpen,
   onClose,
+  requiresManualApproval = false,
   ticketProduct,
   attractionId,
 }) {
@@ -93,11 +94,18 @@ export default function BookingModal({
     if (policy === 'FREE_CANCELLATION') return 'Hoàn tiền 100% nếu hủy trước ngày tham quan.'
     if (policy === 'REFUND_WITH_FEE') {
       const rate = Number(ticketProduct?.refundFeeRate || 0)
-      return `Hoàn tiền trước ngày tham quan, phí hủy ${Math.round(rate * 100)}%.`
+      if (rate > 0) {
+        return `Hoàn tiền trước ngày tham quan, phí hủy ${Math.round(rate * 100)}%.`
+      }
+      return 'Có hỗ trợ hoàn tiền một phần theo chính sách của đối tác.'
     }
     if (policy === 'NON_REFUNDABLE') return 'Vé không hỗ trợ hoàn / hủy sau khi thanh toán.'
     return null
   })()
+
+  const confirmationPolicyText = requiresManualApproval
+    ? 'Sau khi thanh toán, đơn sẽ chờ đối tác xác nhận trước khi phát hành vé QR.'
+    : 'Vé QR được phát hành tự động sau khi thanh toán thành công.'
 
   const renderCalendarCells = () => {
     const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay()
@@ -483,6 +491,13 @@ export default function BookingModal({
                 {refundPolicyText}
               </div>
             )}
+
+            <div className="mb-4 flex items-start gap-2 rounded-2xl bg-[#e0f4f5] px-4 py-3 text-xs font-semibold text-[#00474d]">
+              <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px]" aria-hidden="true">
+                verified
+              </span>
+              {confirmationPolicyText}
+            </div>
 
             {errorMessage && (
               <div className="mb-4 flex items-start gap-2 rounded-2xl border border-[#ba1a1a]/20 bg-[#ffedea] px-4 py-3 text-sm font-semibold text-[#ba1a1a]">

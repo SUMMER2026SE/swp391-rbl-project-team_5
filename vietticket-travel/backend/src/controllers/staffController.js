@@ -654,11 +654,12 @@ async function checkInTicket(req, res, next) {
           req,
           actorId: req.user.id,
           action: 'TICKET_CHECKED_IN',
-          entityType: 'TicketInstance',
-          entityId: instance.id,
+          entityType: 'Booking',
+          entityId: instance.bookingId,
           metadata: {
             bookingId: instance.bookingId,
             attractionId,
+            checkedInCount: updated.count,
           },
         });
 

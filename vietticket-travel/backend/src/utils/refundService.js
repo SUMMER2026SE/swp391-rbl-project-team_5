@@ -2,6 +2,7 @@
 
 // Múi giờ nghiệp vụ của hệ thống (Việt Nam, UTC+7).
 const VN_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
+const DEFAULT_REFUND_WITH_FEE_RATE = 0.5;
 
 /**
  * Ngày hiện tại theo giờ Việt Nam ở dạng 'YYYY-MM-DD'.
@@ -45,7 +46,11 @@ function calculateRefundAmount(booking) {
   }
 
   const policy = snapshotPolicy || ticketProduct.refundPolicy;
-  const feeRate = Number(snapshotFeeRate ?? ticketProduct.refundFeeRate ?? 0);
+  let rawFeeRate = Number(snapshotFeeRate ?? ticketProduct?.refundFeeRate ?? 0);
+  if (!Number.isFinite(rawFeeRate)) rawFeeRate = 0;
+  const feeRate = policy === 'REFUND_WITH_FEE' && rawFeeRate <= 0
+    ? DEFAULT_REFUND_WITH_FEE_RATE
+    : Math.min(Math.max(rawFeeRate, 0), 1);
 
   if (policy === 'FREE_CANCELLATION') {
     return {
@@ -145,6 +150,7 @@ async function releaseInventory(tx, booking) {
 }
 
 module.exports = {
+  DEFAULT_REFUND_WITH_FEE_RATE,
   calculateRefundAmount,
   releaseInventory,
   isBeforeRefundCutoff,

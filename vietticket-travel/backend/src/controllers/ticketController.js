@@ -8,7 +8,7 @@ const {
 } = require('../utils/partnerMappers');
 const { validateTicket } = require('../utils/partnerValidators');
 const { findOwnedAttraction } = require('./attractionController');
-const { todayInVietnam } = require('../utils/refundService');
+const { DEFAULT_REFUND_WITH_FEE_RATE, todayInVietnam } = require('../utils/refundService');
 const {
   getBookableSchedule,
   getProductCapacity,
@@ -57,7 +57,15 @@ function buildTicketData(body) {
   if (body.sellingPrice !== undefined) data.sellingPrice = Number(body.sellingPrice);
   if (body.status !== undefined) data.status = ticketStatusFromClient(body.status);
   if (body.refundPolicy !== undefined) data.refundPolicy = refundPolicyFromClient(body.refundPolicy);
+  if (body.refundFeeRate !== undefined) data.refundFeeRate = Number(body.refundFeeRate);
   return data;
+}
+
+function normalizeRefundFeeRate(policy, value) {
+  if (policy !== 'REFUND_WITH_FEE') return 0;
+  const rate = Number(value);
+  if (!Number.isFinite(rate) || rate <= 0) return DEFAULT_REFUND_WITH_FEE_RATE;
+  return Math.min(rate, 1);
 }
 
 // GET /api/partners/attractions/:id/tickets
@@ -110,6 +118,7 @@ async function createTicket(req, res, next) {
     if (!data.type) data.type = 'ADULT';
     if (!data.status) data.status = 'ACTIVE';
     if (!data.refundPolicy) data.refundPolicy = 'NON_REFUNDABLE';
+    data.refundFeeRate = normalizeRefundFeeRate(data.refundPolicy, data.refundFeeRate);
     if (!data.description) data.description = '';
 
     if (hasPublishedVersion(attraction)) {
@@ -125,7 +134,7 @@ async function createTicket(req, res, next) {
         sellingPrice: data.sellingPrice,
         status: data.status,
         refundPolicy: data.refundPolicy,
-        refundFeeRate: Number(req.body.refundFeeRate || 0),
+        refundFeeRate: data.refundFeeRate,
       };
       tickets.push(newTicket);
       draft.tickets = tickets;
@@ -246,6 +255,14 @@ async function updateTicket(req, res, next) {
         return res.status(400).json({ message: 'Giá bán không được lớn hơn giá gốc.' });
       }
 
+      const nextRefundPolicy = req.body.refundPolicy !== undefined
+        ? refundPolicyFromClient(req.body.refundPolicy)
+        : current.refundPolicy;
+      const nextRefundFeeRate = normalizeRefundFeeRate(
+        nextRefundPolicy,
+        req.body.refundFeeRate !== undefined ? req.body.refundFeeRate : current.refundFeeRate,
+      );
+
       const updatedTicket = {
         ...current,
         name: req.body.name !== undefined ? String(req.body.name).trim() : current.name,
@@ -254,8 +271,8 @@ async function updateTicket(req, res, next) {
         originalPrice: original,
         sellingPrice: selling,
         status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
-        refundPolicy: req.body.refundPolicy !== undefined ? refundPolicyFromClient(req.body.refundPolicy) : current.refundPolicy,
-        refundFeeRate: req.body.refundFeeRate !== undefined ? Number(req.body.refundFeeRate) : current.refundFeeRate,
+        refundPolicy: nextRefundPolicy,
+        refundFeeRate: nextRefundFeeRate,
       };
 
       draft.tickets[ticketIndex] = updatedTicket;
@@ -307,6 +324,14 @@ async function updateTicket(req, res, next) {
         refundFeeRate: Number(existing.refundFeeRate),
       };
 
+      const nextRefundPolicy = req.body.refundPolicy !== undefined
+        ? refundPolicyFromClient(req.body.refundPolicy)
+        : current.refundPolicy;
+      const nextRefundFeeRate = normalizeRefundFeeRate(
+        nextRefundPolicy,
+        req.body.refundFeeRate !== undefined ? req.body.refundFeeRate : current.refundFeeRate,
+      );
+
       const updatedTicket = {
         ...current,
         name: req.body.name !== undefined ? String(req.body.name).trim() : current.name,
@@ -315,8 +340,8 @@ async function updateTicket(req, res, next) {
         originalPrice: original,
         sellingPrice: selling,
         status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
-        refundPolicy: req.body.refundPolicy !== undefined ? refundPolicyFromClient(req.body.refundPolicy) : current.refundPolicy,
-        refundFeeRate: req.body.refundFeeRate !== undefined ? Number(req.body.refundFeeRate) : current.refundFeeRate,
+        refundPolicy: nextRefundPolicy,
+        refundFeeRate: nextRefundFeeRate,
       };
 
       if (idx !== -1) {
@@ -345,9 +370,18 @@ async function updateTicket(req, res, next) {
       });
     }
 
+    const ticketData = buildTicketData(req.body);
+    if (ticketData.refundPolicy !== undefined || ticketData.refundFeeRate !== undefined) {
+      const nextRefundPolicy = ticketData.refundPolicy || existing.refundPolicy;
+      const nextRefundFeeRate = ticketData.refundFeeRate !== undefined
+        ? ticketData.refundFeeRate
+        : existing.refundFeeRate;
+      ticketData.refundFeeRate = normalizeRefundFeeRate(nextRefundPolicy, nextRefundFeeRate);
+    }
+
     const ticket = await prisma.ticketProduct.update({
       where: { id: existing.id },
-      data: buildTicketData(req.body),
+      data: ticketData,
     });
     await refreshAttractionMinPrice(prisma, existing.attractionId);
     await writeAuditLog({
@@ -507,6 +541,11 @@ async function createTicketProduct(req, res, next) {
       const draft = attraction.draftData || buildAttractionSnapshot(attraction);
       const tickets = draft.tickets || [];
       const ticketId = `draft-${randomUUID()}`;
+      const normalizedRefundPolicy = refundPolicy || 'NON_REFUNDABLE';
+      const normalizedRefundFeeRate = normalizeRefundFeeRate(
+        normalizedRefundPolicy,
+        req.body.refundFeeRate,
+      );
       const newTicket = {
         id: ticketId,
         name,
@@ -515,8 +554,8 @@ async function createTicketProduct(req, res, next) {
         originalPrice: Number(originalPrice),
         sellingPrice: Number(sellingPrice),
         status: 'ACTIVE',
-        refundPolicy: refundPolicy || 'NON_REFUNDABLE',
-        refundFeeRate: Number(req.body.refundFeeRate || 0),
+        refundPolicy: normalizedRefundPolicy,
+        refundFeeRate: normalizedRefundFeeRate,
       };
       tickets.push(newTicket);
       draft.tickets = tickets;
@@ -537,6 +576,12 @@ async function createTicketProduct(req, res, next) {
       return res.status(201).json({ success: true, data: { id: ticketId, name, status: 'ACTIVE' } });
     }
 
+    const normalizedRefundPolicy = refundPolicy || 'NON_REFUNDABLE';
+    const normalizedRefundFeeRate = normalizeRefundFeeRate(
+      normalizedRefundPolicy,
+      req.body.refundFeeRate,
+    );
+
     const product = await prisma.ticketProduct.create({
       data: {
         attractionId,
@@ -544,7 +589,8 @@ async function createTicketProduct(req, res, next) {
         description,
         originalPrice,
         sellingPrice,
-        refundPolicy: refundPolicy || 'NON_REFUNDABLE',
+        refundPolicy: normalizedRefundPolicy,
+        refundFeeRate: normalizedRefundFeeRate,
         status: 'ACTIVE',
       },
     });

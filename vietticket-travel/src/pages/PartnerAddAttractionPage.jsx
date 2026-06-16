@@ -41,6 +41,7 @@ function PartnerAddAttractionPage() {
     lat: '',
     lng: '',
     category: '',
+    requiresManualApproval: true,
   })
   const [categories, setCategories] = useState([])
 
@@ -130,7 +131,7 @@ function PartnerAddAttractionPage() {
   }
 
   /* ── Submit ── */
-  const saveAttraction = async ({ submitForReview }) => {
+  const saveAttraction = async ({ goToTickets = false } = {}) => {
     if (!form.name.trim()) {
       toast.error('Vui lòng nhập tên điểm tham quan.')
       setActiveTab(0)
@@ -151,26 +152,6 @@ function PartnerAddAttractionPage() {
       setActiveTab(0)
       return
     }
-    if (submitForReview && form.description.trim().length < 50) {
-      toast.error('Mô tả cần ít nhất 50 ký tự trước khi gửi duyệt.')
-      setActiveTab(0)
-      return
-    }
-    if (submitForReview && (!form.openTime || !form.closeTime || form.openTime >= form.closeTime)) {
-      toast.error('Vui lòng nhập giờ mở cửa và đóng cửa hợp lệ.')
-      setActiveTab(0)
-      return
-    }
-    if (submitForReview && (!form.lat || !form.lng)) {
-      toast.error('Vui lòng bổ sung tọa độ bản đồ trước khi gửi duyệt.')
-      setActiveTab(1)
-      return
-    }
-    if (submitForReview && images.length === 0) {
-      toast.error('Vui lòng tải lên ít nhất một ảnh trước khi gửi duyệt.')
-      setActiveTab(2)
-      return
-    }
     setIsSubmitting(true)
 
     const payload = {
@@ -184,6 +165,7 @@ function PartnerAddAttractionPage() {
       lat: form.lat,
       lng: form.lng,
       category: form.category,
+      requiresManualApproval: form.requiresManualApproval,
     }
 
     try {
@@ -223,13 +205,12 @@ function PartnerAddAttractionPage() {
           await partnerApi.setAttractionPrimaryImage(newId, primaryImageId)
         }
       }
-      if (submitForReview) {
-        await partnerApi.submitAttraction(newId)
-        toast.success('Đã gửi điểm tham quan để admin xét duyệt!')
-      } else {
-        toast.success('Đã lưu điểm tham quan ở trạng thái bản nháp.')
-      }
-      navigate('/partner/attractions')
+      toast.success(
+        goToTickets
+          ? 'Đã lưu bản nháp. Hãy cấu hình gói vé và lịch trước khi gửi duyệt.'
+          : 'Đã lưu điểm tham quan ở trạng thái bản nháp.',
+      )
+      navigate(goToTickets ? `/partner/attractions/${newId}/tickets` : '/partner/attractions')
     } catch (err) {
       toast.error(err.message)
     } finally {
@@ -237,8 +218,8 @@ function PartnerAddAttractionPage() {
     }
   }
 
-  const handlePublish = () => saveAttraction({ submitForReview: true })
-  const handleSaveDraft = () => saveAttraction({ submitForReview: false })
+  const handleContinueSetup = () => saveAttraction({ goToTickets: true })
+  const handleSaveDraft = () => saveAttraction()
 
   const districts = DISTRICTS_MAP[form.province] || []
 
@@ -265,14 +246,14 @@ function PartnerAddAttractionPage() {
             Lưu nháp
           </button>
           <button
-            onClick={handlePublish}
+            onClick={handleContinueSetup}
             disabled={isSubmitting}
             className="px-6 py-2.5 rounded-lg bg-[#00474d] text-white text-sm font-medium hover:bg-[#136870] transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {isSubmitting && (
               <span className="material-symbols-outlined animate-spin text-[18px]">progress_activity</span>
             )}
-            Đăng tải
+            Lưu & cấu hình vé
           </button>
         </div>
       </div>
@@ -338,6 +319,39 @@ function PartnerAddAttractionPage() {
                   <option key={category.id} value={category.name}>{category.name}</option>
                 ))}
               </select>
+            </FormField>
+
+            <FormField label="Chính sách xác nhận đặt vé">
+              <div className="grid gap-3 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => updateForm('requiresManualApproval', true)}
+                  className={`rounded-xl border-2 p-4 text-left transition ${
+                    form.requiresManualApproval
+                      ? 'border-[#00474d] bg-[#00474d]/5'
+                      : 'border-[#e1e3e4] bg-white hover:border-[#bec8ca]'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold text-[#191c1d]">Partner xác nhận thủ công</span>
+                  <span className="mt-1 block text-xs text-[#3f484a]">
+                    Khách thanh toán xong, đơn chờ đối tác duyệt trước khi phát hành vé QR.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateForm('requiresManualApproval', false)}
+                  className={`rounded-xl border-2 p-4 text-left transition ${
+                    !form.requiresManualApproval
+                      ? 'border-[#00474d] bg-[#00474d]/5'
+                      : 'border-[#e1e3e4] bg-white hover:border-[#bec8ca]'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold text-[#191c1d]">Xác nhận tự động</span>
+                  <span className="mt-1 block text-xs text-[#3f484a]">
+                    Vé QR được phát hành ngay sau khi thanh toán thành công.
+                  </span>
+                </button>
+              </div>
             </FormField>
 
             {/* Opening / Closing Time */}
@@ -535,7 +549,13 @@ function PartnerAddAttractionPage() {
               </div>
             )}
 
-            <TabNav onBack={() => setActiveTab(1)} isLast onPublish={handlePublish} isSubmitting={isSubmitting} />
+            <TabNav
+              onBack={() => setActiveTab(1)}
+              isLast
+              onPublish={handleContinueSetup}
+              isSubmitting={isSubmitting}
+              publishLabel="Lưu & cấu hình vé"
+            />
           </section>
         )}
       </div>
@@ -574,7 +594,7 @@ function FormField({ label, required, children }) {
   )
 }
 
-function TabNav({ onBack, onNext, isLast = false, onPublish, isSubmitting = false }) {
+function TabNav({ onBack, onNext, isLast = false, onPublish, isSubmitting = false, publishLabel = 'Đăng tải' }) {
   return (
     <div className="flex justify-between pt-4 border-t border-[#f2f4f5]">
       {onBack ? (
@@ -600,7 +620,7 @@ function TabNav({ onBack, onNext, isLast = false, onPublish, isSubmitting = fals
           ) : (
             <span className="material-symbols-outlined text-[18px]">publish</span>
           )}
-          Đăng tải
+          {publishLabel}
         </button>
       ) : (
         <button
