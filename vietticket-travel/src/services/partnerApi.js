@@ -183,3 +183,38 @@ export function rejectBooking(id, reason) {
     body: { reason },
   })
 }
+
+// ----- Nhân viên (mỗi đối tác tự quản lý nhân viên của mình) -----
+export function listStaff() {
+  return apiRequest('/partners/staff', { method: 'GET' })
+}
+
+export function createStaff(payload) {
+  return apiRequest('/partners/staff', { method: 'POST', body: payload })
+}
+
+export function resendStaffInvite(staffId) {
+  return apiRequest(`/partners/staff/${staffId}/invite`, { method: 'POST' })
+}
+
+export function changeStaffStatus(staffId, status) {
+  return apiRequest(`/partners/staff/${staffId}/status`, {
+    method: 'PATCH',
+    body: { status },
+  })
+}
+
+export function getStaffAssignments(staffId) {
+  return apiRequest(`/partners/staff/${staffId}/assignments`, { method: 'GET' })
+}
+
+export function replaceStaffAssignments(staffId, attractionIds) {
+  return apiRequest(`/partners/staff/${staffId}/assignments`, {
+    method: 'PUT',
+    body: { attractionIds },
+  })
+}
+
+export function removeStaff(staffId) {
+  return apiRequest(`/partners/staff/${staffId}`, { method: 'DELETE' })
+}

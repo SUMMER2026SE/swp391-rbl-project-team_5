@@ -115,6 +115,30 @@ async function sendPasswordResetEmail({ to, token }) {
   });
 }
 
+async function sendStaffInviteEmail({ to, fullName, businessName, token }) {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const link = `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const safeBusiness = escapeHtml(businessName || 'đối tác');
+
+  return sendMail({
+    to,
+    subject: 'Lời mời làm nhân viên trên VietTicket Travel',
+    text:
+      `Xin chào ${fullName || 'bạn'}, ${businessName || 'một đối tác'} đã tạo tài khoản nhân viên cho bạn trên VietTicket Travel. ` +
+      `Hãy đặt mật khẩu để bắt đầu: ${link}`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Bạn được mời làm nhân viên',
+      preview:
+        `Xin chào ${safeName}, <strong>${safeBusiness}</strong> đã tạo tài khoản nhân viên cho bạn trên VietTicket Travel.<br /><br />` +
+        'Hãy đặt mật khẩu để kích hoạt tài khoản và bắt đầu công việc. Liên kết này sẽ hết hạn sau một khoảng thời gian.',
+      buttonText: 'Đặt mật khẩu & kích hoạt',
+      link,
+    }),
+  });
+}
+
 async function sendAccountStatusEmail({ to, fullName, status, reason }) {
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const loginLink = `${frontendUrl}/login`;
@@ -470,6 +494,7 @@ async function sendHoldExpiredEmail({ to, fullName, bookingId, attractionTitle }
 
 module.exports = {
   sendAccountStatusEmail,
+  sendStaffInviteEmail,
   sendPasswordResetEmail,
   sendVerificationEmail,
   sendPartnerReviewEmail,

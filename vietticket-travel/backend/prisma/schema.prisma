@@ -33,6 +33,8 @@ model User {
   isEmailVerified Boolean      @default(false)
   status          UserStatus   @default(ACTIVE)
   tokenVersion    Int          @default(0)
+  // Đối tác chủ quản của nhân viên này. Chỉ set khi role = STAFF.
+  employerPartnerId String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
@@ -42,6 +44,7 @@ model User {
   oauthAccounts           OAuthAccount[]
   authSessions            AuthSession[]
   partnerProfile          PartnerProfile?
+  employer                PartnerProfile?             @relation("PartnerStaff", fields: [employerPartnerId], references: [id], onDelete: Cascade)
   favoriteAttractions     FavoriteAttraction[]
   reviews                 Review[]
   reservations            Reservation[]
@@ -51,6 +54,8 @@ model User {
   createdStaffAssignments StaffAttractionAssignment[] @relation("StaffAssignmentsCreatedBy")
   checkedInTickets        TicketInstance[]            @relation("TicketCheckedInBy")
   auditLogs               AuditLog[]
+
+  @@index([employerPartnerId])
 }
 
 model UserProfile {
@@ -247,8 +252,9 @@ model PartnerProfile {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  attractions Attraction[]
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attractions  Attraction[]
+  staffMembers User[]       @relation("PartnerStaff")
 }
 
 model StaffAttractionAssignment {

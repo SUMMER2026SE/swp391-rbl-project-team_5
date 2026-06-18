@@ -812,15 +812,21 @@ async function replaceStaffAssignments(req, res, next) {
     const result = await prisma.$transaction(async (tx) => {
       const staff = await tx.user.findUnique({
         where: { id: req.params.staffId },
-        select: { id: true, role: true },
+        select: { id: true, role: true, employerPartnerId: true },
       });
       if (!staff || staff.role !== 'STAFF') {
         throw httpError(404, 'Không tìm thấy tài khoản nhân viên.');
+      }
+      // Nhân viên phải thuộc một đối tác trước khi được phân công địa điểm.
+      if (!staff.employerPartnerId) {
+        throw httpError(400, 'Nhân viên này chưa thuộc đối tác nào.');
       }
 
       const attractionCount = await tx.attraction.count({
         where: {
           id: { in: attractionIds },
+          // Mỗi nhân viên chỉ được phân công địa điểm của đối tác chủ quản.
+          partnerId: staff.employerPartnerId,
           archivedAt: null,
           publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
@@ -828,7 +834,7 @@ async function replaceStaffAssignments(req, res, next) {
         },
       });
       if (attractionCount !== attractionIds.length) {
-        throw httpError(400, 'Có địa điểm không tồn tại hoặc chưa được phê duyệt.');
+        throw httpError(400, 'Có địa điểm không thuộc đối tác của nhân viên hoặc chưa được phê duyệt.');
       }
 
       await tx.staffAttractionAssignment.updateMany({

@@ -7,6 +7,7 @@ const {
   validateUploadedFiles,
 } = require('../middleware/uploadMiddleware');
 const partnerController = require('../controllers/partnerController');
+const partnerStaffController = require('../controllers/partnerStaffController');
 const attractionController = require('../controllers/attractionController');
 const ticketController = require('../controllers/ticketController');
 const scheduleController = require('../controllers/scheduleController');
@@ -70,6 +71,15 @@ router.patch('/bookings/:id/reject', restrictTo('PARTNER'), partnerController.re
 // Đánh giá (phản hồi & thống kê phía đối tác)
 router.get('/reviews', restrictTo('PARTNER'), reviewController.listPartnerReviews);
 router.get('/reviews/stats', restrictTo('PARTNER'), reviewController.getPartnerReviewStats);
+
+// Nhân viên (mỗi đối tác tự quản lý nhân viên của mình)
+router.get('/staff', restrictTo('PARTNER'), partnerStaffController.listStaff);
+router.post('/staff', restrictTo('PARTNER'), partnerStaffController.createStaff);
+router.post('/staff/:staffId/invite', restrictTo('PARTNER'), partnerStaffController.resendStaffInvite);
+router.patch('/staff/:staffId/status', restrictTo('PARTNER'), partnerStaffController.changeStaffStatus);
+router.get('/staff/:staffId/assignments', restrictTo('PARTNER'), partnerStaffController.getStaffAssignments);
+router.put('/staff/:staffId/assignments', restrictTo('PARTNER'), partnerStaffController.replaceStaffAssignments);
+router.delete('/staff/:staffId', restrictTo('PARTNER'), partnerStaffController.removeStaff);
 
 module.exports = router;
 

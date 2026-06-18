@@ -147,6 +147,12 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
   },
+  passwordResetToken: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn(),
+    deleteMany: jest.fn(),
+  },
   scheduledJobLock: {
     create: jest.fn(),
     update: jest.fn(),
