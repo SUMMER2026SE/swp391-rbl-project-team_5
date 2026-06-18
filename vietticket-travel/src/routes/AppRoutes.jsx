@@ -17,6 +17,7 @@ const MyTicketsPage = lazy(() => import('../pages/MyTicketsPage.jsx'))
 const PartnerAddAttractionPage = lazy(() => import('../pages/PartnerAddAttractionPage.jsx'))
 const PartnerAttractionsPage = lazy(() => import('../pages/PartnerAttractionsPage.jsx'))
 const PartnerBookingsPage = lazy(() => import('../pages/PartnerBookingsPage.jsx'))
+const PartnerStaffPage = lazy(() => import('../pages/PartnerStaffPage.jsx'))
 const PartnerDashboardPage = lazy(() => import('../pages/PartnerDashboardPage.jsx'))
 const PartnerEditAttractionPage = lazy(() => import('../pages/PartnerEditAttractionPage.jsx'))
 const PartnerKycPage = lazy(() => import('../pages/PartnerKycPage.jsx'))
@@ -86,6 +87,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerBookingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/staff"
+        element={
+          <ProtectedRoute allowedRoles={['PARTNER']}>
+            <PartnerStaffPage />
           </ProtectedRoute>
         }
       />
