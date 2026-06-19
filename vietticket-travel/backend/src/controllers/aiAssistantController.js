@@ -15,6 +15,41 @@ const {
   generateItinerary,
 } = require('../services/aiAssistantService');
 
+// Cận trên cho số ngày tạo kế hoạch (khớp giới hạn 1-7 ở frontend,
+// nới rộng đôi chút cho chuyến dài; chặn lạm dụng API gọi thẳng).
+const MAX_ITINERARY_DAYS = 14;
+
+/**
+ * Tách số người lớn/trẻ em từ body, có suy ra tổng số người.
+ * Trả về { adults, children, total } hoặc null nếu không hợp lệ.
+ */
+function parseParty({ people, adults, children }) {
+  const toCount = (v) => {
+    if (v == null || v === '') return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : NaN;
+  };
+
+  const adultsNum = toCount(adults);
+  const childrenNum = toCount(children);
+  const peopleNum = toCount(people);
+
+  if (Number.isNaN(adultsNum) || Number.isNaN(childrenNum) || Number.isNaN(peopleNum)) {
+    return null;
+  }
+
+  const splitTotal = (adultsNum || 0) + (childrenNum || 0);
+  const total = splitTotal > 0 ? splitTotal : (peopleNum || 0);
+  if (total <= 0) return null;
+
+  return {
+    adults: adultsNum,
+    children: childrenNum,
+    people: peopleNum,
+    total,
+  };
+}
+
 /**
  * POST /api/ai/chat
  * Body: { message: string, history?: Array<{ role, content }> }
@@ -46,33 +81,37 @@ async function chat(req, res, next) {
 
 /**
  * POST /api/ai/recommend
- * Body: { budget: number, people: number, city?: string, interests?: string }
+ * Body: { budget, people?|adults?|children?, city?, interests?, priority?, companion? }
  */
 async function recommend(req, res, next) {
   try {
-    const { budget, people, city, interests } = req.body || {};
+    const { budget, people, adults, children, city, interests, priority, companion } = req.body || {};
 
     const budgetNum = Number(budget);
-    const peopleNum = Number(people);
-
     if (!budgetNum || budgetNum <= 0) {
       return res.status(400).json({
         success: false,
         message: 'Thiếu hoặc sai trường "budget" (số tiền, VND).',
       });
     }
-    if (!peopleNum || peopleNum <= 0) {
+
+    const party = parseParty({ people, adults, children });
+    if (!party) {
       return res.status(400).json({
         success: false,
-        message: 'Thiếu hoặc sai trường "people" (số người).',
+        message: 'Thiếu hoặc sai số người (people hoặc adults/children).',
       });
     }
 
     const result = await recommendAttractions({
       budget: budgetNum,
-      people: peopleNum,
+      adults: party.adults,
+      children: party.children,
+      people: party.people,
       city: city ? String(city) : undefined,
       interests: interests ? String(interests) : undefined,
+      priority: priority ? String(priority) : undefined,
+      companion: companion ? String(companion) : undefined,
     });
 
     return res.status(200).json({
@@ -87,11 +126,11 @@ async function recommend(req, res, next) {
 
 /**
  * POST /api/ai/itinerary
- * Body: { city: string, days: number, people?: number, budget?: number, interests?: string }
+ * Body: { city, days, people?|adults?|children?, budget?, interests?, pace?, priority?, companion? }
  */
 async function itinerary(req, res, next) {
   try {
-    const { city, days, people, budget, interests } = req.body || {};
+    const { city, days, people, adults, children, budget, interests, pace, priority, companion } = req.body || {};
 
     const daysNum = Number(days);
     const budgetNum = budget == null || budget === '' ? undefined : Number(budget);
@@ -108,6 +147,12 @@ async function itinerary(req, res, next) {
         message: 'Thiếu hoặc sai trường "days" (số ngày).',
       });
     }
+    if (!Number.isInteger(daysNum) || daysNum > MAX_ITINERARY_DAYS) {
+      return res.status(400).json({
+        success: false,
+        message: `Số ngày phải là số nguyên từ 1 đến ${MAX_ITINERARY_DAYS}.`,
+      });
+    }
 
     if (budgetNum !== undefined && (!Number.isFinite(budgetNum) || budgetNum <= 0)) {
       return res.status(400).json({
@@ -116,12 +161,19 @@ async function itinerary(req, res, next) {
       });
     }
 
+    const party = parseParty({ people, adults, children }) || { adults: 1, children: 0, people: 1 };
+
     const result = await generateItinerary({
       city,
       days: daysNum,
-      people: people ? Number(people) : 1,
+      adults: party.adults,
+      children: party.children,
+      people: party.people,
       budget: budgetNum,
       interests: interests ? String(interests) : undefined,
+      pace: pace ? String(pace) : undefined,
+      priority: priority ? String(priority) : undefined,
+      companion: companion ? String(companion) : undefined,
     });
 
     return res.status(200).json({

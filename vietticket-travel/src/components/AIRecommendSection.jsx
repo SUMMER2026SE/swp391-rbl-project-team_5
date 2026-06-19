@@ -2,6 +2,12 @@ import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { aiRecommend } from '../services/aiApi.js'
+import {
+  CATEGORY_OPTIONS,
+  COMPANION_OPTIONS,
+  PRIORITY_OPTIONS,
+  interestsToParam,
+} from '../constants/travelCriteria.js'
 
 function formatCurrency(value) {
   const amount = Number(value)
@@ -11,22 +17,40 @@ function formatCurrency(value) {
   return `${new Intl.NumberFormat('vi-VN').format(amount)} VND`
 }
 
+const inputClass =
+  'w-full rounded-2xl border border-[#cbd5db] bg-[#f8fafb] px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#00474d] focus:ring-2 focus:ring-[#00474d]/20'
+
 function AIRecommendSection() {
   const navigate = useNavigate()
   const [budget, setBudget] = useState('')
-  const [people, setPeople] = useState('')
+  const [adults, setAdults] = useState(2)
+  const [children, setChildren] = useState(0)
   const [city, setCity] = useState('')
+  const [categories, setCategories] = useState([])
+  const [priority, setPriority] = useState('balanced')
+  const [companion, setCompanion] = useState('solo')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
+
+  const toggleCategory = useCallback((value) => {
+    setCategories((prev) =>
+      prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value],
+    )
+  }, [])
 
   const handleSubmit = useCallback(
     async (event) => {
       event.preventDefault()
       const budgetValue = Number(budget)
-      const peopleValue = Number(people)
+      const adultsValue = Number(adults) || 0
+      const childrenValue = Number(children) || 0
 
-      if (!budgetValue || budgetValue <= 0 || !peopleValue || peopleValue <= 0) {
-        toast.warning('Vui lòng nhập ngân sách và số người hợp lệ.')
+      if (!budgetValue || budgetValue <= 0) {
+        toast.warning('Vui lòng nhập ngân sách hợp lệ.')
+        return
+      }
+      if (adultsValue + childrenValue <= 0) {
+        toast.warning('Vui lòng nhập số người (ít nhất 1 người).')
         return
       }
 
@@ -36,8 +60,12 @@ function AIRecommendSection() {
       try {
         const response = await aiRecommend({
           budget: budgetValue,
-          people: peopleValue,
+          adults: adultsValue,
+          children: childrenValue,
           city: city.trim() || undefined,
+          interests: interestsToParam(categories),
+          priority,
+          companion,
         })
         setResult(response.data || null)
       } catch (error) {
@@ -47,64 +75,125 @@ function AIRecommendSection() {
         setLoading(false)
       }
     },
-    [budget, city, people],
+    [budget, adults, children, city, categories, priority, companion],
   )
 
   return (
     <section className="my-12 rounded-[28px] border border-[#e2e8f0] bg-white p-6 shadow-[0_18px_60px_rgba(0,71,77,0.06)]">
       <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-[#00474d]">✨ Gợi ý địa điểm theo ngân sách của bạn</h2>
+          <h2 className="text-2xl font-bold text-[#00474d]">✨ Gợi ý địa điểm theo tiêu chí của bạn</h2>
           <p className="mt-2 max-w-2xl text-sm text-[#475569]">
-            Nhập ngân sách và số người, chúng tôi sẽ đề xuất hành trình, combo vé phù hợp với bạn.
+            Cho chúng tôi biết ngân sách, số người, sở thích và phong cách đi — chúng tôi sẽ đề xuất địa điểm & combo vé hợp gu nhất.
           </p>
         </div>
       </div>
 
-      <form className="mb-8 grid gap-4 md:grid-cols-[1.5fr_1fr_1fr_auto]" onSubmit={handleSubmit}>
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-[#334155]">Ngân sách (VND)</span>
-          <input
-            className="w-full rounded-2xl border border-[#cbd5db] bg-[#f8fafb] px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#00474d] focus:ring-2 focus:ring-[#00474d]/20"
-            inputMode="numeric"
-            min="0"
-            onChange={(event) => setBudget(event.target.value)}
-            placeholder="Nhập ngân sách (VND)"
-            type="number"
-            value={budget}
-          />
-        </label>
+      <form className="mb-8 space-y-5" onSubmit={handleSubmit}>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[#334155]">Ngân sách (VND)</span>
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              min="0"
+              onChange={(event) => setBudget(event.target.value)}
+              placeholder="Ví dụ: 2000000"
+              type="number"
+              value={budget}
+            />
+          </label>
 
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-[#334155]">Số người</span>
-          <input
-            className="w-full rounded-2xl border border-[#cbd5db] bg-[#f8fafb] px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#00474d] focus:ring-2 focus:ring-[#00474d]/20"
-            min="1"
-            onChange={(event) => setPeople(event.target.value)}
-            placeholder="Số người"
-            type="number"
-            value={people}
-          />
-        </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[#334155]">Người lớn</span>
+            <input
+              className={inputClass}
+              min="0"
+              onChange={(event) => setAdults(Number(event.target.value))}
+              placeholder="Số người lớn"
+              type="number"
+              value={adults}
+            />
+          </label>
 
-        <label className="block">
-          <span className="mb-2 block text-sm font-semibold text-[#334155]">Thành phố</span>
-          <input
-            className="w-full rounded-2xl border border-[#cbd5db] bg-[#f8fafb] px-4 py-3 text-sm text-[#0f172a] outline-none transition focus:border-[#00474d] focus:ring-2 focus:ring-[#00474d]/20"
-            onChange={(event) => setCity(event.target.value)}
-            placeholder="Thành phố (tuỳ chọn)"
-            type="text"
-            value={city}
-          />
-        </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[#334155]">Trẻ em</span>
+            <input
+              className={inputClass}
+              min="0"
+              onChange={(event) => setChildren(Number(event.target.value))}
+              placeholder="Số trẻ em"
+              type="number"
+              value={children}
+            />
+          </label>
 
-        <button
-          className="h-fit rounded-2xl bg-[#00474d] px-6 py-4 text-sm font-semibold text-white transition hover:bg-[#00629d] active:scale-95"
-          disabled={loading}
-          type="submit"
-        >
-          {loading ? 'Đang tìm gợi ý...' : 'Gợi ý cho tôi'}
-        </button>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[#334155]">Thành phố</span>
+            <input
+              className={inputClass}
+              onChange={(event) => setCity(event.target.value)}
+              placeholder="Thành phố (tuỳ chọn)"
+              type="text"
+              value={city}
+            />
+          </label>
+        </div>
+
+        <div>
+          <span className="mb-2 block text-sm font-semibold text-[#334155]">Loại hình ưa thích</span>
+          <div className="flex flex-wrap gap-2">
+            {CATEGORY_OPTIONS.map((option) => {
+              const active = categories.includes(option.value)
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => toggleCategory(option.value)}
+                  className={`rounded-full border px-4 py-2 text-sm font-medium transition active:scale-95 ${
+                    active
+                      ? 'border-[#00474d] bg-[#00474d] text-white'
+                      : 'border-[#cbd5db] bg-white text-[#334155] hover:border-[#00474d]'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-[1fr_1fr_auto]">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[#334155]">Ưu tiên gợi ý</span>
+            <select className={inputClass} onChange={(event) => setPriority(event.target.value)} value={priority}>
+              {PRIORITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-[#334155]">Đi cùng ai</span>
+            <select className={inputClass} onChange={(event) => setCompanion(event.target.value)} value={companion}>
+              {COMPANION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            className="h-fit self-end rounded-2xl bg-[#00474d] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#00629d] active:scale-95"
+            disabled={loading}
+            type="submit"
+          >
+            {loading ? 'Đang tìm gợi ý...' : 'Gợi ý cho tôi'}
+          </button>
+        </div>
       </form>
 
       {loading && (

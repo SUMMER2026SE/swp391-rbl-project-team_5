@@ -36,6 +36,26 @@ function makeAttraction(id, price, rating = 5) {
   };
 }
 
+function makeAttractionAt(id, price, latitude, longitude, rating = 5, closeTime = '22:00') {
+  const a = makeAttraction(id, price, rating);
+  a.latitude = latitude;
+  a.longitude = longitude;
+  a.closeTime = closeTime;
+  return a;
+}
+
+function makeAttractionWithChildTicket(id, adultPrice, childPrice, rating = 5) {
+  const base = makeAttraction(id, adultPrice, rating);
+  base.ticketProducts.push({
+    id: `ticket-${id}-child`,
+    name: 'Child ticket',
+    type: 'CHILD',
+    sellingPrice: childPrice,
+    refundPolicy: 'NON_REFUNDABLE',
+  });
+  return base;
+}
+
 afterEach(() => {
   jest.clearAllMocks();
 });
@@ -116,6 +136,26 @@ describe('recommendAttractions', () => {
     expect(result.data.recommendedAttractions).toHaveLength(1);
     expect(result.provider).toBe('rule-based');
   });
+
+  test('prices adults and children with their own ticket types', async () => {
+    mockPrisma.attraction.findMany.mockResolvedValue([
+      makeAttractionWithChildTicket('a1', 100000, 50000),
+    ]);
+
+    const result = await recommendAttractions({
+      budget: 1000000,
+      adults: 2,
+      children: 2,
+      city: 'Da Nang',
+    });
+
+    const combo = result.data.combos[0];
+    // 2 người lớn × 100k + 2 trẻ em × 50k = 300k
+    expect(combo.totalPrice).toBe(300000);
+    expect(combo.items).toHaveLength(2);
+    const childLine = combo.items.find((item) => item.unitPrice === 50000);
+    expect(childLine.quantity).toBe(2);
+  });
 });
 
 describe('generateItinerary', () => {
@@ -139,6 +179,80 @@ describe('generateItinerary', () => {
     expect(activities).toHaveLength(1);
     expect(result.data.estimatedCost.total).toBeLessThanOrEqual(500000);
     expect(result.provider).toBe('rule-based');
+  });
+
+  test('packs more attractions per day at a faster pace', async () => {
+    // Mở cửa muộn (22:00) để khung Tối cũng dùng được, kiểm đúng số điểm theo nhịp độ.
+    const catalog = Array.from({ length: 6 }, (_, i) => {
+      const a = makeAttraction(`a${i}`, 50000, 5 - i * 0.1);
+      a.closeTime = '22:00';
+      return a;
+    });
+    mockPrisma.attraction.findMany.mockResolvedValue(catalog);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const relaxed = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'relaxed' });
+    const packed = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'packed' });
+
+    expect(relaxed.data.days[0].activities).toHaveLength(2);
+    expect(packed.data.days[0].activities).toHaveLength(4);
+  });
+
+  test('does not place attractions in an evening slot when they close earlier', async () => {
+    // 4 điểm mở 08:00-17:00; nhịp độ dày đặc có khung Tối 18:00-21:00.
+    const catalog = Array.from({ length: 4 }, (_, i) => makeAttraction(`a${i}`, 50000, 5 - i * 0.1));
+    mockPrisma.attraction.findMany.mockResolvedValue(catalog);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const result = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'packed' });
+
+    const activities = result.data.days[0].activities;
+    expect(activities.length).toBeLessThanOrEqual(3); // khung Tối bị bỏ trống
+    expect(activities.every((a) => a.timeSlot !== 'Tối')).toBe(true);
+  });
+
+  test('provides backup alternatives per day from leftover attractions', async () => {
+    const catalog = Array.from({ length: 6 }, (_, i) => makeAttraction(`a${i}`, 50000, 5 - i * 0.1));
+    mockPrisma.attraction.findMany.mockResolvedValue(catalog);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const result = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'relaxed' });
+
+    const day = result.data.days[0];
+    expect(day.activities).toHaveLength(2);
+    expect(Array.isArray(day.alternatives)).toBe(true);
+    expect(day.alternatives.length).toBeGreaterThan(0);
+  });
+
+  test('orders same-day activities by route proximity', async () => {
+    // a0 điểm cao nhất (làm điểm đầu). a1 ở SÁT a0, a2 ở XA dù điểm số nhỉnh hơn a1.
+    mockPrisma.attraction.findMany.mockResolvedValue([
+      makeAttractionAt('a0', 50000, 16.0, 108.0, 5.0),
+      makeAttractionAt('a1', 50000, 16.001, 108.001, 4.8),
+      makeAttractionAt('a2', 50000, 16.5, 108.5, 4.9),
+    ]);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const result = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'packed' });
+
+    const order = result.data.days[0].activities.map((a) => a.attractionId);
+    // điểm đầu a0 -> gần nhất a1 -> rồi mới a2
+    expect(order).toEqual(['a0', 'a1', 'a2']);
+  });
+
+  test('still schedules attractions that are missing coordinates', async () => {
+    // a0 có toạ độ (điểm đầu); a1, a2 thiếu toạ độ -> vẫn phải được xếp tiếp.
+    const withCoords = makeAttractionAt('a0', 50000, 16.0, 108.0, 5.0);
+    const noCoords1 = makeAttraction('a1', 50000, 4.9);
+    const noCoords2 = makeAttraction('a2', 50000, 4.8);
+    noCoords1.closeTime = '22:00';
+    noCoords2.closeTime = '22:00';
+    mockPrisma.attraction.findMany.mockResolvedValue([withCoords, noCoords1, noCoords2]);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const result = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'packed' });
+
+    expect(result.data.days[0].activities).toHaveLength(3);
   });
 });
 

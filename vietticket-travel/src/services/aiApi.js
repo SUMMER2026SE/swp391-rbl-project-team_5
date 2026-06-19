@@ -7,16 +7,16 @@ export async function aiChat(message, history = []) {
   })
 }
 
-export async function aiRecommend({ budget, people, city, interests }) {
+export async function aiRecommend({ budget, adults, children, city, interests, priority, companion }) {
   return apiRequest('/ai/recommend', {
     method: 'POST',
-    body: { budget, people, city, interests },
+    body: { budget, adults, children, city, interests, priority, companion },
   })
 }
 
-export async function aiItinerary({ city, days, people, interests, budget }) {
+export async function aiItinerary({ city, days, adults, children, interests, budget, pace, priority, companion }) {
   return apiRequest('/ai/itinerary', {
     method: 'POST',
-    body: { city, days, people, interests, budget },
+    body: { city, days, adults, children, interests, budget, pace, priority, companion },
   })
 }
