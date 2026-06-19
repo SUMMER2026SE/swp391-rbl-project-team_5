@@ -9,20 +9,34 @@
 //   POST /api/ai/recommend  - gợi ý địa điểm + combo vé theo budget/số người
 //   POST /api/ai/itinerary  - tạo kế hoạch tham quan nhiều ngày
 //
-// Các route này KHÔNG yêu cầu đăng nhập (public), vì chatbot tư
-// vấn và gợi ý nên dùng được cả với khách chưa có tài khoản.
-// Đã được bảo vệ bởi apiLimiter chung (xem app.js).
-// Nếu cần giới hạn riêng (vì gọi LLM tốn phí), có thể thêm
-// rate limiter riêng cho router này.
+// Bảo vệ chi phí:
+//   - /chat và /itinerary gọi LLM (tốn phí) nên có rate limiter
+//     riêng (aiLlmLimiter) chặt hơn apiLimiter chung trong app.js.
+//   - /itinerary thêm yêu cầu đăng nhập (frontend vốn đã bắt login)
+//     để tránh khách vãng lai gọi thẳng API đốt quota LLM.
+//   - /chat giữ public (theo thiết kế chatbot cho cả khách chưa có
+//     tài khoản) nhưng vẫn nằm dưới aiLlmLimiter.
+//   - /recommend là rule-based (không gọi LLM) nên giữ public.
 // ============================================================
 
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
+const protect = require('../middleware/authMiddleware');
 const { chat, recommend, itinerary } = require('../controllers/aiAssistantController');
 
 const router = express.Router();
 
-router.post('/chat', chat);
+// Giới hạn riêng cho các endpoint gọi LLM: 20 request / 5 phút / IP.
+const aiLlmLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { message: 'Bạn đã dùng trợ lý AI quá nhiều lần. Vui lòng thử lại sau ít phút.' },
+});
+
+router.post('/chat', aiLlmLimiter, chat);
 router.post('/recommend', recommend);
-router.post('/itinerary', itinerary);
+router.post('/itinerary', aiLlmLimiter, protect, itinerary);
 
 module.exports = router;

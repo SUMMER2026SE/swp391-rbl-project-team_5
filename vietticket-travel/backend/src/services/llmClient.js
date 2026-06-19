@@ -29,7 +29,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 const GEMINI_URL = (model) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
 /**
@@ -58,7 +58,10 @@ async function callGemini(systemPrompt, userPrompt, options = {}) {
 
   const res = await fetch(GEMINI_URL(GEMINI_MODEL), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': GEMINI_API_KEY,
+    },
     body: JSON.stringify(body),
   });
 
