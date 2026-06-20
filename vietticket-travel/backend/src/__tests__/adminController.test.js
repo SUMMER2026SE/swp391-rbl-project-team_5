@@ -7,9 +7,85 @@ jest.mock('../utils/mailer', () => ({
 }));
 
 const mockPrisma = require('./helpers/mockPrisma');
-const { getAttractions } = require('../controllers/adminController');
+const { changeUserStatus, getAttractions } = require('../controllers/adminController');
 
 afterEach(() => jest.clearAllMocks());
+
+describe('changeUserStatus', () => {
+  function createRes() {
+    return { status: jest.fn().mockReturnThis(), json: jest.fn() };
+  }
+
+  test('khoa user, tang tokenVersion va thu hoi session dang mo', async () => {
+    const targetUser = {
+      id: 'user-001',
+      email: 'customer@example.com',
+      fullName: 'Customer A',
+      role: 'CUSTOMER',
+      provider: 'LOCAL',
+      isEmailVerified: true,
+      status: 'ACTIVE',
+      tokenVersion: 0,
+      profile: null,
+    };
+    const updatedUser = { ...targetUser, status: 'LOCKED', tokenVersion: 1 };
+    const tx = {
+      user: { update: jest.fn().mockResolvedValue(updatedUser) },
+      authSession: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    };
+    mockPrisma.user.findUnique.mockResolvedValue(targetUser);
+    mockPrisma.$transaction.mockImplementation((cb) => cb(tx));
+
+    const req = {
+      params: { id: targetUser.id },
+      body: { status: 'LOCKED', reason: 'Vi pham', sendEmail: false },
+      user: { id: 'admin-001', role: 'ADMIN' },
+    };
+    const res = createRes();
+    const next = jest.fn();
+
+    await changeUserStatus(req, res, next);
+
+    expect(tx.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: targetUser.id },
+      data: expect.objectContaining({
+        status: 'LOCKED',
+        tokenVersion: { increment: 1 },
+      }),
+    }));
+    expect(tx.authSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: targetUser.id, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      user: expect.objectContaining({ id: targetUser.id, status: 'LOCKED' }),
+    }));
+  });
+
+  test('khong cho admin tu khoa chinh minh', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'admin-001',
+      email: 'admin@example.com',
+      fullName: 'Admin',
+      role: 'ADMIN',
+      status: 'ACTIVE',
+      profile: null,
+    });
+
+    const req = {
+      params: { id: 'admin-001' },
+      body: { status: 'LOCKED' },
+      user: { id: 'admin-001', role: 'ADMIN' },
+    };
+    const res = createRes();
+
+    await changeUserStatus(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+});
 
 describe('getAttractions', () => {
   test('trả danh sách attraction cho trang Admin với dữ liệu đã map', async () => {

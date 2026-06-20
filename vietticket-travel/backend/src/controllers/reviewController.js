@@ -1,6 +1,7 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const { isReviewEligible } = require('../utils/reviewEligibility');
 
 // Helper function to recalculate average rating and total reviews for an attraction
 async function recalculateAttractionRating(tx, attractionId) {
@@ -136,9 +137,11 @@ async function createReview(req, res, next) {
       where: { id: bookingId },
       include: {
         review: true,
+        ticketInstances: { select: { status: true } },
         reservation: {
           include: {
             ticketProduct: true,
+            timeSlot: { select: { endTime: true } }, // cần để tính giờ kết thúc tham quan
           },
         },
       },
@@ -149,8 +152,10 @@ async function createReview(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé của bạn.' });
     }
 
-    if (booking.status.toUpperCase() !== 'COMPLETED') {
-      return res.status(400).json({ message: 'Bạn chỉ được đánh giá cho đơn đặt vé đã hoàn thành (COMPLETED).' });
+    // Cho phép review khi: COMPLETED, hoặc CONFIRMED + đã check-in ít nhất 1 vé + đã qua giờ tham quan.
+    const eligibility = isReviewEligible(booking);
+    if (!eligibility.allowed) {
+      return res.status(400).json({ message: eligibility.reason });
     }
 
     if (booking.review) {

@@ -38,6 +38,61 @@ const formatCountdown = (milliseconds) => {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
+/**
+ * Mirror logic của backend `isReviewEligible`.
+ * Trả về true khi booking được phép đánh giá:
+ *  - COMPLETED: luôn được.
+ *  - CONFIRMED + có ít nhất 1 vé USED + đã qua giờ kết thúc tham quan.
+ *
+ * visitDate được API trả về dạng 'YYYY-MM-DD' (UTC midnight của ngày tham quan).
+ * timeSlotLabel dạng 'HH:MM - HH:MM' (giờ Việt Nam).
+ * Backend là nguồn chính xác; frontend chỉ dùng để ẩn/hiện nút sớm.
+ */
+const VN_OFFSET_MS = 7 * 60 * 60 * 1000
+
+function parseEndTimeToMinutes(timeSlotLabel) {
+  if (!timeSlotLabel) return null
+  // dạng 'HH:MM - HH:MM' hoặc 'HH:MM-HH:MM'
+  const parts = timeSlotLabel.split('-')
+  if (parts.length < 2) return null
+  const endStr = parts[parts.length - 1].trim()
+  const match = endStr.match(/^(\d{1,2}):(\d{2})$/)
+  if (!match) return null
+  const h = parseInt(match[1], 10)
+  const m = parseInt(match[2], 10)
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null
+  return h * 60 + m
+}
+
+function canReviewNow(booking, nowMs) {
+  const status = (booking.status || '').toLowerCase()
+  if (status === 'completed') return true
+  if (status !== 'confirmed') return false
+
+  // Phải có ít nhất 1 vé USED
+  const instances = Array.isArray(booking.ticketInstances) ? booking.ticketInstances : []
+  const hasUsed = instances.some((t) => (t.status || '').toLowerCase() === 'used')
+  if (!hasUsed) return false
+
+  // Kiểm tra đã qua giờ kết thúc tham quan chưa
+  const visitDate = booking.visitDate // 'YYYY-MM-DD'
+  if (!visitDate) return false
+  const visitDateUtcMs = new Date(`${visitDate}T00:00:00Z`).getTime()
+  if (isNaN(visitDateUtcMs)) return false
+
+  const endMinutes = parseEndTimeToMinutes(booking.timeSlotLabel)
+  let deadlineMs
+  if (endMinutes !== null) {
+    // deadline UTC = visitDate UTC midnight + endTime(VN) - 7h offset
+    deadlineMs = visitDateUtcMs + endMinutes * 60_000 - VN_OFFSET_MS
+  } else {
+    // Không có time slot → 00:00 VN ngày kế tiếp = visitDate UTC + 17h
+    deadlineMs = visitDateUtcMs + (24 * 60 - 0) * 60_000 - VN_OFFSET_MS
+  }
+
+  return nowMs >= deadlineMs
+}
+
 function MyTicketsPage() {
   const navigate = useNavigate()
   const socket = useSocket()
@@ -378,7 +433,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
               {' — tiền về tài khoản trong 3-5 ngày làm việc'}
             </span>
           )}
-          {booking.status === 'completed' && !(booking.reviewed || booking.review) && (
+          {canReviewNow(booking, now) && !(booking.reviewed || booking.review) && (
             <button
               className="flex items-center gap-2 rounded-xl bg-secondary-container text-on-secondary-container px-7 py-2.5 font-bold hover:scale-[1.02] active:scale-95 transition-all shadow-sm"
               onClick={() => onOpenReview(booking)}
@@ -390,7 +445,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
               Đánh giá ngay
             </button>
           )}
-          {booking.status === 'completed' && (booking.reviewed || booking.review) && (
+          {canReviewNow(booking, now) && (booking.reviewed || booking.review) && (
             <>
               <div className="flex gap-0.5 text-[#feb700] mr-2">
                 {Array.from({ length: 5 }).map((_, i) => (

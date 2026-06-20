@@ -588,7 +588,7 @@ export default function SearchAttractionsPage() {
         </div>
       </main>
 
-      <div className="fixed bottom-5 right-5 z-50">
+      <div className="fixed bottom-5 right-24 z-50">
         <button
           className="flex items-center gap-2 rounded-full bg-[#00629d] px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:scale-105 active:scale-95"
           type="button"

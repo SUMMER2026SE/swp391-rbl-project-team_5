@@ -41,6 +41,34 @@ describe('getSchedule', () => {
   });
 });
 
+describe('saveSchedule capacity limits', () => {
+  test('tra 400 khi tong suc chua slot vuot suc chua mac dinh', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      defaultCapacity: 100,
+      timeSlots: [],
+      specialDates: [],
+    });
+
+    const req = {
+      partner: PARTNER,
+      params: { id: 'attr-001' },
+      body: {
+        defaultCapacity: 100,
+        timeSlots: [{ start: '09:40', end: '12:44', capacity: 101, isActive: true }],
+      },
+    };
+    const res = createRes();
+    await saveSchedule(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('Tổng sức chứa'),
+    }));
+  });
+});
+
 describe('saveSchedule', () => {
   function setupOwned() {
     mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', partnerId: 'partner-001' });

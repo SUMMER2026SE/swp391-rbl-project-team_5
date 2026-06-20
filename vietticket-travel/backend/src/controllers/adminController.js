@@ -169,10 +169,24 @@ async function changeUserStatus(req, res, next) {
       });
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { status },
-      include: { profile: true },
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const nextUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          status,
+          tokenVersion: { increment: 1 },
+        },
+        include: { profile: true },
+      });
+
+      if (status === 'LOCKED') {
+        await tx.authSession.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+      }
+
+      return nextUser;
     });
 
     if (sendEmail) {
