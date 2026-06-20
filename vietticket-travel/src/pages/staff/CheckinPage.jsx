@@ -150,9 +150,9 @@ export default function CheckinPage() {
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm...">
       <div className="mx-auto max-w-5xl p-4 sm:p-8">
-        <div className="mb-6">
-          <h2 className="mb-1 text-3xl font-semibold text-on-surface">Check-in vé</h2>
-          <p className="text-sm text-on-surface-variant">
+        <div className="mb-5">
+          <h2 className="mb-1 text-2xl font-bold text-on-surface sm:text-3xl">Check-in vé</h2>
+          <p className="max-w-2xl text-sm text-on-surface-variant">
             Quét mã QR trên vé điện tử của khách hoặc nhập tay mã vé để xác nhận vào cổng.
           </p>
         </div>
@@ -160,29 +160,46 @@ export default function CheckinPage() {
         {/* Ô quét / nhập mã */}
         <form
           onSubmit={handleLookup}
-          className="mb-6 flex flex-col gap-3 rounded-xl border border-outline-variant bg-surface-container-lowest p-5 shadow-sm sm:flex-row"
+          className="mb-6 rounded-xl border border-outline-variant bg-surface-container-lowest p-5 shadow-sm"
         >
-          <div className="relative flex-1">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[22px] text-on-surface-variant">
-              qr_code_scanner
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label className="text-sm font-bold text-on-surface" htmlFor="staff-checkin-token">
+              Mã QR / QR token
+            </label>
+            <span className="inline-flex w-fit rounded-full bg-primary-fixed-dim/20 px-3 py-1 text-xs font-semibold text-primary">
+              Hỗ trợ VIETTICKET:&lt;token&gt; hoặc qrCodeToken
             </span>
-            <input
-              ref={inputRef}
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="Quét QR hoặc nhập mã vé…"
-              autoComplete="off"
-              className="w-full rounded-xl border border-outline-variant bg-surface py-3.5 pl-11 pr-4 text-base outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-            />
           </div>
-          <button
-            type="submit"
-            disabled={isLooking || !tokenInput.trim()}
-            className="flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-bold text-on-primary hover:opacity-90 disabled:opacity-50"
-          >
-            <span className="material-symbols-outlined text-[20px]" aria-hidden="true">search</span>
-            {isLooking ? 'Đang tra cứu…' : 'Tra cứu vé'}
-          </button>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_188px]">
+            <div className="relative min-w-0">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[22px] text-on-surface-variant">
+                qr_code_scanner
+              </span>
+              <input
+                id="staff-checkin-token"
+                aria-describedby="staff-checkin-token-hint"
+                ref={inputRef}
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder="Dán VIETTICKET:<token> hoặc qrCodeToken..."
+                autoComplete="off"
+                className="h-14 w-full rounded-xl border border-outline-variant bg-surface pl-11 pr-4 text-base outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={isLooking || !tokenInput.trim()}
+              className="flex h-14 items-center justify-center gap-2 rounded-xl bg-primary px-6 text-sm font-bold text-on-primary shadow-sm transition hover:opacity-90 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[20px]" aria-hidden="true">search</span>
+              {isLooking ? 'Đang tra cứu…' : 'Tra cứu vé'}
+            </button>
+          </div>
+
+          <p id="staff-checkin-token-hint" className="mt-3 text-xs text-on-surface-variant">
+            Khi test thủ công, copy qrCodeToken của vé rồi dán vào ô trên.
+          </p>
         </form>
 
         {/* Kết quả tra cứu */}

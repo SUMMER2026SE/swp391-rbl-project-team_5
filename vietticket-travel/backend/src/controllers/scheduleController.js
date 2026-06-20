@@ -25,6 +25,77 @@ function toDateKey(date) {
   return new Date(date).toISOString().slice(0, 10);
 }
 
+function getSlotCapacity(slot) {
+  return Number(slot?.capacity ?? slot?.maxCapacity ?? 0);
+}
+
+function getActiveSlotCapacityTotal(timeSlots = []) {
+  return timeSlots.reduce((total, slot) => {
+    if (slot?.isActive === false) return total;
+    return total + Math.max(0, getSlotCapacity(slot));
+  }, 0);
+}
+
+function getScheduleSlotsForValidation(attraction, timeSlots, hasTimeSlots, hasPublished) {
+  if (hasTimeSlots) return timeSlots;
+  if (hasPublished && Array.isArray(attraction.draftData?.schedule?.timeSlots)) {
+    return attraction.draftData.schedule.timeSlots;
+  }
+  return attraction.timeSlots || [];
+}
+
+function getDefaultCapacityForValidation(attraction, defaultCapacity, hasPublished) {
+  if (defaultCapacity !== undefined) return Number(defaultCapacity);
+  if (hasPublished && attraction.draftData?.schedule?.defaultCapacity !== undefined) {
+    return Number(attraction.draftData.schedule.defaultCapacity);
+  }
+  return Number(attraction.defaultCapacity ?? 0);
+}
+
+function getSpecialDatesForValidation(attraction, specialDates, hasSpecialDates, hasPublished) {
+  if (hasSpecialDates) return specialDates || {};
+  if (hasPublished && attraction.draftData?.schedule?.specialDates) {
+    return attraction.draftData.schedule.specialDates;
+  }
+
+  const current = {};
+  for (const specialDate of attraction.specialDates || []) {
+    current[toDateKey(specialDate.date)] = {
+      closed: specialDate.closed,
+      capacity: specialDate.capacity ?? undefined,
+    };
+  }
+  return current;
+}
+
+function validateSlotCapacityLimit({ attraction, timeSlots, hasTimeSlots, defaultCapacity, specialDates, hasSpecialDates, hasPublished }) {
+  const effectiveSlots = getScheduleSlotsForValidation(attraction, timeSlots, hasTimeSlots, hasPublished);
+  const activeSlotCapacityTotal = getActiveSlotCapacityTotal(effectiveSlots);
+  const effectiveDefaultCapacity = getDefaultCapacityForValidation(attraction, defaultCapacity, hasPublished);
+
+  if (Number.isFinite(effectiveDefaultCapacity) && activeSlotCapacityTotal > effectiveDefaultCapacity) {
+    return `Tổng sức chứa các khung giờ đang hoạt động (${activeSlotCapacityTotal}) không được lớn hơn sức chứa mặc định mỗi ngày (${effectiveDefaultCapacity}).`;
+  }
+
+  const effectiveSpecialDates = getSpecialDatesForValidation(
+    attraction,
+    specialDates,
+    hasSpecialDates,
+    hasPublished,
+  );
+  for (const [dateKey, value] of Object.entries(effectiveSpecialDates || {})) {
+    if (!value || value.closed) continue;
+    if (value.capacity === undefined || value.capacity === null || value.capacity === '') continue;
+
+    const specialCapacity = Number(value.capacity);
+    if (Number.isFinite(specialCapacity) && activeSlotCapacityTotal > specialCapacity) {
+      return `Tổng sức chứa các khung giờ đang hoạt động (${activeSlotCapacityTotal}) không được lớn hơn sức chứa ngày đặc biệt ${dateKey} (${specialCapacity}).`;
+    }
+  }
+
+  return '';
+}
+
 // GET /api/partners/attractions/:id/schedule
 async function getSchedule(req, res, next) {
   try {
@@ -87,6 +158,7 @@ async function saveSchedule(req, res, next) {
     }
 
     assertPartnerCanEdit(attraction);
+    const hasPublished = hasPublishedVersion(attraction);
 
     const { openDays, defaultCapacity } = req.body;
     const hasTimeSlots = Object.prototype.hasOwnProperty.call(req.body, 'timeSlots');
@@ -152,7 +224,27 @@ async function saveSchedule(req, res, next) {
       }
     }
 
-    if (hasPublishedVersion(attraction)) {
+    if (defaultCapacity !== undefined) {
+      const cap = Number(defaultCapacity);
+      if (!Number.isFinite(cap) || cap < 0) {
+        return res.status(400).json({ message: 'Sức chứa mặc định không hợp lệ.' });
+      }
+    }
+
+    const capacityLimitError = validateSlotCapacityLimit({
+      attraction,
+      timeSlots,
+      hasTimeSlots,
+      defaultCapacity,
+      specialDates,
+      hasSpecialDates,
+      hasPublished,
+    });
+    if (capacityLimitError) {
+      return res.status(400).json({ message: capacityLimitError });
+    }
+
+    if (hasPublished) {
       const draft = attraction.draftData || buildAttractionSnapshot(attraction);
       draft.schedule = draft.schedule || {};
 

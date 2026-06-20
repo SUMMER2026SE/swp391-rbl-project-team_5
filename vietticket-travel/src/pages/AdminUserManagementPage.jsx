@@ -33,6 +33,7 @@ function AdminUserManagementPage() {
   const [lockReason, setLockReason] = useState('')
   const [lockSendEmail, setLockSendEmail] = useState(true)
   const [unlockSendEmail, setUnlockSendEmail] = useState(true)
+  const [statusActionUserId, setStatusActionUserId] = useState(null)
 
   useEffect(() => {
     document.title = 'Quản lý Người dùng | VietTicket Travel'
@@ -119,6 +120,7 @@ function AdminUserManagementPage() {
   }
 
   const openLockModal = (userId) => {
+    if (statusActionUserId) return
     setTargetUserId(userId)
     setLockReason('')
     setLockSendEmail(true)
@@ -126,6 +128,7 @@ function AdminUserManagementPage() {
   }
 
   const openUnlockModal = (userId) => {
+    if (statusActionUserId) return
     setTargetUserId(userId)
     setUnlockSendEmail(true)
     setActiveModal('unlock')
@@ -139,49 +142,63 @@ function AdminUserManagementPage() {
     setUnlockSendEmail(true)
   }
 
+  const applyUserStatusResult = (updatedUser) => {
+    if (!updatedUser) return
+    setUsers((current) => current.map((item) => (item.id === updatedUser.id ? updatedUser : item)))
+  }
+
   async function handleLockAccount(userId, reason, sendEmail) {
+    setStatusActionUserId(userId)
     try {
       const data = await apiRequest(`/admin/users/${userId}/status`, {
         method: 'PATCH',
         body: { status: 'LOCKED', reason, sendEmail },
       })
       toast.success(data.message || 'Đã khóa tài khoản thành công')
+      applyUserStatusResult(data.user)
       setRefetchIndex((prev) => prev + 1)
       closeModals()
     } catch (error) {
       toast.error(error.message || 'Không thể khóa tài khoản.')
+    } finally {
+      setStatusActionUserId(null)
     }
   }
 
   async function handleUnlockAccount(userId, sendEmail) {
+    setStatusActionUserId(userId)
     try {
       const data = await apiRequest(`/admin/users/${userId}/status`, {
         method: 'PATCH',
         body: { status: 'ACTIVE', sendEmail },
       })
+      applyUserStatusResult(data.user)
       toast.success(data.message || 'Đã mở khóa tài khoản thành công')
       setRefetchIndex((prev) => prev + 1)
       closeModals()
     } catch (error) {
       toast.error(error.message || 'Không thể mở khóa tài khoản.')
+    } finally {
+      setStatusActionUserId(null)
     }
   }
 
   const handleLockSubmit = async (event) => {
     event.preventDefault()
-    if (targetUserId === null) return
+    if (targetUserId === null || isStatusActionPending) return
     await handleLockAccount(targetUserId, lockReason, lockSendEmail)
   }
 
   const handleUnlockSubmit = async (event) => {
     event.preventDefault()
-    if (targetUserId === null) return
+    if (targetUserId === null || isStatusActionPending) return
     await handleUnlockAccount(targetUserId, unlockSendEmail)
   }
 
   const totalPages = Math.ceil(total / 10)
   const visibleStart = total > 0 ? (page - 1) * 10 + 1 : 0
   const visibleEnd = Math.min(page * 10, total)
+  const isStatusActionPending = Boolean(statusActionUserId)
 
   return (
     <div className="admin-page">
@@ -446,6 +463,7 @@ function AdminUserManagementPage() {
                               <button
                                 className="admin-row-action admin-row-action--danger"
                                 id={`btn-lock-user-${user.id}`}
+                                disabled={isStatusActionPending}
                                 type="button"
                                 title="Khóa tài khoản"
                                 aria-label={`Khóa tài khoản ${user.fullName || user.name}`}
@@ -459,6 +477,7 @@ function AdminUserManagementPage() {
                               <button
                                 className="admin-row-action admin-row-action--primary"
                                 id={`btn-unlock-user-${user.id}`}
+                                disabled={isStatusActionPending}
                                 type="button"
                                 title="Mở khóa tài khoản"
                                 aria-label={`Mở khóa tài khoản ${user.fullName || user.name}`}
@@ -566,6 +585,7 @@ function AdminUserManagementPage() {
             className="admin-modal-backdrop"
             id="btn-close-modal-backdrop"
             type="button"
+            disabled={isStatusActionPending}
             aria-label="Đóng hộp thoại"
             onClick={closeModals}
           />
@@ -593,6 +613,7 @@ function AdminUserManagementPage() {
                 <span>Lý do khóa tài khoản</span>
                 <textarea
                   id="lock-reason-input"
+                  disabled={isStatusActionPending}
                   value={lockReason}
                   placeholder="Nhập lý do chi tiết..."
                   onChange={(event) => setLockReason(event.target.value)}
@@ -603,6 +624,7 @@ function AdminUserManagementPage() {
                 <input
                   id="lock-send-email-checkbox"
                   type="checkbox"
+                  disabled={isStatusActionPending}
                   checked={lockSendEmail}
                   onChange={(event) => setLockSendEmail(event.target.checked)}
                 />
@@ -617,6 +639,7 @@ function AdminUserManagementPage() {
                   className="admin-modal-button admin-modal-button--secondary"
                   id="btn-cancel-lock"
                   type="button"
+                  disabled={isStatusActionPending}
                   onClick={closeModals}
                 >
                   Hủy
@@ -625,8 +648,9 @@ function AdminUserManagementPage() {
                   className="admin-modal-button admin-modal-button--danger"
                   id="btn-submit-lock"
                   type="submit"
+                  disabled={isStatusActionPending}
                 >
-                  Xác nhận Khóa
+                  {isStatusActionPending ? 'Đang khóa...' : 'Xác nhận Khóa'}
                 </button>
               </div>
             </form>
@@ -657,6 +681,7 @@ function AdminUserManagementPage() {
                 <input
                   id="unlock-send-email-checkbox"
                   type="checkbox"
+                  disabled={isStatusActionPending}
                   checked={unlockSendEmail}
                   onChange={(event) => setUnlockSendEmail(event.target.checked)}
                 />
@@ -671,6 +696,7 @@ function AdminUserManagementPage() {
                   className="admin-modal-button admin-modal-button--secondary"
                   id="btn-cancel-unlock"
                   type="button"
+                  disabled={isStatusActionPending}
                   onClick={closeModals}
                 >
                   Hủy
@@ -679,8 +705,9 @@ function AdminUserManagementPage() {
                   className="admin-modal-button admin-modal-button--primary"
                   id="btn-submit-unlock"
                   type="submit"
+                  disabled={isStatusActionPending}
                 >
-                  Mở khóa Ngay
+                  {isStatusActionPending ? 'Đang mở khóa...' : 'Mở khóa Ngay'}
                 </button>
               </div>
             </form>

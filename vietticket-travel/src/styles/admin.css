@@ -1863,6 +1863,12 @@
   color: var(--admin-danger);
 }
 
+.admin-row-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 .admin-empty-state {
   height: 120px;
   color: var(--color-text-muted) !important;
@@ -2041,7 +2047,14 @@
 }
 
 .admin-modal-container {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 4px;
+  padding: 20px;
 }
 
 .admin-pagination__btn {
@@ -2317,6 +2330,12 @@
 
 .admin-modal-button:active {
   transform: scale(0.98);
+}
+
+.admin-modal-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+  transform: none;
 }
 
 .admin-modal-button--secondary {

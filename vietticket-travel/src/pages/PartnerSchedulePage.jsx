@@ -35,6 +35,38 @@ function toKey(year, month, day) {
 let _slotId = 10
 const newId = () => `s${++_slotId}`
 
+function getActiveSlotCapacityTotal(timeSlots) {
+  return timeSlots.reduce((total, slot) => {
+    if (slot.isActive === false) return total
+    return total + Math.max(0, Number(slot.capacity || 0))
+  }, 0)
+}
+
+function getCapacityLimitError(dayCapacity, timeSlots, specialDates = {}) {
+  const activeSlotCapacityTotal = getActiveSlotCapacityTotal(timeSlots)
+  const defaultCapacityValue = Number(dayCapacity)
+
+  if (!Number.isFinite(defaultCapacityValue) || defaultCapacityValue < 0) {
+    return 'Sức chứa mặc định không hợp lệ.'
+  }
+
+  if (activeSlotCapacityTotal > defaultCapacityValue) {
+    return `Tổng sức chứa các khung giờ đang hoạt động (${activeSlotCapacityTotal}) không được lớn hơn sức chứa mặc định mỗi ngày (${defaultCapacityValue}).`
+  }
+
+  for (const [dateKey, value] of Object.entries(specialDates || {})) {
+    if (!value || value.closed) continue
+    if (value.capacity === undefined || value.capacity === null || value.capacity === '') continue
+
+    const specialCapacity = Number(value.capacity)
+    if (Number.isFinite(specialCapacity) && activeSlotCapacityTotal > specialCapacity) {
+      return `Tổng sức chứa các khung giờ đang hoạt động (${activeSlotCapacityTotal}) không được lớn hơn sức chứa ngày đặc biệt ${dateKey} (${specialCapacity}).`
+    }
+  }
+
+  return ''
+}
+
 function PartnerSchedulePage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -98,7 +130,10 @@ function PartnerSchedulePage() {
     if (!cap || cap <= 0) { setSlotError('Sức chứa phải lớn hơn 0.'); return }
     const overlap = slots.some((s) => newSlot.start < s.end && newSlot.end > s.start)
     if (overlap) { setSlotError('Khung giờ bị trùng lặp với slot hiện có.'); return }
-    setSlots((prev) => [...prev, { id: newId(), start: newSlot.start, end: newSlot.end, capacity: cap, isActive: true }])
+    const nextSlots = [...slots, { id: newId(), start: newSlot.start, end: newSlot.end, capacity: cap, isActive: true }]
+    const capacityError = getCapacityLimitError(defaultCapacity, nextSlots, overrides)
+    if (capacityError) { setSlotError(capacityError); return }
+    setSlots(nextSlots)
     setNewSlot({ start: '', end: '', capacity: '' })
   }
 
@@ -121,6 +156,13 @@ function PartnerSchedulePage() {
     if (!selectedDay) return
     const cap = overrideForm.capacity === '' ? undefined : Number(overrideForm.capacity)
     if (cap !== undefined && cap <= 0) { toast.error('Sức chứa phải lớn hơn 0.'); return }
+    if (!overrideForm.closed && cap !== undefined) {
+      const capacityError = getCapacityLimitError(defaultCapacity, slots, {
+        ...overrides,
+        [selectedDay.key]: { closed: false, capacity: cap },
+      })
+      if (capacityError) { toast.error(capacityError); return }
+    }
     if (!overrideForm.closed && cap === undefined) {
       // Remove override
       setOverrides((prev) => { const n = { ...prev }; delete n[selectedDay.key]; return n })
@@ -138,6 +180,15 @@ function PartnerSchedulePage() {
 
   /* ─── Save all ─── */
   const handleSave = async () => {
+    setSlotError('')
+    const capacityError = getCapacityLimitError(defaultCapacity, slots, overrides)
+    if (capacityError) {
+      setActiveTab('slots')
+      setSlotError(capacityError)
+      toast.error(capacityError)
+      return
+    }
+
     const payload = {
       openDays,
       defaultCapacity,
@@ -165,6 +216,8 @@ function PartnerSchedulePage() {
 
   const daysCount = getDaysInMonth(calYear, calMonth)
   const firstOffset = getFirstDayOfMonth(calYear, calMonth)
+  const activeSlotCapacityTotal = getActiveSlotCapacityTotal(slots)
+  const isSlotCapacityOverDefault = activeSlotCapacityTotal > Number(defaultCapacity)
 
   return (
     <PartnerLayout pageTitle="Schedule Config">
@@ -319,7 +372,16 @@ function PartnerSchedulePage() {
                   <span className="text-[#6f797a]">Slots hoạt động</span>
                   <span className="font-bold text-[#137333]">{slots.filter((s) => s.isActive).length}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-[#6f797a]">Tổng sức chứa slots</span>
+                  <span className={`font-bold ${isSlotCapacityOverDefault ? 'text-[#ba1a1a]' : 'text-[#191c1d]'}`}>{activeSlotCapacityTotal} lượt</span>
+                </div>
               </div>
+              {isSlotCapacityOverDefault && (
+                <p className="mt-3 rounded-lg bg-[#ffdad6] px-3 py-2 text-xs font-medium text-[#ba1a1a]">
+                  Tổng sức chứa slots không được lớn hơn sức chứa / ngày.
+                </p>
+              )}
               <div className="mt-4 pt-4 border-t border-[#f2f4f5]">
                 <p className="text-xs text-[#6f797a]">Ngày mở:</p>
                 <div className="flex flex-wrap gap-1 mt-2">

@@ -211,7 +211,13 @@ function ETicketPage() {
 
             <div className="ticket-divider relative border-t-2 border-dashed border-outline-variant" />
 
-            <section className="grid items-center gap-8 p-8 md:grid-cols-[1fr_auto] md:p-12">
+            <section
+              className={`p-8 md:p-12${
+                canShowQr && booking.ticketInstances.length > 1
+                  ? ''
+                  : ' grid items-center gap-8 md:grid-cols-[1fr_auto]'
+              }`}
+            >
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">
                   Mã đặt chỗ
@@ -227,30 +233,83 @@ function ETicketPage() {
                 </div>
               </div>
 
-              <div className="justify-self-center rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-inner">
-                {canShowQr ? (
-                  <QRCodeSVG
-                    bgColor="#ffffff"
-                    fgColor="#000000"
-                    level="H"
-                    marginSize={1}
-                    size={210}
-                    title={`Vé ${booking.id}`}
-                    value={`VIETTICKET:${booking.ticketInstances[0]?.qrCodeToken || booking.id}`}
-                  />
-                ) : (
-                  <div className="flex h-[210px] w-[210px] flex-col items-center justify-center bg-surface-container-low text-center text-on-surface-variant">
-                    <span className="material-symbols-outlined text-5xl" aria-hidden="true">hourglass_top</span>
-                    <span className="mt-3 text-sm font-bold">Đang chờ xác nhận</span>
-                  </div>
-                )}
-              </div>
+              {/* 1 vé hoặc chưa xác nhận → giữ layout cũ (QR bên phải) */}
+              {(!canShowQr || booking.ticketInstances.length === 1) && (
+                <div className="justify-self-center rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-inner">
+                  {canShowQr ? (
+                    <QRCodeSVG
+                      bgColor="#ffffff"
+                      fgColor="#000000"
+                      level="H"
+                      marginSize={1}
+                      size={210}
+                      title={`Vé ${booking.id}`}
+                      value={`VIETTICKET:${booking.ticketInstances[0].qrCodeToken}`}
+                    />
+                  ) : (
+                    <div className="flex h-[210px] w-[210px] flex-col items-center justify-center bg-surface-container-low text-center text-on-surface-variant">
+                      <span className="material-symbols-outlined text-5xl" aria-hidden="true">hourglass_top</span>
+                      <span className="mt-3 text-sm font-bold">Đang chờ xác nhận</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Nhiều vé → hiển thị tất cả QR theo grid */}
+              {canShowQr && booking.ticketInstances.length > 1 && (
+                <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {booking.ticketInstances.map((ticket, index) => (
+                    <QRTicketCard key={ticket.id} index={index} ticket={ticket} />
+                  ))}
+                </div>
+              )}
             </section>
           </article>
         </div>
       </main>
       <div className="print:hidden"><Footer /></div>
     </>
+  )
+}
+
+function QRTicketCard({ index, ticket }) {
+  const isUsed = ticket.status === 'used'
+  const isExpired = ticket.status === 'expired' || ticket.status === 'refunded'
+  const statusLabel = isUsed
+    ? 'Đã sử dụng'
+    : isExpired
+      ? 'Đã hết hạn'
+      : 'Chưa sử dụng'
+  const statusColor = isUsed
+    ? 'text-on-surface-variant bg-surface-container'
+    : isExpired
+      ? 'text-error bg-error/10'
+      : 'text-primary bg-primary/10'
+
+  return (
+    <div
+      className={`flex flex-col items-center rounded-2xl border p-5 text-center transition ${
+        isUsed
+          ? 'border-outline-variant/30 bg-surface-container/40 opacity-70'
+          : 'border-outline-variant/40 bg-white shadow-sm'
+      }`}
+    >
+      <p className="mb-3 text-sm font-bold text-on-surface-variant">Vé #{index + 1}</p>
+      <div className={isUsed ? 'opacity-50 grayscale' : ''}>
+        <QRCodeSVG
+          bgColor="#ffffff"
+          fgColor="#000000"
+          level="H"
+          marginSize={1}
+          size={160}
+          title={`Vé số ${index + 1}`}
+          value={`VIETTICKET:${ticket.qrCodeToken}`}
+        />
+      </div>
+      <span className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-bold ${statusColor}`}>
+        {statusLabel}
+      </span>
+    </div>
   )
 }
 
