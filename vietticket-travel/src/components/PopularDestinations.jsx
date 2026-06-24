@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiRequest } from '../services/api'
+import { featuredDestinations } from '../data/landingData.js'
 
 const formatPrice = (value) =>
   value == null ? 'Xem các gói vé' : `Từ ${Number(value).toLocaleString('vi-VN')}đ`
+
+// Đường dẫn của thẻ: địa điểm thật mở trang chi tiết; địa điểm nổi bật dự phòng
+// dẫn sang trang khám phá với từ khóa để vẫn thấy các điểm tham quan nổi bật.
+const getDestinationLink = (destination) =>
+  destination.searchQuery
+    ? `/attractions?search=${encodeURIComponent(destination.searchQuery)}`
+    : `/attractions/${destination.id}`
 
 function PopularDestinations() {
   const [destinations, setDestinations] = useState([])
@@ -11,7 +19,7 @@ function PopularDestinations() {
 
   useEffect(() => {
     let active = true
-    apiRequest('/attractions?sort=popular&limit=3')
+    apiRequest('/attractions?sort=popular&limit=6')
       .then((response) => {
         if (active) setDestinations(response.data?.attractions || [])
       })
@@ -26,6 +34,9 @@ function PopularDestinations() {
     }
   }, [])
 
+  // Khi API chưa có địa điểm đã duyệt, hiển thị danh sách nổi bật tuyển chọn.
+  const items = destinations.length > 0 ? destinations : featuredDestinations
+
   return (
     <section className="section section--muted" id="destinations">
       <div className="container">
@@ -36,13 +47,11 @@ function PopularDestinations() {
 
         {loading ? (
           <p className="text-center">Đang tải điểm đến...</p>
-        ) : destinations.length === 0 ? (
-          <p className="text-center">Các điểm tham quan đã duyệt sẽ xuất hiện tại đây.</p>
         ) : (
           <div className="destination-grid">
-            {destinations.map((destination) => (
+            {items.map((destination) => (
               <Link
-                to={`/attractions/${destination.id}`}
+                to={getDestinationLink(destination)}
                 className="destination-card block transition hover:-translate-y-1 hover:shadow-lg focus:outline-none"
                 key={destination.id}
               >

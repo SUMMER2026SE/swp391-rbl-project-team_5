@@ -6,7 +6,7 @@ import Header from '../components/Header.jsx'
 import Seo from '../components/Seo.jsx'
 import AIItineraryPlanner from '../components/AIItineraryPlanner.jsx'
 import { useAuth } from '../context/useAuth.js'
-import { footerLinks } from '../data/landingData.js'
+import { featuredDestinations, footerLinks } from '../data/landingData.js'
 import { apiRequest } from '../services/api.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 
@@ -315,6 +315,21 @@ export default function SearchAttractionsPage() {
 
   const pageNumbers = getPageNumbers(currentPage, totalPages)
 
+  // Khi API chưa có địa điểm phù hợp, gợi ý các điểm tham quan nổi bật tuyển chọn
+  // (lọc theo bộ lọc hiện tại; nếu không khớp thì hiển thị toàn bộ danh sách nổi bật).
+  const matchedFeatured = featuredDestinations.filter((item) => {
+    if (selectedCity !== 'Tất cả thành phố' && item.city !== selectedCity) return false
+    if (selectedCategory !== 'All' && item.category !== selectedCategory) return false
+    if (
+      searchQuery &&
+      !`${item.title} ${item.city}`.toLowerCase().includes(searchQuery.toLowerCase())
+    ) {
+      return false
+    }
+    return true
+  })
+  const featuredFallback = matchedFeatured.length > 0 ? matchedFeatured : featuredDestinations
+
   return (
     <React.Fragment>
       <Seo
@@ -534,6 +549,24 @@ export default function SearchAttractionsPage() {
                 </div>
               )}
 
+              {!loading && attractions.length === 0 && (
+                <div className="mb-6 rounded-2xl border border-dashed border-[#bec8ca] bg-white p-6 text-center">
+                  <span
+                    className="material-symbols-outlined mx-auto mb-2 text-3xl text-[#00629d]"
+                    aria-hidden="true"
+                  >
+                    travel_explore
+                  </span>
+                  <h2 className="text-lg font-bold text-[#00474d]">
+                    Chưa có địa điểm khớp bộ lọc — gợi ý điểm tham quan nổi bật
+                  </h2>
+                  <p className="mx-auto mt-1 max-w-md text-sm font-medium text-[#3f484a]">
+                    {errorMessage ||
+                      'Dưới đây là những điểm tham quan nổi bật được yêu thích nhất trên VietTicket.'}
+                  </p>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
                 {loading ? (
                   <SkeletonCards />
@@ -551,7 +584,13 @@ export default function SearchAttractionsPage() {
                     />
                   ))
                 ) : (
-                  <EmptyState message={errorMessage} />
+                  featuredFallback.map((item) => (
+                    <FeaturedFallbackCard
+                      attraction={item}
+                      key={item.id}
+                      navigate={navigate}
+                    />
+                  ))
                 )}
               </div>
 
@@ -714,17 +753,61 @@ function SkeletonCards() {
   ))
 }
 
-function EmptyState({ message }) {
+function FeaturedFallbackCard({ attraction, navigate }) {
+  const title = attraction.title || 'Điểm tham quan'
+  const location = attraction.city ? `${attraction.city}, Việt Nam` : 'Việt Nam'
+  const rating = Number(attraction.averageRating || 0)
+  const goToSearch = () =>
+    navigate(`/attractions?search=${encodeURIComponent(attraction.searchQuery || title)}`)
+
   return (
-    <div className="col-span-full rounded-lg border border-dashed border-[#bec8ca] bg-white p-10 text-center">
-      <span className="material-symbols-outlined mx-auto mb-3 text-4xl text-[#00629d]" aria-hidden="true">
-        travel_explore
-      </span>
-      <h2 className="text-xl font-bold text-[#00474d]">Chưa tìm thấy địa điểm phù hợp</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm font-medium text-[#3f484a]">
-        {message || 'Hãy thử đổi từ khóa, thành phố, khoảng giá hoặc bộ lọc đánh giá sao.'}
-      </p>
-    </div>
+    <article className="group overflow-hidden rounded-lg border border-[#bec8ca]/50 bg-white shadow-[0_4px_20px_rgba(0,40,50,0.05)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_rgba(0,40,50,0.12)]">
+      <div className="relative h-48 overflow-hidden">
+        <img
+          alt={title}
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          src={attraction.primaryImage || fallbackImage}
+        />
+        <div className="absolute left-3 top-3 rounded-full bg-[#00629d] px-2 py-1 text-xs font-bold text-white shadow-sm">
+          Nổi bật
+        </div>
+        <div className="absolute right-3 top-3 flex items-center gap-1 rounded-lg bg-white/90 px-2 py-1 shadow-sm backdrop-blur-md">
+          <span
+            className="material-symbols-outlined text-[16px] text-[#ffba20]"
+            style={{ fontVariationSettings: "'FILL' 1" }}
+          >
+            star
+          </span>
+          <span className="text-xs font-semibold text-[#191c1d]">
+            {rating > 0 ? rating.toFixed(1) : 'New'}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex min-h-[172px] flex-col gap-3 p-4">
+        <h3 className="text-xl font-bold leading-tight text-[#00474d]">{title}</h3>
+        <div className="flex items-center gap-1 text-sm font-medium text-[#3f484a]">
+          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+            location_on
+          </span>
+          {location}
+        </div>
+
+        <div className="mt-auto flex items-end justify-between gap-4">
+          <div className="flex flex-col">
+            <span className="text-xs font-semibold text-[#3f484a]">Giá từ</span>
+            <span className="text-lg font-bold text-[#00629d]">{formatCurrency(attraction.minPrice)}</span>
+          </div>
+          <button
+            className="rounded-lg border border-[#00474d]/20 bg-[#00474d]/5 px-4 py-2 text-sm font-bold text-[#00474d] transition hover:bg-[#00474d] hover:text-white"
+            onClick={goToSearch}
+            type="button"
+          >
+            Khám phá
+          </button>
+        </div>
+      </div>
+    </article>
   )
 }
 
