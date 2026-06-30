@@ -35,6 +35,7 @@ function sanitizeUser(user) {
     email: user.email,
     fullName: user.fullName,
     role: user.role,
+    employerPartnerId: user.employerPartnerId || null,
     provider: user.provider,
     isEmailVerified: user.isEmailVerified,
     status: user.status,

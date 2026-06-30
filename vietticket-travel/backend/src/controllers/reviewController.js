@@ -1,6 +1,7 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { isReviewEligible } = require('../utils/reviewEligibility');
 
 // Helper function to recalculate average rating and total reviews for an attraction
@@ -253,6 +254,13 @@ async function replyReview(req, res, next) {
 // 4. PATCH /api/reviews/:reviewId/moderate
 async function moderateReview(req, res, next) {
   try {
+    if (!isPlatformStaff(req.user)) {
+      return res.status(403).json({
+        message: 'Chi nhan vien noi bo cua nen tang moi co quyen kiem duyet danh gia.',
+        code: 'PLATFORM_STAFF_REQUIRED',
+      });
+    }
+
     const { reviewId } = req.params;
     const { isHidden } = req.body;
 

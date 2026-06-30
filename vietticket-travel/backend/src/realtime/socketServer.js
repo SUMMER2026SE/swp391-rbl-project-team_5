@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { Server } = require('socket.io');
 const prisma = require('../config/prisma');
 const { corsOptions } = require('../config/cors');
+const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { AUTH_COOKIE_NAME } = require('../utils/authCookie');
 const { setSocketServer } = require('./events');
 
@@ -52,7 +53,19 @@ async function authenticateSocket(socket, next) {
     const [user, session] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
-        include: {
+        // FIX [P1]: Dùng select thay vì include để lấy đúng scalar field
+        // employerPartnerId từ bảng User.
+        //   - employerPartnerId = null  → platform ADMIN/STAFF → isPlatformStaff() = true
+        //   - employerPartnerId = <id>  → partner STAFF       → isPlatformStaff() = false
+        // Trước đây dùng include({ partnerProfile: ... }) không kéo scalar fields
+        // của bảng User → employerPartnerId luôn undefined → isPlatformStaff trả
+        // true cho mọi STAFF, bao gồm partner staff → lỗ hổng nghe ticket chat.
+        select: {
+          id: true,
+          role: true,
+          status: true,
+          tokenVersion: true,
+          employerPartnerId: true,
           partnerProfile: {
             select: { id: true, status: true },
           },
@@ -83,6 +96,7 @@ async function authenticateSocket(socket, next) {
     socket.user = {
       id: user.id,
       role: user.role,
+      employerPartnerId: user.employerPartnerId || null,
       partnerProfileId: approvedPartner?.id || null,
     };
 
@@ -90,6 +104,18 @@ async function authenticateSocket(socket, next) {
   } catch {
     return next(new Error('Unauthorized'));
   }
+}
+
+async function canJoinSupportTicket(user, ticketId) {
+  if (!ticketId || typeof ticketId !== 'string') return false;
+  if (isPlatformStaff(user)) return true;
+
+  const ticket = await prisma.supportTicket.findUnique({
+    where: { id: ticketId },
+    select: { userId: true },
+  });
+
+  return Boolean(ticket && ticket.userId === user?.id);
 }
 
 function initializeSocketServer(httpServer) {
@@ -106,21 +132,14 @@ function initializeSocketServer(httpServer) {
     }
 
     // Support ticket (Module 5): chỉ cho vào phòng chat khi là chủ ticket
-    // hoặc nhân viên (STAFF/ADMIN). Tránh nghe lén hội thoại của người khác.
+    // hoặc platform staff (ADMIN / platform STAFF). Partner staff bị chặn
+    // vì canJoinSupportTicket kiểm tra isPlatformStaff(user) — hàm này
+    // trả false khi user.employerPartnerId != null.
     socket.on('JOIN_SUPPORT_TICKET', async (ticketId) => {
       try {
-        if (!ticketId || typeof ticketId !== 'string') return;
-
-        const isStaff = socket.user.role === 'STAFF' || socket.user.role === 'ADMIN';
-        if (!isStaff) {
-          const ticket = await prisma.supportTicket.findUnique({
-            where: { id: ticketId },
-            select: { userId: true },
-          });
-          if (!ticket || ticket.userId !== socket.user.id) return;
+        if (await canJoinSupportTicket(socket.user, ticketId)) {
+          socket.join(`ticket:${ticketId}`);
         }
-
-        socket.join(`ticket:${ticketId}`);
       } catch (error) {
         console.error('[socket] JOIN_SUPPORT_TICKET lỗi:', error.message);
       }
@@ -151,6 +170,7 @@ async function closeSocketServer() {
 
 module.exports = {
   authenticateSocket,
+  canJoinSupportTicket,
   closeSocketServer,
   initializeSocketServer,
   parseCookies,

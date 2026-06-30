@@ -185,6 +185,27 @@ describe('Review Routes Integration Tests', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.isHidden).toBe(true);
     });
+
+    test('blocks partner staff from moderating platform reviews', async () => {
+      const token = generateTestToken('partner-staff-01', 'STAFF');
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'partner-staff-01',
+        role: 'STAFF',
+        status: 'ACTIVE',
+        tokenVersion: 0,
+        employerPartnerId: 'partner-01',
+      });
+      mockValidSession(mockPrisma, 'partner-staff-01');
+
+      const res = await request(app)
+        .patch('/api/reviews/rev-01/moderate')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ isHidden: true });
+
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe('PLATFORM_STAFF_REQUIRED');
+      expect(mockPrisma.review.findUnique).not.toHaveBeenCalled();
+    });
   });
 
   describe('GET /api/partners/reviews', () => {

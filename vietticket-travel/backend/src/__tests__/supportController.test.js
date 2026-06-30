@@ -4,6 +4,7 @@ const prisma = require('./helpers/mockPrisma');
 const {
   createTicket,
   getTicketDetail,
+  listAllTickets,
   sendMessage,
   updateTicketStatus,
 } = require('../controllers/supportController');
@@ -62,6 +63,23 @@ describe('createTicket', () => {
 });
 
 describe('getTicketDetail', () => {
+  test('forbids partner staff from reading customer support tickets', async () => {
+    prisma.supportTicket.findUnique.mockResolvedValue({
+      id: 'tk-1',
+      userId: 'cust-1',
+      messages: [],
+    });
+    const { req, res, next } = makeReqRes({
+      user: { id: 'partner-staff-1', role: 'STAFF', employerPartnerId: 'partner-1' },
+      params: { ticketId: 'tk-1' },
+    });
+
+    await getTicketDetail(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   test('forbids a customer who does not own the ticket', async () => {
     prisma.supportTicket.findUnique.mockResolvedValue({
       id: 'tk-1',
@@ -74,6 +92,19 @@ describe('getTicketDetail', () => {
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('listAllTickets', () => {
+  test('forbids partner staff from listing the platform support queue', async () => {
+    const { req, res, next } = makeReqRes({
+      user: { id: 'partner-staff-1', role: 'STAFF', employerPartnerId: 'partner-1' },
+    });
+
+    await listAllTickets(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(prisma.supportTicket.findMany).not.toHaveBeenCalled();
   });
 });
 
