@@ -1,6 +1,5 @@
 'use strict';
 
-const bcrypt = require('bcrypt');
 const prisma = require('../config/prisma');
 const { createRandomToken, hashToken, addMinutes } = require('../utils/tokenUtils');
 const { isValidEmail, validateFullName, isValidPhoneNumber } = require('../utils/validators');

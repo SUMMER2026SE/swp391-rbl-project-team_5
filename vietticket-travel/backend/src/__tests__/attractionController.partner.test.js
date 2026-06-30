@@ -314,6 +314,53 @@ describe('uploadImages', () => {
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ images: expect.any(Array) }));
   });
+
+  test('✅ Địa điểm đã public chỉ thêm ảnh vào draft, không ghi bảng ảnh live', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-live',
+      partnerId: 'partner-001',
+      status: 'APPROVED',
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+      draftData: {
+        schemaVersion: 1,
+        images: [{ id: 'img-live', url: '/live.jpg', isPrimary: true }],
+      },
+      images: [{ id: 'img-live', imageUrl: '/live.jpg', isPrimary: true }],
+      categories: [],
+      ticketProducts: [],
+      timeSlots: [],
+      specialDates: [],
+    });
+    mockPrisma.attraction.update.mockResolvedValue({});
+
+    const req = {
+      partner: PARTNER,
+      params: { id: 'attr-live' },
+      protocol: 'http',
+      get: () => 'localhost',
+      files: [{ filename: 'new.png' }],
+    };
+    const res = createRes();
+    await uploadImages(req, res, jest.fn());
+
+    expect(mockPrisma.attractionImage.create).not.toHaveBeenCalled();
+    expect(mockPrisma.attraction.update).toHaveBeenCalledWith({
+      where: { id: 'attr-live' },
+      data: expect.objectContaining({
+        status: 'DRAFT',
+        rejectionReason: null,
+        draftData: expect.objectContaining({ images: expect.any(Array) }),
+      }),
+    });
+    const savedImages = mockPrisma.attraction.update.mock.calls[0][0].data.draftData.images;
+    expect(savedImages).toHaveLength(2);
+    expect(savedImages[1]).toEqual(expect.objectContaining({
+      id: expect.stringMatching(/^draft-/),
+      url: 'http://localhost/uploads/new.png',
+      isPrimary: false,
+    }));
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
 });
 
 describe('manage attraction images', () => {
@@ -378,6 +425,84 @@ describe('manage attraction images', () => {
       where: { id: 'img-2' },
       data: { isPrimary: true },
     });
+    expect(res.json).toHaveBeenCalledWith({ message: 'Đã cập nhật ảnh đại diện.' });
+  });
+
+  test('✅ Xóa ảnh của địa điểm đã public chỉ cập nhật draft', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-live',
+      partnerId: 'partner-001',
+      status: 'APPROVED',
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+      draftData: {
+        schemaVersion: 1,
+        images: [
+          { id: 'img-1', url: '/a.jpg', isPrimary: true },
+          { id: 'img-2', url: '/b.jpg', isPrimary: false },
+        ],
+      },
+      images: [
+        { id: 'img-1', imageUrl: '/a.jpg', isPrimary: true },
+        { id: 'img-2', imageUrl: '/b.jpg', isPrimary: false },
+      ],
+      categories: [],
+      ticketProducts: [],
+      timeSlots: [],
+      specialDates: [],
+    });
+    mockPrisma.attraction.update.mockResolvedValue({});
+
+    const res = createRes();
+    await deleteImage(
+      { partner: PARTNER, params: { id: 'attr-live', imageId: 'img-1' } },
+      res,
+      jest.fn(),
+    );
+
+    expect(mockPrisma.attractionImage.delete).not.toHaveBeenCalled();
+    const savedImages = mockPrisma.attraction.update.mock.calls[0][0].data.draftData.images;
+    expect(savedImages).toEqual([{ id: 'img-2', url: '/b.jpg', isPrimary: true }]);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Đã xóa ảnh.' });
+  });
+
+  test('✅ Đổi ảnh đại diện của địa điểm đã public chỉ cập nhật draft', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-live',
+      partnerId: 'partner-001',
+      status: 'APPROVED',
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+      draftData: {
+        schemaVersion: 1,
+        images: [
+          { id: 'img-1', url: '/a.jpg', isPrimary: true },
+          { id: 'img-2', url: '/b.jpg', isPrimary: false },
+        ],
+      },
+      images: [
+        { id: 'img-1', imageUrl: '/a.jpg', isPrimary: true },
+        { id: 'img-2', imageUrl: '/b.jpg', isPrimary: false },
+      ],
+      categories: [],
+      ticketProducts: [],
+      timeSlots: [],
+      specialDates: [],
+    });
+    mockPrisma.attraction.update.mockResolvedValue({});
+
+    const res = createRes();
+    await setPrimaryImage(
+      { partner: PARTNER, params: { id: 'attr-live', imageId: 'img-2' } },
+      res,
+      jest.fn(),
+    );
+
+    expect(mockPrisma.attractionImage.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.attractionImage.update).not.toHaveBeenCalled();
+    const savedImages = mockPrisma.attraction.update.mock.calls[0][0].data.draftData.images;
+    expect(savedImages).toEqual([
+      { id: 'img-1', url: '/a.jpg', isPrimary: false },
+      { id: 'img-2', url: '/b.jpg', isPrimary: true },
+    ]);
     expect(res.json).toHaveBeenCalledWith({ message: 'Đã cập nhật ảnh đại diện.' });
   });
 

@@ -1,3 +1,4 @@
+const { randomUUID } = require('crypto');
 const prisma = require('../config/prisma');
 const {
   attractionStatusFromClient,
@@ -6,6 +7,16 @@ const {
 } = require('../utils/partnerMappers');
 const { validateAttraction } = require('../utils/partnerValidators');
 const { buildUploadUrl } = require('../middleware/uploadMiddleware');
+const { writeAuditLog } = require('../utils/auditLog');
+const {
+  assertPartnerCanEdit,
+  buildAttractionSnapshot,
+  hasPublishedVersion,
+  mergeSnapshot,
+  normalizeImages,
+  resolveActiveCategory,
+  validateSubmissionSnapshot,
+} = require('../services/attractionWorkflowService');
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -17,6 +28,11 @@ const attractionInclude = {
   ticketProducts: { where: { archivedAt: null } },
   timeSlots: { where: { ticketProductId: null, isActive: true } },
   specialDates: true,
+};
+
+const attractionIncludeWithOrderedImages = {
+  ...attractionInclude,
+  images: { orderBy: { createdAt: 'asc' } },
 };
 
 function parsePositiveInt(value, fallback) {
@@ -46,12 +62,48 @@ async function findOwnedAttraction(attractionId, partnerId, include = attraction
   return attraction;
 }
 
+function toImagePayload(image) {
+  return {
+    id: image.id,
+    url: image.url || image.imageUrl,
+    isPrimary: Boolean(image.isPrimary),
+  };
+}
+
+function getWorkingDraft(attraction) {
+  const source = attraction.draftData && typeof attraction.draftData === 'object'
+    ? attraction.draftData
+    : buildAttractionSnapshot(attraction);
+
+  return {
+    ...source,
+    images: normalizeImages(source.images || []),
+  };
+}
+
+async function saveDraftImages(attraction, images) {
+  const draft = {
+    ...getWorkingDraft(attraction),
+    images: normalizeImages(images),
+  };
+
+  await prisma.attraction.update({
+    where: { id: attraction.id },
+    data: {
+      draftData: draft,
+      status: 'DRAFT',
+      rejectionReason: null,
+    },
+  });
+
+  return draft.images;
+}
+
 // Gắn 1 category (theo tên) cho điểm tham quan: upsert Category rồi nối
 async function setCategory(tx, attractionId, categoryName) {
   const name = String(categoryName || '').trim();
   if (!name) return;
 
-  const { resolveActiveCategory } = require('../services/attractionWorkflowService');
   let category = await resolveActiveCategory(tx, name);
   if (!category) {
     category = await tx.category.upsert({
@@ -228,14 +280,6 @@ async function createAttraction(req, res, next) {
 // PUT /api/partners/attractions/:id
 async function updateAttraction(req, res, next) {
   try {
-    const {
-      assertPartnerCanEdit,
-      hasPublishedVersion,
-      buildAttractionSnapshot,
-      mergeSnapshot,
-      resolveActiveCategory,
-    } = require('../services/attractionWorkflowService');
-
     const existing = await findOwnedAttraction(req.params.id, req.partner.id, attractionInclude);
     if (!existing) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
@@ -346,14 +390,33 @@ async function deleteAttraction(req, res, next) {
 // POST /api/partners/attractions/:id/images — upload nhiều ảnh
 async function uploadImages(req, res, next) {
   try {
-    const existing = await findOwnedAttraction(req.params.id, req.partner.id, { images: true });
+    const existing = await findOwnedAttraction(req.params.id, req.partner.id, attractionInclude);
     if (!existing) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
 
+    assertPartnerCanEdit(existing);
+
     const files = req.files || [];
     if (files.length === 0) {
       return res.status(400).json({ message: 'Vui lòng chọn ít nhất một ảnh.' });
+    }
+
+    if (hasPublishedVersion(existing)) {
+      const draft = getWorkingDraft(existing);
+      const hasDraftPrimary = draft.images.some((img) => img.isPrimary);
+      const created = files.map((file, index) => ({
+        id: `draft-${randomUUID()}`,
+        url: buildUploadUrl(req, file.filename),
+        isPrimary: !hasDraftPrimary && index === 0,
+      }));
+
+      await saveDraftImages(existing, [...draft.images, ...created]);
+
+      return res.status(201).json({
+        message: 'Tải ảnh thành công.',
+        images: created.map(toImagePayload),
+      });
     }
 
     const hasPrimary = existing.images.some((img) => img.isPrimary);
@@ -372,7 +435,7 @@ async function uploadImages(req, res, next) {
 
     return res.status(201).json({
       message: 'Tải ảnh thành công.',
-      images: created.map((img) => ({ id: img.id, url: img.imageUrl, isPrimary: img.isPrimary })),
+      images: created.map(toImagePayload),
     });
   } catch (error) {
     next(error);
@@ -385,10 +448,28 @@ async function deleteImage(req, res, next) {
     const attraction = await findOwnedAttraction(
       req.params.id,
       req.partner.id,
-      { images: { orderBy: { createdAt: 'asc' } } },
+      attractionIncludeWithOrderedImages,
     );
     if (!attraction) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
+    }
+
+    assertPartnerCanEdit(attraction);
+
+    if (hasPublishedVersion(attraction)) {
+      const draft = getWorkingDraft(attraction);
+      const image = draft.images.find((item) => item.id === req.params.imageId);
+      if (!image) {
+        return res.status(404).json({ message: 'Không tìm thấy ảnh.' });
+      }
+
+      const nextImages = draft.images.filter((item) => item.id !== image.id);
+      if (image.isPrimary && nextImages.length > 0 && !nextImages.some((item) => item.isPrimary)) {
+        nextImages[0] = { ...nextImages[0], isPrimary: true };
+      }
+
+      await saveDraftImages(attraction, nextImages);
+      return res.json({ message: 'Đã xóa ảnh.' });
     }
 
     const image = attraction.images.find((item) => item.id === req.params.imageId);
@@ -421,10 +502,26 @@ async function setPrimaryImage(req, res, next) {
     const attraction = await findOwnedAttraction(
       req.params.id,
       req.partner.id,
-      { images: true },
+      attractionInclude,
     );
     if (!attraction) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
+    }
+
+    assertPartnerCanEdit(attraction);
+
+    if (hasPublishedVersion(attraction)) {
+      const draft = getWorkingDraft(attraction);
+      const image = draft.images.find((item) => item.id === req.params.imageId);
+      if (!image) {
+        return res.status(404).json({ message: 'Không tìm thấy ảnh.' });
+      }
+
+      await saveDraftImages(
+        attraction,
+        draft.images.map((item) => ({ ...item, isPrimary: item.id === image.id })),
+      );
+      return res.json({ message: 'Đã cập nhật ảnh đại diện.' });
     }
 
     const image = attraction.images.find((item) => item.id === req.params.imageId);
@@ -465,12 +562,6 @@ async function listCategories(req, res, next) {
 // POST /api/attractions/:id/submit — gửi duyệt (từ MPhu)
 async function submitAttraction(req, res, next) {
   try {
-    const {
-      buildAttractionSnapshot,
-      validateSubmissionSnapshot,
-    } = require('../services/attractionWorkflowService');
-    const { writeAuditLog } = require('../utils/auditLog');
-
     const userId = req.user && req.user.id;
     if (!userId) return res.status(401).json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Unauthorized' } });
 

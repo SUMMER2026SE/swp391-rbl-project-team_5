@@ -618,6 +618,28 @@ async function setupTimeSlots(req, res, next) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Không có quyền thao tác' } });
     }
 
+    try {
+      assertPartnerCanEdit(product.attraction);
+    } catch (error) {
+      return res.status(error.statusCode || 409).json({
+        success: false,
+        error: {
+          code: error.statusCode === 403 ? 'FORBIDDEN' : 'INVALID_STATE',
+          message: error.message,
+        },
+      });
+    }
+
+    if (hasPublishedVersion(product.attraction)) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'REVIEW_REQUIRED',
+          message: 'Khung gio cua goi ve da cong khai phai duoc thay doi qua ban nhap va gui admin duyet.',
+        },
+      });
+    }
+
     const slots = Array.isArray(req.body.slots) ? req.body.slots : null;
     if (!slots || !slots.length) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'slots array is required' } });
 
