@@ -19,6 +19,7 @@ function Header({ links = defaultLinks, activeLink = '' }) {
   const closeMenu = () => setIsMenuOpen(false)
   const firstName = user?.fullName?.split(' ')[0] || 'Hồ sơ'
   const avatar = user?.avatar || defaultUser.avatar
+  const staffPortalPath = user?.employerPartnerId ? '/staff/checkin' : '/staff/tickets'
 
   const handleLogout = () => {
     logout()
@@ -87,7 +88,7 @@ function Header({ links = defaultLinks, activeLink = '' }) {
               {user?.role === 'STAFF' && (
                 <Link
                   className="text-button"
-                  to="/staff/tickets"
+                  to={staffPortalPath}
                   style={{ marginRight: '4px', color: 'var(--color-primary)', fontWeight: 'bold' }}
                 >
                   Cổng nhân viên
@@ -175,7 +176,7 @@ function Header({ links = defaultLinks, activeLink = '' }) {
                   </Link>
                 )}
                 {user?.role === 'STAFF' && (
-                  <Link className="button button--secondary" to="/staff/tickets" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                  <Link className="button button--secondary" to={staffPortalPath} onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
                     Cổng nhân viên
                   </Link>
                 )}

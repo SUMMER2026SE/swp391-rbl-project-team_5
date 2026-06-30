@@ -184,6 +184,34 @@ describe('setupTimeSlots', () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
+  test('blocks live slot changes for published attractions', async () => {
+    mockPrisma.ticketProduct.findUnique.mockResolvedValue({
+      id: 'tkt-001',
+      attraction: {
+        partnerId: 'partner-001',
+        publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+        status: 'APPROVED',
+      },
+    });
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });
+
+    const req = {
+      user: { id: 'user-001' },
+      params: { ticketProductId: 'tkt-001' },
+      body: { slots: [{ startTime: '08:00', endTime: '11:00', maxCapacity: 100 }] },
+    };
+    const res = createRes();
+
+    await setupTimeSlots(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: false,
+      error: expect.objectContaining({ code: 'REVIEW_REQUIRED' }),
+    }));
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test('❌ Trả 400 khi slot thiếu maxCapacity hợp lệ', async () => {
     mockPrisma.ticketProduct.findUnique.mockResolvedValue({ id: 'tkt-001', attraction: { partnerId: 'partner-001' } });
     mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });

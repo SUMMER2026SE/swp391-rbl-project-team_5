@@ -339,7 +339,7 @@ function AppRoutes() {
       <Route
         path="/staff/refunds"
         element={
-          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePlatformStaff>
             <RefundManagementPage />
           </ProtectedRoute>
         }
@@ -347,7 +347,7 @@ function AppRoutes() {
       <Route
         path="/staff/tickets"
         element={
-          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePlatformStaff>
             <SupportTicketsPage />
           </ProtectedRoute>
         }

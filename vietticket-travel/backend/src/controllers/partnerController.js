@@ -23,6 +23,12 @@ function toNullable(value) {
   return trimmed || null;
 }
 
+function bookingConflict(message = 'Đơn đặt vé đã được xử lý trước đó.') {
+  const error = new Error(message);
+  error.statusCode = 409;
+  return error;
+}
+
 // Định dạng hồ sơ đối tác trả về cho FE (trang Cài đặt + Pending)
 function toPartnerResponse(partner, user) {
   return {
@@ -731,24 +737,36 @@ async function approveBooking(req, res, next) {
       // duyệt đồng thời không trừ kho / tạo vé hai lần.
       const current = await tx.booking.findUnique({
         where: { id: bookingId },
-        include: { reservation: true },
+        include: {
+          reservation: {
+            include: {
+              ticketProduct: {
+                include: { attraction: { select: { partnerId: true } } },
+              },
+            },
+          },
+        },
       });
       if (!current || current.status !== 'PENDING_PARTNER') {
         const err = new Error('Đơn đặt vé đã được xử lý trước đó.');
         err.statusCode = 409;
         throw err;
       }
+      if (current.reservation.ticketProduct.attraction.partnerId !== partnerId) {
+        throw bookingConflict('Bạn không có quyền duyệt đơn này.');
+      }
+      const claimed = await tx.booking.updateMany({
+        where: { id: bookingId, status: 'PENDING_PARTNER' },
+        data: { status: 'CONFIRMED' },
+      });
+      if (claimed.count !== 1) {
+        throw bookingConflict();
+      }
       const reservation = current.reservation;
 
       if (reservation.status !== 'CONFIRMED') {
         await confirmReservationAndStock(tx, reservation);
       }
-
-      // 4. Cập nhật Booking -> CONFIRMED
-      await tx.booking.update({
-        where: { id: bookingId },
-        data: { status: 'CONFIRMED' },
-      });
 
       // 5. Tạo TicketInstance (QR code) nếu chưa có.
       // Đếm lại TRONG transaction (không dùng dữ liệu đọc trước đó) để
@@ -831,26 +849,61 @@ async function rejectBooking(req, res, next) {
       });
     }
 
-    const reservation = booking.reservation;
     const hasPaid = booking.payments.length > 0;
 
     await prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          payments: { where: { status: 'SUCCESS', isDuplicate: false }, select: { id: true } },
+          refundRequests: { select: { id: true } },
+          reservation: {
+            include: {
+              ticketProduct: {
+                include: { attraction: { select: { partnerId: true } } },
+              },
+            },
+          },
+        },
+      });
+      if (!booking || booking.status !== 'PENDING_PARTNER') {
+        throw bookingConflict();
+      }
+      if (booking.reservation.ticketProduct.attraction.partnerId !== partnerId) {
+        throw bookingConflict('Bạn không có quyền từ chối đơn này.');
+      }
+
+      const reservation = booking.reservation;
+      const hasPaid = booking.payments.length > 0;
+      const claimed = await tx.booking.updateMany({
+        where: { id: bookingId, status: 'PENDING_PARTNER' },
+        data: { status: 'CANCELLED', refundRequired: hasPaid },
+      });
+      if (claimed.count !== 1) {
+        throw bookingConflict();
+      }
+
       // 1. Hoàn trả DailyStock: bookedQuantity -> giảm, giải phóng lại slot
       //    Chỉ hoàn nếu reservation đã CONFIRMED (tức đã từng chuyển held -> booked)
       if (reservation.status === 'CONFIRMED') {
         await releaseInventory(tx, booking);
       } else if (reservation.status === 'HELD') {
         // Nếu còn HELD thì hoàn lại heldQuantity
-        await tx.dailyStock.updateMany({
+        const dailyStock = await tx.dailyStock.updateMany({
           where: {
             ticketProductId: reservation.ticketProductId,
             date: reservation.date,
+            heldQuantity: { gte: reservation.quantity },
           },
           data: {
             heldQuantity: { decrement: reservation.quantity },
           },
         });
-        await tx.attractionDailyStock.updateMany({
+        if (dailyStock.count !== 1) {
+          throw bookingConflict('Không thể hoàn trả kho vé giữ chỗ.');
+        }
+
+        const attractionStock = await tx.attractionDailyStock.updateMany({
           where: {
             attractionId: reservation.ticketProduct.attractionId,
             date: reservation.date,
@@ -858,17 +911,24 @@ async function rejectBooking(req, res, next) {
           },
           data: { heldQty: { decrement: reservation.quantity } },
         });
+        if (attractionStock.count !== 1) {
+          throw bookingConflict('Không thể hoàn trả kho giữ chỗ của điểm tham quan.');
+        }
 
         if (reservation.timeSlotId) {
-          await tx.timeSlotStock.updateMany({
+          const timeSlotStock = await tx.timeSlotStock.updateMany({
             where: {
               timeSlotId: reservation.timeSlotId,
               date: reservation.date,
+              heldQty: { gte: reservation.quantity },
             },
             data: {
               heldQty: { decrement: reservation.quantity },
             },
           });
+          if (timeSlotStock.count !== 1) {
+            throw bookingConflict('Không thể hoàn trả kho giữ chỗ theo khung giờ.');
+          }
         }
       }
 
@@ -878,11 +938,13 @@ async function rejectBooking(req, res, next) {
         data: { status: 'CANCELLED' },
       });
 
-      // 4. Cập nhật Booking -> CANCELLED. Đơn đã thu tiền -> gắn refundRequired.
-      await tx.booking.update({
-        where: { id: bookingId },
-        data: { status: 'CANCELLED', refundRequired: hasPaid },
-      });
+      // Giải phóng lượt dùng voucher nếu đơn này có áp dụng mã ưu đãi
+      if (booking.voucherId) {
+        await tx.voucher.updateMany({
+          where: { id: booking.voucherId, usedCount: { gt: 0 } },
+          data: { usedCount: { decrement: 1 } },
+        });
+      }
 
       // 5. Đơn đã thu tiền -> tạo RefundRequest hoàn 100% (partner từ chối thì
       //    khách không chịu phí hủy) để Staff duyệt hoàn qua luồng sẵn có.

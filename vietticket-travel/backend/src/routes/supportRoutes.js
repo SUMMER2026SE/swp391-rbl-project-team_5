@@ -2,7 +2,7 @@
 
 const express = require('express');
 const protect = require('../middleware/authMiddleware');
-const { restrictTo } = require('../middleware/roleMiddleware');
+const { requirePlatformStaff, restrictTo } = require('../middleware/roleMiddleware');
 const {
   createTicket,
   listMyTickets,
@@ -21,8 +21,8 @@ router.post('/tickets', restrictTo('CUSTOMER'), createTicket);
 router.get('/tickets/my-tickets', restrictTo('CUSTOMER'), listMyTickets);
 
 // Staff/Admin — đặt trước route động /:ticketId
-router.get('/tickets', restrictTo('STAFF', 'ADMIN'), listAllTickets);
-router.patch('/tickets/:ticketId/status', restrictTo('STAFF', 'ADMIN'), updateTicketStatus);
+router.get('/tickets', restrictTo('STAFF', 'ADMIN'), requirePlatformStaff, listAllTickets);
+router.patch('/tickets/:ticketId/status', restrictTo('STAFF', 'ADMIN'), requirePlatformStaff, updateTicketStatus);
 
 // Dùng chung (kiểm tra quyền sở hữu/role bên trong controller)
 router.get('/tickets/:ticketId', getTicketDetail);

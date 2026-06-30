@@ -3,6 +3,7 @@
 const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
+const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { releaseInventory, todayInVietnam } = require('../utils/refundService');
 const { refundViaVnpay } = require('./paymentController');
 const { writeAuditLog } = require('../utils/auditLog');
@@ -24,6 +25,12 @@ function httpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+}
+
+function assertPlatformRefundStaff(user) {
+  if (!isPlatformStaff(user)) {
+    throw httpError(403, 'Chi nhan vien noi bo cua nen tang moi co quyen xu ly hoan tien.');
+  }
 }
 
 function getTicketAttractionId(instance) {
@@ -54,6 +61,8 @@ async function assertStaffAttractionAccess(client, user, attractionId) {
 
 async function listRefundRequests(req, res, next) {
   try {
+    assertPlatformRefundStaff(req.user);
+
     const status = String(req.query.status || '').trim().toUpperCase();
     if (status && !REFUND_STATUSES.has(status)) {
       return res.status(400).json({
@@ -101,6 +110,8 @@ async function processRefundRequest(req, res, next) {
   let claimedRefundId = null;
   let refundTransactionId = null;
   try {
+    assertPlatformRefundStaff(req.user);
+
     const { refundId } = req.params;
     const action = String(req.body?.action || '').trim().toUpperCase();
     const staffNotes = String(req.body?.staffNotes || '').trim() || null;

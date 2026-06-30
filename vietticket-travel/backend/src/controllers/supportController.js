@@ -1,6 +1,7 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const {
   emitSupportMessage,
   emitSupportTicketUpdated,
@@ -14,8 +15,14 @@ function httpError(statusCode, message) {
   return error;
 }
 
-function isStaff(user) {
-  return user.role === 'STAFF' || user.role === 'ADMIN';
+function isSupportStaff(user) {
+  return isPlatformStaff(user);
+}
+
+function assertSupportStaff(user) {
+  if (!isSupportStaff(user)) {
+    throw httpError(403, 'Chi nhan vien noi bo cua nen tang moi co quyen xu ly yeu cau ho tro.');
+  }
 }
 
 function sendError(res, error, next) {
@@ -108,6 +115,8 @@ async function listMyTickets(req, res, next) {
 // GET /api/support/tickets — (Staff/Admin) toàn bộ ticket, lọc theo trạng thái + tìm kiếm.
 async function listAllTickets(req, res, next) {
   try {
+    assertSupportStaff(req.user);
+
     const status = String(req.query.status || '').trim().toUpperCase();
     if (status && !SUPPORT_STATUSES.has(status)) {
       throw httpError(400, 'Trạng thái không hợp lệ.');
@@ -159,7 +168,7 @@ async function getTicketDetail(req, res, next) {
     });
 
     if (!ticket) throw httpError(404, 'Không tìm thấy yêu cầu hỗ trợ.');
-    if (!isStaff(req.user) && ticket.userId !== req.user.id) {
+    if (!isSupportStaff(req.user) && ticket.userId !== req.user.id) {
       throw httpError(403, 'Bạn không có quyền xem yêu cầu này.');
     }
 
@@ -183,7 +192,7 @@ async function sendMessage(req, res, next) {
     });
     if (!ticket) throw httpError(404, 'Không tìm thấy yêu cầu hỗ trợ.');
 
-    const staff = isStaff(req.user);
+    const staff = isSupportStaff(req.user);
     if (!staff && ticket.userId !== req.user.id) {
       throw httpError(403, 'Bạn không có quyền gửi tin trong yêu cầu này.');
     }
@@ -225,6 +234,8 @@ async function sendMessage(req, res, next) {
 // PATCH /api/support/tickets/:ticketId/status — (Staff/Admin) đổi trạng thái ticket.
 async function updateTicketStatus(req, res, next) {
   try {
+    assertSupportStaff(req.user);
+
     const { ticketId } = req.params;
     const status = String(req.body?.status || '').trim().toUpperCase();
     if (!SUPPORT_STATUSES.has(status)) {

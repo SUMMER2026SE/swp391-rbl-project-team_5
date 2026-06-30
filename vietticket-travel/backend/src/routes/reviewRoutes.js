@@ -2,7 +2,7 @@
 
 const express = require('express');
 const protect = require('../middleware/authMiddleware');
-const { restrictTo } = require('../middleware/roleMiddleware');
+const { requirePlatformStaff, restrictTo } = require('../middleware/roleMiddleware');
 const { requirePartner, requireApprovedPartner } = require('../middleware/partnerMiddleware');
 const reviewController = require('../controllers/reviewController');
 
@@ -25,6 +25,12 @@ router.post(
 );
 
 // Admin/Staff moderation routes
-router.patch('/:reviewId/moderate', protect, restrictTo('ADMIN', 'STAFF'), reviewController.moderateReview);
+router.patch(
+  '/:reviewId/moderate',
+  protect,
+  restrictTo('ADMIN', 'STAFF'),
+  requirePlatformStaff,
+  reviewController.moderateReview,
+);
 
 module.exports = router;

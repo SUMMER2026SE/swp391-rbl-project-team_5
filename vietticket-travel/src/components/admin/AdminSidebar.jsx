@@ -64,19 +64,25 @@ export default function AdminSidebar() {
             ))}
           </>
         )}
-        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '16px 12px 8px' }}>Công cụ nhân viên</p>
-        {NAV_ITEMS_STAFF.map(({ to, icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              'admin-sidebar__nav-link' + (isActive ? ' admin-sidebar__nav-link--active-dark' : ' admin-sidebar__nav-link--dark')
-            }
-          >
-            <span className="material-symbols-outlined">{icon}</span>
-            <span>{label}</span>
-          </NavLink>
-        ))}
+        {/* Công cụ nhân viên: chỉ hiện với platform STAFF (không có employerPartnerId)
+           và ADMIN. Partner staff KHÔNG có quyền vào staff/tickets hay staff/refunds. */}
+        {(user?.role === 'ADMIN' || (user?.role === 'STAFF' && !user?.employerPartnerId)) && (
+          <>
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '16px 12px 8px' }}>Công cụ nhân viên</p>
+            {NAV_ITEMS_STAFF.map(({ to, icon, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  'admin-sidebar__nav-link' + (isActive ? ' admin-sidebar__nav-link--active-dark' : ' admin-sidebar__nav-link--dark')
+                }
+              >
+                <span className="material-symbols-outlined">{icon}</span>
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </>
+        )}
       </nav>
 
       {/* Footer */}
@@ -111,7 +117,11 @@ export default function AdminSidebar() {
           <div>
             <p className="admin-sidebar__profile-name" style={{ color: '#fff' }}>{user?.fullName || 'Admin'}</p>
             <p className="admin-sidebar__profile-role" style={{ color: 'rgba(255,255,255,0.6)' }}>
-              {user?.role === 'ADMIN' ? 'Quản trị viên' : 'Nhân viên hỗ trợ'}
+              {user?.role === 'ADMIN'
+                ? 'Quản trị viên'
+                : user?.employerPartnerId
+                ? 'Nhân viên đối tác'
+                : 'Nhân viên hỗ trợ'}
             </p>
           </div>
         </Link>

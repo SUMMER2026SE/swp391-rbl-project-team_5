@@ -103,6 +103,7 @@ export default function AttractionDetailPage() {
   // Trạng thái mở modal đặt vé & loại vé được chọn
   const [isBookingOpen, setIsBookingOpen] = useState(false)
   const [selectedTicketProduct, setSelectedTicketProduct] = useState(null)
+  const [bookingInitialQuantity, setBookingInitialQuantity] = useState(1)
 
   // State quản lý số lượng vé chọn nhanh ở sidebar
   const [ticketQuantities, setTicketQuantities] = useState({})
@@ -196,6 +197,9 @@ export default function AttractionDetailPage() {
     setTicketQuantities((prev) => {
       const currentQty = prev[ticketId] || 0
       const newQty = Math.max(0, currentQty + delta)
+      if (newQty > 0) {
+        return { [ticketId]: newQty }
+      }
       return { ...prev, [ticketId]: newQty }
     })
   }
@@ -209,8 +213,11 @@ export default function AttractionDetailPage() {
     }, 0)
   }
 
-  const handleOpenBookingModal = (ticket) => {
+  const getBookingQuantity = (ticket) => Math.max(1, Number(ticketQuantities[ticket?.id] || 0) || 1)
+
+  const handleOpenBookingModal = (ticket, quantity = getBookingQuantity(ticket)) => {
     setSelectedTicketProduct(ticket)
+    setBookingInitialQuantity(Math.max(1, Number(quantity) || 1))
     setIsBookingOpen(true)
   }
 
@@ -219,7 +226,7 @@ export default function AttractionDetailPage() {
       ticketProducts.find((ticket) => (ticketQuantities[ticket.id] || 0) > 0) || ticketProducts[0]
 
     if (selectedTicket) {
-      handleOpenBookingModal(selectedTicket)
+      handleOpenBookingModal(selectedTicket, getBookingQuantity(selectedTicket))
     }
   }
 
@@ -465,7 +472,7 @@ export default function AttractionDetailPage() {
                     <TicketProductCard
                       isFeatured={index === 0}
                       key={ticket.id}
-                      onChoose={() => handleOpenBookingModal(ticket)}
+                      onChoose={() => handleOpenBookingModal(ticket, getBookingQuantity(ticket))}
                       onQuantityChange={(delta) => handleQuantityChange(ticket.id, delta)}
                       quantity={ticketQuantities[ticket.id] || 0}
                       ticket={ticket}
@@ -531,7 +538,9 @@ export default function AttractionDetailPage() {
           attractionImage={activeImage || getPrimaryImageUrl(images)}
           attractionLocation={getAddress(attraction)}
           attractionTitle={attraction.title}
+          initialQuantity={bookingInitialQuantity}
           isOpen={isBookingOpen}
+          key={`${selectedTicketProduct.id}-${bookingInitialQuantity}`}
           onClose={() => setIsBookingOpen(false)}
           requiresManualApproval={Boolean(attraction.requiresManualApproval)}
           ticketProduct={selectedTicketProduct}

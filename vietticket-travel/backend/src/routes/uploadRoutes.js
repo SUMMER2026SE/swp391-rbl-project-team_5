@@ -1,6 +1,6 @@
 const express = require('express');
 const protect = require('../middleware/authMiddleware');
-const { restrictTo } = require('../middleware/roleMiddleware');
+const { isPlatformStaff, restrictTo } = require('../middleware/roleMiddleware');
 const {
   uploadAttractionImages,
   uploadDocument,
@@ -44,7 +44,7 @@ router.post('/document', protect, uploadDocument.single('document'), validateUpl
 router.get('/documents/:filename', protect, (req, res) => {
   const filename = String(req.params.filename || '');
   const canRead =
-    ['ADMIN', 'STAFF'].includes(req.user.role)
+    isPlatformStaff(req.user)
     || filename.startsWith(`${req.user.id}-`);
   const documentPath = canRead ? getPrivateDocumentPath(filename) : null;
 

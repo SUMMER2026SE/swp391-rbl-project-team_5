@@ -10,6 +10,23 @@ function restrictTo(...roles) {
   };
 }
 
+function isPlatformStaff(user) {
+  return user?.role === 'ADMIN' || (user?.role === 'STAFF' && !user.employerPartnerId);
+}
+
+function requirePlatformStaff(req, res, next) {
+  if (!isPlatformStaff(req.user)) {
+    return res.status(403).json({
+      message: 'Chi nhan vien noi bo cua nen tang moi co quyen thuc hien hanh dong nay.',
+      code: 'PLATFORM_STAFF_REQUIRED',
+    });
+  }
+
+  return next();
+}
+
 module.exports = {
+  isPlatformStaff,
+  requirePlatformStaff,
   restrictTo,
 };

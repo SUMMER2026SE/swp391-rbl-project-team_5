@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import bookingService from '../services/bookingService.js'
 import { apiRequest } from '../services/api.js'
+import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
 
 const formatCurrency = (value) => {
   const amount = Number(value)
@@ -56,13 +57,15 @@ export default function BookingModal({
   requiresManualApproval = false,
   ticketProduct,
   attractionId,
+  initialQuantity = 1,
 }) {
   const navigate = useNavigate()
   const todayStr = toDateInputValue(new Date())
+  const normalizedInitialQuantity = normalizeInitialQuantity(initialQuantity)
   const [selectedDate, setSelectedDate] = useState(todayStr)
   const [selectedTimeSlotId, setSelectedTimeSlotId] = useState('')
   const [timeSlots, setTimeSlots] = useState([])
-  const [quantity, setQuantity] = useState(1)
+  const [quantity, setQuantity] = useState(() => normalizedInitialQuantity)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')

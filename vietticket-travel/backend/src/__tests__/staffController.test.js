@@ -20,14 +20,18 @@ const {
 } = require('../controllers/staffController');
 
 function makeReqRes(overrides = {}) {
-  const req = {
-    user: { id: 'staff-1' },
+  const baseReq = {
+    user: { id: 'staff-1', role: 'STAFF', employerPartnerId: null },
     params: {},
     query: {},
     body: {},
     headers: {},
     socket: { remoteAddress: '127.0.0.1' },
+  };
+  const req = {
+    ...baseReq,
     ...overrides,
+    user: { ...baseReq.user, ...(overrides.user || {}) },
   };
   const res = {
     status: jest.fn().mockReturnThis(),
@@ -76,6 +80,17 @@ beforeEach(() => {
 });
 
 describe('listRefundRequests', () => {
+  test('blocks partner staff from the platform-wide refund queue', async () => {
+    const { req, res, next } = makeReqRes({
+      user: { employerPartnerId: 'partner-1' },
+    });
+
+    await listRefundRequests(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 403 }));
+    expect(prisma.refundRequest.findMany).not.toHaveBeenCalled();
+  });
+
   test('returns 400 for an invalid status filter', async () => {
     const { req, res, next } = makeReqRes({ query: { status: 'UNKNOWN' } });
 
@@ -87,6 +102,19 @@ describe('listRefundRequests', () => {
 });
 
 describe('processRefundRequest', () => {
+  test('blocks partner staff from processing platform refunds', async () => {
+    const { req, res, next } = makeReqRes({
+      user: { employerPartnerId: 'partner-1' },
+      params: { refundId: 'refund-1' },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(prisma.refundRequest.findUnique).not.toHaveBeenCalled();
+  });
+
   test('approves a pending request and releases inventory', async () => {
     const request = refundFixture();
     const tx = {

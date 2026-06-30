@@ -26,7 +26,7 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-test('chỉ booking đã dùng toàn bộ vé mới được COMPLETED', async () => {
+test('chỉ booking có ít nhất một vé đã dùng mới được COMPLETED', async () => {
   prisma.booking.findMany
     .mockResolvedValueOnce([{ id: 'checked-in' }])
     .mockResolvedValueOnce([{ id: 'no-show' }]);
@@ -49,7 +49,7 @@ test('chỉ booking đã dùng toàn bộ vé mới được COMPLETED', async (
     data: { status: 'NO_SHOW' },
   });
   expect(prisma.ticketInstance.updateMany).toHaveBeenCalledWith({
-    where: { bookingId: { in: ['no-show'] }, status: 'VALID' },
+    where: { bookingId: { in: ['checked-in', 'no-show'] }, status: 'VALID' },
     data: { status: 'EXPIRED' },
   });
 });
