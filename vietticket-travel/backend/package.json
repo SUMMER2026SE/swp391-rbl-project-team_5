@@ -4,7 +4,9 @@
   "description": "",
   "main": "src/server.js",
   "scripts": {
+    "predev": "prisma generate",
     "dev": "nodemon src/server.js",
+    "prestart": "prisma generate",
     "start": "node src/server.js",
     "test": "jest --runInBand --forceExit",
     "test:watch": "jest --watch",
