@@ -11,11 +11,12 @@ import { validateEmail, validatePassword } from '../utils/formValidators.js'
 import loginVisual from '../assets/sapa.webp'
 
 function getSafeRedirect(loggedInUser, redirectFrom) {
+  const staffHome = loggedInUser?.employerPartnerId ? '/staff/checkin' : '/staff/tickets'
   const defaultForRole =
     loggedInUser?.role === 'ADMIN'
       ? '/admin'
       : loggedInUser?.role === 'STAFF'
-        ? '/staff/tickets'
+        ? staffHome
         : loggedInUser?.role === 'PARTNER'
           ? '/partner/dashboard'
           : '/'
@@ -29,6 +30,13 @@ function getSafeRedirect(loggedInUser, redirectFrom) {
     return defaultForRole
   }
   if (targetPath.startsWith('/staff') && !['STAFF', 'ADMIN'].includes(loggedInUser?.role)) {
+    return defaultForRole
+  }
+  if (
+    loggedInUser?.role === 'STAFF' &&
+    loggedInUser?.employerPartnerId &&
+    (targetPath.startsWith('/staff/tickets') || targetPath.startsWith('/staff/refunds'))
+  ) {
     return defaultForRole
   }
   if (targetPath.startsWith('/partner') && loggedInUser?.role !== 'PARTNER') {

@@ -67,7 +67,7 @@ function AccountLayout({ active = 'profile', children }) {
                 Trang quản trị
               </Link>
             )}
-            {currentUser?.role === 'STAFF' && (
+            {currentUser?.role === 'STAFF' && !currentUser?.employerPartnerId && (
               <Link className="text-button" to="/staff/tickets">
                 Cổng nhân viên
               </Link>
@@ -117,7 +117,7 @@ function AccountLayout({ active = 'profile', children }) {
                 Trang quản trị
               </Link>
             )}
-            {currentUser?.role === 'STAFF' && (
+            {currentUser?.role === 'STAFF' && !currentUser?.employerPartnerId && (
               <Link to="/staff/tickets">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   support_agent

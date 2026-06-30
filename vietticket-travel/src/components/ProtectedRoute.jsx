@@ -1,7 +1,11 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/useAuth.js'
 
-function ProtectedRoute({ children, allowedRoles }) {
+function isPlatformStaff(user) {
+  return user?.role === 'ADMIN' || (user?.role === 'STAFF' && !user.employerPartnerId)
+}
+
+function ProtectedRoute({ children, allowedRoles, requirePlatformStaff = false }) {
   const location = useLocation()
   const { isAuthenticated, isAuthLoading, user } = useAuth()
 
@@ -15,6 +19,10 @@ function ProtectedRoute({ children, allowedRoles }) {
 
   if (allowedRoles && !allowedRoles.includes(user?.role)) {
     return <Navigate to="/" replace />
+  }
+
+  if (requirePlatformStaff && !isPlatformStaff(user)) {
+    return <Navigate to="/staff/checkin" replace />
   }
 
   return children
