@@ -1,14 +1,30 @@
-import React, { lazy, Suspense, useMemo } from 'react'
+import React, { useMemo } from 'react'
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { defaultIcon, hasValidLatLng } from './leafletIcon.js'
 
-const MapTilerLayer = lazy(() => import('./MapTilerLayer.jsx'))
-
 // Tâm mặc định (giữa Việt Nam) khi chưa có điểm nào.
 const VN_CENTER = [16.0, 107.9]
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY
+const MAPTILER_ATTRIBUTION =
+  '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+const OSM_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+
+function getBaseLayerProps() {
+  if (MAPTILER_KEY) {
+    return {
+      attribution: MAPTILER_ATTRIBUTION,
+      url: `https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=${MAPTILER_KEY}`,
+    }
+  }
+
+  return {
+    attribution: OSM_ATTRIBUTION,
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  }
+}
 
 const formatPrice = (value) =>
   value == null ? null : `${Number(value).toLocaleString('vi-VN')}đ`
@@ -44,6 +60,7 @@ export default function AttractionsMap({ attractions = [], navigate, height = 48
   )
 
   const center = points.length ? [points[0].lat, points[0].lng] : VN_CENTER
+  const baseLayer = getBaseLayerProps()
 
   return (
     <div className="overflow-hidden rounded-xl border border-[#bec8ca]/60 shadow-[0_4px_20px_rgba(0,40,50,0.06)]">
@@ -53,16 +70,7 @@ export default function AttractionsMap({ attractions = [], navigate, height = 48
         scrollWheelZoom
         style={{ height, width: '100%' }}
       >
-        {MAPTILER_KEY ? (
-          <Suspense fallback={null}>
-            <MapTilerLayer apiKey={MAPTILER_KEY} />
-          </Suspense>
-        ) : (
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-        )}
+        <TileLayer attribution={baseLayer.attribution} url={baseLayer.url} />
         <FitBounds points={points} />
         {points.map((p) => (
           <Marker key={p.id} position={[p.lat, p.lng]} icon={defaultIcon}>
