@@ -305,6 +305,21 @@ async function reconcileVnpayPayment(query) {
               where: { id: current.id },
               data: { status: 'CANCELLED', refundRequired: true },
             });
+            let refundRequest = await tx.refundRequest.findUnique({
+              where: { bookingId: current.id },
+              select: { id: true },
+            });
+            if (!refundRequest) {
+              await tx.refundRequest.create({
+                data: {
+                  bookingId: current.id,
+                  requestedById: current.userId,
+                  reason: `Hệ thống tự động hủy đơn do vé đã bị thu hồi hoặc đơn giữ chỗ hết hạn trước khi thanh toán.`,
+                  amount: current.totalAmount,
+                  status: 'PENDING',
+                },
+              });
+            }
             bookingStatus = 'CANCELLED';
           }
         } else {

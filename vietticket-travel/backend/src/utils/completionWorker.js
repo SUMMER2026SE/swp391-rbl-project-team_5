@@ -23,27 +23,25 @@ async function sweepCompletedBookings({ now = new Date() } = {}) {
   const cutoff = startOfTodayVn(now);
 
   // updateMany không lọc được theo quan hệ -> tìm id trước rồi cập nhật hàng loạt.
+  // Đơn hàng có ít nhất 1 vé đã check-in (status = USED) được coi là hoàn thành (COMPLETED).
   const completed = await prisma.booking.findMany({
     where: {
       status: 'CONFIRMED',
       reservation: { date: { lt: cutoff } },
       ticketInstances: {
         some: { status: 'USED' },
-        every: { status: 'USED' },
       },
     },
     select: { id: true },
   });
 
+  // Đơn hàng không có bất kỳ vé nào được check-in sẽ được coi là NO_SHOW.
   const noShows = await prisma.booking.findMany({
     where: {
       status: 'CONFIRMED',
       reservation: { date: { lt: cutoff } },
-      NOT: {
-        ticketInstances: {
-          some: { status: 'USED' },
-          every: { status: 'USED' },
-        },
+      ticketInstances: {
+        none: { status: 'USED' },
       },
     },
     select: { id: true },
@@ -60,7 +58,7 @@ async function sweepCompletedBookings({ now = new Date() } = {}) {
     }),
     prisma.ticketInstance.updateMany({
       where: {
-        bookingId: { in: noShows.map((booking) => booking.id) },
+        bookingId: { in: [...completed, ...noShows].map((booking) => booking.id) },
         status: 'VALID',
       },
       data: { status: 'EXPIRED' },
