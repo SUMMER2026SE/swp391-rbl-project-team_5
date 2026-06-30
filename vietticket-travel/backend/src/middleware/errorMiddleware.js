@@ -1,5 +1,9 @@
 const multer = require('multer');
 
+function isServerError(statusCode) {
+  return Number(statusCode) >= 500;
+}
+
 function notFound(req, res, next) {
   const error = new Error(`Không tìm thấy đường dẫn ${req.originalUrl}`);
   error.statusCode = 404;
@@ -19,9 +23,14 @@ function errorHandler(error, req, res, next) {
   }
 
   const statusCode = error.statusCode || 500;
+  if (isServerError(statusCode)) {
+    console.error('[error]', error);
+  }
 
   return res.status(statusCode).json({
-    message: error.message || 'Máy chủ đang gặp lỗi. Vui lòng thử lại sau.',
+    message: isServerError(statusCode)
+      ? 'May chu dang gap loi. Vui long thu lai sau.'
+      : error.message || 'May chu dang gap loi. Vui long thu lai sau.',
   });
 }
 
