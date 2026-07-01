@@ -21,6 +21,7 @@ const reviewRoutes = require('./routes/reviewRoutes');
 const supportRoutes = require('./routes/supportRoutes');
 const newsletterRoutes = require('./routes/newsletterRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const weatherRoutes = require('./routes/weatherRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -105,6 +106,7 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/newsletter', newsletterRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/weather', weatherRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -4,11 +4,12 @@ import { toast } from 'react-toastify'
 import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'
 import LocationMap from '../components/LocationMap.jsx'
+import WeatherWidget from '../components/WeatherWidget.jsx'
 import Header from '../components/Header.jsx'
 import Seo from '../components/Seo.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { footerLinks } from '../data/landingData.js'
-import { apiRequest } from '../services/api.js'
+import { getAttractionDetail } from '../services/attractionApi.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 import reviewService from '../services/reviewService.js'
 
@@ -167,7 +168,7 @@ export default function AttractionDetailPage() {
       setErrorMessage('')
 
       try {
-        const result = await apiRequest(`/attractions/${id}`)
+        const result = await getAttractionDetail(id)
         const detail = result.data
         const images = normalizeImages(detail)
         setAttraction(detail)
@@ -403,6 +404,15 @@ export default function AttractionDetailPage() {
                   </span>
                   Chưa có toạ độ bản đồ cho địa điểm này
                 </div>
+              )}
+
+              {attraction.latitude != null && attraction.longitude != null && (
+                <WeatherWidget
+                  key={`${attraction.latitude},${attraction.longitude}`}
+                  latitude={attraction.latitude}
+                  longitude={attraction.longitude}
+                  categories={attraction.categories}
+                />
               )}
 
               <section className="space-y-4">
