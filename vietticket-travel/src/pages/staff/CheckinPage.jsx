@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
-import { apiRequest } from '../../services/api.js'
+import { listTodayBookings, lookupTicketByQr, checkInTicket } from '../../services/staffApi.js'
 
 // Trang check-in tại cổng cho nhân viên:
 // - Ô nhập nhận mã từ máy quét QR (máy quét gõ chuỗi + Enter như bàn phím)
@@ -87,7 +87,7 @@ export default function CheckinPage() {
 
   const fetchToday = useCallback(async () => {
     try {
-      const response = await apiRequest('/staff/bookings/today')
+      const response = await listTodayBookings()
       setTodayBookings(response.data || [])
       setTodayMeta(response.meta || { date: '', total: 0, checkedIn: 0 })
     } catch (error) {
@@ -108,7 +108,7 @@ export default function CheckinPage() {
     setTicket(null)
     setLastCheckin(null)
     try {
-      const response = await apiRequest(`/staff/checkin/${encodeURIComponent(token)}`)
+      const response = await lookupTicketByQr(token)
       setTicket({ ...response.data, token })
     } catch (error) {
       toast.error(error.message || 'Không tìm thấy vé.')
@@ -122,9 +122,7 @@ export default function CheckinPage() {
     if (!ticket?.canCheckIn) return
     setIsChecking(true)
     try {
-      const response = await apiRequest(`/staff/checkin/${encodeURIComponent(ticket.token)}`, {
-        method: 'POST',
-      })
+      const response = await checkInTicket(ticket.token)
       setLastCheckin(response.data)
       setTicket(null)
       setTokenInput('')

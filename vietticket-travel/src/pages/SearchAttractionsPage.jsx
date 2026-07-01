@@ -7,7 +7,7 @@ import Seo from '../components/Seo.jsx'
 import AIItineraryPlanner from '../components/AIItineraryPlanner.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { featuredDestinations, footerLinks } from '../data/landingData.js'
-import { apiRequest } from '../services/api.js'
+import { getMapPoints, searchAttractions } from '../services/attractionApi.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 
 const AttractionsMap = lazy(() => import('../components/AttractionsMap.jsx'))
@@ -202,7 +202,7 @@ export default function SearchAttractionsPage() {
     let active = true
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMapLoading(true)
-    apiRequest('/attractions/map-points')
+    getMapPoints()
       .then((result) => {
         if (active) setMapPoints(result.data?.points || [])
       })
@@ -226,30 +226,16 @@ export default function SearchAttractionsPage() {
       setErrorMessage('')
 
       try {
-        // Xây dựng query params gửi lên API
-        const params = new URLSearchParams()
-        params.append('page', currentPage.toString())
-        params.append('limit', '9')
-        if (selectedCity && selectedCity !== 'Tất cả thành phố') {
-          params.append('city', selectedCity)
-        }
-        if (selectedCategory && selectedCategory !== 'All') {
-          params.append('category', selectedCategory)
-        }
-        if (priceRange < 5000000) {
-          params.append('maxPrice', priceRange.toString())
-        }
-        if (selectedStars && selectedStars.length > 0) {
-          params.append('minRating', Math.min(...selectedStars).toString())
-        }
-        if (searchQuery) {
-          params.append('search', searchQuery)
-        }
-        if (selectedSort) {
-          params.append('sort', selectedSort)
-        }
-
-        const result = await apiRequest(`/attractions?${params.toString()}`)
+        const result = await searchAttractions({
+          page: currentPage,
+          limit: 9,
+          city: selectedCity && selectedCity !== 'Tất cả thành phố' ? selectedCity : undefined,
+          category: selectedCategory && selectedCategory !== 'All' ? selectedCategory : undefined,
+          maxPrice: priceRange < 5000000 ? priceRange : undefined,
+          minRating: selectedStars && selectedStars.length > 0 ? Math.min(...selectedStars) : undefined,
+          search: searchQuery || undefined,
+          sort: selectedSort || undefined,
+        })
         if (!active) return
 
         setAttractions(result.data?.attractions || [])

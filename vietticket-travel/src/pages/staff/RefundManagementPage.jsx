@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
-import { apiRequest } from '../../services/api.js'
+import { listRefundRequests, processRefundRequest } from '../../services/staffApi.js'
 
 const STATUS_META = {
   PENDING: {
@@ -248,7 +248,7 @@ export default function RefundManagementPage() {
   const fetchRequests = useCallback(async () => {
     setIsLoading(true)
     try {
-      const response = await apiRequest('/staff/refunds')
+      const response = await listRefundRequests()
       const nextRequests = response.data || []
       setRequests(nextRequests)
       setSelected((current) => {
@@ -275,10 +275,7 @@ export default function RefundManagementPage() {
     if (!selected) return
     setIsProcessing(true)
     try {
-      await apiRequest(`/staff/refunds/${selected.id}`, {
-        method: 'PATCH',
-        body: { action: 'APPROVED', staffNotes: approveModal.notes.trim() },
-      })
+      await processRefundRequest(selected.id, 'APPROVED', approveModal.notes.trim())
       toast.success('Đã duyệt yêu cầu hoàn tiền.')
       setApproveModal({ open: false, notes: '' })
       setSelected(null)
@@ -299,10 +296,7 @@ export default function RefundManagementPage() {
     }
     setIsProcessing(true)
     try {
-      await apiRequest(`/staff/refunds/${selected.id}`, {
-        method: 'PATCH',
-        body: { action: 'REJECTED', staffNotes: notes },
-      })
+      await processRefundRequest(selected.id, 'REJECTED', notes)
       toast.success('Đã từ chối yêu cầu hoàn tiền.')
       setRejectModal({ open: false, notes: '' })
       setSelected(null)

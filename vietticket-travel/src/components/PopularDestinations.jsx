@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiRequest } from '../services/api'
+import { searchAttractions } from '../services/attractionApi.js'
 import { featuredDestinations } from '../data/landingData.js'
 
 const formatPrice = (value) =>
@@ -19,7 +19,7 @@ function PopularDestinations() {
 
   useEffect(() => {
     let active = true
-    apiRequest('/attractions?sort=popular&limit=6')
+    searchAttractions({ sort: 'popular', limit: 6 })
       .then((response) => {
         if (active) setDestinations(response.data?.attractions || [])
       })

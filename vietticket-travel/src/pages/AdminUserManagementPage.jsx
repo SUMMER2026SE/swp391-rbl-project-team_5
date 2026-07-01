@@ -3,7 +3,7 @@ import '../styles/admin.css'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
-import { apiRequest } from '../services/api.js'
+import { getUsers, changeUserStatus } from '../services/adminApi.js'
 import AdminSidebar from '../components/admin/AdminSidebar.jsx'
 
 const roleOptions = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF']
@@ -45,14 +45,13 @@ function AdminUserManagementPage() {
     const delayDebounceFn = setTimeout(async () => {
       setIsLoading(true)
       try {
-        const queryParams = new URLSearchParams({
+        const data = await getUsers({
           page,
           limit: 10,
           search: searchTerm,
           role: roleFilter,
           status: statusFilter,
         })
-        const data = await apiRequest(`/admin/users?${queryParams.toString()}`)
         if (isMounted) {
           setUsers(data.users || [])
           setTotal(data.pagination?.total || 0)
@@ -150,10 +149,7 @@ function AdminUserManagementPage() {
   async function handleLockAccount(userId, reason, sendEmail) {
     setStatusActionUserId(userId)
     try {
-      const data = await apiRequest(`/admin/users/${userId}/status`, {
-        method: 'PATCH',
-        body: { status: 'LOCKED', reason, sendEmail },
-      })
+      const data = await changeUserStatus(userId, { status: 'LOCKED', reason, sendEmail })
       toast.success(data.message || 'Đã khóa tài khoản thành công')
       applyUserStatusResult(data.user)
       setRefetchIndex((prev) => prev + 1)
@@ -168,10 +164,7 @@ function AdminUserManagementPage() {
   async function handleUnlockAccount(userId, sendEmail) {
     setStatusActionUserId(userId)
     try {
-      const data = await apiRequest(`/admin/users/${userId}/status`, {
-        method: 'PATCH',
-        body: { status: 'ACTIVE', sendEmail },
-      })
+      const data = await changeUserStatus(userId, { status: 'ACTIVE', sendEmail })
       applyUserStatusResult(data.user)
       toast.success(data.message || 'Đã mở khóa tài khoản thành công')
       setRefetchIndex((prev) => prev + 1)

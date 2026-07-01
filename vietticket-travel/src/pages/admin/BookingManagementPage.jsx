@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
-import { apiRequest } from '../../services/api.js'
+import { getAdminBookings } from '../../services/adminApi.js'
 import { getBookingStatusMeta } from '../../utils/bookingStatus.js'
 
 // Trang quản lý Booking & Payment toàn sàn cho Admin:
@@ -87,14 +87,13 @@ export default function BookingManagementPage() {
   const fetchBookings = useCallback(async () => {
     setIsLoading(true)
     try {
-      const query = new URLSearchParams()
-      query.set('page', String(page))
-      query.set('limit', String(PAGE_SIZE))
-      if (statusFilter) query.set('status', statusFilter)
-      if (onlyRefundRequired) query.set('refundRequired', 'true')
-      if (search) query.set('search', search)
-
-      const response = await apiRequest(`/admin/bookings?${query.toString()}`)
+      const response = await getAdminBookings({
+        page,
+        limit: PAGE_SIZE,
+        status: statusFilter,
+        refundRequired: onlyRefundRequired,
+        search,
+      })
       setBookings(response.data || [])
       setStats(response.stats || { countsByStatus: {}, refundRequired: 0, grossRevenue: 0 })
       setPagination(response.pagination || { total: 0, totalPages: 1 })

@@ -57,5 +57,43 @@ export function deleteCategory(id) {
   return apiRequest(`/admin/categories/${id}`, { method: 'DELETE' })
 }
 
+// ----- Quản lý người dùng -----
+// params: { search, role, status, page, limit }
+export function getUsers(params = {}) {
+  const query = new URLSearchParams()
+  if (params.search) query.set('search', params.search)
+  if (params.role && params.role !== 'all') query.set('role', params.role.toUpperCase())
+  if (params.status && params.status !== 'all') query.set('status', params.status.toUpperCase())
+  if (params.page) query.set('page', params.page)
+  if (params.limit) query.set('limit', params.limit)
+  const qs = query.toString()
+  return apiRequest(`/admin/users${qs ? `?${qs}` : ''}`, { method: 'GET' })
+}
+
+// status: 'ACTIVE' | 'LOCKED'
+export function changeUserStatus(id, { status, reason, sendEmail } = {}) {
+  return apiRequest(`/admin/users/${id}/status`, {
+    method: 'PATCH',
+    body: { status, reason, sendEmail },
+  })
+}
+
+// ----- Đặt vé toàn sàn -----
+// params: { status, search, refundRequired, page, limit }
+export function getAdminBookings(params = {}) {
+  const query = new URLSearchParams()
+  if (params.status && params.status !== 'all') query.set('status', params.status.toUpperCase())
+  if (params.search) query.set('search', params.search)
+  if (params.refundRequired) query.set('refundRequired', 'true')
+  if (params.page) query.set('page', params.page)
+  if (params.limit) query.set('limit', params.limit)
+  const qs = query.toString()
+  return apiRequest(`/admin/bookings${qs ? `?${qs}` : ''}`, { method: 'GET' })
+}
+
+export function getAdminReviews() {
+  return apiRequest('/admin/reviews', { method: 'GET' })
+}
+
 export const listPartners = getPartners;
 export const listAttractions = getAttractions;

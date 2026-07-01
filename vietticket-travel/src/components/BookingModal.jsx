@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import bookingService from '../services/bookingService.js'
-import { apiRequest } from '../services/api.js'
+import { checkAvailability, reserveTickets } from '../services/attractionApi.js'
 import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
 
 const formatCurrency = (value) => {
@@ -206,9 +206,7 @@ export default function BookingModal({
       setErrorMessage('')
 
       try {
-        const result = await apiRequest(
-          `/tickets/${ticketId}/availability?date=${selectedDate}`,
-        )
+        const result = await checkAvailability(ticketId, selectedDate)
         const slots = Array.isArray(result.data) ? result.data : []
         setTimeSlots(slots)
 
@@ -272,14 +270,11 @@ export default function BookingModal({
     setErrorMessage('')
 
     try {
-      const result = await apiRequest(`/tickets/${ticketId}/reserve`, {
-        method: 'POST',
-        body: {
-          attractionId,
-          date: selectedDate,
-          timeSlotId: selectedSlot?.timeSlotId || null,
-          quantity,
-        },
+      const result = await reserveTickets(ticketId, {
+        attractionId,
+        date: selectedDate,
+        timeSlotId: selectedSlot?.timeSlotId || null,
+        quantity,
       })
       bookingService.reserveTicket(result.data?.reservationId || result.data?.id)
       onClose()
