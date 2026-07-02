@@ -59,6 +59,15 @@ async function assertStaffAttractionAccess(client, user, attractionId) {
   }
 }
 
+// Giới hạn phân trang: mặc định 20, tối đa 100 để tránh trả về quá nhiều bản ghi.
+const REFUND_PAGE_SIZE_DEFAULT = 20;
+const REFUND_PAGE_SIZE_MAX = 100;
+
+function parsePositiveInt(value, fallback) {
+  const num = Number.parseInt(value, 10);
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
 async function listRefundRequests(req, res, next) {
   try {
     assertPlatformRefundStaff(req.user);
@@ -71,34 +80,84 @@ async function listRefundRequests(req, res, next) {
       });
     }
 
-    const requests = await prisma.refundRequest.findMany({
-      where: status ? { status } : {},
-      orderBy: { createdAt: 'desc' },
-      include: {
-        booking: {
-          include: {
-            user: { select: { fullName: true, email: true } },
-            payments: {
-              where: { status: 'SUCCESS' },
-              orderBy: { createdAt: 'desc' },
-              select: { id: true, paymentGateway: true, status: true },
-            },
-            reservation: {
-              include: {
-                timeSlot: true,
-                ticketProduct: {
-                  include: {
-                    attraction: { select: { title: true } },
+    const search = String(req.query.search || '').trim();
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(
+      parsePositiveInt(req.query.limit, REFUND_PAGE_SIZE_DEFAULT),
+      REFUND_PAGE_SIZE_MAX,
+    );
+    const skip = (page - 1) * limit;
+
+    // where cho danh sách (áp dụng bộ lọc trạng thái + tìm kiếm).
+    const where = {};
+    if (status) where.status = status;
+    if (search) {
+      // Tìm theo mã booking, tên khách (user hoặc snapshot) và tên địa điểm snapshot.
+      where.OR = [
+        { bookingId: { contains: search, mode: 'insensitive' } },
+        { booking: { fullName: { contains: search, mode: 'insensitive' } } },
+        { booking: { user: { fullName: { contains: search, mode: 'insensitive' } } } },
+        { booking: { snapshotAttractionTitle: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    // Chạy song song: trang dữ liệu, tổng số bản ghi khớp filter, và thống kê
+    // theo trạng thái trên TOÀN BỘ (không lọc) để các thẻ thống kê không bị lệch.
+    const [requests, total, statusGroups] = await Promise.all([
+      prisma.refundRequest.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          booking: {
+            include: {
+              user: { select: { fullName: true, email: true } },
+              payments: {
+                where: { status: 'SUCCESS' },
+                orderBy: { createdAt: 'desc' },
+                select: { id: true, paymentGateway: true, status: true },
+              },
+              reservation: {
+                include: {
+                  timeSlot: true,
+                  ticketProduct: {
+                    include: {
+                      attraction: { select: { title: true } },
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    });
+      }),
+      prisma.refundRequest.count({ where }),
+      prisma.refundRequest.groupBy({ by: ['status'], _count: { _all: true } }),
+    ]);
 
-    return res.json({ success: true, data: requests });
+    const statusCounts = { PENDING: 0, PROCESSING: 0, APPROVED: 0, REJECTED: 0 };
+    for (const group of statusGroups || []) {
+      if (group.status in statusCounts) {
+        statusCounts[group.status] = group._count?._all || 0;
+      }
+    }
+    const stats = {
+      total: Object.values(statusCounts).reduce((sum, n) => sum + n, 0),
+      pending: statusCounts.PENDING,
+      processing: statusCounts.PROCESSING,
+      approved: statusCounts.APPROVED,
+      rejected: statusCounts.REJECTED,
+    };
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+
+    return res.json({
+      success: true,
+      data: requests,
+      pagination: { page, limit, total, totalPages },
+      stats,
+    });
   } catch (error) {
     return next(error);
   }

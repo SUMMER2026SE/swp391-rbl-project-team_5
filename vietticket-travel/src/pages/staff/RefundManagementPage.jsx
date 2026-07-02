@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import { listRefundRequests, processRefundRequest } from '../../services/staffApi.js'
@@ -233,6 +233,8 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) 
   )
 }
 
+const PAGE_SIZE = 20
+
 export default function RefundManagementPage() {
   const [requests, setRequests] = useState([])
   const [selected, setSelected] = useState(null)
@@ -240,36 +242,81 @@ export default function RefundManagementPage() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [total, setTotal] = useState(0)
+  // Thống kê theo trạng thái do server tính trên TOÀN BỘ dữ liệu -> không lệch
+  // theo trang/bộ lọc hiện tại.
+  const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 })
   const [rejectModal, setRejectModal] = useState({ open: false, notes: '' })
   const [approveModal, setApproveModal] = useState({ open: false, notes: '' })
 
-  // Luôn tải TOÀN BỘ danh sách; lọc trạng thái ở client để các thẻ thống kê
-  // phía trên không bị lệch theo bộ lọc.
+  // Bộ đếm để bỏ qua response cũ đến muộn (tránh race khi đổi trang/gõ tìm kiếm
+  // liên tục làm dữ liệu cũ ghi đè dữ liệu mới).
+  const requestIdRef = useRef(0)
+
+  // Phân trang phía server: chỉ tải đúng 1 trang mỗi lần thay vì toàn bộ danh sách.
   const fetchRequests = useCallback(async () => {
+    const requestId = ++requestIdRef.current
     setIsLoading(true)
     try {
-      const response = await listRefundRequests()
+      const response = await listRefundRequests({
+        status: statusFilter || undefined,
+        search: debouncedSearch || undefined,
+        page,
+        limit: PAGE_SIZE,
+      })
+      if (requestId !== requestIdRef.current) return // response cũ -> bỏ qua
       const nextRequests = response.data || []
+      // Trang hiện tại rỗng (vd. vừa xử lý bản ghi cuối) nhưng chưa phải trang 1
+      // -> lùi về trang trước; effect sẽ tự tải lại.
+      if (nextRequests.length === 0 && page > 1) {
+        setPage((p) => Math.max(1, p - 1))
+        return
+      }
       setRequests(nextRequests)
+      if (response.stats) setStats(response.stats)
+      if (response.pagination) {
+        setTotalPages(response.pagination.totalPages || 1)
+        setTotal(response.pagination.total || 0)
+      }
       setSelected((current) => {
         if (!current) return nextRequests[0] || null
-        return nextRequests.find((item) => item.id === current.id) || null
+        return nextRequests.find((item) => item.id === current.id) || nextRequests[0] || null
       })
     } catch (error) {
+      if (requestId !== requestIdRef.current) return // response cũ -> bỏ qua
       toast.error(error.message)
       setRequests([])
       setSelected(null)
     } finally {
-      setIsLoading(false)
+      if (requestId === requestIdRef.current) setIsLoading(false)
     }
-  }, [])
+  }, [statusFilter, debouncedSearch, page])
 
   useEffect(() => {
+    // Hoãn 1 tick để tránh gọi setState đồng bộ ngay trong thân effect.
     const timer = window.setTimeout(() => {
       void fetchRequests()
     }, 0)
     return () => window.clearTimeout(timer)
   }, [fetchRequests])
+
+  // Debounce ô tìm kiếm 350ms -> không gọi API mỗi phím gõ. Quay về trang 1 để
+  // không bị kẹt ở trang không tồn tại khi từ khóa thay đổi.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim())
+      setPage(1)
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value)
+    setPage(1)
+  }
 
   async function handleApprove() {
     if (!selected) return
@@ -308,29 +355,8 @@ export default function RefundManagementPage() {
     }
   }
 
-  const stats = useMemo(
-    () => ({
-      total: requests.length,
-      pending: requests.filter((r) => r.status === 'PENDING').length,
-      approved: requests.filter((r) => r.status === 'APPROVED').length,
-      rejected: requests.filter((r) => r.status === 'REJECTED').length,
-    }),
-    [requests],
-  )
-
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    return requests.filter((request) => {
-      if (statusFilter && request.status !== statusFilter) return false
-      if (!query) return true
-      const bookingId = request.booking?.id || ''
-      const customer = request.booking?.user?.fullName || request.booking?.fullName || ''
-      const attraction = request.booking?.reservation?.ticketProduct?.attraction?.title || ''
-      return [bookingId, customer, attraction].some((value) =>
-        value.toLowerCase().includes(query),
-      )
-    })
-  }, [requests, search, statusFilter])
+  // Server đã lọc + phân trang sẵn nên bảng hiển thị trực tiếp danh sách trả về.
+  const filtered = requests
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm hoàn tiền...">
@@ -411,7 +437,7 @@ export default function RefundManagementPage() {
                   <select
                     className="rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface outline-none focus:border-primary"
                     value={statusFilter}
-                    onChange={(event) => setStatusFilter(event.target.value)}
+                    onChange={(event) => handleStatusFilterChange(event.target.value)}
                     aria-label="Lọc theo trạng thái"
                   >
                     <option value="">Tất cả trạng thái</option>
@@ -500,6 +526,34 @@ export default function RefundManagementPage() {
                     )}
                   </tbody>
                 </table>
+              </div>
+
+              <div className="flex flex-col gap-3 border-t border-outline-variant bg-surface-container-low px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-on-surface-variant">
+                  {total > 0
+                    ? `Trang ${page}/${totalPages} • Tổng ${total.toLocaleString('vi-VN')} yêu cầu`
+                    : 'Không có yêu cầu nào'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 rounded-lg border border-outline-variant bg-surface px-3 py-1.5 text-sm font-semibold text-on-surface disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={isLoading || page <= 1}
+                  >
+                    <span className="material-symbols-outlined text-[18px]">chevron_left</span>
+                    Trước
+                  </button>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 rounded-lg border border-outline-variant bg-surface px-3 py-1.5 text-sm font-semibold text-on-surface disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={isLoading || page >= totalPages}
+                  >
+                    Sau
+                    <span className="material-symbols-outlined text-[18px]">chevron_right</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

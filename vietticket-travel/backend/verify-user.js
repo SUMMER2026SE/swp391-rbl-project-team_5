@@ -1,6 +1,26 @@
 // Tiện ích DEV: xác minh email cho tài khoản (bỏ qua SMTP khi test cục bộ).
-// Dùng: node verify-user.js <email>
+// Dùng: ALLOW_VERIFY_USER=1 node verify-user.js <email>
+//
+// ⚠️ Script này BỎ QUA toàn bộ xác thực — bất kỳ ai chạy được đều có thể tự
+// verify email của tài khoản khác. Chỉ dùng ở môi trường phát triển.
 const prisma = require('./src/config/prisma');
+
+// Bảo vệ theo mô hình "mặc định từ chối" (không phụ thuộc việc prod có set
+// NODE_ENV hay không):
+// 1) Chặn cứng nếu NODE_ENV=production.
+// 2) Bắt buộc opt-in tường minh qua ALLOW_VERIFY_USER=1 -> chạy nhầm ở bất kỳ
+//    môi trường nào (kể cả khi NODE_ENV chưa set) đều bị từ chối.
+if (process.env.NODE_ENV === 'production') {
+  console.error('⛔ KHÔNG chạy script verify-user.js ở môi trường production!');
+  process.exit(1);
+}
+if (process.env.ALLOW_VERIFY_USER !== '1') {
+  console.error(
+    '⛔ Script này bị khóa mặc định. Nếu chắc chắn đang ở môi trường dev, chạy lại với:\n'
+    + '   ALLOW_VERIFY_USER=1 node verify-user.js <email>',
+  );
+  process.exit(1);
+}
 
 (async () => {
   const email = String(process.argv[2] || '').trim().toLowerCase();

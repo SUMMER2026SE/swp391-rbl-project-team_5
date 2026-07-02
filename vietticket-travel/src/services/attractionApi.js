@@ -32,10 +32,11 @@ export function getAttractionDetail(id) {
 
 // ----- Khung giờ & giữ chỗ vé -----
 // Kiểm tra sức chứa còn lại của một gói vé theo ngày (YYYY-MM-DD).
-export function checkAvailability(ticketProductId, date) {
+// Nhận thêm signal (tuỳ chọn) để huỷ request cũ khi người dùng đổi ngày liên tục.
+export function checkAvailability(ticketProductId, date, { signal } = {}) {
   return apiRequest(
     `/tickets/${ticketProductId}/availability?date=${encodeURIComponent(date)}`,
-    { method: 'GET' },
+    { method: 'GET', signal },
   )
 }
 

@@ -5,9 +5,15 @@ import { apiRequest } from './api.js'
 // để dùng lại nhất quán như các service khác trong dự án.
 
 // ----- Hoàn tiền (Staff/Admin) -----
-export function listRefundRequests(status) {
-  const query = status ? `?status=${encodeURIComponent(status)}` : ''
-  return apiRequest(`/staff/refunds${query}`, { method: 'GET' })
+// Hỗ trợ phân trang phía server: { status, search, page, limit }.
+export function listRefundRequests({ status, search, page, limit } = {}) {
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
+  if (search) params.set('search', search)
+  if (page) params.set('page', String(page))
+  if (limit) params.set('limit', String(limit))
+  const query = params.toString()
+  return apiRequest(`/staff/refunds${query ? `?${query}` : ''}`, { method: 'GET' })
 }
 
 // action: 'APPROVED' | 'REJECTED' — staffNotes bắt buộc khi từ chối.

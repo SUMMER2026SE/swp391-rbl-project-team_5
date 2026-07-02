@@ -33,7 +33,7 @@ function TicketResultCard({ ticket, onCheckin, isChecking }) {
       </div>
 
       <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <InfoRow label="Mã đơn" value={ticket.bookingId.slice(0, 8).toUpperCase()} mono />
+        <InfoRow label="Mã đơn" value={(ticket.bookingId || '').slice(0, 8).toUpperCase() || '—'} mono />
         <InfoRow label="Khách hàng" value={ticket.customer} />
         <InfoRow label="Số điện thoại" value={ticket.phone || '—'} />
         <InfoRow label="Địa điểm" value={ticket.attraction} />
@@ -141,8 +141,8 @@ export default function CheckinPage() {
   const filteredToday = todayBookings.filter((b) => {
     const query = todaySearch.trim().toLowerCase()
     if (!query) return true
-    return [b.bookingId, b.customer, b.attraction, b.phone || '']
-      .some((value) => value.toLowerCase().includes(query))
+    return [b.bookingId, b.customer, b.attraction, b.phone]
+      .some((value) => String(value || '').toLowerCase().includes(query))
   })
 
   return (
@@ -278,7 +278,7 @@ export default function CheckinPage() {
                   filteredToday.map((b) => (
                     <tr key={b.bookingId} className="border-b border-outline-variant/40 hover:bg-surface">
                       <td className="px-5 py-3 font-mono text-xs font-semibold text-primary">
-                        {b.bookingId.slice(0, 8).toUpperCase()}
+                        {(b.bookingId || '').slice(0, 8).toUpperCase() || '—'}
                       </td>
                       <td className="px-5 py-3">
                         <p className="font-medium text-on-surface">{b.customer}</p>

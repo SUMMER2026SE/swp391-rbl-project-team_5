@@ -7,8 +7,23 @@ const weatherService = require('../services/weatherService');
 // Toạ độ do frontend truyền vào (đã có sẵn từ dữ liệu điểm tham quan).
 async function getWeather(req, res) {
   try {
-    const lat = Number(req.query.lat);
-    const lng = Number(req.query.lng);
+    const rawLat = req.query.lat;
+    const rawLng = req.query.lng;
+
+    // Chặn tham số rỗng/thiếu TRƯỚC khi ép kiểu: Number('') = 0 (hợp lệ) nên
+    // ?lat=&lng= sẽ lọt qua range check và gọi API với toạ độ 0,0 (Vịnh Guinea).
+    if (
+      rawLat === undefined || rawLng === undefined
+      || String(rawLat).trim() === '' || String(rawLng).trim() === ''
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Thiếu toạ độ (lat/lng).' },
+      });
+    }
+
+    const lat = Number(rawLat);
+    const lng = Number(rawLng);
 
     if (
       !Number.isFinite(lat)
@@ -23,6 +38,8 @@ async function getWeather(req, res) {
     }
 
     const forecast = await weatherService.getForecast(lat, lng);
+    // Cho phép browser/CDN cache 30 phút (khớp TTL cache backend) -> giảm tải.
+    res.set('Cache-Control', 'public, max-age=1800');
     return res.status(200).json({ success: true, data: { forecast } });
   } catch (error) {
     // Không để lỗi nhà cung cấp thời tiết làm hỏng trải nghiệm: trả 502 gọn.

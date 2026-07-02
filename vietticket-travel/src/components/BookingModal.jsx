@@ -201,12 +201,19 @@ export default function BookingModal({
       return
     }
 
+    // Huỷ request cũ khi người dùng đổi ngày liên tục -> tránh race condition
+    // khiến response cũ (đến muộn) ghi đè khung giờ của ngày mới.
+    const controller = new AbortController()
+
     const fetchAvailability = async () => {
       setIsLoadingSlots(true)
       setErrorMessage('')
 
       try {
-        const result = await checkAvailability(ticketId, selectedDate)
+        const result = await checkAvailability(ticketId, selectedDate, {
+          signal: controller.signal,
+        })
+        if (controller.signal.aborted) return
         const slots = Array.isArray(result.data) ? result.data : []
         setTimeSlots(slots)
 
@@ -217,16 +224,22 @@ export default function BookingModal({
             clampQuantityToLimit(current, availableSlot.availableTickets))
         }
       } catch (error) {
+        // Bỏ qua lỗi do chính mình huỷ request (đổi ngày/đóng modal).
+        if (controller.signal.aborted || error.name === 'AbortError') return
         console.error('Lỗi lấy thông tin khung giờ trống:', error)
         setTimeSlots([])
         setSelectedTimeSlotId('')
         setErrorMessage(error.message)
       } finally {
-        setIsLoadingSlots(false)
+        if (!controller.signal.aborted) setIsLoadingSlots(false)
       }
     }
 
     fetchAvailability()
+
+    return () => {
+      controller.abort()
+    }
   }, [isOpen, selectedDate, ticketId])
 
   const handleSelectSlot = (slot) => {

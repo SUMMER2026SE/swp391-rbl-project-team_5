@@ -158,6 +158,10 @@ export default function SearchAttractionsPage() {
     const params = new URLSearchParams(location.search)
     return params.get('search') || ''
   })
+  // Giá trị tìm kiếm đã debounce: input cập nhật tức thì, nhưng chỉ gọi API sau
+  // khi người dùng ngừng gõ 350ms -> tránh mỗi phím một request (đồng bộ với
+  // AdminUserManagementPage vốn đã debounce 300ms).
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(searchQuery)
   const [selectedCategory, setSelectedCategory] = useState(() => {
     const params = new URLSearchParams(location.search)
     return params.get('category') || 'All'
@@ -196,6 +200,14 @@ export default function SearchAttractionsPage() {
     setCurrentPage(1)
   }, [location.search])
 
+  // Debounce ô tìm kiếm: cập nhật giá trị dùng cho API sau 350ms ngừng gõ.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
   // Tải toàn bộ điểm có toạ độ (1 lần) khi mở bản đồ.
   useEffect(() => {
     if (!showMap || mapPoints.length > 0) return
@@ -233,7 +245,7 @@ export default function SearchAttractionsPage() {
           category: selectedCategory && selectedCategory !== 'All' ? selectedCategory : undefined,
           maxPrice: priceRange < 5000000 ? priceRange : undefined,
           minRating: selectedStars && selectedStars.length > 0 ? Math.min(...selectedStars) : undefined,
-          search: searchQuery || undefined,
+          search: debouncedSearchQuery || undefined,
           sort: selectedSort || undefined,
         })
         if (!active) return
@@ -258,7 +270,7 @@ export default function SearchAttractionsPage() {
     return () => {
       active = false
     }
-  }, [selectedCategory, selectedCity, priceRange, selectedStars, currentPage, searchQuery, selectedSort])
+  }, [selectedCategory, selectedCity, priceRange, selectedStars, currentPage, debouncedSearchQuery, selectedSort])
 
   // Handler lọc đánh giá sao
   const handleStarChange = (star) => {

@@ -120,6 +120,8 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
+    count: jest.fn(),
+    groupBy: jest.fn(),
   },
   voucher: {
     findUnique: jest.fn(),

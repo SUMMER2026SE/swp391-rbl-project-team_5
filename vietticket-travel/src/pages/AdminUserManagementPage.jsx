@@ -10,7 +10,9 @@ const roleOptions = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF']
 const statusOptions = ['ACTIVE', 'LOCKED']
 
 function AdminUserManagementPage() {
-  const { user } = useAuth()
+  // Đổi tên thành currentUser: trong bảng dưới, biến lặp mỗi dòng cũng tên "user"
+  // nên tránh bị che khuất (shadowing) khi cần so sánh với admin đang đăng nhập.
+  const { user: currentUser } = useAuth()
 
   const [users, setUsers] = useState([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -82,28 +84,28 @@ function AdminUserManagementPage() {
       {
         id: 'total',
         label: 'Tổng tài khoản',
-        value: statsData.totalAccounts.toLocaleString('vi-VN'),
+        value: (statsData?.totalAccounts ?? 0).toLocaleString('vi-VN'),
         icon: 'group',
         tone: 'primary',
       },
       {
         id: 'customers',
         label: 'Khách hàng hoạt động',
-        value: statsData.activeCustomers.toLocaleString('vi-VN'),
+        value: (statsData?.activeCustomers ?? 0).toLocaleString('vi-VN'),
         icon: 'person',
         tone: 'primary',
       },
       {
         id: 'partners',
         label: 'Đối tác địa điểm',
-        value: statsData.attractionPartners.toLocaleString('vi-VN'),
+        value: (statsData?.attractionPartners ?? 0).toLocaleString('vi-VN'),
         icon: 'store',
         tone: 'primary',
       },
       {
         id: 'locked',
         label: 'Tài khoản bị khóa',
-        value: statsData.lockedAccounts.toLocaleString('vi-VN'),
+        value: (statsData?.lockedAccounts ?? 0).toLocaleString('vi-VN'),
         icon: 'lock',
         tone: 'danger',
       },
@@ -120,6 +122,11 @@ function AdminUserManagementPage() {
 
   const openLockModal = (userId) => {
     if (statusActionUserId) return
+    // Chặn admin tự khóa chính mình -> tránh tự khóa vĩnh viễn tài khoản quản trị.
+    if (currentUser?.id && userId === currentUser.id) {
+      toast.error('Bạn không thể tự khóa tài khoản của chính mình.')
+      return
+    }
     setTargetUserId(userId)
     setLockReason('')
     setLockSendEmail(true)
@@ -240,12 +247,12 @@ function AdminUserManagementPage() {
             </button>
             <div className="admin-profile-chip">
               <div className="admin-profile-chip__text">
-                <p>{user?.fullName || 'Admin'}</p>
-                <span>{user?.role === 'ADMIN' ? 'Quản trị viên' : user?.role || 'Admin'}</span>
+                <p>{currentUser?.fullName || 'Admin'}</p>
+                <span>{currentUser?.role === 'ADMIN' ? 'Quản trị viên' : currentUser?.role || 'Admin'}</span>
               </div>
               <img
-                src={user?.avatar || 'https://ui-avatars.com/api/?name=Admin&background=006068&color=fff'}
-                alt={user?.fullName || 'Admin'}
+                src={currentUser?.avatar || 'https://ui-avatars.com/api/?name=Admin&background=006068&color=fff'}
+                alt={currentUser?.fullName || 'Admin'}
               />
             </div>
           </div>
@@ -456,9 +463,9 @@ function AdminUserManagementPage() {
                               <button
                                 className="admin-row-action admin-row-action--danger"
                                 id={`btn-lock-user-${user.id}`}
-                                disabled={isStatusActionPending}
+                                disabled={isStatusActionPending || user.id === currentUser?.id}
                                 type="button"
-                                title="Khóa tài khoản"
+                                title={user.id === currentUser?.id ? 'Không thể tự khóa tài khoản của bạn' : 'Khóa tài khoản'}
                                 aria-label={`Khóa tài khoản ${user.fullName || user.name}`}
                                 onClick={() => openLockModal(user.id)}
                               >

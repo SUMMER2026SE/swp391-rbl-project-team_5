@@ -15,6 +15,7 @@ function formatDayLabel(dateStr, index) {
 export default function WeatherWidget({ latitude, longitude, categories }) {
   const [forecast, setForecast] = useState([])
   const [status, setStatus] = useState('loading') // 'loading' | 'ready' | 'error'
+  const [reloadIndex, setReloadIndex] = useState(0) // tăng để thử tải lại khi lỗi
 
   const hidden = latitude == null || longitude == null || isIndoorOnly(categories)
 
@@ -22,6 +23,9 @@ export default function WeatherWidget({ latitude, longitude, categories }) {
     if (hidden) return undefined
 
     let active = true
+    // Reset về loading khi thử lại (reloadIndex đổi) để hiện spinner thay vì lỗi cũ.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStatus('loading')
 
     getWeather(latitude, longitude)
       .then((result) => {
@@ -37,11 +41,36 @@ export default function WeatherWidget({ latitude, longitude, categories }) {
     return () => {
       active = false
     }
-  }, [hidden, latitude, longitude])
+  }, [hidden, latitude, longitude, reloadIndex])
 
-  // Thiếu toạ độ / điểm trong nhà / không lấy được dữ liệu -> ẩn hẳn, không phá layout.
+  // Thiếu toạ độ / điểm trong nhà -> ẩn hẳn, không phá layout.
   if (hidden) return null
-  if (status === 'error') return null
+
+  // Khi lỗi: thời tiết là thông tin quan trọng với du khách -> hiển thị thông báo
+  // kèm nút thử lại thay vì im lặng return null.
+  if (status === 'error') {
+    return (
+      <section className="rounded-2xl border border-[#bec8ca]/40 bg-white p-5 shadow-[0_4px_20px_rgba(0,96,104,0.04)]">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="material-symbols-outlined text-[22px] text-[#00474d]" aria-hidden="true">
+            partly_cloudy_day
+          </span>
+          <h2 className="text-lg font-bold text-[#00474d]">Dự báo thời tiết</h2>
+        </div>
+        <div className="flex flex-col items-start gap-3 py-2 text-sm font-semibold text-[#3f484a]">
+          <span>Không thể tải dự báo thời tiết lúc này.</span>
+          <button
+            type="button"
+            onClick={() => setReloadIndex((prev) => prev + 1)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#00474d] px-3 py-1.5 text-sm font-bold text-[#00474d] transition hover:bg-[#00474d] hover:text-white"
+          >
+            <span className="material-symbols-outlined text-[16px]" aria-hidden="true">refresh</span>
+            Thử lại
+          </button>
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="rounded-2xl border border-[#bec8ca]/40 bg-white p-5 shadow-[0_4px_20px_rgba(0,96,104,0.04)]">
@@ -79,7 +108,7 @@ export default function WeatherWidget({ latitude, longitude, categories }) {
                 {day.icon}
               </span>
               <span className="text-sm font-bold text-[#1a1c1e]">
-                {day.tempMax != null ? `${day.tempMax}°` : '—'}
+                {day.tempMax != null ? `${day.tempMax}°C` : '—'}
                 <span className="font-semibold text-[#3f484a]">
                   {day.tempMin != null ? ` / ${day.tempMin}°` : ''}
                 </span>

@@ -16,8 +16,11 @@ const FORECAST_DAYS = 7;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 phút cho dữ liệu thành công
 const FAILURE_CACHE_TTL_MS = 60 * 1000; // 1 phút cho lần lỗi (negative-cache)
 const REQUEST_TIMEOUT_MS = 5000; // Hủy request nếu Open-Meteo không phản hồi sau 5s
+const CACHE_PRECISION = 2; // Số chữ số thập phân dùng cho cả cache key lẫn toạ độ gọi API
+const MAX_CACHE_SIZE = 500; // Giới hạn số entry để tránh memory leak với nhiều toạ độ
 
 // Cache đơn giản: key "lat,lng" (làm tròn 2 chữ số) -> { data, expiresAt }
+// Map giữ thứ tự chèn nên dùng làm LRU đơn giản: entry cũ nhất nằm đầu.
 const cache = new Map();
 
 // Ánh xạ mã thời tiết WMO -> nhãn tiếng Việt + icon material-symbols.
@@ -65,6 +68,33 @@ function roundOrNull(value, digits = 1) {
   return Math.round(num * factor) / factor;
 }
 
+// Làm tròn toạ độ về CACHE_PRECISION chữ số. Dùng CHUNG cho cache key và tham số
+// gọi API để tránh cache pollution: nếu cache key làm tròn nhưng URL dùng toạ độ gốc
+// thì hai điểm gần nhau (cùng key) sẽ nhận dữ liệu của điểm được gọi đầu tiên.
+function roundCoord(value) {
+  const factor = 10 ** CACHE_PRECISION;
+  return Math.round(value * factor) / factor;
+}
+
+// LRU đơn giản: đọc cache đồng thời làm "mới" entry (đưa xuống cuối Map).
+function cacheGet(key) {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  cache.delete(key);
+  cache.set(key, entry);
+  return entry;
+}
+
+// Ghi cache và xoá entry cũ nhất (đầu Map) khi vượt giới hạn kích thước.
+function cacheSet(key, entry) {
+  cache.delete(key); // đảm bảo key được đưa xuống cuối (mới nhất)
+  cache.set(key, entry);
+  while (cache.size > MAX_CACHE_SIZE) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
+}
+
 function normalizeForecast(daily) {
   if (!daily || !Array.isArray(daily.time)) return [];
 
@@ -93,16 +123,19 @@ function normalizeForecast(daily) {
  * @returns {Promise<Array>} mảng dự báo theo ngày đã chuẩn hoá
  */
 async function getForecast(lat, lng) {
-  const cacheKey = `${lat.toFixed(2)},${lng.toFixed(2)}`;
-  const cached = cache.get(cacheKey);
+  // Làm tròn TRƯỚC để cache key và toạ độ gọi API luôn khớp nhau.
+  const roundedLat = roundCoord(lat);
+  const roundedLng = roundCoord(lng);
+  const cacheKey = `${roundedLat},${roundedLng}`;
+  const cached = cacheGet(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     if (cached.error) throw new Error('Open-Meteo tạm thời không phản hồi.');
     return cached.data;
   }
 
   const params = new URLSearchParams({
-    latitude: String(lat),
-    longitude: String(lng),
+    latitude: String(roundedLat),
+    longitude: String(roundedLng),
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
     timezone: 'auto',
     forecast_days: String(FORECAST_DAYS),
@@ -119,11 +152,11 @@ async function getForecast(lat, lng) {
     const body = await res.json();
     const forecast = normalizeForecast(body.daily);
 
-    cache.set(cacheKey, { data: forecast, expiresAt: Date.now() + CACHE_TTL_MS });
+    cacheSet(cacheKey, { data: forecast, expiresAt: Date.now() + CACHE_TTL_MS });
     return forecast;
   } catch (error) {
     // Negative-cache ngắn: tránh dồn request tới Open-Meteo khi nó lỗi/timeout.
-    cache.set(cacheKey, { error: true, expiresAt: Date.now() + FAILURE_CACHE_TTL_MS });
+    cacheSet(cacheKey, { error: true, expiresAt: Date.now() + FAILURE_CACHE_TTL_MS });
     throw error;
   }
 }

@@ -99,6 +99,63 @@ describe('listRefundRequests', () => {
     expect(res.status).toHaveBeenCalledWith(400);
     expect(prisma.refundRequest.findMany).not.toHaveBeenCalled();
   });
+
+  test('phân trang: trả về đúng page/limit và thống kê trạng thái toàn cục', async () => {
+    prisma.refundRequest.findMany.mockResolvedValue([refundFixture()]);
+    prisma.refundRequest.count.mockResolvedValue(45);
+    prisma.refundRequest.groupBy.mockResolvedValue([
+      { status: 'PENDING', _count: { _all: 10 } },
+      { status: 'APPROVED', _count: { _all: 30 } },
+      { status: 'REJECTED', _count: { _all: 5 } },
+    ]);
+
+    const { req, res, next } = makeReqRes({ query: { page: '2', limit: '20' } });
+    await listRefundRequests(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    // Bỏ qua đúng 20 bản ghi của trang 1 và lấy tối đa 20.
+    expect(prisma.refundRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 20, take: 20 }),
+    );
+    // Thống kê tính từ groupBy toàn cục, không phụ thuộc trang hiện tại.
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        pagination: { page: 2, limit: 20, total: 45, totalPages: 3 },
+        stats: expect.objectContaining({
+          total: 45, pending: 10, approved: 30, rejected: 5,
+        }),
+      }),
+    );
+  });
+
+  test('giới hạn limit tối đa 100 để tránh tải quá nhiều', async () => {
+    prisma.refundRequest.findMany.mockResolvedValue([]);
+    prisma.refundRequest.count.mockResolvedValue(0);
+    prisma.refundRequest.groupBy.mockResolvedValue([]);
+
+    const { req, res, next } = makeReqRes({ query: { limit: '9999' } });
+    await listRefundRequests(req, res, next);
+
+    expect(prisma.refundRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 100 }),
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('tìm kiếm: dựng where.OR theo mã booking, tên khách và địa điểm', async () => {
+    prisma.refundRequest.findMany.mockResolvedValue([]);
+    prisma.refundRequest.count.mockResolvedValue(0);
+    prisma.refundRequest.groupBy.mockResolvedValue([]);
+
+    const { req, res, next } = makeReqRes({ query: { search: 'Nguyen' } });
+    await listRefundRequests(req, res, next);
+
+    const callArg = prisma.refundRequest.findMany.mock.calls[0][0];
+    expect(Array.isArray(callArg.where.OR)).toBe(true);
+    expect(callArg.where.OR.length).toBeGreaterThanOrEqual(3);
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 describe('processRefundRequest', () => {

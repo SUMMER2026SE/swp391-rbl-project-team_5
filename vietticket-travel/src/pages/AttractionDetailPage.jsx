@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'
@@ -273,12 +273,12 @@ export default function AttractionDetailPage() {
       <Header links={detailNavLinks} />
       <nav aria-label="Breadcrumb" className="bg-white border-b border-[#bec8ca]/40">
         <div className="mx-auto max-w-[1280px] px-5 md:px-12 py-3 flex items-center gap-1.5 text-sm font-semibold text-[#3f484a]">
-          <a href="/" className="hover:text-[#006068] transition-colors">Trang chủ</a>
+          <Link to="/" className="hover:text-[#006068] transition-colors">Trang chủ</Link>
           <span className="material-symbols-outlined text-[14px] text-[#bec8ca]" aria-hidden="true">chevron_right</span>
-          <a href="/attractions" className="hover:text-[#006068] transition-colors">Khám phá</a>
+          <Link to="/attractions" className="hover:text-[#006068] transition-colors">Khám phá</Link>
           <span className="material-symbols-outlined text-[14px] text-[#bec8ca]" aria-hidden="true">chevron_right</span>
           {attraction?.city && (
-            <><a href={`/attractions?city=${attraction.city}`} className="hover:text-[#006068] transition-colors">{attraction.city}</a>
+            <><Link to={`/attractions?city=${encodeURIComponent(attraction.city)}`} className="hover:text-[#006068] transition-colors">{attraction.city}</Link>
             <span className="material-symbols-outlined text-[14px] text-[#bec8ca]" aria-hidden="true">chevron_right</span></>
           )}
           <span className="text-[#006068] font-bold truncate max-w-[240px]">{attraction?.title}</span>
@@ -381,7 +381,7 @@ export default function AttractionDetailPage() {
                           style={{ fontVariationSettings: "'FILL' 1" }}
                           aria-hidden="true"
                         >
-                          {rating >= index + 1 ? 'star' : rating > index ? 'star_half' : 'star'}
+                          {rating >= index + 1 ? 'star' : rating > index ? 'star_half' : 'star_outline'}
                         </span>
                       ))}
                     </div>
