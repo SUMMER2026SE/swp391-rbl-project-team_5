@@ -11,6 +11,7 @@
 // ============================================================
 
 const prisma = require('../config/prisma');
+const { getTicketAvailability } = require('./availabilityService');
 
 const CITY_ALIASES = [
   { aliases: ['da nang', 'danang'], terms: ['Đà Nẵng'] },
@@ -77,6 +78,11 @@ function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function dateOnlyKey(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
 function expandCityTerms(city) {
   const raw = String(city || '').trim();
   if (!raw) return [];
@@ -103,6 +109,23 @@ function expandCategoryTerms(category) {
     .flatMap((entry) => entry.terms);
 
   return unique([...rawTerms, ...mappedTerms]);
+}
+
+function inferCatalogFiltersFromText(text) {
+  const normalized = normalizeSearchText(text);
+  if (!normalized) return {};
+
+  const cityEntry = CITY_ALIASES.find((entry) =>
+    entry.aliases.some((alias) => normalized.includes(alias))
+  );
+  const categoryTerms = CATEGORY_ALIASES
+    .filter((entry) => entry.aliases.some((alias) => normalized.includes(alias)))
+    .flatMap((entry) => entry.terms);
+
+  return {
+    category: unique(categoryTerms).join(', ') || undefined,
+    city: cityEntry?.terms?.[0] || undefined,
+  };
 }
 
 function buildCatalogWhere({ city, category, includeCategory = true }) {
@@ -180,14 +203,21 @@ async function findCatalog({ city, category, limit, includeCategory = true }) {
  * @returns {Promise<Array<object>>}
  */
 async function getCatalogSummary(filters = {}) {
-  const { city, category, limit = 60 } = filters;
+  const { city, category, limit = 60, date } = filters;
 
   let attractions = await findCatalog({ city, category, limit, includeCategory: Boolean(category) });
   if (category && attractions.length === 0) {
     attractions = await findCatalog({ city, category, limit, includeCategory: false });
   }
 
-  return attractions.map((a) => ({
+  const catalog = attractions.map(toCatalogItem);
+  if (!date) return catalog;
+
+  return decorateCatalogAvailability(catalog, date);
+}
+
+function toCatalogItem(a) {
+  return {
     id: a.id,
     title: a.title,
     description: shorten(a.description, 220),
@@ -209,7 +239,76 @@ async function getCatalogSummary(filters = {}) {
       price: Number(t.sellingPrice),
       refundPolicy: t.refundPolicy,
     })),
-  }));
+  };
+}
+
+async function decorateCatalogAvailability(catalog, date) {
+  const dateKey = dateOnlyKey(date);
+  if (!dateKey) return catalog;
+
+  const decorated = await Promise.all(
+    catalog.map(async (attraction) => {
+      const tickets = await Promise.all(
+        (attraction.tickets || []).map(async (ticket) => {
+          try {
+            const availability = await getTicketAvailability(prisma, ticket.id, date);
+            const availableSlots = availability.slots.filter(
+              (slot) => Number(slot.availableTickets || 0) > 0,
+            );
+
+            return {
+              ...ticket,
+              availabilityChecked: true,
+              availabilityDate: dateKey,
+              availability: {
+                closed: availability.closed,
+                reason: availability.reason || null,
+                availableTickets: availability.availableTickets,
+                productAvailable: availability.productAvailable,
+                attractionAvailable: availability.attractionAvailable,
+                dayCapacity: availability.dayCapacity,
+                slotSource: availability.slotSource,
+                slots: availability.slots,
+                bestSlot: availableSlots[0] || null,
+              },
+            };
+          } catch (error) {
+            console.warn('[aiCatalog] Ticket availability skipped:', ticket.id, error.message);
+            return {
+              ...ticket,
+              availabilityChecked: true,
+              availabilityDate: dateKey,
+              availability: {
+                closed: true,
+                reason: 'Ticket is not bookable for the selected date.',
+                availableTickets: 0,
+                productAvailable: 0,
+                attractionAvailable: 0,
+                dayCapacity: 0,
+                slotSource: null,
+                slots: [],
+                bestSlot: null,
+              },
+            };
+          }
+        }),
+      );
+
+      const availableTickets = tickets.filter(
+        (ticket) => Number(ticket.availability?.availableTickets || 0) > 0,
+      );
+
+      return {
+        ...attraction,
+        availabilityChecked: true,
+        availabilityDate: dateKey,
+        unavailableTicketCount: tickets.length - availableTickets.length,
+        tickets: availableTickets,
+      };
+    }),
+  );
+
+  return decorated.filter((attraction) => attraction.tickets.length > 0);
 }
 
 function shorten(text, maxLen) {
@@ -219,5 +318,7 @@ function shorten(text, maxLen) {
 }
 
 module.exports = {
+  decorateCatalogAvailability,
+  inferCatalogFiltersFromText,
   getCatalogSummary,
 };
