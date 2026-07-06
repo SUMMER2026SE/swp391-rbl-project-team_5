@@ -29,8 +29,8 @@ function errorHandler(error, req, res, next) {
 
   return res.status(statusCode).json({
     message: isServerError(statusCode)
-      ? 'May chu dang gap loi. Vui long thu lai sau.'
-      : error.message || 'May chu dang gap loi. Vui long thu lai sau.',
+      ? 'Máy chủ đang gặp lỗi. Vui lòng thử lại sau.'
+      : error.message || 'Máy chủ đang gặp lỗi. Vui lòng thử lại sau.',
   });
 }
 

@@ -1,19 +1,35 @@
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
+const {
+  isProduction,
+  normalizeUrl,
+  parseOriginList,
+  unique,
+} = require('./runtimeConfig');
+
+const configuredOrigins = unique([
+  ...parseOriginList(process.env.FRONTEND_URL),
+  ...parseOriginList(process.env.CORS_ALLOWED_ORIGINS),
+]);
+
+const developmentOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:5175',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
   'http://127.0.0.1:5175',
-].filter(Boolean);
+];
+
+const allowedOrigins = isProduction()
+  ? configuredOrigins
+  : unique([...configuredOrigins, ...developmentOrigins]);
 
 function isAllowedOrigin(origin) {
   if (!origin) return true;
-  if (allowedOrigins.includes(origin)) return true;
+  const normalizedOrigin = normalizeUrl(origin);
+  if (allowedOrigins.includes(normalizedOrigin)) return true;
 
-  if (process.env.NODE_ENV !== 'production') {
-    return /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(origin);
+  if (!isProduction()) {
+    return /^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(normalizedOrigin);
   }
 
   return false;

@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const { getFrontendUrl } = require('../config/runtimeConfig');
 
 function hasSmtpConfig() {
   return Boolean(
@@ -80,7 +81,7 @@ async function sendMail({ to, subject, html, text, attachments = [] }) {
 }
 
 async function sendVerificationEmail({ to, token }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
 
   return sendMail({
@@ -98,7 +99,7 @@ async function sendVerificationEmail({ to, token }) {
 }
 
 async function sendPasswordResetEmail({ to, token }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
 
   return sendMail({
@@ -116,7 +117,7 @@ async function sendPasswordResetEmail({ to, token }) {
 }
 
 async function sendStaffInviteEmail({ to, fullName, businessName, token }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/reset-password?token=${encodeURIComponent(token)}`;
   const safeName = escapeHtml(fullName || 'bạn');
   const safeBusiness = escapeHtml(businessName || 'đối tác');
@@ -140,7 +141,7 @@ async function sendStaffInviteEmail({ to, fullName, businessName, token }) {
 }
 
 async function sendAccountStatusEmail({ to, fullName, status, reason }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const loginLink = `${frontendUrl}/login`;
   const safeFullName = escapeHtml(fullName || 'bạn');
   const safeReason = escapeHtml(reason || 'Không có lý do cụ thể.');
@@ -179,7 +180,7 @@ async function sendAccountStatusEmail({ to, fullName, status, reason }) {
 }
 
 async function sendPartnerReviewEmail({ to, businessName, action, rejectionReason }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const safeBusiness = escapeHtml(businessName || 'Đối tác');
 
   if (action === 'APPROVED') {
@@ -219,7 +220,7 @@ async function sendPartnerReviewEmail({ to, businessName, action, rejectionReaso
 }
 
 async function sendAttractionViolationEmail({ to, partnerName, attractionTitle, reason }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/support`;
   const safePartner = escapeHtml(partnerName || 'Đối tác');
   const safeAttraction = escapeHtml(attractionTitle || 'địa điểm');
@@ -246,7 +247,7 @@ async function sendAttractionReviewEmail({
   action,
   rejectionReason,
 }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/partner/attractions`;
   const safePartner = escapeHtml(partnerName || 'Đối tác');
   const safeAttraction = escapeHtml(attractionTitle || 'địa điểm');
@@ -284,7 +285,7 @@ async function sendAttractionReviewEmail({
 }
 
 async function sendTicketConfirmationEmail({ booking, pdfBuffer }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const ticketLink = `${frontendUrl}/tickets/${booking.id}`;
   const attraction = booking.reservation.ticketProduct.attraction;
   const visitDate = new Intl.DateTimeFormat('vi-VN', {
@@ -331,7 +332,7 @@ async function sendRefundRequestReceivedEmail({
   bookingId,
   refundAmount,
 }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
   const shortId = String(bookingId).slice(0, 8).toUpperCase();
@@ -365,7 +366,7 @@ async function sendRefundStatusEmail({
   refundAmount,
   staffNotes,
 }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
   const shortId = String(bookingId).slice(0, 8).toUpperCase();
@@ -409,7 +410,7 @@ async function sendReissueTicketEmail({
   bookingId,
   newTicketCount,
 }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/tickets/${bookingId}`;
   const safeName = escapeHtml(fullName || 'bạn');
   const shortId = String(bookingId).slice(0, 8).toUpperCase();
@@ -435,7 +436,7 @@ async function sendBookingRejectedEmail({
   reason,
   refundAmount,
 }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
   const shortId = String(bookingId).slice(0, 8).toUpperCase();
@@ -467,7 +468,7 @@ async function sendBookingRejectedEmail({
 }
 
 async function sendHoldExpiredEmail({ to, fullName, bookingId, attractionTitle }) {
-  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/attractions`;
   const safeName = escapeHtml(fullName || 'bạn');
   const shortId = String(bookingId).slice(0, 8).toUpperCase();

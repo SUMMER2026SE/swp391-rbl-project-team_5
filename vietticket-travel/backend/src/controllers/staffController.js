@@ -29,7 +29,7 @@ function httpError(statusCode, message) {
 
 function assertPlatformRefundStaff(user) {
   if (!isPlatformStaff(user)) {
-    throw httpError(403, 'Chi nhan vien noi bo cua nen tang moi co quyen xu ly hoan tien.');
+    throw httpError(403, 'Chỉ nhân viên nội bộ của nền tảng mới có quyền xử lý hoàn tiền.');
   }
 }
 

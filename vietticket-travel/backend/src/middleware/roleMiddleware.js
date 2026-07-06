@@ -17,7 +17,7 @@ function isPlatformStaff(user) {
 function requirePlatformStaff(req, res, next) {
   if (!isPlatformStaff(req.user)) {
     return res.status(403).json({
-      message: 'Chi nhan vien noi bo cua nen tang moi co quyen thuc hien hanh dong nay.',
+      message: 'Chỉ nhân viên nội bộ của nền tảng mới có quyền thực hiện hành động này.',
       code: 'PLATFORM_STAFF_REQUIRED',
     });
   }

@@ -256,7 +256,7 @@ async function moderateReview(req, res, next) {
   try {
     if (!isPlatformStaff(req.user)) {
       return res.status(403).json({
-        message: 'Chi nhan vien noi bo cua nen tang moi co quyen kiem duyet danh gia.',
+        message: 'Chỉ nhân viên nội bộ của nền tảng mới có quyền kiểm duyệt đánh giá.',
         code: 'PLATFORM_STAFF_REQUIRED',
       });
     }
