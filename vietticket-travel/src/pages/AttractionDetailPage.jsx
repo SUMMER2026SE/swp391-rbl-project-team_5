@@ -12,6 +12,10 @@ import { footerLinks } from '../data/landingData.js'
 import { getAttractionDetail } from '../services/attractionApi.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 import reviewService from '../services/reviewService.js'
+import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
+import { loadItineraryBookingQueue } from '../utils/aiItineraryBookingQueue.js'
+import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
+import fallbackDetailImage from '../assets/halong_bay.webp'
 
 const detailNavLinks = [
   { label: 'Khám phá', href: '/attractions', active: true },
@@ -21,17 +25,8 @@ const detailNavLinks = [
 
 const fallbackImages = [
   {
-    imageUrl:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuC8Obh9J3W67YZYfg7Rd0OMWCkJ57CHJISoc2WFL2cxBAWxwR0wQdffk2w_hBRrPAVcdMTjYqV25D3NSgsyBMWsitsPVdG4kJPpLKswUUbGTCpIytepBPOayEdlpp7yVm5O8OFnFYNYmFpg7ColoomMRS71dnbFpJEMnekGDwvovQVh0Mv-c840_6uhAiDzbpjAMDfgK363W3AbYJNChupnI24c8moSAB4p7ffHSFXtrNJuhkF-uO3o-HVdrnnfBVfsrTG3GoaWWT4',
+    imageUrl: fallbackDetailImage,
     isPrimary: true,
-  },
-  {
-    imageUrl:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuBfQA1SvY6S4CtYJQsyTIo_XF0ohBLkBXYyfKIrRj7aJ3q0q_aKM_9BUQuJARXbNZj5EghwriK7YH0Yhhdi0apIwUU1_h1xd9NCNe9ueY2pDXjlzuKUSKR29acie-KGEPuo8ldJxiFnn1mmR8S26SOJ4zkgn0h9s-KnyuVi47VrQbXWDEkv7cR6i1k-wIO8uHCZDoF6kZSK-49ssp1IIdJyZkQiFvbk5xRp_4onkwflsFbvWmXDnTTK-h_5gnhz7JYHArjt2gdXacg',
-  },
-  {
-    imageUrl:
-      'https://lh3.googleusercontent.com/aida-public/AB6AXuAVzq7iqoicSsBqnMnzXepbqflg-cB29r3x0NJNrPAx-wfiFpHWFpadfYGsCGR23pxynHUQ6g48hSYHIb6JPHGX-kNuNq2wvpEQoMAjDoaCLsiTLwKA0XPuUHblPdYDKA1nX_OX1ofVbmUtSFyteYTBN0DfTx9YatUchhDGG5Y558IlpgkwZhimFDp1tGki-PRe_yEa9U2al3mvCzsTAK9tnFKAJmsRMIFE-zf8D3NmepICsIB4Wc8G2NsFIEVkSirLNTXkD0Tshbc',
   },
 ]
 
@@ -83,6 +78,14 @@ const getPrimaryImageUrl = (images) => {
   return getImageUrl(primaryImage) || getImageUrl(images[0]) || getImageUrl(fallbackImages[0])
 }
 
+const handleImageFallback = (event) => {
+  const image = event.currentTarget
+  if (image.dataset.fallbackApplied === 'true') return
+
+  image.dataset.fallbackApplied = 'true'
+  image.src = fallbackDetailImage
+}
+
 const getAddress = (attraction) => {
   if (attraction.address && attraction.city) {
     return `${attraction.address}, ${attraction.city}, Việt Nam`
@@ -105,6 +108,10 @@ export default function AttractionDetailPage() {
   const [isBookingOpen, setIsBookingOpen] = useState(false)
   const [selectedTicketProduct, setSelectedTicketProduct] = useState(null)
   const [bookingInitialQuantity, setBookingInitialQuantity] = useState(1)
+  const [bookingInitialDate, setBookingInitialDate] = useState('')
+  const [bookingInitialTimeSlotId, setBookingInitialTimeSlotId] = useState('')
+  const [aiBookingQueueContext, setAiBookingQueueContext] = useState(null)
+  const [aiRecommendationContext, setAiRecommendationContext] = useState(null)
 
   // State quản lý số lượng vé chọn nhanh ở sidebar
   const [ticketQuantities, setTicketQuantities] = useState({})
@@ -131,6 +138,33 @@ export default function AttractionDetailPage() {
       toast.error(error.message)
     } finally {
       setIsFavoriteUpdating(false)
+    }
+  }
+
+  const handleShareAttraction = async () => {
+    const shareUrl = `${window.location.origin}/attractions/${id}`
+    const title = attraction?.title || 'VietTicket Travel'
+    const text = attraction?.city
+      ? `Khám phá ${title} tại ${attraction.city} trên VietTicket Travel.`
+      : `Khám phá ${title} trên VietTicket Travel.`
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text, url: shareUrl })
+        return
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl)
+        toast.success('Đã sao chép liên kết chia sẻ.')
+        return
+      }
+
+      window.prompt('Sao chép liên kết chia sẻ:', shareUrl)
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        toast.error('Không thể chia sẻ địa điểm lúc này. Vui lòng thử lại.')
+      }
     }
   }
 
@@ -163,6 +197,14 @@ export default function AttractionDetailPage() {
     isAuthenticated && favoriteUserId === user?.id && isFavorite
 
   useEffect(() => {
+    const initialParams = new URLSearchParams(location.search)
+    const isAiQueuePrefill =
+      initialParams.get('source') === AI_BOOKING_SOURCE &&
+      initialParams.get('bookNow') === '1' &&
+      initialParams.get('aiQueueId')
+
+    if (isAiQueuePrefill && isAuthLoading) return undefined
+
     const fetchDetail = async () => {
       setLoading(true)
       setErrorMessage('')
@@ -174,8 +216,76 @@ export default function AttractionDetailPage() {
         setAttraction(detail)
         setActiveImage(getPrimaryImageUrl(images))
 
-        if (Array.isArray(detail.ticketProducts) && detail.ticketProducts.length > 0) {
-          setTicketQuantities({ [detail.ticketProducts[0].id]: 1 })
+        const products = Array.isArray(detail.ticketProducts) ? detail.ticketProducts : []
+        if (products.length > 0) {
+          const params = new URLSearchParams(location.search)
+          const isAiSource = params.get('source') === AI_BOOKING_SOURCE
+          const shouldPrefillBooking = params.get('bookNow') === '1'
+          const shouldPrefillAiBooking = isAiSource && shouldPrefillBooking
+          const aiQueueId = params.get('aiQueueId')
+          const aiQueueItemId = params.get('aiQueueItemId')
+          const recommendationContext =
+            isAiSource && !shouldPrefillAiBooking
+              ? {
+                  date: isDateInputValue(params.get('date')) ? params.get('date') : '',
+                  quantity: normalizeInitialQuantity(params.get('qty')),
+                }
+              : null
+          setAiRecommendationContext(recommendationContext)
+
+          if (shouldPrefillAiBooking && aiQueueId) {
+            const queue = loadItineraryBookingQueue()
+            const currentUserId = user?.id || user?.userId || ''
+            const queueOwnerMatches = !queue?.ownerId || queue.ownerId === currentUserId
+            const itemIndex = queue?.id === aiQueueId
+              ? queue.items.findIndex((item) => item.id === aiQueueItemId)
+              : -1
+            const queueItem = itemIndex >= 0 ? queue?.items[itemIndex] : queue?.items?.[0]
+            setAiBookingQueueContext(
+              queue?.id === aiQueueId && queueOwnerMatches && queueItem
+                ? {
+                    current: itemIndex >= 0 ? itemIndex + 1 : 1,
+                    item: queueItem,
+                    itemId: queueItem.id,
+                    planTitle: queue.planTitle,
+                    queueId: queue.id,
+                    total: queue.items.length,
+                  }
+                : null,
+            )
+          } else {
+            setAiBookingQueueContext(null)
+          }
+
+          const requestedTicketId = params.get('ticketId')
+          const prefillTicket = shouldPrefillBooking
+            ? requestedTicketId
+              ? products.find((item) => String(item.id) === requestedTicketId)
+              : products[0]
+            : null
+
+          if (shouldPrefillBooking && requestedTicketId && !prefillTicket) {
+            toast.warning('Không tìm thấy gói vé đã chọn. Vui lòng chọn lại trong danh sách vé.')
+          }
+
+          if (shouldPrefillBooking && prefillTicket) {
+            const quantity = normalizeInitialQuantity(params.get('qty'))
+            const date = params.get('date')
+            const timeSlotId = params.get('timeSlotId')
+
+            setTicketQuantities({ [prefillTicket.id]: quantity })
+            setSelectedTicketProduct(prefillTicket)
+            setBookingInitialQuantity(quantity)
+            setBookingInitialDate(isDateInputValue(date) ? date : '')
+            setBookingInitialTimeSlotId(timeSlotId ? String(timeSlotId) : '')
+            setIsBookingOpen(true)
+            window.history.replaceState(null, '', location.pathname)
+          } else {
+            setTicketQuantities({ [products[0].id]: recommendationContext?.quantity || 1 })
+            setBookingInitialDate(recommendationContext?.date || '')
+          }
+        } else {
+          setAiRecommendationContext(null)
         }
       } catch (error) {
         console.error('Lỗi khi tải chi tiết địa điểm từ API:', error)
@@ -187,7 +297,7 @@ export default function AttractionDetailPage() {
     }
 
     fetchDetail()
-  }, [id])
+  }, [id, isAuthLoading, location.pathname, location.search, user?.id, user?.userId])
 
   const images = useMemo(() => normalizeImages(attraction), [attraction])
   const ticketProducts = attraction?.ticketProducts || []
@@ -216,10 +326,19 @@ export default function AttractionDetailPage() {
 
   const getBookingQuantity = (ticket) => Math.max(1, Number(ticketQuantities[ticket?.id] || 0) || 1)
 
-  const handleOpenBookingModal = (ticket, quantity = getBookingQuantity(ticket)) => {
+  const handleOpenBookingModal = (ticket, quantity = getBookingQuantity(ticket), options = {}) => {
+    const effectiveDate = options.date || aiRecommendationContext?.date || ''
     setSelectedTicketProduct(ticket)
-    setBookingInitialQuantity(Math.max(1, Number(quantity) || 1))
+    setBookingInitialQuantity(normalizeInitialQuantity(quantity))
+    setBookingInitialDate(isDateInputValue(effectiveDate) ? effectiveDate : '')
+    setBookingInitialTimeSlotId(options.timeSlotId ? String(options.timeSlotId) : '')
     setIsBookingOpen(true)
+  }
+
+  const handleCloseBookingModal = () => {
+    setIsBookingOpen(false)
+    setBookingInitialDate('')
+    setBookingInitialTimeSlotId('')
   }
 
   const handleOpenSelectedTicket = () => {
@@ -291,6 +410,7 @@ export default function AttractionDetailPage() {
               <img
                 alt={attraction.title}
                 className="h-full w-full object-cover"
+                onError={handleImageFallback}
                 src={activeImage || getPrimaryImageUrl(images)}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/45 to-transparent" />
@@ -351,6 +471,7 @@ export default function AttractionDetailPage() {
                     <img
                       alt={`${attraction.title} thumbnail ${index + 1}`}
                       className="h-full w-full object-cover"
+                      onError={handleImageFallback}
                       src={imageUrl}
                     />
                   </button>
@@ -470,12 +591,68 @@ export default function AttractionDetailPage() {
                     <button
                       aria-label="Chia sẻ"
                       className="flex h-10 w-10 items-center justify-center rounded-full border border-[#bec8ca] text-[#3f484a] transition hover:border-[#006068] hover:text-[#006068] active:scale-95"
+                      onClick={handleShareAttraction}
                       type="button"
                     >
                       <span className="material-symbols-outlined text-[20px]" aria-hidden="true">share</span>
                     </button>
                   </div>
                 </div>
+
+                {aiBookingQueueContext && (
+                  <div className="rounded-2xl border border-[#a6eff8] bg-[#eefcff] p-4">
+                    <div className="flex items-start gap-3">
+                      <span
+                        className="material-symbols-outlined mt-0.5 text-[#006068]"
+                        aria-hidden="true"
+                      >
+                        route
+                      </span>
+                      <div>
+                        <p className="text-sm font-bold text-[#00474d]">
+                          Đặt vé từ lịch trình AI
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-[#3f484a]">
+                          Bước {aiBookingQueueContext.current}/{aiBookingQueueContext.total}
+                          {aiBookingQueueContext.item?.dayLabel
+                            ? ` - ${aiBookingQueueContext.item.dayLabel}`
+                            : ''}
+                        </p>
+                        {aiBookingQueueContext.item?.ticketName && (
+                          <p className="mt-1 text-xs text-[#5b6668]">
+                            {aiBookingQueueContext.item.ticketName} x {aiBookingQueueContext.item.quantity}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!aiBookingQueueContext && aiRecommendationContext && (
+                  <div className="rounded-2xl border border-[#a6eff8] bg-[#eefcff] p-4">
+                    <div className="flex items-start gap-3">
+                      <span
+                        className="material-symbols-outlined mt-0.5 text-[#006068]"
+                        aria-hidden="true"
+                      >
+                        auto_awesome
+                      </span>
+                      <div>
+                        <p className="text-sm font-bold text-[#00474d]">
+                          Ngữ cảnh từ gợi ý AI
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-[#3f484a]">
+                          {aiRecommendationContext.date
+                            ? `Ngày tham quan: ${aiRecommendationContext.date}`
+                            : 'Khách đang xem từ kết quả gợi ý AI'}
+                          {aiRecommendationContext.quantity
+                            ? ` - ${aiRecommendationContext.quantity} vé`
+                            : ''}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {ticketProducts.length > 0 ? (
                   ticketProducts.map((ticket, index) => (
@@ -544,14 +721,26 @@ export default function AttractionDetailPage() {
 
       {isBookingOpen && selectedTicketProduct && (
         <BookingModal
+          aiQueueId={
+            String(selectedTicketProduct.id) === String(aiBookingQueueContext?.item?.ticketId || '')
+              ? aiBookingQueueContext?.queueId || ''
+              : ''
+          }
+          aiQueueItemId={
+            String(selectedTicketProduct.id) === String(aiBookingQueueContext?.item?.ticketId || '')
+              ? aiBookingQueueContext?.itemId || ''
+              : ''
+          }
           attractionId={id}
           attractionImage={activeImage || getPrimaryImageUrl(images)}
           attractionLocation={getAddress(attraction)}
           attractionTitle={attraction.title}
+          initialDate={bookingInitialDate}
           initialQuantity={bookingInitialQuantity}
+          initialTimeSlotId={bookingInitialTimeSlotId}
           isOpen={isBookingOpen}
-          key={`${selectedTicketProduct.id}-${bookingInitialQuantity}`}
-          onClose={() => setIsBookingOpen(false)}
+          key={`${selectedTicketProduct.id}-${bookingInitialQuantity}-${bookingInitialDate || 'auto'}-${bookingInitialTimeSlotId || 'auto'}`}
+          onClose={handleCloseBookingModal}
           requiresManualApproval={Boolean(attraction.requiresManualApproval)}
           ticketProduct={selectedTicketProduct}
         />

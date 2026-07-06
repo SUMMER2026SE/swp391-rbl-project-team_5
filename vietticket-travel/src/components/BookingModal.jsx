@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import bookingService from '../services/bookingService.js'
 import { checkAvailability, reserveTickets } from '../services/attractionApi.js'
+import { useAuth } from '../context/useAuth.js'
+import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
+import { markItineraryQueueItemReserved } from '../utils/aiItineraryBookingQueue.js'
 import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
 
 const formatCurrency = (value) => {
@@ -19,7 +22,20 @@ const toDateInputValue = (date) => {
   return new Date(date.getTime() - timezoneOffset).toISOString().split('T')[0]
 }
 
-const getSlotId = (slot) => slot.timeSlotId || slot.id
+const getSlotId = (slot) => String(slot.timeSlotId || slot.id || '')
+
+const getCalendarDate = (dateValue) => {
+  if (!isDateInputValue(dateValue)) {
+    return new Date()
+  }
+
+  const [year, month] = dateValue.split('-').map(Number)
+  if (!Number.isFinite(year) || !Number.isFinite(month)) {
+    return new Date()
+  }
+
+  return new Date(year, month - 1, 1)
+}
 
 const getSlotLabel = (slot) => {
   if (slot.label) {
@@ -56,13 +72,21 @@ export default function BookingModal({
   onClose,
   requiresManualApproval = false,
   ticketProduct,
+  initialDate = '',
   attractionId,
+  aiQueueId = '',
+  aiQueueItemId = '',
   initialQuantity = 1,
+  initialTimeSlotId = '',
 }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { isAuthenticated, isAuthLoading } = useAuth()
   const todayStr = toDateInputValue(new Date())
+  const normalizedInitialDate =
+    isDateInputValue(initialDate) && initialDate >= todayStr ? initialDate : todayStr
   const normalizedInitialQuantity = normalizeInitialQuantity(initialQuantity)
-  const [selectedDate, setSelectedDate] = useState(todayStr)
+  const [selectedDate, setSelectedDate] = useState(normalizedInitialDate)
   const [selectedTimeSlotId, setSelectedTimeSlotId] = useState('')
   const [timeSlots, setTimeSlots] = useState([])
   const [quantity, setQuantity] = useState(() => normalizedInitialQuantity)
@@ -70,8 +94,8 @@ export default function BookingModal({
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
-  const [currentMonth, setCurrentMonth] = useState(() => new Date().getMonth())
-  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear())
+  const [currentMonth, setCurrentMonth] = useState(() => getCalendarDate(normalizedInitialDate).getMonth())
+  const [currentYear, setCurrentYear] = useState(() => getCalendarDate(normalizedInitialDate).getFullYear())
 
   const MONTH_NAMES_VI = [
     'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4',
@@ -90,6 +114,15 @@ export default function BookingModal({
   const selectedSlot = timeSlots.find((slot) => getSlotId(slot) === selectedTimeSlotId)
   const maxQuantity =
     typeof selectedSlot?.availableTickets === 'number' ? selectedSlot.availableTickets : null
+  const checkoutDisabled =
+    isSubmitting || isAuthLoading || isLoadingSlots || !ticketId || !selectedTimeSlotId
+  const checkoutButtonText = (() => {
+    if (isSubmitting) return 'Đang giữ vé...'
+    if (isAuthLoading) return 'Đang kiểm tra đăng nhập...'
+    if (isLoadingSlots) return 'Đang kiểm tra vé...'
+    if (!selectedTimeSlotId) return 'Chọn khung giờ để tiếp tục'
+    return 'Tiếp tục thanh toán'
+  })()
 
   // Chính sách hoàn tiền của loại vé (hiển thị TRƯỚC khi khách thanh toán).
   const refundPolicyText = (() => {
@@ -217,7 +250,14 @@ export default function BookingModal({
         const slots = Array.isArray(result.data) ? result.data : []
         setTimeSlots(slots)
 
-        const availableSlot = slots.find((slot) => !isSlotUnavailable(slot))
+        const preferredSlot = initialTimeSlotId
+          ? slots.find(
+              (slot) =>
+                getSlotId(slot) === String(initialTimeSlotId) &&
+                !isSlotUnavailable(slot),
+            )
+          : null
+        const availableSlot = preferredSlot || slots.find((slot) => !isSlotUnavailable(slot))
         setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
         if (availableSlot) {
           setQuantity((current) =>
@@ -240,7 +280,7 @@ export default function BookingModal({
     return () => {
       controller.abort()
     }
-  }, [isOpen, selectedDate, ticketId])
+  }, [initialTimeSlotId, isOpen, selectedDate, ticketId])
 
   const handleSelectSlot = (slot) => {
     setSelectedTimeSlotId(getSlotId(slot))
@@ -263,6 +303,41 @@ export default function BookingModal({
 
   const handleCheckout = async () => {
     setErrorMessage('')
+
+    if (isAuthLoading) {
+      return
+    }
+
+    if (!isAuthenticated) {
+      const redirectParams = new URLSearchParams(location.search)
+      redirectParams.set('bookNow', '1')
+      redirectParams.set('ticketId', ticketId || '')
+      redirectParams.set('qty', String(quantity))
+      redirectParams.set('date', selectedDate)
+      if (selectedTimeSlotId) {
+        redirectParams.set('timeSlotId', selectedTimeSlotId)
+      }
+      if (aiQueueId && aiQueueItemId) {
+        redirectParams.set('source', AI_BOOKING_SOURCE)
+        redirectParams.set('aiQueueId', aiQueueId)
+        redirectParams.set('aiQueueItemId', aiQueueItemId)
+      }
+
+      onClose()
+      navigate('/login', {
+        state: {
+          from: {
+            pathname: location.pathname,
+            search: `?${redirectParams.toString()}`,
+          },
+        },
+      })
+      return
+    }
+
+    if (isLoadingSlots) {
+      return
+    }
 
     if (!ticketId) {
       setErrorMessage('Không tìm thấy loại vé cần đặt. Vui lòng thử lại.')
@@ -289,11 +364,33 @@ export default function BookingModal({
         timeSlotId: selectedSlot?.timeSlotId || null,
         quantity,
       })
-      bookingService.reserveTicket(result.data?.reservationId || result.data?.id)
+      const reservationId = result.data?.reservationId || result.data?.id
+      bookingService.reserveTicket(reservationId)
+      if (aiQueueId && aiQueueItemId) {
+        markItineraryQueueItemReserved({
+          itemId: aiQueueItemId,
+          queueId: aiQueueId,
+          reservationId,
+        })
+      }
+      const checkoutParams = new URLSearchParams()
+      if (aiQueueId && aiQueueItemId) {
+        checkoutParams.set('aiQueueId', aiQueueId)
+        checkoutParams.set('aiQueueItemId', aiQueueItemId)
+      }
       onClose()
-      navigate(`/checkout/${result.data?.reservationId || result.data?.id}`)
+      navigate(
+        `/checkout/${reservationId}${
+          checkoutParams.toString() ? `?${checkoutParams.toString()}` : ''
+        }`,
+      )
     } catch (error) {
       console.error('Lỗi khi giữ vé:', error)
+      if (error.status === 401 || error.status === 403) {
+        onClose()
+        navigate('/login', { state: { from: location } })
+        return
+      }
       setErrorMessage(error.message)
     } finally {
       setIsSubmitting(false)
@@ -519,11 +616,11 @@ export default function BookingModal({
 
             <button
               className="group flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#006068] to-[#007b85] text-lg font-bold text-white shadow-lg shadow-[#006068]/20 transition hover:scale-[1.01] hover:shadow-[#006068]/40 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-70"
-              disabled={isSubmitting || !ticketId}
+              disabled={checkoutDisabled}
               onClick={handleCheckout}
               type="button"
             >
-              {isSubmitting ? 'Đang giữ vé...' : 'Tiếp tục thanh toán'}
+              {checkoutButtonText}
               <span className="material-symbols-outlined transition-transform group-hover:translate-x-1" aria-hidden="true">
                 arrow_forward
               </span>

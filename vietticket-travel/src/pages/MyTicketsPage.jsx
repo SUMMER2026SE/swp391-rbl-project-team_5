@@ -8,6 +8,7 @@ import ReviewModal from '../components/tickets/ReviewModal.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
+import { hasUsableTicketInstances } from '../utils/ticketInstanceStatus.js'
 
 const tabs = [
   { id: 'all', label: 'Tất cả' },
@@ -313,6 +314,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
   const [showRefund, setShowRefund] = useState(false)
   const remainingTime = getRemainingTime(booking.expiresAt, now)
   const isExpired = booking.status === 'unpaid' && remainingTime === 0
+  const hasUsableQr = hasUsableTicketInstances(booking.ticketInstances)
   const quantityText = `${booking.quantity || 1} vé`
 
   return (
@@ -407,9 +409,9 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
                 to={`/tickets/${booking.id}`}
               >
                 <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
-                  qr_code_2
+                  {hasUsableQr ? 'qr_code_2' : 'receipt_long'}
                 </span>
-                Xem mã QR
+                {hasUsableQr ? 'Xem mã QR' : 'Xem chi tiết vé'}
               </Link>
             </>
           )}
