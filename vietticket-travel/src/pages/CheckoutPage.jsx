@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
+import { markItineraryQueueItemReserved } from '../utils/aiItineraryBookingQueue.js'
+import { validateEmail, validateOptionalPhone } from '../utils/formValidators.js'
 
 const paymentMethods = [
   { id: 'vnpay', label: 'Ví VNPay', icon: 'account_balance_wallet' },
@@ -39,6 +41,10 @@ const formatDate = (value) => {
 
 function CheckoutPage() {
   const { reservationId } = useParams()
+  const [searchParams] = useSearchParams()
+  const aiQueueId = searchParams.get('aiQueueId') || ''
+  const aiQueueItemId = searchParams.get('aiQueueItemId') || ''
+  const isAiItineraryCheckout = Boolean(aiQueueId && aiQueueItemId)
   const [booking, setBooking] = useState(null)
   const [contact, setContact] = useState({
     fullName: '',
@@ -131,6 +137,7 @@ function CheckoutPage() {
   const isExpired = Boolean(
     booking && now > 0 && booking.status === 'held' && expiresAtMs <= now,
   )
+  const hasVoucherCode = voucherCode.trim().length > 0
 
   const handleContactChange = (field) => (event) => {
     setContact((current) => ({ ...current, [field]: event.target.value }))
@@ -160,6 +167,11 @@ function CheckoutPage() {
   const handleApplyVoucher = async (event) => {
     event.preventDefault()
     if (!booking || isApplyingVoucher) return
+    if (!hasVoucherCode) {
+      setVoucherMessage('Vui lòng nhập mã ưu đãi.')
+      setVoucherSuccess(false)
+      return
+    }
 
     setIsApplyingVoucher(true)
     setVoucherMessage('')
@@ -203,6 +215,17 @@ function CheckoutPage() {
       return
     }
 
+    const emailError = validateEmail(contact.email)
+    if (emailError) {
+      setErrorMessage(emailError)
+      return
+    }
+    const phoneError = validateOptionalPhone(contact.phone)
+    if (phoneError) {
+      setErrorMessage(phoneError)
+      return
+    }
+
     setIsSubmitting(true)
     try {
       let bookingId = booking.bookingId
@@ -217,6 +240,15 @@ function CheckoutPage() {
           paymentMethod: selectedPayment,
         })
         bookingId = createdBooking.id
+      }
+
+      if (isAiItineraryCheckout) {
+        markItineraryQueueItemReserved({
+          bookingId,
+          itemId: aiQueueItemId,
+          queueId: aiQueueId,
+          reservationId: booking.id,
+        })
       }
 
       // VNPay: lấy URL thanh toán thật rồi chuyển hướng trình duyệt sang cổng.
@@ -288,6 +320,15 @@ function CheckoutPage() {
             <h1 className="text-3xl font-bold text-primary md:text-4xl">
               Xác nhận đặt vé
             </h1>
+
+            {isAiItineraryCheckout && (
+              <div className="rounded-2xl border border-[#a6eff8] bg-[#eefcff] p-4 text-sm font-semibold text-[#00474d]">
+                <span className="material-symbols-outlined mr-2 align-[-4px] text-[20px]" aria-hidden="true">
+                  route
+                </span>
+                Bạn đang thanh toán một vé trong lịch trình AI. Sau khi thanh toán thành công, hệ thống sẽ gợi ý vé tiếp theo trong lịch trình.
+              </div>
+            )}
 
             <section className="rounded-2xl border border-outline-variant/20 bg-white p-6 shadow-sm md:p-8">
               <h2 className="mb-3 text-lg font-bold text-on-surface">
@@ -395,13 +436,13 @@ function CheckoutPage() {
                     className="min-w-0 flex-1 rounded-xl border border-outline-variant px-4 py-3 uppercase outline-none focus:border-primary disabled:opacity-60 disabled:cursor-not-allowed"
                     id="voucher"
                     onChange={handleVoucherChange}
-                    placeholder="GIAM20"
+                    placeholder="NHAPMA"
                     value={voucherCode}
                     disabled={Boolean(booking.bookingId)}
                   />
                   <button
                     className="rounded-xl bg-secondary px-5 py-3 font-bold text-white disabled:opacity-60"
-                    disabled={isApplyingVoucher || Boolean(booking.bookingId)}
+                    disabled={isApplyingVoucher || Boolean(booking.bookingId) || !hasVoucherCode}
                     type="submit"
                   >
                     {isApplyingVoucher ? 'Đang kiểm tra...' : 'Áp dụng'}
@@ -414,7 +455,7 @@ function CheckoutPage() {
                 )}
                 {!booking.bookingId && (
                   <p className="mt-2 text-xs text-on-surface-variant">
-                    Thử mã GIAM20 hoặc VIETTICKET10.
+                    Nhập mã ưu đãi nếu bạn có.
                   </p>
                 )}
               </form>

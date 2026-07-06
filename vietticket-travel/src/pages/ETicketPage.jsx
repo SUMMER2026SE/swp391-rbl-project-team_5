@@ -6,6 +6,12 @@ import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
+import {
+  getTicketInstanceStatus,
+  getTicketInstanceStatusMeta,
+  hasUsableTicketInstances,
+  isTicketInstanceUsable,
+} from '../utils/ticketInstanceStatus.js'
 
 const fallbackImage =
   'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=1400&q=85'
@@ -122,9 +128,63 @@ function ETicketPage() {
     )
   }
 
+  const ticketInstances = Array.isArray(booking.ticketInstances) ? booking.ticketInstances : []
+  const hasUsableQr = hasUsableTicketInstances(ticketInstances)
   const canShowQr =
     ['confirmed', 'completed'].includes(booking.status) &&
-    booking.ticketInstances?.length > 0
+    hasUsableQr
+  const primaryUsableTicket = ticketInstances.find(isTicketInstanceUsable)
+  const qrUnavailableCopy = (() => {
+    if (booking.status === 'pending_partner') {
+      return {
+        title: 'Vé đang chờ đối tác duyệt',
+        description: 'Mã QR sẽ xuất hiện sau khi đơn đặt vé được xác nhận.',
+        icon: 'hourglass_top',
+      }
+    }
+
+    if (ticketInstances.length > 0 && !hasUsableQr) {
+      const statuses = ticketInstances.map(getTicketInstanceStatus)
+      if (statuses.every((status) => status === 'used')) {
+        return {
+          title: 'Vé đã được sử dụng',
+          description: 'Mã QR đã được khóa sau khi check-in để tránh sử dụng lại.',
+          icon: 'check_circle',
+        }
+      }
+      if (statuses.every((status) => status === 'refunded')) {
+        return {
+          title: 'Vé đã hoàn tiền',
+          description: 'Mã QR không còn hiệu lực sau khi yêu cầu hoàn tiền được xử lý.',
+          icon: 'price_check',
+        }
+      }
+      return {
+        title: 'Vé không còn hiệu lực',
+        description: 'Mã QR chỉ hiển thị cho các vé còn hiệu lực và chưa sử dụng.',
+        icon: 'block',
+      }
+    }
+
+    return {
+      title: 'Mã QR chưa khả dụng',
+      description: 'Mã QR sẽ xuất hiện sau khi đơn đặt vé được xác nhận.',
+      icon: 'hourglass_top',
+    }
+  })()
+  const ticketInstructions = canShowQr
+    ? [
+        { icon: 'qr_code_scanner', text: 'Xuất trình mã QR tại cổng soát vé.' },
+        { icon: 'schedule', text: 'Có mặt trước khung giờ ít nhất 15 phút.' },
+        { icon: 'badge', text: 'Mang theo giấy tờ tùy thân khi được yêu cầu.' },
+        { icon: 'signal_wifi_off', text: 'Bạn có thể lưu hoặc in vé để dùng ngoại tuyến.' },
+      ]
+    : [
+        { icon: qrUnavailableCopy.icon, text: qrUnavailableCopy.description },
+        { icon: 'confirmation_number', text: 'Theo dõi trạng thái đơn trong mục Vé của tôi.' },
+        { icon: 'support_agent', text: 'Liên hệ hỗ trợ nếu bạn đã thanh toán nhưng vé chưa được cập nhật.' },
+        { icon: 'shield', text: 'Không chia sẻ thông tin đơn đặt chỗ công khai.' },
+      ]
   const quantityText = `${booking.quantity || 1} vé`
 
   return (
@@ -154,12 +214,19 @@ function ETicketPage() {
                 type="button"
               >
                 <span className="material-symbols-outlined" aria-hidden="true">download</span>
-                In / Lưu PDF
+                {canShowQr ? 'In / Lưu PDF' : 'In thông tin vé'}
               </button>
             </div>
           </div>
 
-          {!canShowQr && (
+          {!canShowQr && ticketInstances.length > 0 && !hasUsableQr && (
+            <div className="print:hidden mb-6 rounded-2xl border border-tertiary-fixed-dim bg-tertiary-fixed/30 p-5 text-on-tertiary-fixed-variant">
+              <p className="font-bold">{qrUnavailableCopy.title}</p>
+              <p className="mt-1 text-sm">{qrUnavailableCopy.description}</p>
+            </div>
+          )}
+
+          {!canShowQr && !(ticketInstances.length > 0 && !hasUsableQr) && (
             <div className="print:hidden mb-6 rounded-2xl border border-tertiary-fixed-dim bg-tertiary-fixed/30 p-5 text-on-tertiary-fixed-variant">
               <p className="font-bold">
                 {booking.status === 'pending_partner'
@@ -213,7 +280,7 @@ function ETicketPage() {
 
             <section
               className={`p-8 md:p-12${
-                canShowQr && booking.ticketInstances.length > 1
+                canShowQr && ticketInstances.length > 1
                   ? ''
                   : ' grid items-center gap-8 md:grid-cols-[1fr_auto]'
               }`}
@@ -226,17 +293,20 @@ function ETicketPage() {
                   {booking.id}
                 </p>
                 <div className="mt-7 grid gap-4 sm:grid-cols-2">
-                  <Instruction icon="qr_code_scanner" text="Xuất trình mã QR tại cổng soát vé." />
-                  <Instruction icon="schedule" text="Có mặt trước khung giờ ít nhất 15 phút." />
-                  <Instruction icon="badge" text="Mang theo giấy tờ tùy thân khi được yêu cầu." />
-                  <Instruction icon="signal_wifi_off" text="Bạn có thể lưu hoặc in vé để dùng ngoại tuyến." />
+                  {ticketInstructions.map((instruction) => (
+                    <Instruction
+                      icon={instruction.icon}
+                      key={`${instruction.icon}-${instruction.text}`}
+                      text={instruction.text}
+                    />
+                  ))}
                 </div>
               </div>
 
               {/* 1 vé hoặc chưa xác nhận → giữ layout cũ (QR bên phải) */}
-              {(!canShowQr || booking.ticketInstances.length === 1) && (
+              {(!canShowQr || ticketInstances.length === 1) && (
                 <div className="justify-self-center rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-inner">
-                  {canShowQr ? (
+                  {canShowQr && primaryUsableTicket ? (
                     <QRCodeSVG
                       bgColor="#ffffff"
                       fgColor="#000000"
@@ -244,21 +314,23 @@ function ETicketPage() {
                       marginSize={1}
                       size={210}
                       title={`Vé ${booking.id}`}
-                      value={`VIETTICKET:${booking.ticketInstances[0].qrCodeToken}`}
+                      value={`VIETTICKET:${primaryUsableTicket.qrCodeToken}`}
                     />
                   ) : (
                     <div className="flex h-[210px] w-[210px] flex-col items-center justify-center bg-surface-container-low text-center text-on-surface-variant">
-                      <span className="material-symbols-outlined text-5xl" aria-hidden="true">hourglass_top</span>
-                      <span className="mt-3 text-sm font-bold">Đang chờ xác nhận</span>
+                      <span className="material-symbols-outlined text-5xl" aria-hidden="true">
+                        {qrUnavailableCopy.icon}
+                      </span>
+                      <span className="mt-3 text-sm font-bold">{qrUnavailableCopy.title}</span>
                     </div>
                   )}
                 </div>
               )}
 
               {/* Nhiều vé → hiển thị tất cả QR theo grid */}
-              {canShowQr && booking.ticketInstances.length > 1 && (
+              {canShowQr && ticketInstances.length > 1 && (
                 <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                  {booking.ticketInstances.map((ticket, index) => (
+                  {ticketInstances.map((ticket, index) => (
                     <QRTicketCard key={ticket.id} index={index} ticket={ticket} />
                   ))}
                 </div>
@@ -285,17 +357,22 @@ function QRTicketCard({ index, ticket }) {
     : isExpired
       ? 'text-error bg-error/10'
       : 'text-primary bg-primary/10'
+  const isUsable = isTicketInstanceUsable(ticket)
+  const statusMeta = getTicketInstanceStatusMeta(ticket)
+  const displayStatusLabel = statusMeta.label || statusLabel
+  const displayStatusColor = statusMeta.className || statusColor
 
   return (
     <div
       className={`flex flex-col items-center rounded-2xl border p-5 text-center transition ${
-        isUsed
+        !isUsable
           ? 'border-outline-variant/30 bg-surface-container/40 opacity-70'
           : 'border-outline-variant/40 bg-white shadow-sm'
       }`}
     >
       <p className="mb-3 text-sm font-bold text-on-surface-variant">Vé #{index + 1}</p>
-      <div className={isUsed ? 'opacity-50 grayscale' : ''}>
+      <div className={!isUsable ? 'opacity-80 grayscale' : ''}>
+        {isUsable ? (
         <QRCodeSVG
           bgColor="#ffffff"
           fgColor="#000000"
@@ -305,9 +382,17 @@ function QRTicketCard({ index, ticket }) {
           title={`Vé số ${index + 1}`}
           value={`VIETTICKET:${ticket.qrCodeToken}`}
         />
+        ) : (
+          <div className="flex h-[160px] w-[160px] flex-col items-center justify-center rounded-xl bg-surface-container-low text-on-surface-variant">
+            <span className="material-symbols-outlined text-5xl" aria-hidden="true">
+              {statusMeta.icon}
+            </span>
+            <span className="mt-2 text-xs font-bold">{statusMeta.label}</span>
+          </div>
+        )}
       </div>
-      <span className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-bold ${statusColor}`}>
-        {statusLabel}
+      <span className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-bold ${displayStatusColor}`}>
+        {displayStatusLabel}
       </span>
     </div>
   )

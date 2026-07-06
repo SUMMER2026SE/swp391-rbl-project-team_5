@@ -3,6 +3,12 @@ import { Link, useSearchParams } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
+import {
+  buildItineraryQueueBookingUrl,
+  completeItineraryQueueItemByBookingId,
+  getItineraryQueueProgress,
+  getNextItineraryQueueStep,
+} from '../utils/aiItineraryBookingQueue.js'
 
 const formatDate = (value) => {
   if (!value) return 'Chưa cập nhật'
@@ -33,6 +39,7 @@ function BookingSuccessPage() {
     searchParams.get('vnp_ResponseCode') || searchParams.get('vnpayResponseCode')
   const bookingId = searchParams.get('bookingId')
   const [booking, setBooking] = useState(null)
+  const [aiQueueResult, setAiQueueResult] = useState(null)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState('')
 
@@ -41,6 +48,7 @@ function BookingSuccessPage() {
   const isSuccess = outcome === 'success'
   const isInvalid = outcome === 'invalid'
   const isPendingPartner = booking?.status === 'pending_partner'
+  const nextAiBookingUrl = aiQueueResult?.nextUrl || ''
   const failureReason =
     VNPAY_ERROR_MESSAGES[responseCode] ||
     'Giao dịch không thể hoàn tất. Bạn chưa bị trừ tiền cho đơn này.'
@@ -77,6 +85,29 @@ function BookingSuccessPage() {
       active = false
     }
   }, [bookingId])
+
+  useEffect(() => {
+    if (!isSuccess || !bookingId) return undefined
+
+    let active = true
+
+    Promise.resolve().then(() => {
+      const updatedQueue = completeItineraryQueueItemByBookingId(bookingId)
+      if (!active || !updatedQueue) return
+
+      const nextItem = getNextItineraryQueueStep(updatedQueue)
+      setAiQueueResult({
+        nextItem,
+        nextUrl: nextItem ? buildItineraryQueueBookingUrl(updatedQueue, nextItem) : '',
+        planTitle: updatedQueue.planTitle,
+        progress: getItineraryQueueProgress(updatedQueue),
+      })
+    })
+
+    return () => {
+      active = false
+    }
+  }, [bookingId, isSuccess])
 
   return (
     <>
@@ -152,6 +183,46 @@ function BookingSuccessPage() {
               <SummaryRow icon="tag" label="Mã đặt chỗ" value={booking.id} mono />
               <SummaryRow icon="location_on" label="Địa điểm" value={booking.attractionTitle} />
               <SummaryRow icon="calendar_month" label="Ngày tham quan" value={formatDate(booking.visitDate)} />
+            </div>
+          )}
+
+          {isSuccess && aiQueueResult?.progress?.total > 0 && (
+            <div className="mt-6 rounded-2xl border border-[#a6eff8] bg-[#eefcff] p-5 text-left">
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined mt-0.5 text-[#006068]" aria-hidden="true">
+                  route
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-[#00474d]">
+                    Tiến độ lịch trình AI
+                  </p>
+                  <p className="mt-1 text-xs font-semibold text-[#3f484a]">
+                    Đã hoàn tất {aiQueueResult.progress.completed}/{aiQueueResult.progress.total} vé trong {aiQueueResult.planTitle || 'lịch trình AI'}.
+                  </p>
+                  {aiQueueResult.nextItem ? (
+                    <div className="mt-3">
+                      <p className="text-xs text-[#5b6668]">
+                        Tiếp theo: {aiQueueResult.nextItem.attractionTitle} - {aiQueueResult.nextItem.ticketName}
+                      </p>
+                      {nextAiBookingUrl && (
+                        <Link
+                          className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-[#00474d] px-4 py-2 text-xs font-bold text-white"
+                          to={nextAiBookingUrl}
+                        >
+                          <span className="material-symbols-outlined text-[17px]" aria-hidden="true">
+                            shopping_cart_checkout
+                          </span>
+                          Đặt vé tiếp theo
+                        </Link>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs font-semibold text-[#006068]">
+                      Tất cả vé trong lịch trình AI đã được xử lý.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
