@@ -12,6 +12,7 @@ const {
 } = require('../utils/vnpay');
 const { calculateRefundAmount, isBeforeRefundCutoff } = require('../utils/refundService');
 const { sendRefundRequestReceivedEmail } = require('../utils/mailer');
+const { getFrontendUrl } = require('../config/runtimeConfig');
 const {
   confirmReservationAndStock,
   createTicketInstances,
@@ -394,7 +395,7 @@ async function vnpayIpn(req, res) {
 async function vnpayReturn(req, res, next) {
   try {
     const secret = process.env.VNP_HASHSECRET;
-    const frontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontend = getFrontendUrl();
     const query = { ...req.query };
 
     const valid = verifyVnpaySignature(query, secret);

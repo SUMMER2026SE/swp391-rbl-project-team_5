@@ -21,7 +21,7 @@ function isSupportStaff(user) {
 
 function assertSupportStaff(user) {
   if (!isSupportStaff(user)) {
-    throw httpError(403, 'Chi nhan vien noi bo cua nen tang moi co quyen xu ly yeu cau ho tro.');
+    throw httpError(403, 'Chỉ nhân viên nội bộ của nền tảng mới có quyền xử lý yêu cầu hỗ trợ.');
   }
 }
 

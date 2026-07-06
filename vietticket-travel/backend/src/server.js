@@ -1,5 +1,9 @@
 require('dotenv').config({ quiet: true });
 
+const { validateProductionEnv } = require('./config/runtimeConfig');
+
+validateProductionEnv();
+
 const { createServer } = require('http');
 const app = require('./app');
 const prisma = require('./config/prisma');

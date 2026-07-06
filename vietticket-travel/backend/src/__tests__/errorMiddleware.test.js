@@ -26,7 +26,7 @@ describe('errorHandler', () => {
 
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({
-      message: 'May chu dang gap loi. Vui long thu lai sau.',
+      message: 'Máy chủ đang gặp lỗi. Vui lòng thử lại sau.',
     });
     expect(consoleError).toHaveBeenCalledWith('[error]', error);
   });
