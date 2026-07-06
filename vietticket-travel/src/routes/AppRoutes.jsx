@@ -331,7 +331,7 @@ function AppRoutes() {
       <Route
         path="/staff/checkin"
         element={
-          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']}>
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePartnerStaff>
             <CheckinPage />
           </ProtectedRoute>
         }

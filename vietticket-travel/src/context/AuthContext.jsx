@@ -102,24 +102,15 @@ export function AuthProvider({ children }) {
     let isMounted = true
 
     async function hydrateSession() {
-      // Nếu đã có phiên đăng nhập lưu trong localStorage, giữ lại khi server
-      // tạm thời không phản hồi (tránh đăng xuất ngoài ý muốn).
-      const cachedAuth = readStorage(AUTH_STORAGE_KEY, null)
-      const cachedUser = readStorage(USER_STORAGE_KEY, null)
-      const hasCachedSession = cachedAuth?.authenticated && cachedUser
-
       try {
         const data = await apiRequest('/auth/me', { method: 'GET' })
 
         if (!isMounted) return
 
         persistSession(data.user)
-      } catch (error) {
+      } catch {
         if (!isMounted) return
-        const isAuthenticationFailure = error.status === 401 || error.status === 403
-        if (isAuthenticationFailure || !hasCachedSession) {
-          clearSession()
-        }
+        clearSession()
       } finally {
         if (isMounted) {
           setIsAuthLoading(false)
