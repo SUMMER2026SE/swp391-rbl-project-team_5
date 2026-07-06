@@ -54,6 +54,7 @@ model User {
   createdStaffAssignments StaffAttractionAssignment[] @relation("StaffAssignmentsCreatedBy")
   checkedInTickets        TicketInstance[]            @relation("TicketCheckedInBy")
   auditLogs               AuditLog[]
+  savedItineraries        SavedItinerary[]
 
   @@index([employerPartnerId])
 }
@@ -738,4 +739,27 @@ model SupportMessage {
   ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId])
+}
+
+// ============================================================
+// Lưu lịch trình AI do người dùng generate và muốn giữ lại.
+// data: JSON snapshot toàn bộ plan (cùng cấu trúc với response
+//       của POST /api/ai/itinerary), không normalize thêm để
+//       giữ đơn giản và không bị ảnh hưởng khi schema thay đổi.
+// ============================================================
+model SavedItinerary {
+  id        String   @id @default(uuid())
+  userId    String
+  planId    String   // client-generated ID (clientPlanId hoặc UUID)
+  title     String
+  data      Json     // full plan snapshot
+  criteria  Json?    // tham số tạo lịch (city, days, budget, ...)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, planId])
+  @@index([userId])
+  @@index([createdAt])
 }
