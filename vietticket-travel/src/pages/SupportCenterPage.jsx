@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
@@ -24,6 +24,8 @@ const shortCode = (value) =>
 
 function SupportCenterPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const requestedBookingId = String(searchParams.get('bookingId') || '').trim()
   const [subject, setSubject] = useState(SUBJECT_OPTIONS[0])
   const [bookingId, setBookingId] = useState('')
   const [title, setTitle] = useState('')
@@ -38,9 +40,11 @@ function SupportCenterPage() {
       .getBookings()
       .then((data) => {
         if (!active) return
-        setBookings(
-          data.filter((b) => ['confirmed', 'completed'].includes(b.status)),
-        )
+        const ownedBookings = Array.isArray(data) ? data : []
+        setBookings(ownedBookings)
+        if (requestedBookingId && ownedBookings.some((b) => String(b.id) === requestedBookingId)) {
+          setBookingId(requestedBookingId)
+        }
       })
       .catch(() => {
         // Không chặn form nếu không tải được danh sách đơn.
@@ -59,7 +63,7 @@ function SupportCenterPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [requestedBookingId])
 
   async function handleSubmit(event) {
     event.preventDefault()

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { searchAttractions } from '../services/attractionApi.js'
 import { featuredDestinations } from '../data/landingData.js'
+import fallbackDestinationImage from '../assets/ninh_binh.webp'
 
 const formatPrice = (value) =>
   value == null ? 'Xem các gói vé' : `Từ ${Number(value).toLocaleString('vi-VN')}đ`
@@ -12,6 +13,14 @@ const getDestinationLink = (destination) =>
   destination.searchQuery
     ? `/attractions?search=${encodeURIComponent(destination.searchQuery)}`
     : `/attractions/${destination.id}`
+
+const handleImageFallback = (event) => {
+  const image = event.currentTarget
+  if (image.dataset.fallbackApplied === 'true') return
+
+  image.dataset.fallbackApplied = 'true'
+  image.src = fallbackDestinationImage
+}
 
 function PopularDestinations() {
   const [destinations, setDestinations] = useState([])
@@ -61,6 +70,7 @@ function PopularDestinations() {
                       src={destination.primaryImage}
                       alt={destination.title}
                       loading="lazy"
+                      onError={handleImageFallback}
                     />
                   ) : (
                     <div className="h-full w-full bg-[#e1e3e4]" aria-hidden="true" />

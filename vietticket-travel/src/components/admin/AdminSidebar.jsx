@@ -16,16 +16,26 @@ const NAV_ITEMS_ADMIN = [
   { to: '/admin/users',               icon: 'manage_accounts', label: 'Quản lý người dùng' },
 ];
 
-const NAV_ITEMS_STAFF = [
-  { to: '/staff/checkin',  icon: 'qr_code_scanner', label: 'Check-in vé' },
-  { to: '/staff/tickets',  icon: 'support_agent', label: 'Hỗ trợ khách hàng' },
-  { to: '/staff/refunds',  icon: 'currency_exchange', label: 'Quản lý hoàn tiền' },
+const NAV_ITEMS_CHECKIN_STAFF = [
+  { to: '/staff/checkin', icon: 'qr_code_scanner', label: 'Check-in vé' },
+];
+
+const NAV_ITEMS_PLATFORM_STAFF = [
+  { to: '/staff/tickets', icon: 'support_agent', label: 'Hỗ trợ khách hàng' },
+  { to: '/staff/refunds', icon: 'currency_exchange', label: 'Quản lý hoàn tiền' },
 ];
 
 
 export default function AdminSidebar() {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
+  const isAdmin = user?.role === 'ADMIN';
+  const isPartnerStaff = user?.role === 'STAFF' && Boolean(user?.employerPartnerId);
+  const isPlatformStaff = user?.role === 'STAFF' && !user?.employerPartnerId;
+  const staffNavItems = [
+    ...(isAdmin || isPartnerStaff ? NAV_ITEMS_CHECKIN_STAFF : []),
+    ...(isAdmin || isPlatformStaff ? NAV_ITEMS_PLATFORM_STAFF : []),
+  ];
 
   const handleLogout = async () => {
     const ok = window.confirm("Bạn có chắc chắn muốn đăng xuất khỏi cổng quản trị không?");
@@ -46,7 +56,7 @@ export default function AdminSidebar() {
 
       {/* Navigation */}
       <nav className="admin-sidebar__nav" style={{ padding: '12px 12px', flex: 1, overflowY: 'auto' }}>
-        {user?.role === 'ADMIN' && (
+        {isAdmin && (
           <>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '4px 12px 8px' }}>Quản trị hệ thống</p>
             {NAV_ITEMS_ADMIN.map(({ to, icon, label, end }) => (
@@ -64,12 +74,11 @@ export default function AdminSidebar() {
             ))}
           </>
         )}
-        {/* Công cụ nhân viên: chỉ hiện với platform STAFF (không có employerPartnerId)
-           và ADMIN. Partner staff KHÔNG có quyền vào staff/tickets hay staff/refunds. */}
-        {(user?.role === 'ADMIN' || (user?.role === 'STAFF' && !user?.employerPartnerId)) && (
+        {/* Công cụ nhân viên hiển thị theo đúng phân quyền backend. */}
+        {staffNavItems.length > 0 && (
           <>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '16px 12px 8px' }}>Công cụ nhân viên</p>
-            {NAV_ITEMS_STAFF.map(({ to, icon, label }) => (
+            {staffNavItems.map(({ to, icon, label }) => (
               <NavLink
                 key={to}
                 to={to}

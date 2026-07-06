@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
@@ -9,6 +9,7 @@ import { useAuth } from '../context/useAuth.js'
 import { featuredDestinations, footerLinks } from '../data/landingData.js'
 import { getMapPoints, searchAttractions } from '../services/attractionApi.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
+import fallbackAttractionImage from '../assets/ninh_binh.webp'
 
 const AttractionsMap = lazy(() => import('../components/AttractionsMap.jsx'))
 
@@ -45,8 +46,15 @@ const searchNavLinks = [
   { label: 'Hỗ trợ', href: '/support' },
 ]
 
-const fallbackImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuCKCCSrWKDWnm1egxswx9ZDrsvUaf9XQAsPHBSMsnDBW-OM9iEJywudgQuEOwCJwRDBayEUi00MFLNyuz7_Ysw2yYOeWH3ksI6A73M_HISMDbZRKLyFWxT2dcs54bwuBnw02BVwqnjZtSY5vzFiUYTLtWmH3V3u5n7Ctp2Q8Qm89mBg3hYrJnSPSb6XsGkslTlRAtazp3UmX3CcxiG2hECKwTb9C4qvMtHaxIj1MnfhANSSytvNfsYou2PU9Y0VtNfXp1FJKkzYx6k'
+const fallbackImage = fallbackAttractionImage
+
+const handleImageFallback = (event) => {
+  const image = event.currentTarget
+  if (image.dataset.fallbackApplied === 'true') return
+
+  image.dataset.fallbackApplied = 'true'
+  image.src = fallbackImage
+}
 
 const formatCurrency = (value) => {
   const amount = Number(value)
@@ -577,7 +585,6 @@ export default function SearchAttractionsPage() {
                         favoriteUserId === user?.id && favoriteIds.has(attraction.id)
                       }
                       key={attraction.id || `${attraction.title || attraction.name}-${index}`}
-                      navigate={navigate}
                       onToggleFavorite={handleToggleFavorite}
                     />
                   ))
@@ -657,7 +664,7 @@ function FilterSection({ icon, title, children }) {
   )
 }
 
-function AttractionCard({ attraction, isFavorite, isFavoritePending, navigate, onToggleFavorite }) {
+function AttractionCard({ attraction, isFavorite, isFavoritePending, onToggleFavorite }) {
   const title = attraction.title || attraction.name || 'Điểm tham quan'
   const location = attraction.city ? `${attraction.city}, Việt Nam` : attraction.address || 'Việt Nam'
   const rating = Number(attraction.averageRating || attraction.rating || 0)
@@ -669,6 +676,7 @@ function AttractionCard({ attraction, isFavorite, isFavoritePending, navigate, o
         <img
           alt={title}
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          onError={handleImageFallback}
           src={getPrimaryImage(attraction)}
         />
         <button
@@ -715,14 +723,18 @@ function AttractionCard({ attraction, isFavorite, isFavoritePending, navigate, o
             <span className="text-xs font-semibold text-[#3f484a]">Giá từ</span>
             <span className="text-lg font-bold text-[#00629d]">{formatCurrency(price)}</span>
           </div>
-          <button
-            className="rounded-lg border border-[#00474d]/20 bg-[#00474d]/5 px-4 py-2 text-sm font-bold text-[#00474d] transition hover:bg-[#00474d] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!attraction.id}
-            onClick={() => navigate(`/attractions/${attraction.id}`)}
-            type="button"
-          >
-            Chi tiết
-          </button>
+          {attraction.id ? (
+            <Link
+              className="rounded-lg border border-[#00474d]/20 bg-[#00474d]/5 px-4 py-2 text-sm font-bold text-[#00474d] transition hover:bg-[#00474d] hover:text-white"
+              to={`/attractions/${attraction.id}`}
+            >
+              Chi tiết
+            </Link>
+          ) : (
+            <span className="rounded-lg border border-[#00474d]/20 bg-[#00474d]/5 px-4 py-2 text-sm font-bold text-[#00474d] opacity-50">
+              Chi tiết
+            </span>
+          )}
         </div>
       </div>
     </article>
@@ -764,6 +776,7 @@ function FeaturedFallbackCard({ attraction, navigate }) {
         <img
           alt={title}
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          onError={handleImageFallback}
           src={attraction.primaryImage || fallbackImage}
         />
         <div className="absolute left-3 top-3 rounded-full bg-[#00629d] px-2 py-1 text-xs font-bold text-white shadow-sm">

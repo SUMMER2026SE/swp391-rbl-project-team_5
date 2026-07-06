@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import Header from '../components/Header.jsx'
 import { useAuth } from '../context/useAuth.js'
@@ -27,6 +27,8 @@ function StatusBadge({ status }) {
 function MySupportTicketsPage() {
   const { user } = useAuth()
   const socket = useSocket()
+  const [searchParams] = useSearchParams()
+  const requestedTicketId = String(searchParams.get('ticketId') || '').trim()
   const [tickets, setTickets] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [detail, setDetail] = useState(null)
@@ -38,11 +40,17 @@ function MySupportTicketsPage() {
     try {
       const data = await supportApi.getMyTickets()
       setTickets(data)
-      setActiveId((current) => current || data[0]?.id || null)
+      setActiveId((current) => {
+        if (requestedTicketId && data.some((ticket) => String(ticket.id) === requestedTicketId)) {
+          return requestedTicketId
+        }
+        if (current && data.some((ticket) => ticket.id === current)) return current
+        return data[0]?.id || null
+      })
     } catch (error) {
       toast.error(error.message)
     }
-  }, [])
+  }, [requestedTicketId])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadTickets(), 0)

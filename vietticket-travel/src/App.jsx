@@ -7,29 +7,32 @@ import AppRoutes from './routes/AppRoutes.jsx'
 import ChatbotWidget from './components/ChatbotWidget.jsx'
 
 function App() {
-  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || 'missing-google-client-id'
-
-  return (
-    <GoogleOAuthProvider clientId={googleClientId}>
-      <BrowserRouter>
-        <AuthProvider>
-          <SocketProvider>
-            <AppRoutes />
-            <ChatbotWidget />
-            <ToastContainer
-              autoClose={2600}
-              closeOnClick
-              draggable
-              newestOnTop
-              pauseOnHover
-              position="top-right"
-              theme="light"
-            />
-          </SocketProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </GoogleOAuthProvider>
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+  const app = (
+    <BrowserRouter>
+      <AuthProvider>
+        <SocketProvider>
+          <AppRoutes />
+          <ChatbotWidget />
+          <ToastContainer
+            autoClose={2600}
+            closeOnClick
+            draggable
+            newestOnTop
+            pauseOnHover
+            position="top-right"
+            theme="light"
+          />
+        </SocketProvider>
+      </AuthProvider>
+    </BrowserRouter>
   )
+
+  if (!googleClientId) {
+    return app
+  }
+
+  return <GoogleOAuthProvider clientId={googleClientId}>{app}</GoogleOAuthProvider>
 }
 
 export default App
