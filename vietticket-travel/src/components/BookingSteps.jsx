@@ -1,4 +1,8 @@
-function BookingSteps({ steps, preview }) {
+function BookingSteps({ steps = [], preview = {} }) {
+  const previewImage = preview?.image || {}
+  const previewMeta = Array.isArray(preview?.meta) ? preview.meta : []
+  const previewTools = Array.isArray(preview?.tools) ? preview.tools : []
+
   return (
     <section className="section container" id="steps">
       <div className="booking-grid">
@@ -25,17 +29,19 @@ function BookingSteps({ steps, preview }) {
 
         <div className="booking-preview" aria-label="Xem trước tiến trình đặt vé">
           <article className="booking-card">
-            <img src={preview.image.src} alt={preview.image.alt} />
+            {previewImage.src ? (
+              <img src={previewImage.src} alt={previewImage.alt || preview.title || 'Xem trước đặt vé'} />
+            ) : null}
             <div className="booking-card__content">
               <h3>{preview.title}</h3>
               <div className="booking-card__meta">
-                {preview.meta.map((item) => (
-                  <span key={item}>{item}</span>
+                {previewMeta.map((item, index) => (
+                  <span key={`meta-${index}`}>{item}</span>
                 ))}
               </div>
               <div className="booking-card__tools" aria-label="Tiện ích chuyến đi">
-                {preview.tools.map((tool) => (
-                  <span className="material-symbols-outlined" key={tool} aria-hidden="true">
+                {previewTools.map((tool, index) => (
+                  <span className="material-symbols-outlined" key={`${tool}-${index}`} aria-hidden="true">
                     {tool}
                   </span>
                 ))}

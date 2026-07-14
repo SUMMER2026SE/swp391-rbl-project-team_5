@@ -182,7 +182,7 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
   }, [history, inputValue, loading])
 
   const handleKeyDown = (event) => {
-    if (event.key === 'Enter') {
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       handleSend()
     }

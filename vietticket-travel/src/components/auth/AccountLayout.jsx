@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { defaultUser } from '../../context/authConstants.js'
 import { useAuth } from '../../context/useAuth.js'
+import { hasRole } from '../../utils/userRoles.js'
 
 const navItems = [
   { label: 'Hồ sơ của tôi', icon: 'person', to: '/profile', active: 'profile' },
@@ -62,17 +63,17 @@ function AccountLayout({ active = 'profile', children }) {
             VietTicket Travel
           </Link>
           <div className="account-header__actions">
-            {currentUser?.role === 'ADMIN' && (
+            {hasRole(currentUser, 'ADMIN') && (
               <Link className="text-button" to="/admin">
                 Trang quản trị
               </Link>
             )}
-            {currentUser?.role === 'STAFF' && !currentUser?.employerPartnerId && (
+            {hasRole(currentUser, 'STAFF') && !currentUser?.employerPartnerId && (
               <Link className="text-button" to="/staff/tickets">
                 Cổng nhân viên
               </Link>
             )}
-            {currentUser?.role === 'PARTNER' && (
+            {hasRole(currentUser, 'PARTNER') && (
               <Link className="text-button" to="/partner/dashboard">
                 Cổng đối tác
               </Link>
@@ -109,7 +110,7 @@ function AccountLayout({ active = 'profile', children }) {
           </div>
 
           <nav className="account-nav">
-            {currentUser?.role === 'ADMIN' && (
+            {hasRole(currentUser, 'ADMIN') && (
               <Link to="/admin">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   admin_panel_settings
@@ -117,7 +118,7 @@ function AccountLayout({ active = 'profile', children }) {
                 Trang quản trị
               </Link>
             )}
-            {currentUser?.role === 'STAFF' && !currentUser?.employerPartnerId && (
+            {hasRole(currentUser, 'STAFF') && !currentUser?.employerPartnerId && (
               <Link to="/staff/tickets">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   support_agent
@@ -125,7 +126,7 @@ function AccountLayout({ active = 'profile', children }) {
                 Cổng nhân viên
               </Link>
             )}
-            {currentUser?.role === 'PARTNER' && (
+            {hasRole(currentUser, 'PARTNER') && (
               <Link to="/partner/dashboard">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   dashboard
