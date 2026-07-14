@@ -30,6 +30,8 @@ function PartnerBookingsPage() {
   const [pagination, setPagination]     = useState({ total: 0, totalPages: 1 })
   const [rejectTarget, setRejectTarget] = useState(null) // booking đang chờ nhập lý do từ chối
   const [rejectReason, setRejectReason] = useState('')
+  const [cancelTarget, setCancelTarget] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
   const [selectedBooking, setSelectedBooking] = useState(null)
 
   useEffect(() => {
@@ -126,6 +128,30 @@ function PartnerBookingsPage() {
       fetchBookings()
     } catch (err) {
       toast.error(err.message || 'Không thể từ chối đơn.')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleConfirmedCancellation = async () => {
+    if (!cancelTarget) return
+    const reason = cancelReason.trim()
+    if (reason.length < 5) {
+      toast.warning('Vui lòng nhập lý do hủy (tối thiểu 5 ký tự).')
+      return
+    }
+    setActionLoading(cancelTarget.id)
+    try {
+      await partnerApi.cancelConfirmedBooking(cancelTarget.id, reason)
+      toast.success('Đã hủy đơn. Khoản hoàn 100% đang được xử lý tự động.')
+      setSelectedBooking((prev) =>
+        prev && prev.id === cancelTarget.id ? { ...prev, status: 'cancelled', refundRequired: true } : prev,
+      )
+      setCancelTarget(null)
+      setCancelReason('')
+      void fetchBookings()
+    } catch (err) {
+      toast.error(err.message || 'Không thể hủy đơn đã xác nhận.')
     } finally {
       setActionLoading(null)
     }
@@ -259,6 +285,18 @@ function PartnerBookingsPage() {
                                   {isActing ? '…' : 'Từ chối'}
                                 </button>
                               </>
+                            )}
+                            {b.status === 'confirmed' && (
+                              <button
+                                onClick={() => {
+                                  setCancelTarget(b)
+                                  setCancelReason('')
+                                }}
+                                disabled={isActing}
+                                className="px-3 py-1.5 border border-[#ba1a1a] text-[#ba1a1a] text-xs font-semibold rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
+                              >
+                                Hủy đơn
+                              </button>
                             )}
                           </div>
                         </td>
@@ -547,6 +585,18 @@ function PartnerBookingsPage() {
                   </button>
                 </div>
               )}
+              {selectedBooking.status === 'confirmed' && (
+                <button
+                  onClick={() => {
+                    setCancelTarget(selectedBooking)
+                    setCancelReason('')
+                  }}
+                  disabled={actionLoading === selectedBooking.id}
+                  className="px-4 py-2 border border-[#ba1a1a] text-[#ba1a1a] text-sm font-semibold rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
+                >
+                  Hủy đơn đã xác nhận
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -590,6 +640,48 @@ function PartnerBookingsPage() {
                 className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-sm font-semibold text-white hover:bg-[#93000a] transition-colors disabled:opacity-50"
               >
                 {actionLoading === rejectTarget.id ? 'Đang xử lý…' : 'Xác nhận từ chối'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl animate-fadeIn">
+            <h3 className="text-lg font-bold text-[#191c1d]">Hủy đơn đã xác nhận</h3>
+            <p className="mt-1 text-sm text-[#3f484a]">
+              Đơn <span className="font-mono font-semibold text-[#00629d]">{cancelTarget.id.slice(0, 8).toUpperCase()}</span> của khách{' '}
+              <span className="font-semibold">{cancelTarget.customer}</span>.
+            </p>
+            <p className="mt-2 rounded-lg bg-[#ffdad6]/50 px-3 py-2 text-xs text-[#93000a]">
+              Chỉ hủy khi điểm tham quan không thể cung cấp dịch vụ. Hệ thống sẽ vô hiệu hóa toàn bộ QR,
+              hoàn kho và xử lý hoàn 100% về phương thức thanh toán ban đầu.
+            </p>
+            <textarea
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+              rows={3}
+              placeholder="Ví dụ: Điểm tham quan đóng cửa đột xuất do thời tiết…"
+              className="mt-3 w-full rounded-lg border border-[#bec8ca] px-3 py-2 text-sm outline-none focus:border-[#00474d]"
+            />
+            <p className="mt-1 text-xs text-[#6f797a]">Tối thiểu 5 ký tự.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setCancelTarget(null)
+                  setCancelReason('')
+                }}
+                disabled={actionLoading === cancelTarget.id}
+                className="px-4 py-2 rounded-lg border border-[#bec8ca] text-sm text-[#3f484a] hover:bg-[#f2f4f5] transition-colors disabled:opacity-50"
+              >
+                Đóng
+              </button>
+              <button
+                onClick={handleConfirmedCancellation}
+                disabled={actionLoading === cancelTarget.id || cancelReason.trim().length < 5}
+                className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-sm font-semibold text-white hover:bg-[#93000a] transition-colors disabled:opacity-50"
+              >
+                {actionLoading === cancelTarget.id ? 'Đang xử lý…' : 'Xác nhận hủy và hoàn tiền'}
               </button>
             </div>
           </div>

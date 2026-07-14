@@ -5,9 +5,16 @@ import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
 import { getUsers, changeUserStatus } from '../services/adminApi.js'
 import AdminSidebar from '../components/admin/AdminSidebar.jsx'
+import { getUserRoles, hasRole } from '../utils/userRoles.js'
 
 const roleOptions = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF']
 const statusOptions = ['ACTIVE', 'LOCKED']
+const ROLE_LABELS = {
+  ADMIN: 'Quản trị viên',
+  CUSTOMER: 'Khách hàng',
+  PARTNER: 'Đối tác',
+  STAFF: 'Nhân viên',
+}
 
 function AdminUserManagementPage() {
   // Đổi tên thành currentUser: trong bảng dưới, biến lặp mỗi dòng cũng tên "user"
@@ -248,7 +255,7 @@ function AdminUserManagementPage() {
             <div className="admin-profile-chip">
               <div className="admin-profile-chip__text">
                 <p>{currentUser?.fullName || 'Admin'}</p>
-                <span>{currentUser?.role === 'ADMIN' ? 'Quản trị viên' : currentUser?.role || 'Admin'}</span>
+                <span>{hasRole(currentUser, 'ADMIN') ? 'Quản trị viên' : currentUser?.roleLabel || 'Admin'}</span>
               </div>
               <img
                 src={currentUser?.avatar || 'https://ui-avatars.com/api/?name=Admin&background=006068&color=fff'}
@@ -404,19 +411,16 @@ function AdminUserManagementPage() {
                           </div>
                         </td>
                         <td>
-                          <span
-                            className={`admin-role-badge admin-role-badge--${user.role.toLowerCase()}`}
-                          >
-                            {user.role === 'ADMIN'
-                              ? 'Quản trị viên'
-                              : user.role === 'CUSTOMER'
-                              ? 'Khách hàng'
-                              : user.role === 'PARTNER'
-                              ? 'Đối tác'
-                              : user.role === 'STAFF'
-                              ? 'Nhân viên'
-                              : user.role}
-                          </span>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {getUserRoles(user).map((role) => (
+                              <span
+                                key={role}
+                                className={`admin-role-badge admin-role-badge--${role.toLowerCase()}`}
+                              >
+                                {ROLE_LABELS[role] || role}
+                              </span>
+                            ))}
+                          </div>
                         </td>
                         <td className="admin-table-cell--center">
                           {user.provider === 'GOOGLE' ? (

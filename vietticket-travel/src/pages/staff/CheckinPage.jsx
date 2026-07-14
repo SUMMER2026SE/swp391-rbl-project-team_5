@@ -51,7 +51,7 @@ function TicketResultCard({ ticket, onCheckin, isChecking }) {
           className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-4 text-base font-bold text-on-primary hover:opacity-90 disabled:opacity-50"
         >
           <span className="material-symbols-outlined" aria-hidden="true">how_to_reg</span>
-          {isChecking ? 'Đang check-in…' : `Check-in ${ticket.quantity} khách`}
+          {isChecking ? 'Đang check-in…' : 'Check-in vé này'}
         </button>
       )}
     </div>
@@ -215,7 +215,7 @@ export default function CheckinPage() {
             </span>
             <div>
               <p className="text-lg font-bold text-primary">
-                Đã check-in {lastCheckin.checkedInCount} khách — {lastCheckin.customer}
+                Đã check-in {lastCheckin.checkedInCount} vé — {lastCheckin.customer}
               </p>
               <p className="text-sm text-on-surface-variant">
                 {lastCheckin.attraction} · {lastCheckin.ticketName} ·{' '}

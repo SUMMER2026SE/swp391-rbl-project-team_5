@@ -130,7 +130,9 @@ function PartnerKycPage() {
     
     if (step === 1) {
       if (!formData.businessName.trim()) errs.businessName = 'Tên doanh nghiệp không được để trống.'
-      if (formData.taxCode.trim() && !/^\d{10}(\d{3})?$/.test(formData.taxCode.trim())) {
+      if (!formData.taxCode.trim()) {
+        errs.taxCode = 'Mã số thuế không được để trống.'
+      } else if (!/^\d{10}(\d{3})?$/.test(formData.taxCode.trim())) {
         errs.taxCode = 'Mã số thuế phải gồm 10 hoặc 13 chữ số.'
       }
       if (!formData.registrationDate) errs.registrationDate = 'Vui lòng chọn ngày đăng ký kinh doanh.'
@@ -461,7 +463,7 @@ function PartnerKycPage() {
                 {/* Mã số thuế */}
                 <div className="col-span-1">
                   <label className="block text-sm font-semibold text-[#191c1d] mb-2">
-                    Mã số thuế (TIN) <span className="font-normal text-[#6f797a]">(Không bắt buộc)</span>
+                    Mã số thuế (TIN) <span className="text-red-500">*</span>
                   </label>
                   <div className={`relative rounded-lg border bg-white overflow-hidden flex items-center px-3 transition-colors duration-200 ${
                     touched.taxCode && errors.taxCode 
@@ -473,6 +475,8 @@ function PartnerKycPage() {
                       className="w-full py-3 bg-transparent border-none focus:ring-0 text-[#191c1d] placeholder-[#bec8ca] text-sm outline-none"
                       placeholder="VD: 0123456789"
                       type="text"
+                      inputMode="numeric"
+                      maxLength={13}
                       name="taxCode"
                       value={formData.taxCode}
                       onChange={handleInputChange}

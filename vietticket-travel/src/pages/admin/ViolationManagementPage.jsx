@@ -7,8 +7,13 @@ import '../../styles/admin.css';
 const FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=400&q=80';
 
-const ALL_STATUSES = ['all', 'active', 'hidden'];
-const STATUS_LABEL = { all: 'Tất cả', active: 'Đang hoạt động', hidden: 'Đã ẩn' };
+const ALL_STATUSES = ['all', 'active', 'paused', 'hidden'];
+const STATUS_LABEL = {
+  all: 'Tất cả',
+  active: 'Đang hoạt động',
+  paused: 'Đang tạm dừng',
+  hidden: 'Bị đình chỉ',
+};
 
 function formatReviews(value) {
   const count = Number(value) || 0;
@@ -24,7 +29,9 @@ function mapLocation(attraction) {
     category: attraction.category?.name || 'Chưa phân loại',
     rating: Number(attraction.averageRating || 0),
     reviews: formatReviews(attraction.totalReviews),
-    status: attraction.status === 'SUSPENDED' ? 'hidden' : 'active',
+    status: attraction.status === 'SUSPENDED'
+      ? 'hidden'
+      : attraction.publicationStatus === 'ACTIVE' ? 'active' : 'paused',
     image: attraction.primaryImage || FALLBACK_IMAGE,
   };
 }
@@ -38,7 +45,7 @@ function ConfirmModal({
   onReasonChange,
 }) {
   if (!target) return null;
-  const hiding = target.status === 'active';
+  const hiding = target.status !== 'hidden';
 
   return (
     <div className="admin-modal-overlay" onClick={loading ? undefined : onClose}>
@@ -54,7 +61,7 @@ function ConfirmModal({
           <strong>{target.name}</strong> không?{' '}
           {hiding
             ? 'Địa điểm sẽ không còn xuất hiện trên nền tảng người dùng.'
-            : 'Địa điểm sẽ được hiển thị trở lại trên nền tảng.'}
+            : 'Địa điểm sẽ về trạng thái tạm dừng; đối tác phải kiểm tra và chủ động mở bán lại.'}
         </p>
 
         {hiding && (
@@ -143,7 +150,7 @@ export default function ViolationManagementPage() {
   async function confirmToggle() {
     if (!confirmTarget) return;
 
-    const hiding = confirmTarget.status === 'active';
+    const hiding = confirmTarget.status !== 'hidden';
     const trimmedReason = reason.trim();
     if (hiding && !trimmedReason) {
       toast.error('Vui lòng nhập lý do tạm ẩn.');
@@ -155,20 +162,20 @@ export default function ViolationManagementPage() {
       if (hiding) {
         await adminApi.hideAttraction(confirmTarget.id, trimmedReason);
       } else {
-        await adminApi.reviewAttraction(confirmTarget.id, 'APPROVED');
+        await adminApi.restoreAttraction(confirmTarget.id);
       }
 
       setLocations((current) =>
         current.map((item) =>
           item.id === confirmTarget.id
-            ? { ...item, status: hiding ? 'hidden' : 'active' }
+            ? { ...item, status: hiding ? 'hidden' : 'paused' }
             : item,
         ),
       );
       toast.success(
         hiding
           ? `Đã tạm ẩn địa điểm: ${confirmTarget.name}`
-          : `Đã khôi phục địa điểm: ${confirmTarget.name}`,
+          : `Đã khôi phục và giữ tạm dừng địa điểm: ${confirmTarget.name}`,
       );
       setConfirmTarget(null);
       setReason('');
@@ -346,6 +353,11 @@ export default function ViolationManagementPage() {
                         <span className="badge__dot" style={{ background: 'var(--adm-primary-dark)' }} />
                         Hoạt động
                       </span>
+                    ) : location.status === 'paused' ? (
+                      <span className="badge badge--pending">
+                        <span className="badge__dot" />
+                        Tạm dừng
+                      </span>
                     ) : (
                       <span className="badge badge--hidden">
                         <span className="badge__dot" style={{ background: 'var(--adm-outline)' }} />
@@ -354,7 +366,7 @@ export default function ViolationManagementPage() {
                     )}
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    {location.status === 'active' ? (
+                    {location.status !== 'hidden' ? (
                       <button
                         className="btn-warn"
                         disabled={actionId === location.id}

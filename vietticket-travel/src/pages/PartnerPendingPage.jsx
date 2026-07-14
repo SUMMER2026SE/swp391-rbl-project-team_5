@@ -12,7 +12,7 @@ const NAV_ITEMS = [
 ]
 
 function PartnerPendingPage() {
-  const { user, logout } = useAuth()
+  const { user, logout, refreshSession } = useAuth()
   const navigate = useNavigate()
   const [partner, setPartner] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -29,6 +29,9 @@ function PartnerPendingPage() {
         if (!active) return
 
         if (result.partner?.status === 'APPROVED') {
+          const refreshed = await refreshSession()
+          if (!refreshed.ok) throw new Error(refreshed.message)
+          if (!active) return
           navigate('/partner/dashboard', { replace: true })
           return
         }
@@ -53,7 +56,7 @@ function PartnerPendingPage() {
     return () => {
       active = false
     }
-  }, [navigate])
+  }, [navigate, refreshSession])
 
   const status = partner?.status || 'PENDING'
   const isRejected = status === 'REJECTED'
@@ -66,7 +69,7 @@ function PartnerPendingPage() {
   const description = isRejected
     ? partner?.rejectionReason || 'Vui lòng liên hệ bộ phận hỗ trợ để được hướng dẫn bổ sung hồ sơ.'
     : isSuspended
-      ? 'Vui lòng liên hệ bộ phận hỗ trợ để biết thêm thông tin.'
+      ? partner?.rejectionReason || 'Vui lòng liên hệ bộ phận hỗ trợ để biết thêm thông tin.'
       : 'Cảm ơn bạn đã hoàn tất thông tin xác thực! Đội ngũ của chúng tôi đang kiểm tra các tài liệu của bạn.'
 
   return (

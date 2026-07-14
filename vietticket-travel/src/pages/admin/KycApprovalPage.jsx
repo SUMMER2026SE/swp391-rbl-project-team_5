@@ -44,6 +44,7 @@ function computeStats(partners) {
     pending: partners.filter((partner) => partner.status === 'pending').length,
     approved: partners.filter((partner) => partner.status === 'approved').length,
     rejected: partners.filter((partner) => partner.status === 'rejected').length,
+    suspended: partners.filter((partner) => partner.status === 'suspended').length,
     total: partners.length,
   };
 }
@@ -54,6 +55,8 @@ export default function KycApprovalPage() {
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
   const [selectedPartner, setSelectedPartner] = useState(null);
+  const [statusTarget, setStatusTarget] = useState(null);
+  const [statusReason, setStatusReason] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -123,6 +126,51 @@ export default function KycApprovalPage() {
     }
   }
 
+  function openStatusAction(partner) {
+    setStatusTarget(partner);
+    setStatusReason('');
+  }
+
+  function closeStatusAction() {
+    if (actionId) return;
+    setStatusTarget(null);
+    setStatusReason('');
+  }
+
+  async function handleOperationalStatus() {
+    if (!statusTarget) return;
+    const suspending = statusTarget.status === 'approved';
+    const reason = statusReason.trim();
+    if (suspending && !reason) {
+      toast.error('Vui lòng nhập lý do đình chỉ đối tác.');
+      return;
+    }
+
+    const nextStatus = suspending ? 'SUSPENDED' : 'APPROVED';
+    setActionId(statusTarget.id);
+    try {
+      await adminApi.changePartnerStatus(statusTarget.id, nextStatus, reason);
+      setPartners((current) => current.map((partner) => (
+        partner.id === statusTarget.id
+          ? {
+              ...partner,
+              status: nextStatus.toLowerCase(),
+              rejectReason: suspending ? reason : '',
+            }
+          : partner
+      )));
+      toast.success(suspending
+        ? `Đã đình chỉ đối tác: ${statusTarget.name}`
+        : `Đã khôi phục đối tác: ${statusTarget.name}`);
+      setStatusTarget(null);
+      setStatusReason('');
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setActionId('');
+    }
+  }
+
   // ── Derived ────────────────────────────────────────────────────────────────
 
   const stats = computeStats(partners);
@@ -135,6 +183,7 @@ export default function KycApprovalPage() {
     { id: 'pending',  icon: 'pending_actions', variant: 'pending',  label: 'Đang chờ duyệt', value: stats.pending },
     { id: 'approved', icon: 'check_circle',    variant: 'approved', label: 'Đã phê duyệt',   value: stats.approved },
     { id: 'rejected', icon: 'cancel',          variant: 'rejected', label: 'Bị từ chối',      value: stats.rejected },
+    { id: 'suspended', icon: 'block',           variant: 'rejected', label: 'Bị đình chỉ',     value: stats.suspended },
     { id: 'total',    icon: 'group',           variant: 'total',    label: 'Tổng đối tác',    value: stats.total },
   ];
 
@@ -145,13 +194,13 @@ export default function KycApprovalPage() {
       {/* Page Header */}
       <div className="admin-page-header">
         <div>
-          <h2 style={{ color: 'var(--adm-primary-dark)' }}>Duyệt hồ sơ Đối tác (KYC)</h2>
-          <p>Danh sách các đối tác mới đăng ký đang chờ xác thực thông tin pháp lý.</p>
+          <h2 style={{ color: 'var(--adm-primary-dark)' }}>Hồ sơ và trạng thái đối tác</h2>
+          <p>Xét duyệt KYC và quản lý trạng thái vận hành của từng đối tác.</p>
         </div>
 
         {/* Filter by status */}
         <div style={{ display: 'flex', gap: 8 }}>
-          {['all', 'pending', 'approved', 'rejected'].map(s => (
+          {['all', 'pending', 'approved', 'rejected', 'suspended'].map(s => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
@@ -199,7 +248,7 @@ export default function KycApprovalPage() {
                 <th>Thông Tin Liên Hệ</th>
                 <th>Ngày Đăng Ký</th>
                 <th>Trạng Thái</th>
-                <th>Lý Do Từ Chối</th>
+                <th>Lý Do Từ Chối / Đình Chỉ</th>
                 <th style={{ textAlign: 'right' }}>Thao Tác</th>
               </tr>
             </thead>
@@ -284,7 +333,7 @@ export default function KycApprovalPage() {
                     </span>
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--adm-error)', maxWidth: 200, wordBreak: 'break-word' }}>
-                    {partner.status === 'rejected' ? partner.rejectReason : '—'}
+                    {['rejected', 'suspended'].includes(partner.status) ? partner.rejectReason : '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {partner.status === 'pending' ? (
@@ -304,6 +353,17 @@ export default function KycApprovalPage() {
                           Từ chối
                         </button>
                       </div>
+                    ) : ['approved', 'suspended'].includes(partner.status) ? (
+                      <button
+                        className={partner.status === 'approved' ? 'btn-warn' : 'btn-approve'}
+                        disabled={actionId === partner.id}
+                        onClick={() => openStatusAction(partner)}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                          {partner.status === 'approved' ? 'block' : 'restart_alt'}
+                        </span>
+                        {partner.status === 'approved' ? 'Đình chỉ' : 'Khôi phục'}
+                      </button>
                     ) : (
                       <span className={`badge badge--${partner.status}`}>
                         {STATUS_LABEL[partner.status] || partner.status.toUpperCase()}
@@ -593,6 +653,69 @@ export default function KycApprovalPage() {
                   </button>
                 </>
               )}
+              {['approved', 'suspended'].includes(selectedPartner.status) && (
+                <button
+                  className={selectedPartner.status === 'approved' ? 'btn-warn' : 'btn-approve'}
+                  disabled={actionId === selectedPartner.id}
+                  onClick={() => {
+                    openStatusAction(selectedPartner);
+                    setSelectedPartner(null);
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                    {selectedPartner.status === 'approved' ? 'block' : 'restart_alt'}
+                  </span>
+                  {selectedPartner.status === 'approved' ? 'Đình chỉ đối tác' : 'Khôi phục đối tác'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {statusTarget && (
+        <div className="admin-modal-overlay" onClick={closeStatusAction}>
+          <div className="admin-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-modal__icon admin-modal__icon--warn">
+              <span className="material-symbols-outlined" style={{ fontSize: 28 }}>
+                {statusTarget.status === 'approved' ? 'block' : 'restart_alt'}
+              </span>
+            </div>
+            <h3 className="admin-modal__title">
+              {statusTarget.status === 'approved' ? 'Đình chỉ đối tác' : 'Khôi phục đối tác'}
+            </h3>
+            <p className="admin-modal__body">
+              {statusTarget.status === 'approved'
+                ? <>Mọi lượt bán mới và quyền quản lý của <strong>{statusTarget.name}</strong> sẽ bị dừng. Vé đã xác nhận vẫn phải được phục vụ.</>
+                : <>Quyền quản lý của <strong>{statusTarget.name}</strong> sẽ được khôi phục. Trạng thái mở bán từng địa điểm không bị thay đổi.</>}
+            </p>
+
+            {statusTarget.status === 'approved' && (
+              <label className="admin-field">
+                <span>Lý do đình chỉ</span>
+                <textarea
+                  value={statusReason}
+                  onChange={(event) => setStatusReason(event.target.value)}
+                  placeholder="Nhập lý do vi phạm hoặc quyết định vận hành..."
+                  maxLength={1000}
+                  disabled={Boolean(actionId)}
+                />
+              </label>
+            )}
+
+            <div className="admin-modal__actions">
+              <button className="admin-modal__cancel" disabled={Boolean(actionId)} onClick={closeStatusAction}>
+                Hủy bỏ
+              </button>
+              <button
+                className="admin-modal__confirm"
+                disabled={Boolean(actionId) || (statusTarget.status === 'approved' && !statusReason.trim())}
+                onClick={handleOperationalStatus}
+              >
+                {actionId
+                  ? 'Đang xử lý...'
+                  : statusTarget.status === 'approved' ? 'Xác nhận đình chỉ' : 'Xác nhận khôi phục'}
+              </button>
             </div>
           </div>
         </div>

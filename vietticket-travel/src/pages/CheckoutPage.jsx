@@ -16,6 +16,36 @@ const checkoutNavLinks = [
   { label: 'Vé của tôi', href: '/my-tickets' },
 ]
 
+const checkoutMilestones = [
+  { label: 'Kiểm tra đơn', icon: 'fact_check' },
+  { label: 'Thanh toán VNPay', icon: 'account_balance_wallet' },
+  { label: 'Nhận vé QR', icon: 'qr_code_2' },
+]
+
+const checkoutTrustItems = [
+  {
+    title: 'Thanh toán bảo mật',
+    description: 'Giao dịch được chuyển qua cổng VNPay, VietTicket không lưu thông tin thẻ.',
+    icon: 'lock',
+  },
+  {
+    title: 'Vé điện tử rõ ràng',
+    description: 'Sau khi thanh toán hợp lệ, vé QR sẽ nằm trong mục Vé của tôi.',
+    icon: 'confirmation_number',
+  },
+  {
+    title: 'Hỗ trợ sau đặt vé',
+    description: 'Mã đặt chỗ giúp đội hỗ trợ tra cứu nhanh khi lịch trình thay đổi.',
+    icon: 'support_agent',
+  },
+]
+
+const checkoutChecklistItems = [
+  { label: 'Ngày và khung giờ tham quan đã đúng', icon: 'event_available' },
+  { label: 'Email nhận vé có thể truy cập', icon: 'mark_email_read' },
+  { label: 'Chính sách hoàn/hủy đã được kiểm tra', icon: 'currency_exchange' },
+]
+
 const formatCurrency = (value) =>
   `${new Intl.NumberFormat('vi-VN').format(Number(value) || 0)} VND`
 
@@ -182,17 +212,21 @@ function CheckoutPage() {
         voucherCode,
         booking.subtotalAmount,
       )
-      const normalizedCode = result.data.voucher.code
+      const normalizedCode = result.data?.voucher?.code || voucherCode.trim()
 
-      setBooking((current) => ({
-        ...current,
-        voucherCode: normalizedCode,
-        discountAmount: result.data.discountAmount,
-        totalAmount: result.data.totalAmount,
-      }))
+      setBooking((current) =>
+        current
+          ? {
+              ...current,
+              voucherCode: normalizedCode,
+              discountAmount: Number(result.data?.discountAmount) || 0,
+              totalAmount: result.data?.totalAmount ?? current.totalAmount,
+            }
+          : current,
+      )
       setVoucherCode(normalizedCode)
       setAppliedVoucherCode(normalizedCode)
-      setVoucherMessage(result.message)
+      setVoucherMessage(result.message || 'Đã áp dụng mã ưu đãi.')
       setVoucherSuccess(true)
     } catch (error) {
       setVoucherMessage(error.message)
@@ -321,6 +355,8 @@ function CheckoutPage() {
               Xác nhận đặt vé
             </h1>
 
+            <CheckoutMilestones hasCreatedBooking={Boolean(booking.bookingId)} />
+
             {isAiItineraryCheckout && (
               <div className="rounded-2xl border border-[#a6eff8] bg-[#eefcff] p-4 text-sm font-semibold text-[#00474d]">
                 <span className="material-symbols-outlined mr-2 align-[-4px] text-[20px]" aria-hidden="true">
@@ -394,6 +430,8 @@ function CheckoutPage() {
 
           <aside className="lg:sticky lg:top-28 lg:col-span-5">
             <div className="flex flex-col gap-6 rounded-2xl border border-outline-variant/20 bg-white p-6 shadow-sm md:p-8">
+              <CheckoutTrustPanel />
+
               <section>
                 <h2 className="mb-4 text-lg font-bold text-on-surface">
                   Phương thức thanh toán
@@ -480,6 +518,8 @@ function CheckoutPage() {
                 </div>
               </section>
 
+              <CheckoutChecklist />
+
               {!isExpired && (
                 <div className={`flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${
                   remainingMs < 2 * 60 * 1000
@@ -529,6 +569,90 @@ function CheckoutPage() {
       </main>
       <Footer />
     </>
+  )
+}
+
+function CheckoutMilestones({ hasCreatedBooking }) {
+  const activeIndex = hasCreatedBooking ? 1 : 0
+
+  return (
+    <div className="grid gap-3 rounded-2xl border border-outline-variant/20 bg-white p-4 shadow-sm sm:grid-cols-3">
+      {checkoutMilestones.map((step, index) => {
+        const isActive = index <= activeIndex
+
+        return (
+          <div
+            className={`flex items-center gap-3 rounded-xl px-3 py-2 ${
+              isActive ? 'bg-primary/5 text-primary' : 'text-on-surface-variant'
+            }`}
+            key={step.label}
+          >
+            <span
+              className={`material-symbols-outlined flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[20px] ${
+                isActive ? 'bg-primary text-white' : 'bg-surface-container text-on-surface-variant'
+              }`}
+              aria-hidden="true"
+            >
+              {step.icon}
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase text-on-surface-variant">
+                Bước {index + 1}
+              </p>
+              <p className="text-sm font-extrabold">{step.label}</p>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function CheckoutTrustPanel() {
+  return (
+    <section className="rounded-2xl bg-[#eefcff] p-5">
+      <h2 className="text-base font-extrabold text-[#00474d]">
+        Yên tâm trước khi thanh toán
+      </h2>
+      <div className="mt-4 grid gap-3">
+        {checkoutTrustItems.map((item) => (
+          <div className="flex gap-3" key={item.title}>
+            <span
+              className="material-symbols-outlined mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[19px] text-[#006068]"
+              aria-hidden="true"
+            >
+              {item.icon}
+            </span>
+            <div>
+              <p className="text-sm font-extrabold text-[#1a1c1e]">{item.title}</p>
+              <p className="mt-0.5 text-xs font-semibold leading-5 text-[#3e494a]">
+                {item.description}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function CheckoutChecklist() {
+  return (
+    <section className="rounded-2xl border border-outline-variant/20 bg-surface-container-low p-5">
+      <h2 className="text-base font-extrabold text-on-surface">
+        Kiểm tra nhanh trước khi trả tiền
+      </h2>
+      <div className="mt-4 grid gap-2.5">
+        {checkoutChecklistItems.map((item) => (
+          <div className="flex items-center gap-2 text-sm font-semibold text-on-surface-variant" key={item.label}>
+            <span className="material-symbols-outlined text-[19px] text-primary" aria-hidden="true">
+              {item.icon}
+            </span>
+            {item.label}
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 

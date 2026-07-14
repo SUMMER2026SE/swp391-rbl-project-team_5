@@ -53,7 +53,7 @@ function PartnerReportsPage() {
         <div>
           <h2 className="text-2xl font-semibold text-[#191c1d]">Báo cáo doanh thu</h2>
           <p className="text-sm text-[#6f797a] mt-1">
-            Chỉ tính giao dịch thành công của các đơn đã xác nhận.
+            Ghi nhận theo ngày sử dụng dịch vụ hoặc ngày hoàn tiền thành công.
           </p>
         </div>
         <div className="flex gap-2">
@@ -90,10 +90,14 @@ function PartnerReportsPage() {
         <div className="flex flex-col gap-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             {[
-              ['Đơn hợp lệ', report.summary.bookings, 'confirmation_number'],
-              ['Vé đã bán', report.summary.ticketsSold, 'sell'],
-              ['Doanh thu gộp', formatVND(report.summary.grossRevenue), 'payments'],
+              ['Giao dịch ghi nhận', report.summary.bookings, 'confirmation_number'],
+              ['Vé đã ghi nhận', report.summary.ticketsSold, 'sell'],
+              ['Doanh số trước hoàn', formatVND(report.summary.paymentGross), 'payments'],
+              ['Tiền đã hoàn', formatVND(report.summary.refundedAmount), 'currency_exchange'],
+              ['Doanh số thuần', formatVND(report.summary.grossRevenue), 'receipt_long'],
+              ['Hoa hồng nền tảng', formatVND(report.summary.commission), 'percent'],
               ['Thực nhận dự kiến', formatVND(report.summary.netRevenue), 'account_balance_wallet'],
+              ['Phí hủy được giữ lại', formatVND(report.summary.retainedCancellationFees), 'price_check'],
             ].map(([label, value, icon]) => (
               <div className="bg-white rounded-xl border border-[#e1e3e4] shadow-sm p-5" key={label}>
                 <span className="material-symbols-outlined text-[#00474d]">{icon}</span>
@@ -139,7 +143,7 @@ function PartnerReportsPage() {
                   />
                 </div>
                 <p className="text-xs text-[#6f797a] mt-1">
-                  {item.bookings} đơn · {item.ticketsSold} vé · {(item.share * 100).toFixed(1)}%
+                  {item.bookings} giao dịch · {item.ticketsSold} vé · {(item.share * 100).toFixed(1)}%
                 </p>
               </div>
             ))}

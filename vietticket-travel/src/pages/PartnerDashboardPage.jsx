@@ -140,7 +140,7 @@ function PartnerDashboardPage() {
               { label: 'Vé bán ra (tháng)', value: stats?.ticketsSoldThisMonth ?? 0, icon: 'local_mall', color: 'text-[#8b5cf6]', bg: 'bg-[#f5f3ff]', link: '/partner/bookings' },
               { label: 'Tỷ lệ lấp đầy', value: stats?.occupancyRate !== undefined ? `${(stats.occupancyRate * 100).toFixed(1)}%` : '0.0%', icon: 'percent', color: 'text-[#ec4899]', bg: 'bg-[#fdf2f8]', link: null },
               { label: 'Chờ xử lý', value: stats?.pendingBookings ?? 0, icon: 'pending', color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]', link: '/partner/bookings' },
-              { label: 'Doanh thu tháng', value: formatVND(stats?.revenueThisMonth ?? 0), icon: 'payments', color: 'text-[#4a3800]', bg: 'bg-[#ffefc6]', link: '/partner/reports' },
+                { label: 'Doanh số thuần (tháng)', value: formatVND(stats?.revenueThisMonth ?? 0), icon: 'payments', color: 'text-[#4a3800]', bg: 'bg-[#ffefc6]', link: '/partner/reports' },
               { label: 'Thực nhận (tháng)', value: formatVND(stats?.netRevenueThisMonth ?? 0), icon: 'account_balance_wallet', color: 'text-[#137333]', bg: 'bg-[#E6F4EA]', link: '/partner/reports' },
             ].map((s) => (
               <StatCard key={s.label} {...s} />

@@ -9,6 +9,12 @@ import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 import { hasUsableTicketInstances } from '../utils/ticketInstanceStatus.js'
+import {
+  filterBookingsByTicketTab,
+  getRemainingPaymentTime,
+  isPaymentExpired,
+  normalizeBookingStatus,
+} from '../utils/myTicketsFilters.js'
 
 const tabs = [
   { id: 'all', label: 'Tất cả' },
@@ -29,69 +35,60 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
 }
 
-const getRemainingTime = (expiresAt, now) =>
-  Math.max(0, new Date(expiresAt).getTime() - now)
+const formatBookingCode = (value) => {
+  const code = String(value || '').replaceAll('-', '').slice(0, 8).toUpperCase()
+  return code || 'N/A'
+}
 
 const formatCountdown = (milliseconds) => {
-  const totalSeconds = Math.ceil(milliseconds / 1000)
+  const safeMilliseconds = Number.isFinite(milliseconds) ? Math.max(0, milliseconds) : 0
+  const totalSeconds = Math.ceil(safeMilliseconds / 1000)
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-/**
- * Mirror logic của backend `isReviewEligible`.
- * Trả về true khi booking được phép đánh giá:
- *  - COMPLETED: luôn được.
- *  - CONFIRMED + có ít nhất 1 vé USED + đã qua giờ kết thúc tham quan.
- *
- * visitDate được API trả về dạng 'YYYY-MM-DD' (UTC midnight của ngày tham quan).
- * timeSlotLabel dạng 'HH:MM - HH:MM' (giờ Việt Nam).
- * Backend là nguồn chính xác; frontend chỉ dùng để ẩn/hiện nút sớm.
- */
-const VN_OFFSET_MS = 7 * 60 * 60 * 1000
+const getTicketOverviewItems = (bookings, nowMs) => {
+  const list = Array.isArray(bookings) ? bookings : []
+  const unpaidCount = list.filter((booking) => {
+    const status = normalizeBookingStatus(booking.status)
+    return status === 'unpaid' && !isPaymentExpired(booking, nowMs)
+  }).length
+  const readyCount = list.filter((booking) => {
+    const status = normalizeBookingStatus(booking.status)
+    return status === 'confirmed' && hasUsableTicketInstances(booking.ticketInstances)
+  }).length
+  const watchingCount = list.filter((booking) =>
+    ['pending_partner', 'refund_requested'].includes(normalizeBookingStatus(booking.status)),
+  ).length
 
-function parseEndTimeToMinutes(timeSlotLabel) {
-  if (!timeSlotLabel) return null
-  // dạng 'HH:MM - HH:MM' hoặc 'HH:MM-HH:MM'
-  const parts = timeSlotLabel.split('-')
-  if (parts.length < 2) return null
-  const endStr = parts[parts.length - 1].trim()
-  const match = endStr.match(/^(\d{1,2}):(\d{2})$/)
-  if (!match) return null
-  const h = parseInt(match[1], 10)
-  const m = parseInt(match[2], 10)
-  if (h < 0 || h > 23 || m < 0 || m > 59) return null
-  return h * 60 + m
+  return [
+    {
+      label: 'Cần thanh toán',
+      value: unpaidCount,
+      description: 'Đơn giữ chỗ còn hạn',
+      icon: 'timer',
+      tone: 'bg-[#fff8e2] text-[#6b4b00]',
+    },
+    {
+      label: 'Vé sẵn sàng',
+      value: readyCount,
+      description: 'Có thể mở QR tại cổng',
+      icon: 'qr_code_2',
+      tone: 'bg-[#eefcff] text-[#00474d]',
+    },
+    {
+      label: 'Cần theo dõi',
+      value: watchingCount,
+      description: 'Chờ duyệt hoặc hoàn tiền',
+      icon: 'hourglass_top',
+      tone: 'bg-[#f6f3ff] text-[#4d3f77]',
+    },
+  ]
 }
 
-function canReviewNow(booking, nowMs) {
-  const status = (booking.status || '').toLowerCase()
-  if (status === 'completed') return true
-  if (status !== 'confirmed') return false
-
-  // Phải có ít nhất 1 vé USED
-  const instances = Array.isArray(booking.ticketInstances) ? booking.ticketInstances : []
-  const hasUsed = instances.some((t) => (t.status || '').toLowerCase() === 'used')
-  if (!hasUsed) return false
-
-  // Kiểm tra đã qua giờ kết thúc tham quan chưa
-  const visitDate = booking.visitDate // 'YYYY-MM-DD'
-  if (!visitDate) return false
-  const visitDateUtcMs = new Date(`${visitDate}T00:00:00Z`).getTime()
-  if (isNaN(visitDateUtcMs)) return false
-
-  const endMinutes = parseEndTimeToMinutes(booking.timeSlotLabel)
-  let deadlineMs
-  if (endMinutes !== null) {
-    // deadline UTC = visitDate UTC midnight + endTime(VN) - 7h offset
-    deadlineMs = visitDateUtcMs + endMinutes * 60_000 - VN_OFFSET_MS
-  } else {
-    // Không có time slot → 00:00 VN ngày kế tiếp = visitDate UTC + 17h
-    deadlineMs = visitDateUtcMs + (24 * 60 - 0) * 60_000 - VN_OFFSET_MS
-  }
-
-  return nowMs >= deadlineMs
+function canReviewNow(booking) {
+  return String(booking.status || '').toLowerCase() === 'completed'
 }
 
 function MyTicketsPage() {
@@ -99,10 +96,10 @@ function MyTicketsPage() {
   const socket = useSocket()
   const [activeTab, setActiveTab] = useState('all')
   const [bookings, setBookings] = useState([])
-  const [now, setNow] = useState(() => Date.now())
   const [isLoading, setIsLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
   const [selectedReviewBooking, setSelectedReviewBooking] = useState(null)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -151,7 +148,7 @@ function MyTicketsPage() {
 
       setBookings((current) =>
         current.map((booking) =>
-          booking.id === payload.bookingId ? { ...booking, status } : booking,
+          String(booking.id) === String(payload.bookingId) ? { ...booking, status } : booking,
         ),
       )
 
@@ -182,26 +179,12 @@ function MyTicketsPage() {
   }
 
   const filteredBookings = useMemo(
-    () =>
-      bookings.filter((booking) => {
-        const isExpired =
-          booking.status === 'unpaid' &&
-          getRemainingTime(booking.expiresAt, now) === 0
-
-        if (activeTab === 'unpaid') return booking.status === 'unpaid' && !isExpired
-        if (activeTab === 'active') {
-          // Vé đang chờ duyệt hoàn tiền vẫn là vé "đang sử dụng" cho tới khi có kết quả.
-          return ['confirmed', 'pending_partner', 'refund_requested'].includes(booking.status)
-        }
-        if (activeTab === 'history') {
-          return (
-            isExpired ||
-            ['completed', 'cancelled', 'refunded'].includes(booking.status)
-          )
-        }
-        return true
-      }),
+    () => filterBookingsByTicketTab(bookings, activeTab, now),
     [activeTab, bookings, now],
+  )
+  const overviewItems = useMemo(
+    () => getTicketOverviewItems(bookings, now),
+    [bookings, now],
   )
 
   return (
@@ -257,6 +240,10 @@ function MyTicketsPage() {
             </div>
           </div>
 
+          {!isLoading && bookings.length > 0 && (
+            <TicketOverview items={overviewItems} />
+          )}
+
           <div className="flex max-w-4xl flex-col gap-6">
             {isLoading ? (
               <p className="py-12 text-center font-semibold text-primary">
@@ -310,10 +297,33 @@ function SidebarLink({ active = false, href, icon, label }) {
   )
 }
 
+function TicketOverview({ items }) {
+  return (
+    <section className="mb-6 grid max-w-4xl gap-3 sm:grid-cols-3">
+      {items.map((item) => (
+        <article
+          className={`rounded-2xl p-4 shadow-sm ${item.tone}`}
+          key={item.label}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-extrabold">{item.label}</span>
+            <span className="material-symbols-outlined text-[22px]" aria-hidden="true">
+              {item.icon}
+            </span>
+          </div>
+          <p className="mt-3 text-3xl font-extrabold">{item.value}</p>
+          <p className="mt-1 text-xs font-semibold opacity-80">{item.description}</p>
+        </article>
+      ))}
+    </section>
+  )
+}
+
 function TicketCard({ booking, now, onRefetch, onOpenReview }) {
   const [showRefund, setShowRefund] = useState(false)
-  const remainingTime = getRemainingTime(booking.expiresAt, now)
-  const isExpired = booking.status === 'unpaid' && remainingTime === 0
+  const status = normalizeBookingStatus(booking.status)
+  const remainingTime = getRemainingPaymentTime(booking.expiresAt, now)
+  const isExpired = isPaymentExpired(booking, now)
   const hasUsableQr = hasUsableTicketInstances(booking.ticketInstances)
   const quantityText = `${booking.quantity || 1} vé`
 
@@ -345,7 +355,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
           </div>
 
           <div className="mb-6 grid grid-cols-2 gap-x-8 gap-y-4">
-            <TicketFact label="Mã đặt chỗ" value={booking.id} />
+            <TicketFact label="Mã đặt chỗ" title={booking.id} value={formatBookingCode(booking.id)} />
             <TicketFact label="Ngày" value={formatDate(booking.visitDate)} />
             <TicketFact label="Số lượng" value={quantityText} />
             <TicketFact
@@ -357,7 +367,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-3 border-t border-outline-variant/30 pt-4">
-          {booking.status === 'unpaid' && !isExpired && (
+          {status === 'unpaid' && !isExpired && (
             <>
               <span className="mr-auto flex items-center gap-1 text-sm font-semibold text-error">
                 <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
@@ -373,7 +383,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
               </Link>
             </>
           )}
-          {booking.status === 'confirmed' && (
+          {status === 'confirmed' && (
             <>
               {booking.refundRequest?.status === 'REJECTED' ? (
                 <div className="mr-auto flex items-start gap-2 rounded-xl bg-red-50 px-4 py-2.5 text-sm">
@@ -415,7 +425,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
               </Link>
             </>
           )}
-          {booking.status === 'refund_requested' && (
+          {status === 'refund_requested' && (
             <span className="flex items-center gap-1 text-sm font-semibold text-on-surface-variant">
               <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
                 hourglass_top
@@ -426,7 +436,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
                 : ''}
             </span>
           )}
-          {booking.status === 'refunded' && (
+          {status === 'refunded' && (
             <span className="flex items-center gap-1 text-sm font-semibold text-primary">
               <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
                 price_check
@@ -435,7 +445,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
               {' — tiền về tài khoản trong 3-5 ngày làm việc'}
             </span>
           )}
-          {canReviewNow(booking, now) && !(booking.reviewed || booking.review) && (
+          {canReviewNow(booking) && !(booking.reviewed || booking.review) && (
             <button
               className="flex items-center gap-2 rounded-xl bg-secondary-container text-on-secondary-container px-7 py-2.5 font-bold hover:scale-[1.02] active:scale-95 transition-all shadow-sm"
               onClick={() => onOpenReview(booking)}
@@ -447,7 +457,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
               Đánh giá ngay
             </button>
           )}
-          {canReviewNow(booking, now) && (booking.reviewed || booking.review) && (
+          {canReviewNow(booking) && (booking.reviewed || booking.review) && (
             <>
               <div className="flex gap-0.5 text-[#feb700] mr-2">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -494,13 +504,14 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
 function StatusBadge({ booking, isExpired }) {
   // Nhãn + màu lấy từ nguồn dùng chung; riêng 2 trường hợp đặc thù của trang này
   // (đơn quá hạn thanh toán, đơn hoàn thành đã đánh giá) thì ghi đè tại chỗ.
+  const status = normalizeBookingStatus(booking.status)
   let statusConfig
   if (isExpired) {
     statusConfig = { label: 'Đã hết hạn', className: 'bg-surface-container-high text-on-surface-variant' }
-  } else if (booking.status === 'completed' && (booking.reviewed || booking.review)) {
+  } else if (status === 'completed' && (booking.reviewed || booking.review)) {
     statusConfig = { label: 'Đã xong & Đánh giá', className: 'bg-outline text-white' }
   } else {
-    statusConfig = getBookingStatusMeta(booking.status)
+    statusConfig = getBookingStatusMeta(status)
   }
 
   return (
@@ -510,13 +521,16 @@ function StatusBadge({ booking, isExpired }) {
   )
 }
 
-function TicketFact({ emphasized = false, label, value }) {
+function TicketFact({ emphasized = false, label, title, value }) {
   return (
     <div>
       <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-on-surface-variant">
         {label}
       </p>
-      <p className={emphasized ? 'text-lg font-bold text-primary' : 'font-semibold text-on-surface'}>
+      <p
+        className={emphasized ? 'text-lg font-bold text-primary' : 'font-semibold text-on-surface'}
+        title={title}
+      >
         {value}
       </p>
     </div>

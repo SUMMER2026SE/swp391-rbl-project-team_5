@@ -31,6 +31,106 @@ const VNPAY_ERROR_MESSAGES = {
   79: 'Bạn nhập sai mật khẩu thanh toán quá số lần quy định.',
 }
 
+const getSupportUrl = (bookingId) =>
+  bookingId ? `/support?bookingId=${encodeURIComponent(bookingId)}` : '/support'
+
+const getPostPaymentActions = ({
+  booking,
+  bookingId,
+  isInvalid,
+  isPendingPartner,
+  isSuccess,
+  isUnknown,
+}) => {
+  const resolvedBookingId = booking?.id || bookingId || ''
+
+  if (isSuccess && !isPendingPartner) {
+    return [
+      {
+        title: 'Mở vé QR',
+        description: 'Kiểm tra mã QR, ngày tham quan và khung giờ trước khi tới cổng.',
+        icon: 'qr_code_2',
+        to: resolvedBookingId ? `/tickets/${resolvedBookingId}` : '/my-tickets',
+      },
+      {
+        title: 'Lưu lại lịch trình',
+        description: 'Trong trang vé, bạn có thể mở bản đồ và thêm lịch tham quan vào calendar.',
+        icon: 'event_available',
+        to: resolvedBookingId ? `/tickets/${resolvedBookingId}` : '/my-tickets',
+      },
+      {
+        title: 'Cần hỗ trợ?',
+        description: 'Gửi yêu cầu kèm mã đặt chỗ để đội hỗ trợ xử lý nhanh hơn.',
+        icon: 'support_agent',
+        to: getSupportUrl(resolvedBookingId),
+      },
+    ]
+  }
+
+  if (isSuccess && isPendingPartner) {
+    return [
+      {
+        title: 'Theo dõi trạng thái',
+        description: 'Vé QR sẽ xuất hiện trong Vé của tôi khi đối tác xác nhận.',
+        icon: 'hourglass_top',
+        to: '/my-tickets',
+      },
+      {
+        title: 'Kiểm tra email',
+        description: 'Thông báo xác nhận sẽ được gửi tới email trong đơn đặt vé.',
+        icon: 'mark_email_read',
+      },
+      {
+        title: 'Hỏi hỗ trợ nếu cần',
+        description: 'Dùng mã đặt chỗ để hỏi tiến độ khi lịch đi của bạn gần sát.',
+        icon: 'support_agent',
+        to: getSupportUrl(resolvedBookingId),
+      },
+    ]
+  }
+
+  if (isInvalid || isUnknown) {
+    return [
+      {
+        title: 'Kiểm tra đơn trước',
+        description: 'Nếu đã bị trừ tiền, hãy xem lại trạng thái trong Vé của tôi trước khi thanh toán lại.',
+        icon: 'receipt_long',
+        to: '/my-tickets',
+      },
+      {
+        title: 'Giữ lại mã giao dịch',
+        description: 'Mã đặt chỗ và thông tin ngân hàng giúp đối soát nhanh hơn.',
+        icon: 'tag',
+      },
+      {
+        title: 'Gửi yêu cầu hỗ trợ',
+        description: 'Đội hỗ trợ có thể kiểm tra trạng thái thanh toán và đơn đặt vé.',
+        icon: 'support_agent',
+        to: getSupportUrl(resolvedBookingId),
+      },
+    ]
+  }
+
+  return [
+    {
+      title: 'Thử thanh toán lại',
+      description: 'Đơn vẫn có thể được giữ trong thời gian giữ chỗ, dùng nút thanh toán lại bên dưới.',
+      icon: 'refresh',
+    },
+    {
+      title: 'Kiểm tra ngân hàng',
+      description: 'Đảm bảo số dư, OTP và hạn mức giao dịch còn khả dụng.',
+      icon: 'account_balance',
+    },
+    {
+      title: 'Cần người hỗ trợ?',
+      description: 'Gửi yêu cầu nếu bạn không chắc giao dịch đã bị trừ tiền hay chưa.',
+      icon: 'support_agent',
+      to: getSupportUrl(resolvedBookingId),
+    },
+  ]
+}
+
 function BookingSuccessPage() {
   const [searchParams] = useSearchParams()
   // Backend /vnpay-return redirect về với ?status=success|failed|invalid&vnp_ResponseCode=...
@@ -44,14 +144,24 @@ function BookingSuccessPage() {
   const [retryError, setRetryError] = useState('')
 
   // 3 kết cục: success / invalid (không xác minh được chữ ký) / failed (khách hủy, lỗi thẻ...)
-  const outcome = statusParam || (responseCode === '00' ? 'success' : 'failed')
+  const outcome = statusParam || (responseCode ? (responseCode === '00' ? 'success' : 'failed') : 'unknown')
   const isSuccess = outcome === 'success'
   const isInvalid = outcome === 'invalid'
+  const isUnknown = outcome === 'unknown'
   const isPendingPartner = booking?.status === 'pending_partner'
   const nextAiBookingUrl = aiQueueResult?.nextUrl || ''
-  const failureReason =
-    VNPAY_ERROR_MESSAGES[responseCode] ||
-    'Giao dịch không thể hoàn tất. Bạn chưa bị trừ tiền cho đơn này.'
+  const failureReason = isUnknown
+    ? 'Trang này cần thông tin giao dịch từ cổng thanh toán. Vui lòng kiểm tra lại đơn trong mục Vé của tôi.'
+    : (VNPAY_ERROR_MESSAGES[responseCode] ||
+        'Giao dịch không thể hoàn tất. Bạn chưa bị trừ tiền cho đơn này.')
+  const nextActionItems = getPostPaymentActions({
+    booking,
+    bookingId,
+    isInvalid,
+    isPendingPartner,
+    isSuccess,
+    isUnknown,
+  })
 
   const handleRetry = async () => {
     if (!bookingId || retrying) return
@@ -120,7 +230,7 @@ function BookingSuccessPage() {
                 ? isPendingPartner
                   ? 'bg-tertiary-fixed'
                   : 'bg-primary-container'
-                : isInvalid
+                : isInvalid || isUnknown
                   ? 'bg-amber-100'
                   : 'bg-red-100'
             }`}
@@ -131,7 +241,7 @@ function BookingSuccessPage() {
                   ? isPendingPartner
                     ? 'text-tertiary'
                     : 'text-white'
-                  : isInvalid
+                  : isInvalid || isUnknown
                     ? 'text-amber-600'
                     : 'text-error'
               }`}
@@ -141,7 +251,7 @@ function BookingSuccessPage() {
                 ? isPendingPartner
                   ? 'hourglass_top'
                   : 'check_circle'
-                : isInvalid
+                : isInvalid || isUnknown
                   ? 'help'
                   : 'error'}
             </span>
@@ -149,14 +259,16 @@ function BookingSuccessPage() {
 
           <h1
             className={`mt-6 text-3xl font-extrabold md:text-4xl ${
-              isSuccess ? 'text-primary' : isInvalid ? 'text-amber-700' : 'text-error'
+              isSuccess ? 'text-primary' : isInvalid || isUnknown ? 'text-amber-700' : 'text-error'
             }`}
           >
             {isSuccess
               ? isPendingPartner
                 ? 'Đang chờ đối tác duyệt'
                 : 'Đặt vé thành công!'
-              : isInvalid
+              : isUnknown
+                ? 'Thiếu thông tin thanh toán'
+                : isInvalid
                 ? 'Chưa xác minh được kết quả'
                 : 'Thanh toán chưa thành công'}
           </h1>
@@ -166,12 +278,14 @@ function BookingSuccessPage() {
               ? isPendingPartner
                 ? 'Thanh toán đã được ghi nhận. VietTicket sẽ phát hành mã QR ngay khi đối tác xác nhận vé.'
                 : 'Thanh toán đã được ghi nhận và vé điện tử của bạn đã sẵn sàng.'
-              : isInvalid
+              : isUnknown
+                ? 'Không tìm thấy thông tin giao dịch trên đường dẫn hiện tại. Bạn có thể kiểm tra trạng thái đơn trong mục "Vé của tôi".'
+                : isInvalid
                 ? 'Chúng tôi chưa xác minh được kết quả trả về từ cổng thanh toán. Nếu bạn đã bị trừ tiền, trạng thái đơn sẽ được cập nhật tự động trong ít phút — vui lòng kiểm tra mục "Vé của tôi" trước khi thanh toán lại.'
                 : failureReason}
           </p>
 
-          {!isSuccess && !isInvalid && (
+          {!isSuccess && !isInvalid && !isUnknown && (
             <p className="mt-2 text-sm text-on-surface-variant">
               Đơn giữ chỗ của bạn vẫn được giữ trong thời gian giữ chỗ. Bạn có thể thử thanh toán
               lại ngay bên dưới, hoặc đổi phương thức thanh toán khác trên VNPay.
@@ -226,6 +340,8 @@ function BookingSuccessPage() {
             </div>
           )}
 
+          <NextActionPanel items={nextActionItems} />
+
           {retryError && (
             <p className="mt-6 rounded-xl bg-red-50 p-3 text-sm font-semibold text-error">
               {retryError}
@@ -249,7 +365,7 @@ function BookingSuccessPage() {
                 <span className="material-symbols-outlined text-[19px]" aria-hidden="true">confirmation_number</span>
                 Theo dõi trạng thái vé
               </Link>
-            ) : isInvalid ? (
+            ) : isInvalid || isUnknown ? (
               <Link
                 className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
                 to="/my-tickets"
@@ -293,6 +409,57 @@ function SummaryRow({ icon, label, mono = false, value }) {
         <p className={mono ? 'font-mono font-bold tracking-wider text-primary' : 'font-semibold text-on-surface'}>
           {value}
         </p>
+      </div>
+    </div>
+  )
+}
+
+function NextActionPanel({ items }) {
+  return (
+    <div className="mt-6 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-5 text-left">
+      <h2 className="text-base font-extrabold text-on-surface">
+        Việc nên làm tiếp theo
+      </h2>
+      <div className="mt-4 grid gap-3">
+        {items.map((item) => {
+          const content = (
+            <>
+              <span
+                className="material-symbols-outlined mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[19px] text-primary"
+                aria-hidden="true"
+              >
+                {item.icon}
+              </span>
+              <span className="min-w-0 flex-1">
+                <strong className="block text-sm font-extrabold text-on-surface">
+                  {item.title}
+                </strong>
+                <span className="mt-0.5 block text-xs font-semibold leading-5 text-on-surface-variant">
+                  {item.description}
+                </span>
+              </span>
+              {item.to && (
+                <span className="material-symbols-outlined text-[18px] text-primary" aria-hidden="true">
+                  arrow_forward
+                </span>
+              )}
+            </>
+          )
+
+          return item.to ? (
+            <Link
+              className="flex items-start gap-3 rounded-xl p-2 transition hover:bg-white"
+              key={item.title}
+              to={item.to}
+            >
+              {content}
+            </Link>
+          ) : (
+            <div className="flex items-start gap-3 rounded-xl p-2" key={item.title}>
+              {content}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

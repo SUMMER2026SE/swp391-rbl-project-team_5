@@ -28,6 +28,9 @@ function formatAge(dateStr) {
   if (hrs < 24) return `${hrs} giờ`
   return `${Math.floor(hrs / 24)} ngày`
 }
+
+const isSameId = (left, right) => String(left ?? '') === String(right ?? '')
+
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.OPEN
   return (
@@ -82,17 +85,17 @@ export default function SupportTicketsPage() {
 
   useEffect(() => {
     function handleMessage(message) {
-      if (message.ticketId !== activeId) return
+      if (!isSameId(message.ticketId, activeId)) return
       setDetail((current) =>
         current ? { ...current, messages: [...current.messages, message] } : current,
       )
     }
     function handleStatus(payload) {
-      if (payload.ticketId === activeId) {
+      if (isSameId(payload.ticketId, activeId)) {
         setDetail((current) => (current ? { ...current, status: payload.status } : current))
       }
       setTickets((current) =>
-        current.map((t) => (t.id === payload.ticketId ? { ...t, status: payload.status } : t)),
+        current.map((t) => (isSameId(t.id, payload.ticketId) ? { ...t, status: payload.status } : t)),
       )
     }
 
@@ -146,7 +149,7 @@ export default function SupportTicketsPage() {
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm ticket...">
-      <div className="flex h-[calc(100vh-64px)] overflow-hidden">
+      <div className="flex h-[calc(100dvh-64px)] min-h-[calc(100dvh-64px)] overflow-hidden">
         {/* Hàng đợi ticket */}
         <section className="flex w-72 shrink-0 flex-col border-r border-outline-variant bg-surface-container-lowest xl:w-80">
           <div className="border-b border-outline-variant p-4">
@@ -195,7 +198,7 @@ export default function SupportTicketsPage() {
                       type="button"
                       onClick={() => setActiveId(ticket.id)}
                       className={`flex w-full flex-col gap-1 border-b border-outline-variant/20 p-4 text-left transition ${
-                        activeId === ticket.id ? 'bg-primary/5' : 'hover:bg-surface-container-high'
+                        isSameId(activeId, ticket.id) ? 'bg-primary/5' : 'hover:bg-surface-container-high'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">

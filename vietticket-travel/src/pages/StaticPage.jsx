@@ -67,7 +67,7 @@ function StaticPage({ type }) {
             style={{
               padding: 'clamp(24px, 5vw, 56px)',
               background: '#fff',
-              border: '1px solid var(--color-border)',
+              border: '1px solid var(--color-outline-variant)',
               borderRadius: 24,
               boxShadow: '0 18px 50px rgba(17, 51, 54, 0.08)',
             }}

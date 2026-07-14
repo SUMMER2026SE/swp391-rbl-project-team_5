@@ -15,6 +15,7 @@ import reviewService from '../services/reviewService.js'
 import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
 import { loadItineraryBookingQueue } from '../utils/aiItineraryBookingQueue.js'
 import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
+import { saveRecentlyViewedAttraction } from '../utils/recentlyViewedAttractions.js'
 import fallbackDetailImage from '../assets/halong_bay.webp'
 
 const detailNavLinks = [
@@ -47,16 +48,35 @@ const formatCurrency = (value) => {
 }
 
 const getRefundPolicyLabel = (ticket) => {
+  const cutoffHours = Number(ticket?.refundCutoffHours ?? 24)
+  const cutoffLabel = cutoffHours === 0 ? 'trước giờ bắt đầu' : `trước ${cutoffHours} giờ`
   if (ticket?.refundPolicy === 'FREE_CANCELLATION') {
-    return 'Hoàn tiền 100%'
+    return `Hoàn 100% khi hủy ${cutoffLabel}`
   }
   if (ticket?.refundPolicy === 'REFUND_WITH_FEE') {
     const feeRate = Number(ticket?.refundFeeRate || 0)
     return feeRate > 0
-      ? `Hoàn một phần, phí hủy ${Math.round(feeRate * 100)}%`
+      ? `Hoàn một phần khi hủy ${cutoffLabel}, phí ${Math.round(feeRate * 100)}%`
       : 'Hoàn một phần theo chính sách'
   }
   return 'Không hoàn tiền'
+}
+
+const getLowestTicketPrice = (ticketProducts = []) =>
+  ticketProducts.reduce((lowest, ticket) => {
+    const price = Number(ticket?.sellingPrice)
+    if (!Number.isFinite(price) || price <= 0) return lowest
+    return lowest == null ? price : Math.min(lowest, price)
+  }, null)
+
+const getBestRefundPolicyLabel = (ticketProducts = []) => {
+  if (ticketProducts.some((ticket) => ticket?.refundPolicy === 'FREE_CANCELLATION')) {
+    return 'Có vé hoàn 100%'
+  }
+  if (ticketProducts.some((ticket) => ticket?.refundPolicy === 'REFUND_WITH_FEE')) {
+    return 'Có hỗ trợ hoàn'
+  }
+  return 'Theo chính sách vé'
 }
 
 const getImageUrl = (image) => (typeof image === 'string' ? image : image?.imageUrl)
@@ -213,10 +233,16 @@ export default function AttractionDetailPage() {
         const result = await getAttractionDetail(id)
         const detail = result.data
         const images = normalizeImages(detail)
+        const products = Array.isArray(detail.ticketProducts) ? detail.ticketProducts : []
         setAttraction(detail)
         setActiveImage(getPrimaryImageUrl(images))
+        saveRecentlyViewedAttraction({
+          ...detail,
+          id: detail.id || id,
+          minPrice: getLowestTicketPrice(products),
+          primaryImage: getPrimaryImageUrl(images),
+        })
 
-        const products = Array.isArray(detail.ticketProducts) ? detail.ticketProducts : []
         if (products.length > 0) {
           const params = new URLSearchParams(location.search)
           const isAiSource = params.get('source') === AI_BOOKING_SOURCE
@@ -224,11 +250,15 @@ export default function AttractionDetailPage() {
           const shouldPrefillAiBooking = isAiSource && shouldPrefillBooking
           const aiQueueId = params.get('aiQueueId')
           const aiQueueItemId = params.get('aiQueueItemId')
+          const requestedDate = isDateInputValue(params.get('date')) ? params.get('date') : ''
+          const requestedQuantity = normalizeInitialQuantity(params.get('qty') || params.get('guests'))
+          const hasSearchTripContext = Boolean(requestedDate || params.get('qty') || params.get('guests'))
           const recommendationContext =
-            isAiSource && !shouldPrefillAiBooking
+            !shouldPrefillAiBooking && (isAiSource || hasSearchTripContext)
               ? {
-                  date: isDateInputValue(params.get('date')) ? params.get('date') : '',
-                  quantity: normalizeInitialQuantity(params.get('qty')),
+                  date: requestedDate,
+                  quantity: requestedQuantity,
+                  source: isAiSource ? 'ai' : 'search',
                 }
               : null
           setAiRecommendationContext(recommendationContext)
@@ -303,15 +333,35 @@ export default function AttractionDetailPage() {
   const ticketProducts = attraction?.ticketProducts || []
   const rating = Number(attraction?.averageRating || 0)
   const reviewCount = Number(attraction?.totalReviews || 0)
+  const lowestTicketPrice = getLowestTicketPrice(ticketProducts)
+  const decisionHighlights = [
+    {
+      icon: 'payments',
+      title: 'Giá từ',
+      value: formatCurrency(lowestTicketPrice),
+    },
+    {
+      icon: attraction?.requiresManualApproval ? 'manage_accounts' : 'verified',
+      title: 'Xác nhận',
+      value: attraction?.requiresManualApproval ? 'Đối tác duyệt' : 'Tức thì',
+    },
+    {
+      icon: 'currency_exchange',
+      title: 'Hoàn vé',
+      value: getBestRefundPolicyLabel(ticketProducts),
+    },
+    {
+      icon: 'qr_code_2',
+      title: 'Nhận vé',
+      value: 'QR trên điện thoại',
+    },
+  ]
 
   const handleQuantityChange = (ticketId, delta) => {
     setTicketQuantities((prev) => {
       const currentQty = prev[ticketId] || 0
-      const newQty = Math.max(0, currentQty + delta)
-      if (newQty > 0) {
-        return { [ticketId]: newQty }
-      }
-      return { ...prev, [ticketId]: newQty }
+      const newQty = Math.max(1, currentQty + delta)
+      return { [ticketId]: newQty }
     })
   }
 
@@ -320,11 +370,15 @@ export default function AttractionDetailPage() {
 
     return attraction.ticketProducts.reduce((sum, ticket) => {
       const qty = ticketQuantities[ticket.id] || 0
-      return sum + qty * Number(ticket.sellingPrice)
+      return sum + qty * (Number(ticket.sellingPrice) || 0)
     }, 0)
   }
 
   const getBookingQuantity = (ticket) => Math.max(1, Number(ticketQuantities[ticket?.id] || 0) || 1)
+  const selectedTicketCount = Object.values(ticketQuantities).reduce((sum, qty) => {
+    const amount = Number(qty) || 0
+    return amount > 0 ? sum + amount : sum
+  }, 0)
 
   const handleOpenBookingModal = (ticket, quantity = getBookingQuantity(ticket), options = {}) => {
     const effectiveDate = options.date || aiRecommendationContext?.date || ''
@@ -359,6 +413,10 @@ export default function AttractionDetailPage() {
   if (loading) {
     return (
       <React.Fragment>
+        <Seo
+          title="Đang tải địa điểm"
+          description="VietTicket Travel đang tải thông tin điểm tham quan."
+        />
         <Header links={detailNavLinks} />
         <div className="min-h-[60vh] bg-[#f9f9fc] px-5 py-20 text-center text-[#3f484a]">
           Đang tải thông tin địa điểm...
@@ -371,12 +429,22 @@ export default function AttractionDetailPage() {
   if (!attraction) {
     return (
       <React.Fragment>
+        <Seo
+          title="Không tìm thấy địa điểm"
+          description="Địa điểm này không tồn tại hoặc đã bị ẩn trên VietTicket Travel."
+        />
         <Header links={detailNavLinks} />
         <div className="min-h-[60vh] bg-[#f9f9fc] px-5 py-20 text-center">
           <h1 className="text-2xl font-bold text-[#00474d]">Không tìm thấy địa điểm!</h1>
           <p className="mt-3 text-sm font-semibold text-[#3f484a]">
             {errorMessage || 'Địa điểm này không tồn tại hoặc đã bị ẩn.'}
           </p>
+          <Link
+            className="mt-6 inline-flex items-center justify-center rounded-xl bg-[#00474d] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#006068]"
+            to="/attractions"
+          >
+            Quay lại danh sách
+          </Link>
         </div>
         <Footer links={footerLinks} />
       </React.Fragment>
@@ -403,13 +471,15 @@ export default function AttractionDetailPage() {
           <span className="text-[#006068] font-bold truncate max-w-[240px]">{attraction?.title}</span>
         </div>
       </nav>
-      <main className="bg-[#f9f9fc] px-5 py-8 text-[#1a1c1e] md:px-12">
+      <main className="bg-[#f9f9fc] px-5 pb-28 pt-8 text-[#1a1c1e] md:px-12 lg:pb-8">
         <div className="mx-auto max-w-[1280px]">
           <section className="mb-16">
-            <div className="group relative mb-4 aspect-[21/9] overflow-hidden rounded-xl shadow-[0_4px_20px_rgba(0,96,104,0.04)]">
+            <div className="group relative mb-4 aspect-[16/9] overflow-hidden rounded-xl shadow-[0_4px_20px_rgba(0,96,104,0.04)] lg:aspect-[5/2]">
               <img
                 alt={attraction.title}
                 className="h-full w-full object-cover"
+                fetchPriority="high"
+                loading="eager"
                 onError={handleImageFallback}
                 src={activeImage || getPrimaryImageUrl(images)}
               />
@@ -419,7 +489,7 @@ export default function AttractionDetailPage() {
                 <React.Fragment>
                   <button
                     aria-label="Ảnh trước"
-                    className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 text-white opacity-0 backdrop-blur-md transition hover:bg-white/40 group-hover:opacity-100"
+                    className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 text-white opacity-100 backdrop-blur-md transition hover:bg-white/40 md:opacity-0 md:group-hover:opacity-100"
                     onClick={() => goToGalleryImage(-1)}
                     type="button"
                   >
@@ -429,7 +499,7 @@ export default function AttractionDetailPage() {
                   </button>
                   <button
                     aria-label="Ảnh tiếp theo"
-                    className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 text-white opacity-0 backdrop-blur-md transition hover:bg-white/40 group-hover:opacity-100"
+                    className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/20 text-white opacity-100 backdrop-blur-md transition hover:bg-white/40 md:opacity-0 md:group-hover:opacity-100"
                     onClick={() => goToGalleryImage(1)}
                     type="button"
                   >
@@ -511,6 +581,17 @@ export default function AttractionDetailPage() {
                   </div>
                 </div>
               </header>
+
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                {decisionHighlights.map((item) => (
+                  <DecisionHighlight
+                    icon={item.icon}
+                    key={item.title}
+                    title={item.title}
+                    value={item.value}
+                  />
+                ))}
+              </div>
 
               {attraction.latitude != null && attraction.longitude != null ? (
                 <LocationMap
@@ -598,6 +679,17 @@ export default function AttractionDetailPage() {
                     </button>
                   </div>
                 </div>
+                <div className="rounded-xl border border-[#a6eff8] bg-[#eefcff] px-4 py-3">
+                  <p className="text-xs font-bold uppercase tracking-normal text-[#006068]">
+                    Giá tốt nhất hiện có
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-end justify-between gap-2">
+                    <span className="text-xl font-bold text-[#00474d]">{formatCurrency(lowestTicketPrice)}</span>
+                    <span className="text-xs font-semibold text-[#3f484a]">
+                      {attraction.requiresManualApproval ? 'Chờ đối tác xác nhận' : 'Có thể nhận QR sau thanh toán'}
+                    </span>
+                  </div>
+                </div>
 
                 {aiBookingQueueContext && (
                   <div className="rounded-2xl border border-[#a6eff8] bg-[#eefcff] p-4">
@@ -639,12 +731,16 @@ export default function AttractionDetailPage() {
                       </span>
                       <div>
                         <p className="text-sm font-bold text-[#00474d]">
-                          Ngữ cảnh từ gợi ý AI
+                          {aiRecommendationContext.source === 'ai'
+                            ? 'Ngữ cảnh từ gợi ý AI'
+                            : 'Ngữ cảnh từ tìm kiếm'}
                         </p>
                         <p className="mt-1 text-xs font-semibold text-[#3f484a]">
                           {aiRecommendationContext.date
                             ? `Ngày tham quan: ${aiRecommendationContext.date}`
-                            : 'Khách đang xem từ kết quả gợi ý AI'}
+                            : aiRecommendationContext.source === 'ai'
+                              ? 'Khách đang xem từ kết quả gợi ý AI'
+                              : 'Khách đang xem từ kết quả tìm kiếm'}
                           {aiRecommendationContext.quantity
                             ? ` - ${aiRecommendationContext.quantity} vé`
                             : ''}
@@ -674,13 +770,13 @@ export default function AttractionDetailPage() {
                 <div className="space-y-4 border-t border-[#bec8ca] pt-4">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-bold text-[#3f484a]">
-                      Tổng cộng ({Object.values(ticketQuantities).reduce((sum, qty) => sum + qty, 0)} vé)
+                      Tổng cộng ({selectedTicketCount} vé)
                     </span>
                     <span className="text-xl font-bold text-[#00474d]">{formatCurrency(calculateTotal())}</span>
                   </div>
                   <button
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#feb700] py-4 text-lg font-bold text-[#6b4b00] transition hover:shadow-[0_12px_32px_rgba(0,96,104,0.08)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={ticketProducts.length === 0}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#feb700] py-4 text-lg font-bold text-[#3d2a00] transition hover:shadow-[0_12px_32px_rgba(0,96,104,0.08)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={ticketProducts.length === 0 || selectedTicketCount === 0}
                     onClick={handleOpenSelectedTicket}
                     type="button"
                   >
@@ -696,9 +792,14 @@ export default function AttractionDetailPage() {
               </div>
 
               <div className="rounded-2xl border border-white/50 bg-white/70 p-6 backdrop-blur-md">
-                <p className="mb-4 text-sm font-bold text-[#00474d]">Tại sao chọn VietTicket?</p>
+                <p className="mb-4 text-sm font-bold text-[#00474d]">VietTicket đồng hành trước chuyến đi</p>
                 <ul className="space-y-3">
-                  {['Giá rẻ hơn tại quầy', 'Bỏ qua hàng chờ mua vé', 'Tích điểm đổi quà'].map((item) => (
+                  {[
+                    'Vé QR lưu trên điện thoại',
+                    'Thanh toán an toàn qua VNPay',
+                    'Chính sách hoàn hiển thị theo từng loại vé',
+                    'Hỗ trợ khi lịch trình thay đổi',
+                  ].map((item) => (
                     <li className="flex items-center gap-3 text-sm font-semibold text-[#3f484a]" key={item}>
                       <span
                         className="material-symbols-outlined text-lg text-[#00474d]"
@@ -716,6 +817,32 @@ export default function AttractionDetailPage() {
           </div>
         </div>
       </main>
+
+      {ticketProducts.length > 0 && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#bec8ca]/60 bg-white/95 px-4 py-3 shadow-[0_-10px_30px_rgba(0,40,50,0.12)] backdrop-blur-md lg:hidden">
+          <div className="mx-auto flex max-w-[1280px] items-center gap-3 pr-16">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase text-[#3f484a]">
+                {selectedTicketCount > 0 ? `Tạm tính ${selectedTicketCount} vé` : 'Giá từ'}
+              </p>
+              <p className="truncate text-lg font-extrabold text-[#00474d]">
+                {formatCurrency(calculateTotal() || lowestTicketPrice)}
+              </p>
+            </div>
+            <button
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#feb700] px-4 py-3 text-sm font-extrabold text-[#3d2a00] shadow-sm transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={selectedTicketCount === 0}
+              onClick={handleOpenSelectedTicket}
+              type="button"
+            >
+              <span className="material-symbols-outlined text-[19px]" aria-hidden="true">
+                shopping_cart_checkout
+              </span>
+              Chọn vé
+            </button>
+          </div>
+        </div>
+      )}
 
       <Footer links={footerLinks} />
 
@@ -885,8 +1012,7 @@ function ReviewTab({ attraction }) {
     const parts = name.trim().split(/\s+/)
     if (parts.length === 1) {
       const first = parts[0][0] || ''
-      const last = parts[0][parts[0].length - 1] || ''
-      return `${first}***${last}`
+      return `${first}***`
     }
     return parts
       .map((part) => {
@@ -1136,6 +1262,20 @@ function FeatureBox({ description, icon, title }) {
   )
 }
 
+function DecisionHighlight({ icon, title, value }) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-[#bec8ca]/50 bg-white p-4 shadow-[0_4px_20px_rgba(0,96,104,0.035)]">
+      <span className="material-symbols-outlined text-[22px] text-[#006068]" aria-hidden="true">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs font-bold uppercase tracking-normal text-[#5f6b6d]">{title}</p>
+        <p className="mt-1 text-sm font-bold text-[#00474d]">{value}</p>
+      </div>
+    </div>
+  )
+}
+
 function TicketProductCard({ isFeatured, onChoose, onQuantityChange, quantity, ticket }) {
   return (
     <div
@@ -1164,7 +1304,7 @@ function TicketProductCard({ isFeatured, onChoose, onQuantityChange, quantity, t
         <div className="flex items-center gap-3 rounded-lg border border-[#bec8ca] bg-white px-3 py-1">
           <button
             className="text-lg font-bold text-[#3f484a] disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={quantity <= 0}
+            disabled={quantity <= 1}
             onClick={() => onQuantityChange(-1)}
             type="button"
           >

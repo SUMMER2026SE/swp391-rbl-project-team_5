@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
+import { hasRole } from '../utils/userRoles.js'
 import heroImage from '../assets/halong_bay.webp'
 import * as partnerApi from '../services/partnerApi.js'
 import {
@@ -72,7 +73,7 @@ function PartnerRegisterPage() {
     if (isAuthLoading) return
 
     if (isAuthenticated) {
-      if (user?.role === 'PARTNER') {
+      if (hasRole(user, 'PARTNER')) {
         navigate('/partner/dashboard', { replace: true })
       } else {
         partnerApi

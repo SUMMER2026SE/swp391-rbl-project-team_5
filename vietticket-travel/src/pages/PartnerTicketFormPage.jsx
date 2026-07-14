@@ -18,8 +18,8 @@ const TICKET_TYPES = [
 
 const REFUND_POLICIES = [
   { value: 'NONE',    label: 'Không hoàn tiền',         desc: 'Không hỗ trợ hoàn tiền trong bất kỳ trường hợp nào.', color: 'border-[#ba1a1a] bg-[#ffdad6]/30 text-[#ba1a1a]' },
-  { value: 'PARTIAL', label: 'Hoàn tiền một phần',       desc: 'Có hỗ trợ hoàn tiền một phần theo chính sách của đối tác.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
-  { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% giá vé nếu hủy trước ngày tham quan.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
+  { value: 'PARTIAL', label: 'Hoàn tiền một phần',       desc: 'Khách nhận lại tiền sau khi trừ phí hủy đã công bố.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
+  { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% nếu khách hủy trước thời hạn đã công bố.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
 ]
 
 function PartnerTicketFormPage() {
@@ -34,7 +34,8 @@ function PartnerTicketFormPage() {
 
   const [form, setForm] = useState({
     name: '', type: 'ADULT', originalPrice: '', sellingPrice: '',
-    description: '', refundPolicy: 'PARTIAL', status: 'active',
+    description: '', refundPolicy: 'PARTIAL', refundFeePercent: '10',
+    refundCutoffHours: '24', status: 'active',
   })
 
   useEffect(() => {
@@ -59,6 +60,8 @@ function PartnerTicketFormPage() {
           sellingPrice: t.sellingPrice ?? '',
           description: t.description ?? '',
           refundPolicy: t.refundPolicy ?? 'PARTIAL',
+          refundFeePercent: String(Math.round(Number(t.refundFeeRate ?? 0.1) * 100)),
+          refundCutoffHours: String(t.refundCutoffHours ?? 24),
           status: t.status ?? 'active',
         })
       } catch (err) {
@@ -84,6 +87,18 @@ function PartnerTicketFormPage() {
       : Number(form.sellingPrice) > Number(form.originalPrice)
         ? 'Giá bán không được vượt quá giá gốc.'
         : '',
+    refundFeePercent: form.refundPolicy === 'PARTIAL'
+      && (!Number.isInteger(Number(form.refundFeePercent))
+        || Number(form.refundFeePercent) < 1
+        || Number(form.refundFeePercent) > 99)
+      ? 'Phí hủy phải là số nguyên từ 1% đến 99%.'
+      : '',
+    refundCutoffHours: form.refundPolicy !== 'NONE'
+      && (!Number.isInteger(Number(form.refundCutoffHours))
+        || Number(form.refundCutoffHours) < 0
+        || Number(form.refundCutoffHours) > 720)
+      ? 'Thời hạn hủy phải là số giờ nguyên từ 0 đến 720.'
+      : '',
   }
   const isValid = Object.values(errors).every((e) => !e)
 
@@ -92,7 +107,13 @@ function PartnerTicketFormPage() {
     : 0
 
   const handleSubmit = async () => {
-    setTouched({ name: true, originalPrice: true, sellingPrice: true })
+    setTouched({
+      name: true,
+      originalPrice: true,
+      sellingPrice: true,
+      refundFeePercent: true,
+      refundCutoffHours: true,
+    })
     if (!isValid) { toast.error('Vui lòng kiểm tra lại thông tin.'); return }
     const payload = {
       name: form.name,
@@ -101,6 +122,12 @@ function PartnerTicketFormPage() {
       originalPrice: Number(form.originalPrice),
       sellingPrice: Number(form.sellingPrice),
       refundPolicy: form.refundPolicy,
+      refundFeeRate: form.refundPolicy === 'PARTIAL'
+        ? Number(form.refundFeePercent) / 100
+        : 0,
+      refundCutoffHours: form.refundPolicy === 'NONE'
+        ? 24
+        : Number(form.refundCutoffHours),
       status: form.status,
     }
     setIsSubmitting(true)
@@ -173,6 +200,18 @@ function PartnerTicketFormPage() {
                   className={`${inputCls(false)} resize-none`}
                 />
               </FormField>
+              {form.type === 'CHILD' && (
+                <div className="rounded-lg bg-[#00474d]/5 border border-[#00474d]/20 p-3 text-xs text-[#00474d] font-semibold flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[16px] mt-0.5" aria-hidden="true">info</span>
+                  <p>Mẹo: Hãy ghi rõ điều kiện áp dụng cho Trẻ em (ví dụ: Chiều cao dưới 1m4 hoặc Độ tuổi từ 3 – 11 tuổi) trong Mô tả gói vé để soát vé dễ dàng hơn tại quầy.</p>
+                </div>
+              )}
+              {form.type === 'GROUP' && (
+                <div className="rounded-lg bg-[#00474d]/5 border border-[#00474d]/20 p-3 text-xs text-[#00474d] font-semibold flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[16px] mt-0.5" aria-hidden="true">info</span>
+                  <p>Mẹo: Hãy nêu rõ số lượng khách tối thiểu áp dụng cho gói vé Nhóm (ví dụ: Áp dụng khi mua từ 10 vé trở lên) trong Mô tả gói vé.</p>
+                </div>
+              )}
             </div>
           </FormCard>
 
@@ -263,6 +302,59 @@ function PartnerTicketFormPage() {
                 </label>
               ))}
             </div>
+
+            {form.refundPolicy !== 'NONE' && (
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                {form.refundPolicy === 'PARTIAL' && (
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-[#191c1d]" htmlFor="refund-fee-percent">
+                      Phí hủy (%)
+                    </label>
+                    <input
+                      id="refund-fee-percent"
+                      type="number"
+                      min="1"
+                      max="99"
+                      step="1"
+                      className={`w-full rounded-lg border bg-white px-3 py-2.5 text-sm outline-none focus:border-[#006068] ${
+                        touched.refundFeePercent && errors.refundFeePercent ? 'border-[#ba1a1a]' : 'border-[#bec8ca]'
+                      }`}
+                      value={form.refundFeePercent}
+                      onChange={(event) => update('refundFeePercent', event.target.value)}
+                      onBlur={() => touch('refundFeePercent')}
+                    />
+                    {touched.refundFeePercent && errors.refundFeePercent && (
+                      <p className="mt-1 text-xs text-[#ba1a1a]">{errors.refundFeePercent}</p>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-[#191c1d]" htmlFor="refund-cutoff-hours">
+                    Hạn hủy trước giờ bắt đầu
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="refund-cutoff-hours"
+                      type="number"
+                      min="0"
+                      max="720"
+                      step="1"
+                      className={`w-full rounded-lg border bg-white px-3 py-2.5 pr-12 text-sm outline-none focus:border-[#006068] ${
+                        touched.refundCutoffHours && errors.refundCutoffHours ? 'border-[#ba1a1a]' : 'border-[#bec8ca]'
+                      }`}
+                      value={form.refundCutoffHours}
+                      onChange={(event) => update('refundCutoffHours', event.target.value)}
+                      onBlur={() => touch('refundCutoffHours')}
+                    />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#6f797a]">giờ</span>
+                  </div>
+                  {touched.refundCutoffHours && errors.refundCutoffHours && (
+                    <p className="mt-1 text-xs text-[#ba1a1a]">{errors.refundCutoffHours}</p>
+                  )}
+                </div>
+              </div>
+            )}
           </FormCard>
         </div>
 
