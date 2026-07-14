@@ -4,6 +4,8 @@
 // tránh lặp lại trong các controller.
 // ============================================================
 
+const { normalizeRefundFeeRate } = require('./refundService');
+
 // --- Trạng thái điểm tham quan ---
 // FE chỉ dùng 'active' | 'inactive'; DB dùng AttractionStatus đầy đủ.
 function attractionStatusToClient(dbStatus, publicationStatus) {
@@ -109,7 +111,9 @@ function toAttractionListItem(attraction) {
     publicationStatus: attraction.publicationStatus || (
       attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
     ),
-    requiresManualApproval: Boolean(attraction.requiresManualApproval),
+    requiresManualApproval: Boolean(
+      draft?.requiresManualApproval ?? attraction.requiresManualApproval,
+    ),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,
@@ -143,7 +147,9 @@ function toAttractionDetail(attraction) {
     publicationStatus: attraction.publicationStatus || (
       attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
     ),
-    requiresManualApproval: Boolean(attraction.requiresManualApproval),
+    requiresManualApproval: Boolean(
+      draft?.requiresManualApproval ?? attraction.requiresManualApproval,
+    ),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,
@@ -168,6 +174,11 @@ function toTicket(ticket) {
     originalPrice: decimalToNumber(ticket.originalPrice),
     sellingPrice: decimalToNumber(ticket.sellingPrice),
     refundPolicy: refundPolicyToClient(ticket.refundPolicy),
+    refundFeeRate: normalizeRefundFeeRate(
+      ticket.refundPolicy,
+      decimalToNumber(ticket.refundFeeRate),
+    ),
+    refundCutoffHours: Number(ticket.refundCutoffHours ?? 24),
     status: ticketStatusToClient(ticket.status),
   };
 }

@@ -22,7 +22,7 @@ CHÍNH SÁCH ĐẶT VÉ:
 - Một số điểm tham quan yêu cầu đối tác duyệt đơn thủ công trước khi vé được xác nhận (thường trong vòng 24h).
 
 CHÍNH SÁCH HOÀN/ĐỔI VÉ (tuỳ theo từng loại vé, ghi rõ trên trang chi tiết vé):
-- FREE_CANCELLATION: Miễn phí hủy/hoàn tiền nếu hủy trước thời gian quy định (thường 24-48h trước giờ tham quan).
+- FREE_CANCELLATION: Miễn phí hủy/hoàn tiền nếu gửi yêu cầu trước ngày tham quan.
 - REFUND_WITH_FEE: Được hoàn tiền nhưng tính phí hủy (theo % giá vé, hiển thị cụ thể trên vé).
 - NON_REFUNDABLE: Không hỗ trợ hoàn/đổi vé sau khi đã thanh toán thành công.
 - Mọi yêu cầu hoàn/đổi vé thực hiện qua mục "Vé của tôi" hoặc liên hệ hỗ trợ qua hệ thống Support Ticket.

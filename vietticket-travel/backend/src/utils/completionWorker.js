@@ -16,14 +16,16 @@ function startOfTodayVn(now = new Date()) {
   return new Date(`${todayInVietnam(now)}T00:00:00.000Z`);
 }
 
-// Chỉ đơn đã check-in toàn bộ vé mới được COMPLETED. Đơn đã qua ngày nhưng
-// không sử dụng được đánh dấu NO_SHOW để không mở quyền đánh giá sai.
+// Sau khi ngày tham quan kết thúc: đơn đã sử dụng ít nhất một vé được COMPLETED,
+// các vé còn lại hết hiệu lực; đơn không sử dụng vé nào được đánh dấu NO_SHOW.
+// Nếu toàn bộ vé được quét trong ngày, staffController sẽ COMPLETED đơn ngay.
 // Tách riêng khỏi timer để test được. Trả về số đơn đã hoàn tất.
 async function sweepCompletedBookings({ now = new Date() } = {}) {
   const cutoff = startOfTodayVn(now);
 
   // updateMany không lọc được theo quan hệ -> tìm id trước rồi cập nhật hàng loạt.
-  // Đơn hàng có ít nhất 1 vé đã check-in (status = USED) được coi là hoàn thành (COMPLETED).
+  // Với booking nhóm, một phần khách có thể không đến. Sau khi ngày tham quan kết thúc,
+  // chỉ cần có vé USED là dịch vụ đã được thực hiện và booking được coi là hoàn tất.
   const completed = await prisma.booking.findMany({
     where: {
       status: 'CONFIRMED',

@@ -12,6 +12,7 @@
 
 const prisma = require('../config/prisma');
 const { getTicketAvailability } = require('./availabilityService');
+const { publicAttractionWhere } = require('./catalogVisibilityService');
 
 const CITY_ALIASES = [
   { aliases: ['da nang', 'danang'], terms: ['Đà Nẵng'] },
@@ -132,11 +133,7 @@ function buildCatalogWhere({ city, category, includeCategory = true }) {
   const cityTerms = expandCityTerms(city);
   const categoryTerms = includeCategory ? expandCategoryTerms(category) : [];
 
-  return {
-    publishedAt: { not: null },
-    publicationStatus: 'ACTIVE',
-    archivedAt: null,
-    status: { not: 'SUSPENDED' },
+  return publicAttractionWhere({
     ticketProducts: {
       some: { status: 'ACTIVE', archivedAt: null },
     },
@@ -154,7 +151,7 @@ function buildCatalogWhere({ city, category, includeCategory = true }) {
           },
         }
       : {}),
-  };
+  });
 }
 
 async function findCatalog({ city, category, limit, includeCategory = true }) {

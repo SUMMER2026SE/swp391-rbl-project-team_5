@@ -1,5 +1,8 @@
 'use strict';
 
+const { isBookingCutoffPassed } = require('../utils/activityTime');
+const { isTicketProductSaleEnabled } = require('./catalogVisibilityService');
+
 function parseOpenDays(csv) {
   if (!csv) return [true, true, true, true, true, true, true];
   const values = String(csv)
@@ -24,6 +27,7 @@ async function getBookableSchedule(client, ticketProductId, date) {
       },
       attraction: {
         include: {
+          partner: { select: { status: true } },
           specialDates: { where: { date }, take: 1 },
           timeSlots: {
             where: { ticketProductId: null, isActive: true },
@@ -36,14 +40,7 @@ async function getBookableSchedule(client, ticketProductId, date) {
 
   const attraction = product?.attraction;
   if (
-    !product ||
-    product.status !== 'ACTIVE' ||
-    product.archivedAt ||
-    !attraction ||
-    !attraction.publishedAt ||
-    attraction.publicationStatus !== 'ACTIVE' ||
-    attraction.status === 'SUSPENDED' ||
-    attraction.archivedAt
+    !isTicketProductSaleEnabled(product)
   ) {
     const error = new Error('Gói vé hiện không khả dụng.');
     error.statusCode = 404;
@@ -88,7 +85,7 @@ function getSlotCapacity(schedule, slot) {
   );
 }
 
-async function getTicketAvailability(client, ticketProductId, date) {
+async function getTicketAvailability(client, ticketProductId, date, { now = new Date() } = {}) {
   const schedule = await getBookableSchedule(client, ticketProductId, date);
 
   if (schedule.isClosed) {
@@ -122,13 +119,13 @@ async function getTicketAvailability(client, ticketProductId, date) {
 
   const productAvailable = Math.max(
     0,
-    Number(dailyStock?.capacity ?? getProductCapacity(schedule))
+    getProductCapacity(schedule)
       - Number(dailyStock?.bookedQuantity || 0)
       - Number(dailyStock?.heldQuantity || 0),
   );
   const attractionAvailable = Math.max(
     0,
-    Number(attractionStock?.capacity ?? schedule.dayCapacity)
+    schedule.dayCapacity
       - Number(attractionStock?.bookedQty || 0)
       - Number(attractionStock?.heldQty || 0),
   );
@@ -137,6 +134,12 @@ async function getTicketAvailability(client, ticketProductId, date) {
   const slots = schedule.slots.length > 0
     ? schedule.slots.map((slot) => {
         const stock = stockBySlot.get(slot.id);
+        const cutoffPassed = isBookingCutoffPassed({
+          date,
+          timeSlot: slot,
+          attraction: schedule.attraction,
+          now,
+        });
         const slotAvailable = Math.max(
           0,
           getSlotCapacity(schedule, slot)
@@ -151,10 +154,11 @@ async function getTicketAvailability(client, ticketProductId, date) {
           maxCapacity: getSlotCapacity(schedule, slot),
           slotAvailable,
           availableTickets: Math.min(
-            slotAvailable,
-            productAvailable,
-            attractionAvailable,
+            cutoffPassed ? 0 : slotAvailable,
+            cutoffPassed ? 0 : productAvailable,
+            cutoffPassed ? 0 : attractionAvailable,
           ),
+          bookingClosed: cutoffPassed,
         };
       })
     : [{
@@ -164,7 +168,18 @@ async function getTicketAvailability(client, ticketProductId, date) {
         endTime: schedule.attraction.closeTime || null,
         label: 'Ve su dung trong ngay',
         maxCapacity: Math.min(getProductCapacity(schedule), schedule.dayCapacity),
-        availableTickets: Math.min(productAvailable, attractionAvailable),
+        availableTickets: isBookingCutoffPassed({
+          date,
+          attraction: schedule.attraction,
+          now,
+        })
+          ? 0
+          : Math.min(productAvailable, attractionAvailable),
+        bookingClosed: isBookingCutoffPassed({
+          date,
+          attraction: schedule.attraction,
+          now,
+        }),
       }];
 
   return {

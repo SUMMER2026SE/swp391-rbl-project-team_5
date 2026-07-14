@@ -12,7 +12,10 @@ function isValidTime(value) {
 }
 
 function isValidDate(value) {
-  return DATE_REGEX.test(String(value || '')) && !Number.isNaN(new Date(value).getTime());
+  const dateKey = String(value || '');
+  if (!DATE_REGEX.test(dateKey)) return false;
+  const parsed = new Date(`${dateKey}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === dateKey;
 }
 
 // --- Hồ sơ KYC đối tác ---
@@ -29,7 +32,11 @@ function validateKyc(body) {
     return 'Vui lòng tải lên giấy phép kinh doanh.';
   }
 
-  if (body.taxCode && !/^\d{10}(\d{3})?$/.test(String(body.taxCode).trim())) {
+  if (!isNonEmptyString(body.taxCode)) {
+    return 'Vui lòng nhập mã số thuế.';
+  }
+
+  if (!/^\d{10}(\d{3})?$/.test(String(body.taxCode).trim())) {
     return 'Mã số thuế phải gồm 10 hoặc 13 chữ số.';
   }
 
@@ -140,12 +147,31 @@ function validateTicket(body, { partial = false } = {}) {
     }
   }
 
-  // refundFeeRate là PHÂN SỐ trong [0,1] (vd 0.1 = 10%). Chặn giá trị sai đơn vị
-  // (vd nhập 10 nghĩa là 10% -> phí 1000% -> khách nhận 0đ).
+  const normalizedPolicy = has('refundPolicy')
+    ? String(body.refundPolicy).toUpperCase()
+    : null;
+  const isPartialRefund = ['PARTIAL', 'REFUND_WITH_FEE'].includes(normalizedPolicy);
+
+  if (isPartialRefund && (!has('refundFeeRate') || body.refundFeeRate === '')) {
+    return 'Vui lòng nhập phí hoàn/hủy cho chính sách hoàn một phần.';
+  }
+
+  // refundFeeRate là phân số (vd 0.1 = 10%). Với hoàn một phần, 0% và 100%
+  // phải dùng chính sách hoàn toàn phần hoặc không hoàn để tránh diễn giải mơ hồ.
   if (has('refundFeeRate') && body.refundFeeRate !== null && body.refundFeeRate !== '') {
     const feeRate = Number(body.refundFeeRate);
     if (!Number.isFinite(feeRate) || feeRate < 0 || feeRate > 1) {
       return 'Phí hoàn/hủy phải là tỉ lệ trong khoảng 0 đến 1 (vd 0.1 = 10%).';
+    }
+    if (isPartialRefund && (feeRate <= 0 || feeRate >= 1)) {
+      return 'Phí hoàn/hủy một phần phải lớn hơn 0 và nhỏ hơn 1 (từ 1% đến 99%).';
+    }
+  }
+
+  if (has('refundCutoffHours')) {
+    const cutoffHours = Number(body.refundCutoffHours);
+    if (!Number.isInteger(cutoffHours) || cutoffHours < 0 || cutoffHours > 720) {
+      return 'Thời hạn hủy phải là số giờ nguyên từ 0 đến 720.';
     }
   }
 

@@ -61,89 +61,22 @@ function computeReviewDeadlineUtc(visitDateUtc, endTimeVn) {
 
 /**
  * Kiểm tra booking có đủ điều kiện để đánh giá không.
+ * SRS yêu cầu trạng thái phải đúng COMPLETED; việc chuyển trạng thái do luồng
+ * check-in (khi đã dùng toàn bộ vé) hoặc completion worker (sau ngày tham quan) đảm nhiệm.
  *
- * Điều kiện:
- *  1. status là COMPLETED → luôn được (worker đã xác nhận xong).
- *  2. status là CONFIRMED:
- *     a. Có ít nhất 1 ticketInstance USED (đã check-in).
- *     b. Thời điểm hiện tại đã qua giờ kết thúc khung giờ tham quan (giờ VN).
- *  3. Mọi status khác (CANCELLED, NO_SHOW, REFUNDED, v.v.) → không được.
- *
- * @param {object} booking - Booking từ Prisma, phải include:
- *   booking.status
- *   booking.snapshotVisitDate | booking.reservation.date
- *   booking.reservation.timeSlot  (có thể null)
- *   booking.ticketInstances[]     (mảng { status: string })
- * @param {Date} [now] - Thời điểm hiện tại (mặc định = new Date())
+ * @param {object} booking Booking từ Prisma, cần có booking.status.
  * @returns {{ allowed: boolean, reason?: string }}
  */
-function isReviewEligible(booking, now = new Date()) {
+function isReviewEligible(booking) {
   const status = (booking.status || '').toUpperCase();
 
-  // COMPLETED → luôn được
   if (status === 'COMPLETED') {
     return { allowed: true };
   }
-
-  // Chỉ xét thêm CONFIRMED
-  if (status !== 'CONFIRMED') {
-    return {
-      allowed: false,
-      reason: 'Bạn chỉ được đánh giá sau khi đã tham quan và khung giờ kết thúc.',
-    };
-  }
-
-  // --- CONFIRMED ---
-
-  // Điều kiện a: phải có ít nhất 1 vé đã USED
-  const instances = Array.isArray(booking.ticketInstances) ? booking.ticketInstances : [];
-  const hasUsed = instances.some((t) => (t.status || '').toUpperCase() === 'USED');
-  if (!hasUsed) {
-    return {
-      allowed: false,
-      reason: 'Bạn chỉ được đánh giá sau khi đã check-in ít nhất một vé.',
-    };
-  }
-
-  // Điều kiện b: đã qua giờ kết thúc tham quan
-  const visitDateRaw = booking.snapshotVisitDate ?? booking.reservation?.date;
-  if (!visitDateRaw) {
-    // Không có ngày tham quan → không thể xác định → không cho review từ CONFIRMED
-    return {
-      allowed: false,
-      reason: 'Không xác định được ngày tham quan.',
-    };
-  }
-
-  const visitDateUtc = new Date(visitDateRaw);
-  if (isNaN(visitDateUtc.getTime())) {
-    return {
-      allowed: false,
-      reason: 'Ngày tham quan không hợp lệ.',
-    };
-  }
-
-  // endTime lấy từ reservation.timeSlot (ưu tiên) hoặc snapshotTimeSlotLabel
-  let endTimeVn = booking.reservation?.timeSlot?.endTime ?? null;
-
-  // Fallback: parse từ snapshotTimeSlotLabel "HH:MM - HH:MM"
-  if (!endTimeVn && booking.snapshotTimeSlotLabel) {
-    const parts = booking.snapshotTimeSlotLabel.split('-');
-    if (parts.length >= 2) {
-      endTimeVn = parts[parts.length - 1].trim() || null;
-    }
-  }
-
-  const deadline = computeReviewDeadlineUtc(visitDateUtc, endTimeVn);
-
-  if (now < deadline) {
-    return {
-      allowed: false,
-      reason: 'Khung giờ tham quan chưa kết thúc. Vui lòng thử lại sau.',
-    };
-  }
-
-  return { allowed: true };
+  return {
+    allowed: false,
+    reason: 'Bạn chỉ được đánh giá sau khi đơn đã hoàn thành.',
+  };
 }
 
 module.exports = { isReviewEligible, computeReviewDeadlineUtc, parseTimeToMinutes };
