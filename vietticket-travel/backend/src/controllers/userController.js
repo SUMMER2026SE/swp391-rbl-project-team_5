@@ -36,7 +36,7 @@ async function getProfile(req, res, next) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     return res.json({ user: sanitizeUser(user) });
@@ -99,7 +99,7 @@ async function updateProfile(req, res, next) {
           },
         },
       },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     return res.json({
@@ -120,7 +120,7 @@ async function uploadAvatar(req, res, next) {
     // Delete old avatar file if it exists on local storage
     const existingUser = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     const oldAvatarUrl = existingUser?.profile?.avatarUrl;
@@ -153,7 +153,7 @@ async function uploadAvatar(req, res, next) {
           },
         },
       },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     return res.json({
@@ -203,10 +203,22 @@ async function changePassword(req, res, next) {
 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash },
-    });
+    const sessionRevokeWhere = {
+      userId: user.id,
+      revokedAt: null,
+      ...(req.authSession?.id ? { id: { not: req.authSession.id } } : {}),
+    };
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash },
+      }),
+      prisma.authSession.updateMany({
+        where: sessionRevokeWhere,
+        data: { revokedAt: new Date() },
+      }),
+    ]);
 
     return res.json({ message: 'Cập nhật mật khẩu thành công.' });
   } catch (error) {

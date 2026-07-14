@@ -153,7 +153,7 @@ async function createReview(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé của bạn.' });
     }
 
-    // Cho phép review khi: COMPLETED, hoặc CONFIRMED + đã check-in ít nhất 1 vé + đã qua giờ tham quan.
+    // SRS quy định chỉ booking COMPLETED mới được đánh giá.
     const eligibility = isReviewEligible(booking);
     if (!eligibility.allowed) {
       return res.status(400).json({ message: eligibility.reason });

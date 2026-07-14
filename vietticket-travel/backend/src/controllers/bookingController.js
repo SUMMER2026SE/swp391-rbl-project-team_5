@@ -1,6 +1,7 @@
 const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
+const { isTicketProductSaleEnabled } = require('../services/catalogVisibilityService');
 
 
 const { Decimal } = Prisma;
@@ -90,6 +91,7 @@ function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
     snapshotUnitPrice: product.sellingPrice,
     snapshotRefundPolicy: product.refundPolicy || 'NON_REFUNDABLE',
     snapshotRefundFeeRate: product.refundFeeRate || 0,
+    snapshotRefundCutoffHours: product.refundCutoffHours ?? 24,
     snapshotVisitDate: reservation.date,
     snapshotTimeSlotLabel: reservation.timeSlot
       ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
@@ -119,6 +121,7 @@ function getBookingSnapshotView(booking) {
       unitPrice: product.sellingPrice,
       refundPolicy: product.refundPolicy,
       refundFeeRate: product.refundFeeRate,
+      refundCutoffHours: product.refundCutoffHours ?? 24,
     };
   }
 
@@ -137,6 +140,8 @@ function getBookingSnapshotView(booking) {
     unitPrice: booking.snapshotUnitPrice,
     refundPolicy: booking.snapshotRefundPolicy || product.refundPolicy,
     refundFeeRate: booking.snapshotRefundFeeRate ?? product.refundFeeRate,
+    refundCutoffHours:
+      booking.snapshotRefundCutoffHours ?? product.refundCutoffHours ?? 24,
   };
 }
 
@@ -216,16 +221,19 @@ function toBookingResponse(booking) {
     paymentMethod: booking.paymentMethod || '',
     refundPolicy: snapshot.refundPolicy,
     refundFeeRate: decimalToNumber(snapshot.refundFeeRate),
+    refundCutoffHours: Number(snapshot.refundCutoffHours ?? 24),
     expiresAt: reservation.expiresAt,
     createdAt: booking.createdAt,
     updatedAt: booking.updatedAt,
     reviewed: !!booking.review,
     rating: booking.review?.rating || 0,
-    // Yêu cầu hoàn tiền gần nhất (mỗi đơn tối đa 1) để UI hiện đúng trạng thái
-    // chờ duyệt / đã duyệt / bị từ chối kèm lý do.
+    // Yêu cầu hoàn tiền gần nhất; một booking có thể có thêm yêu cầu riêng
+    // cho từng giao dịch thanh toán trùng.
     refundRequest: booking.refundRequests?.[0]
       ? {
           id: booking.refundRequests[0].id,
+          type: booking.refundRequests[0].type,
+          mandatory: booking.refundRequests[0].mandatory,
           status: booking.refundRequests[0].status,
           amount: decimalToNumber(booking.refundRequests[0].amount),
           reason: booking.refundRequests[0].reason,
@@ -528,6 +536,7 @@ async function createBooking(req, res, next) {
               include: {
                 attraction: {
                   include: {
+                    partner: { select: { commissionRate: true, status: true } },
                     images: {
                       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
                       take: 1,
@@ -551,6 +560,11 @@ async function createBooking(req, res, next) {
         }
         if (reservation.expiresAt <= now) {
           const error = new Error('Đơn giữ chỗ đã hết hạn.');
+          error.statusCode = 409;
+          throw error;
+        }
+        if (!isTicketProductSaleEnabled(reservation.ticketProduct)) {
+          const error = new Error('Gói vé đã tạm dừng bán và không thể tạo đơn mới.');
           error.statusCode = 409;
           throw error;
         }
@@ -579,6 +593,16 @@ async function createBooking(req, res, next) {
           error.statusCode = 400;
           throw error;
         }
+        const rawCommissionRate = Number(
+          reservation.ticketProduct.attraction.partner?.commissionRate ?? 0.10,
+        );
+        const commissionRate = Number.isFinite(rawCommissionRate)
+          ? Math.min(Math.max(rawCommissionRate, 0), 1)
+          : 0.10;
+        const commissionAmount = totalAmount
+          .mul(commissionRate)
+          .toDecimalPlaces(2);
+        const partnerNetAmount = totalAmount.minus(commissionAmount);
 
         if (voucher) {
           const usageWhere =
@@ -616,6 +640,9 @@ async function createBooking(req, res, next) {
             email,
             phone: phone || null,
             note: note || null,
+            commissionRateSnapshot: commissionRate,
+            commissionAmountSnapshot: commissionAmount,
+            partnerNetAmountSnapshot: partnerNetAmount,
             ...buildBookingSnapshot(reservation, now),
           },
         });

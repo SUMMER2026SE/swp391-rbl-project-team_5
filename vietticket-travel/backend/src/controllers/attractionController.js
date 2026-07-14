@@ -17,6 +17,10 @@ const {
   resolveActiveCategory,
   validateSubmissionSnapshot,
 } = require('../services/attractionWorkflowService');
+const {
+  isAttractionSaleEnabled,
+  publicAttractionWhere,
+} = require('../services/catalogVisibilityService');
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -293,11 +297,6 @@ async function updateAttraction(req, res, next) {
     }
 
     const data = buildAttractionData(req.body);
-    const operationalData = {};
-    if (data.requiresManualApproval !== undefined) {
-      operationalData.requiresManualApproval = data.requiresManualApproval;
-      delete data.requiresManualApproval;
-    }
 
     if (hasPublishedVersion(existing)) {
       let cat = null;
@@ -318,7 +317,6 @@ async function updateAttraction(req, res, next) {
       await prisma.attraction.update({
         where: { id: existing.id },
         data: {
-          ...operationalData,
           draftData: merged,
           status: 'DRAFT',
           rejectionReason: null,
@@ -329,7 +327,7 @@ async function updateAttraction(req, res, next) {
       data.rejectionReason = null;
 
       await prisma.$transaction(async (tx) => {
-        await tx.attraction.update({ where: { id: existing.id }, data: { ...data, ...operationalData } });
+        await tx.attraction.update({ where: { id: existing.id }, data });
         if (req.body.category !== undefined) {
           await setCategory(tx, existing.id, req.body.category);
         }
@@ -670,12 +668,7 @@ async function searchAttractions(req, res, next) {
     }
 
     // Chỉ hiển thị địa điểm đang phát hành công khai (ẩn địa điểm đã tạm dừng bán vé).
-    const where = {
-      publishedAt: { not: null },
-      publicationStatus: 'ACTIVE',
-      archivedAt: null,
-      status: { not: 'SUSPENDED' },
-    };
+    const where = publicAttractionWhere();
     const andConditions = [];
 
     if (city) {
@@ -797,14 +790,10 @@ async function searchAttractions(req, res, next) {
 async function getMapPoints(req, res, next) {
   try {
     const items = await prisma.attraction.findMany({
-      where: {
-        publishedAt: { not: null },
-        publicationStatus: 'ACTIVE',
-        archivedAt: null,
-        status: { not: 'SUSPENDED' },
+      where: publicAttractionWhere({
         latitude: { not: null },
         longitude: { not: null },
-      },
+      }),
       select: {
         id: true,
         title: true,
@@ -844,6 +833,7 @@ async function getAttractionDetail(req, res, next) {
     const attraction = await prisma.attraction.findUnique({
       where: { id },
       include: {
+        partner: { select: { status: true } },
         images: true,
         categories: { include: { category: true } },
         ticketProducts: { where: { status: 'ACTIVE', archivedAt: null } },
@@ -852,10 +842,7 @@ async function getAttractionDetail(req, res, next) {
 
     if (
       !attraction
-      || attraction.archivedAt
-      || !attraction.publishedAt
-      || attraction.status === 'SUSPENDED'
-      || attraction.publicationStatus !== 'ACTIVE'
+      || !isAttractionSaleEnabled(attraction)
     ) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
     }
@@ -870,6 +857,7 @@ async function getAttractionDetail(req, res, next) {
       sellingPrice: t.sellingPrice,
       refundPolicy: t.refundPolicy,
       refundFeeRate: t.refundFeeRate,
+      refundCutoffHours: t.refundCutoffHours ?? 24,
     }));
 
     const result = {

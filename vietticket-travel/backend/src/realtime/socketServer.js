@@ -4,6 +4,7 @@ const prisma = require('../config/prisma');
 const { corsOptions } = require('../config/cors');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { AUTH_COOKIE_NAME } = require('../utils/authCookie');
+const { getEffectiveRoles, hasRole } = require('../utils/userRoles');
 const { setSocketServer } = require('./events');
 
 let io = null;
@@ -66,6 +67,7 @@ async function authenticateSocket(socket, next) {
           status: true,
           tokenVersion: true,
           employerPartnerId: true,
+          roleMemberships: { select: { role: true } },
           partnerProfile: {
             select: { id: true, status: true },
           },
@@ -89,13 +91,14 @@ async function authenticateSocket(socket, next) {
     }
 
     const approvedPartner =
-      user.role === 'PARTNER' && user.partnerProfile?.status === 'APPROVED'
+      hasRole(user, 'PARTNER') && user.partnerProfile?.status === 'APPROVED'
         ? user.partnerProfile
         : null;
 
     socket.user = {
       id: user.id,
       role: user.role,
+      roles: getEffectiveRoles(user),
       employerPartnerId: user.employerPartnerId || null,
       partnerProfileId: approvedPartner?.id || null,
     };
@@ -127,7 +130,7 @@ function initializeSocketServer(httpServer) {
   io.on('connection', (socket) => {
     socket.join(`user:${socket.user.id}`);
 
-    if (socket.user.role === 'PARTNER' && socket.user.partnerProfileId) {
+    if (hasRole(socket.user, 'PARTNER') && socket.user.partnerProfileId) {
       socket.join(`partner:${socket.user.partnerProfileId}`);
     }
 

@@ -4,9 +4,22 @@ const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
-const { releaseInventory, todayInVietnam } = require('../utils/refundService');
-const { refundViaVnpay } = require('./paymentController');
+const { todayInVietnam } = require('../utils/refundService');
+const { refundViaVnpay, queryVnpayTransaction } = require('./paymentController');
+const { createVnpRequestId } = require('../utils/vnpay');
+const {
+  REFUND_GATEWAY_OUTCOME,
+  assertRefundCanBeSubmitted,
+  buildGatewayTransactionData,
+  classifyVnpayRefundResult,
+  classifyVnpayReconciliationResult,
+  finalizeSuccessfulRefund,
+  findRefundTargetPayment,
+  isMandatoryRefundRequest,
+} = require('../services/refundLifecycleService');
 const { writeAuditLog } = require('../utils/auditLog');
+const { hasRole } = require('../utils/userRoles');
+const { getCheckinTimeBlockReason } = require('../utils/activityTime');
 const {
   sendRefundStatusEmail,
   sendReissueTicketEmail,
@@ -41,7 +54,7 @@ function getTicketAttractionId(instance) {
 }
 
 async function assertStaffAttractionAccess(client, user, attractionId) {
-  if (user.role === 'ADMIN') return;
+  if (hasRole(user, 'ADMIN')) return;
   if (!attractionId) {
     throw httpError(403, 'Không xác định được địa điểm của vé.');
   }
@@ -110,6 +123,18 @@ async function listRefundRequests(req, res, next) {
         skip,
         take: limit,
         include: {
+          refundTransactions: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              status: true,
+              gatewayResponseCode: true,
+              gatewayTransactionStatus: true,
+              gatewayTransactionId: true,
+              processedAt: true,
+            },
+          },
           booking: {
             include: {
               user: { select: { fullName: true, email: true } },
@@ -165,32 +190,25 @@ async function listRefundRequests(req, res, next) {
 
 async function processRefundRequest(req, res, next) {
   let refundClaimed = false;
-  let gatewayRefundDone = false;
+  let keepProcessing = false;
   let claimedRefundId = null;
-  let refundTransactionId = null;
+
   try {
     assertPlatformRefundStaff(req.user);
 
     const { refundId } = req.params;
     const action = String(req.body?.action || '').trim().toUpperCase();
     const staffNotes = String(req.body?.staffNotes || '').trim() || null;
-
     if (!REFUND_ACTIONS.has(action)) {
-      return res.status(400).json({
-        success: false,
-        error: { message: 'action phải là APPROVED hoặc REJECTED.' },
-      });
+      throw httpError(400, 'action phải là APPROVED hoặc REJECTED.');
     }
-
-    // staffNotes bắt buộc khi từ chối để gửi email giải thích cho khách.
     if (action === 'REJECTED' && !staffNotes) {
-      return res.status(400).json({
-        success: false,
-        error: { message: 'Vui lòng nhập lý do từ chối để thông báo cho khách hàng.' },
-      });
+      throw httpError(400, 'Vui lòng nhập lý do từ chối để thông báo cho khách hàng.');
+    }
+    if (staffNotes && staffNotes.length > 2000) {
+      throw httpError(400, 'Ghi chú xử lý không được vượt quá 2000 ký tự.');
     }
 
-    // 1) Đọc trước (NGOÀI transaction) để có dữ liệu gọi cổng thanh toán.
     const refundRequest = await prisma.refundRequest.findUnique({
       where: { id: refundId },
       include: {
@@ -198,25 +216,27 @@ async function processRefundRequest(req, res, next) {
           include: {
             user: { select: { fullName: true, email: true } },
             payments: {
-              where: { status: 'SUCCESS', isDuplicate: false },
-              orderBy: { createdAt: 'desc' },
+              where: { status: 'SUCCESS' },
+              orderBy: { createdAt: 'asc' },
             },
+            refundTransactions: true,
           },
+        },
+        refundTransactions: {
+          orderBy: { createdAt: 'desc' },
+          include: { payment: true },
         },
       },
     });
 
-    if (!refundRequest) {
-      throw httpError(404, 'Không tìm thấy yêu cầu hoàn tiền.');
-    }
+    if (!refundRequest) throw httpError(404, 'Không tìm thấy yêu cầu hoàn tiền.');
     if (refundRequest.status !== 'PENDING') {
-      throw httpError(409, 'Yêu cầu này đã được xử lý trước đó.');
+      throw httpError(409, 'Yêu cầu này không còn ở trạng thái chờ xử lý.');
     }
-    if (refundRequest.booking.status === 'REFUNDED') {
+    if (refundRequest.booking.status === 'REFUNDED' && refundRequest.type !== 'DUPLICATE_PAYMENT') {
       throw httpError(409, 'Đơn đặt vé này đã được hoàn tiền.');
     }
-
-    if (action === 'REJECTED' && refundRequest.booking.refundRequired) {
+    if (action === 'REJECTED' && isMandatoryRefundRequest(refundRequest)) {
       throw httpError(400, 'Không thể từ chối yêu cầu hoàn tiền bắt buộc.');
     }
 
@@ -229,228 +249,427 @@ async function processRefundRequest(req, res, next) {
       },
     });
     if (claimed.count !== 1) {
-      throw httpError(409, 'Yêu cầu này vừa được một nhân viên khác tiếp nhận xử lý.');
+      throw httpError(409, 'Yêu cầu vừa được một nhân viên khác tiếp nhận.');
     }
     refundClaimed = true;
     claimedRefundId = refundId;
 
-    // 2) Khi DUYỆT: nếu đơn trả online qua VNPay -> gọi cổng hoàn tiền TRƯỚC.
-    //    Nếu cổng từ chối -> dừng, KHÔNG đụng DB (đơn giữ nguyên REFUND_REQUESTED).
-    let finalStaffNotes = staffNotes;
-    if (action === 'APPROVED') {
-      const onlinePayment = refundRequest.booking.payments.find((p) =>
-        /vnpay/i.test(p.paymentGateway),
-      );
-
-      if (onlinePayment) {
-        const total = Number(refundRequest.booking.totalAmount);
-        const amount = Number(refundRequest.amount);
-        // 02 = hoàn toàn phần, 03 = hoàn một phần (khi có phí hủy).
-        const transactionType = amount >= total ? '02' : '03';
-        const gatewayRequestId = randomUUID();
-        const refundTransaction = await prisma.refundTransaction.create({
-          data: {
-            bookingId: refundRequest.booking.id,
-            paymentId: onlinePayment.id,
-            refundRequestId: refundRequest.id,
-            gatewayRequestId,
-            transactionType,
-            amount,
-            status: 'PROCESSING',
-            reason: refundRequest.reason,
-            processedById: req.user.id,
-            rawRequest: {
-              originalTransactionId: onlinePayment.transactionId,
-              orderInfo: `Hoan tien don hang ${refundRequest.booking.id}`,
-            },
-          },
-        });
-        refundTransactionId = refundTransaction.id;
-
-        const gateway = await refundViaVnpay({
-          payment: onlinePayment,
-          amount,
-          transactionType,
-          createBy: req.user.email,
-          ipAddr: getClientIp(req),
-          orderInfo: `Hoan tien don hang ${refundRequest.booking.id}`,
-          requestId: gatewayRequestId,
-        });
-
-        if (!gateway.success) {
-          await prisma.refundTransaction.update({
-            where: { id: refundTransaction.id },
-            data: {
-              status: 'FAILED',
-              rawResponse: gateway.raw,
-              processedAt: new Date(),
-            },
-          });
-          throw httpError(
-            502,
-            `Cổng VNPay từ chối hoàn tiền (mã ${gateway.responseCode || 'N/A'}).` +
-              (gateway.message ? ` ${gateway.message}` : ''),
-          );
-        }
-
-        gatewayRefundDone = true;
-        await prisma.refundTransaction.update({
-          where: { id: refundTransaction.id },
-          data: { rawResponse: gateway.raw },
-        });
-        const noteRefundOk = `VNPay refund OK (RequestNo gốc: ${onlinePayment.rawResponse?.vnp_TransactionNo || 'N/A'})`;
-        finalStaffNotes = [staffNotes, noteRefundOk].filter(Boolean).join(' | ');
-
-        // Lưu NGAY kết quả hoàn tiền của cổng vào Payment.rawResponse để có dữ liệu
-        // đối soát, kể cả khi transaction cập nhật trạng thái phía dưới thất bại.
-        try {
-          await prisma.payment.update({
-            where: { id: onlinePayment.id },
-            data: {
-              rawResponse: {
-                ...(onlinePayment.rawResponse || {}),
-                refund: gateway.raw,
-              },
-            },
-          });
-        } catch (persistError) {
-          console.error(
-            `[staff-refund] KHÔNG LƯU ĐƯỢC kết quả refund VNPay của booking ${refundRequest.booking.id} ` +
-              `(refund TransactionNo: ${gateway.raw?.vnp_TransactionNo || 'N/A'}):`,
-            persistError.message,
-          );
-        }
-      }
-    }
-
-    // 3) Cổng đã OK (hoặc đơn không trả online) -> mới ghi DB trong transaction.
-    let result;
-    try {
-      result = await prisma.$transaction(
-      async (tx) => {
+    if (action === 'REJECTED') {
+      const updated = await prisma.$transaction(async (tx) => {
         const fresh = await tx.refundRequest.findUnique({
           where: { id: refundId },
-          include: {
-            booking: {
-              include: {
-                user: { select: { fullName: true, email: true } },
-                reservation: { include: { ticketProduct: true } },
-              },
-            },
-          },
+          include: { booking: true },
         });
-
         if (!fresh || fresh.status !== 'PROCESSING') {
-          throw httpError(409, 'Yêu cầu này đã được xử lý trước đó.');
+          throw httpError(409, 'Yêu cầu không còn ở trạng thái đang xử lý.');
         }
-        if (fresh.booking.status === 'REFUNDED') {
-          throw httpError(409, 'Đơn đặt vé này đã được hoàn tiền.');
+        if (isMandatoryRefundRequest(fresh)) {
+          throw httpError(400, 'Không thể từ chối yêu cầu hoàn tiền bắt buộc.');
         }
-
-        const booking = fresh.booking;
-
-        if (action === 'APPROVED') {
-          await releaseInventory(tx, booking);
-          await tx.ticketInstance.updateMany({
-            where: { bookingId: booking.id },
-            data: { status: 'REFUNDED' },
-          });
+        if (fresh.booking.status === 'REFUND_REQUESTED') {
           await tx.booking.update({
-            where: { id: booking.id },
-            data: { status: 'REFUNDED', refundRequired: false },
-          });
-        } else if (booking.status === 'REFUND_REQUESTED') {
-          // Khách tự yêu cầu hoàn -> từ chối thì trả đơn về trạng thái đã xác nhận.
-          await tx.booking.update({
-            where: { id: booking.id },
-            data: { status: 'CONFIRMED', refundRequired: false },
+            where: { id: fresh.bookingId },
+            data: {
+              status: fresh.bookingStatusBeforeRequest || 'CONFIRMED',
+              refundRequired: false,
+            },
           });
         }
-        // Đơn CANCELLED (partner từ chối / thu tiền nhưng mất vé) thì giữ nguyên
-        // trạng thái và refundRequired để tiếp tục đối soát — tiền của khách vẫn phải hoàn.
-
-        const updated = await tx.refundRequest.update({
+        return tx.refundRequest.update({
           where: { id: refundId },
           data: {
-            status: action,
-            staffNotes: finalStaffNotes,
+            status: 'REJECTED',
+            staffNotes,
             processedById: req.user.id,
             processedAt: new Date(),
             processingStartedAt: null,
           },
         });
-
-          return { updated, booking, amount: fresh.amount };
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       refundClaimed = false;
-      if (refundTransactionId) {
+
+      await writeAuditLog({
+        req,
+        action: 'REFUND_REQUEST_REJECTED',
+        entityType: 'RefundRequest',
+        entityId: refundId,
+        metadata: { bookingId: refundRequest.bookingId, staffNotes },
+      });
+      await sendRefundStatusEmail({
+        to: refundRequest.booking.user.email,
+        fullName: refundRequest.booking.user.fullName,
+        bookingId: refundRequest.booking.id,
+        action: 'REJECTED',
+        refundAmount: Number(refundRequest.amount),
+        staffNotes,
+      }).catch((emailError) => {
+        console.error('[staff-refund] Không thể gửi email:', emailError.message);
+      });
+      return res.json({ success: true, data: updated });
+    }
+
+    const payment = findRefundTargetPayment(refundRequest);
+    if (!payment) {
+      throw httpError(422, 'Không tìm thấy giao dịch VNPay thành công tương ứng để hoàn tiền.');
+    }
+
+    const existingSuccess = refundRequest.refundTransactions.find(
+      (transaction) => transaction.status === 'SUCCESS',
+    );
+    const existingUncertain = refundRequest.refundTransactions.find((transaction) =>
+      ['PENDING', 'PROCESSING', 'NEEDS_RECONCILIATION'].includes(transaction.status),
+    );
+    if (existingUncertain) {
+      keepProcessing = true;
+      refundClaimed = false;
+      return res.status(202).json({
+        success: true,
+        data: {
+          status: 'PROCESSING',
+          requiresReconciliation: true,
+          transactionId: existingUncertain.id,
+        },
+        message: 'Khoản hoàn đang được xử lý hoặc cần đối soát, hệ thống không gửi lại yêu cầu.',
+      });
+    }
+
+    let refundTransaction = existingSuccess;
+    let gatewayResult = null;
+    if (!refundTransaction) {
+      const { requestedAmount, capturedAmount } = assertRefundCanBeSubmitted({
+        refundRequest,
+        payment,
+        transactions: refundRequest.booking.refundTransactions,
+      });
+      const transactionType = requestedAmount >= capturedAmount ? '02' : '03';
+      const orderInfo = refundRequest.type === 'DUPLICATE_PAYMENT'
+        ? `Hoan tien giao dich trung don hang ${refundRequest.booking.id}`
+        : `Hoan tien don hang ${refundRequest.booking.id}`;
+
+      refundTransaction = await prisma.refundTransaction.create({
+        data: {
+          bookingId: refundRequest.booking.id,
+          paymentId: payment.id,
+          refundRequestId: refundRequest.id,
+          gatewayRequestId: createVnpRequestId(),
+          transactionType,
+          amount: requestedAmount,
+          status: 'PROCESSING',
+          reason: refundRequest.reason,
+          processedById: req.user.id,
+          submittedAt: new Date(),
+          rawRequest: { originalTransactionId: payment.transactionId, orderInfo },
+        },
+      });
+
+      try {
+        gatewayResult = await refundViaVnpay({
+          payment,
+          amount: requestedAmount,
+          transactionType,
+          createBy: req.user.email,
+          ipAddr: getClientIp(req),
+          orderInfo,
+          requestId: refundTransaction.gatewayRequestId,
+        });
+      } catch (gatewayError) {
+        if (gatewayError.gatewayAttempted !== true) {
+          await prisma.$transaction(async (tx) => {
+            await tx.refundTransaction.update({
+              where: { id: refundTransaction.id },
+              data: {
+                status: 'FAILED',
+                rawResponse: { error: gatewayError.message },
+                processedAt: new Date(),
+              },
+            });
+            await tx.refundRequest.update({
+              where: { id: refundId },
+              data: {
+                status: 'PENDING',
+                processedById: null,
+                processingStartedAt: null,
+                staffNotes: `Không thể gửi yêu cầu sang VNPay: ${gatewayError.message}`,
+              },
+            });
+          });
+          refundClaimed = false;
+          throw gatewayError;
+        }
+        keepProcessing = true;
+        refundClaimed = false;
         await prisma.refundTransaction.update({
-          where: { id: refundTransactionId },
+          where: { id: refundTransaction.id },
           data: {
-            status: 'SUCCESS',
+            status: 'NEEDS_RECONCILIATION',
+            rawResponse: { error: gatewayError.message },
+            submittedAt: new Date(),
             processedAt: new Date(),
           },
         });
+        return res.status(202).json({
+          success: true,
+          data: { status: 'PROCESSING', requiresReconciliation: true },
+          message: 'Chưa xác định được kết quả từ VNPay. Yêu cầu đã chuyển sang đối soát và sẽ không bị gửi lặp.',
+        });
       }
-    } catch (txError) {
-      if (gatewayRefundDone) {
-        if (refundTransactionId) {
-          await prisma.refundTransaction.update({
-            where: { id: refundTransactionId },
+
+      const gatewayOutcome = classifyVnpayRefundResult(gatewayResult);
+      if (gatewayOutcome === REFUND_GATEWAY_OUTCOME.PENDING_RECONCILIATION) {
+        keepProcessing = true;
+        refundClaimed = false;
+        await prisma.refundTransaction.update({
+          where: { id: refundTransaction.id },
+          data: {
+            status: 'NEEDS_RECONCILIATION',
+            ...buildGatewayTransactionData(gatewayResult),
+            processedAt: new Date(),
+          },
+        });
+        return res.status(202).json({
+          success: true,
+          data: { status: 'PROCESSING', requiresReconciliation: true },
+          message: 'VNPay đang xử lý khoản hoàn. Hệ thống sẽ đối soát trước khi cập nhật hoàn tất.',
+        });
+      }
+      if (gatewayOutcome === REFUND_GATEWAY_OUTCOME.FAILED) {
+        await prisma.$transaction(async (tx) => {
+          await tx.refundTransaction.update({
+            where: { id: refundTransaction.id },
             data: {
-              status: 'NEEDS_RECONCILIATION',
+              status: 'FAILED',
+              ...buildGatewayTransactionData(gatewayResult),
               processedAt: new Date(),
             },
-          }).catch((persistError) => {
-            console.error(
-              '[staff-refund] Không thể đánh dấu giao dịch cần đối soát:',
-              persistError.message,
-            );
           });
-        }
-        // Tiền ĐÃ hoàn qua cổng nhưng DB chưa cập nhật được -> cần đối soát thủ công.
-        console.error(
-          `[staff-refund][ĐỐI SOÁT] Cổng VNPay đã hoàn tiền cho booking ${refundRequest.booking.id} ` +
-            `nhưng cập nhật DB thất bại. Kiểm tra Payment.rawResponse.refund để đối soát. Lỗi: ${txError.message}`,
+          await tx.refundRequest.update({
+            where: { id: refundId },
+            data: {
+              status: 'PENDING',
+              processedById: null,
+              processingStartedAt: null,
+              staffNotes: `VNPay từ chối: ${gatewayResult.responseCode || 'N/A'} ${gatewayResult.message || ''}`.trim(),
+            },
+          });
+        });
+        refundClaimed = false;
+        throw httpError(
+          502,
+          `VNPay từ chối hoàn tiền (mã ${gatewayResult.responseCode || 'N/A'}). ${gatewayResult.message || ''}`.trim(),
         );
       }
-      throw txError;
     }
 
+    const finalStaffNotes = [
+      staffNotes,
+      gatewayResult
+        ? `VNPay refund ${gatewayResult.responseCode}/${gatewayResult.transactionStatus}`
+        : 'Đã đối soát giao dịch hoàn thành trước đó.',
+    ].filter(Boolean).join(' | ');
+
+    let updated;
     try {
-      await sendRefundStatusEmail({
-        to: result.booking.user.email,
-        fullName: result.booking.user.fullName,
-        bookingId: result.booking.id,
-        action,
-        refundAmount: Number(result.amount),
-        staffNotes,
-      });
-    } catch (emailError) {
-      console.error('[staff-refund] Không thể gửi email:', emailError.message);
+      updated = await prisma.$transaction(
+        (tx) => finalizeSuccessfulRefund(tx, {
+          refundRequestId: refundId,
+          refundTransactionId: refundTransaction.id,
+          processedById: req.user.id,
+          staffNotes: finalStaffNotes,
+          gatewayResult,
+        }),
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+      refundClaimed = false;
+    } catch (finalizeError) {
+      keepProcessing = true;
+      refundClaimed = false;
+      await prisma.refundTransaction.update({
+        where: { id: refundTransaction.id },
+        data: {
+          status: 'NEEDS_RECONCILIATION',
+          ...(gatewayResult ? buildGatewayTransactionData(gatewayResult) : {}),
+          processedAt: new Date(),
+        },
+      }).catch(() => {});
+      throw finalizeError;
     }
 
-    return res.json({ success: true, data: result.updated });
+    await writeAuditLog({
+      req,
+      action: 'REFUND_REQUEST_APPROVED',
+      entityType: 'RefundRequest',
+      entityId: refundId,
+      metadata: {
+        bookingId: refundRequest.bookingId,
+        amount: Number(refundRequest.amount),
+        transactionId: refundTransaction.id,
+      },
+    });
+    await sendRefundStatusEmail({
+      to: refundRequest.booking.user.email,
+      fullName: refundRequest.booking.user.fullName,
+      bookingId: refundRequest.booking.id,
+      action: 'APPROVED',
+      refundAmount: Number(refundRequest.amount),
+      staffNotes,
+    }).catch((emailError) => {
+      console.error('[staff-refund] Không thể gửi email:', emailError.message);
+    });
+
+    return res.json({ success: true, data: updated });
   } catch (error) {
-    if (refundClaimed && !gatewayRefundDone && claimedRefundId) {
-      try {
-        await prisma.refundRequest.updateMany({
-          where: { id: claimedRefundId, status: 'PROCESSING' },
+    if (refundClaimed && !keepProcessing && claimedRefundId) {
+      await prisma.refundRequest.updateMany({
+        where: { id: claimedRefundId, status: 'PROCESSING' },
+        data: {
+          status: 'PENDING',
+          processedById: null,
+          processingStartedAt: null,
+        },
+      }).catch((releaseError) => {
+        console.error(`[staff-refund] Không thể trả yêu cầu ${claimedRefundId} về hàng đợi:`, releaseError.message);
+      });
+    }
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        error: { message: error.message },
+      });
+    }
+    return next(error);
+  }
+}
+
+async function reconcileRefundRequest(req, res, next) {
+  try {
+    assertPlatformRefundStaff(req.user);
+    const { refundId } = req.params;
+    const refundRequest = await prisma.refundRequest.findUnique({
+      where: { id: refundId },
+      include: {
+        booking: { include: { user: { select: { fullName: true, email: true } } } },
+        refundTransactions: {
+          where: { status: { in: ['PROCESSING', 'NEEDS_RECONCILIATION'] } },
+          orderBy: { createdAt: 'desc' },
+          include: { payment: true },
+        },
+      },
+    });
+    if (!refundRequest) throw httpError(404, 'Không tìm thấy yêu cầu hoàn tiền.');
+    if (refundRequest.status !== 'PROCESSING') {
+      throw httpError(409, 'Chỉ yêu cầu đang xử lý mới có thể đối soát.');
+    }
+
+    const refundTransaction = refundRequest.refundTransactions[0];
+    if (!refundTransaction?.payment) {
+      throw httpError(422, 'Không tìm thấy giao dịch hoàn cần đối soát.');
+    }
+
+    let queryResult;
+    try {
+      queryResult = await queryVnpayTransaction({
+        payment: refundTransaction.payment,
+        ipAddr: getClientIp(req),
+        orderInfo: `Doi soat hoan tien don hang ${refundRequest.bookingId}`,
+      });
+    } catch (queryError) {
+      await prisma.refundTransaction.update({
+        where: { id: refundTransaction.id },
+        data: {
+          status: 'NEEDS_RECONCILIATION',
+          reconciledAt: new Date(),
+        },
+      });
+      throw queryError;
+    }
+
+    const outcome = classifyVnpayReconciliationResult(queryResult, refundTransaction);
+    const reconciliationData = {
+      gatewayResponseCode: queryResult.responseCode,
+      gatewayTransactionStatus: queryResult.transactionStatus,
+      gatewayTransactionId: String(queryResult.raw?.vnp_TransactionNo || '') || null,
+      rawResponse: {
+        ...(refundTransaction.rawResponse || {}),
+        reconciliation: queryResult.raw,
+      },
+      reconciledAt: new Date(),
+    };
+
+    if (outcome === REFUND_GATEWAY_OUTCOME.PENDING_RECONCILIATION) {
+      await prisma.refundTransaction.update({
+        where: { id: refundTransaction.id },
+        data: { status: 'NEEDS_RECONCILIATION', ...reconciliationData },
+      });
+      return res.status(202).json({
+        success: true,
+        data: { status: 'PROCESSING', requiresReconciliation: true },
+        message: 'VNPay chưa xác nhận khoản hoàn hoàn tất. Yêu cầu tiếp tục chờ đối soát.',
+      });
+    }
+
+    if (outcome === REFUND_GATEWAY_OUTCOME.FAILED) {
+      await prisma.$transaction(async (tx) => {
+        await tx.refundTransaction.update({
+          where: { id: refundTransaction.id },
+          data: { status: 'FAILED', ...reconciliationData, processedAt: new Date() },
+        });
+        await tx.refundRequest.update({
+          where: { id: refundId },
           data: {
             status: 'PENDING',
             processedById: null,
             processingStartedAt: null,
+            staffNotes: 'Đối soát xác nhận VNPay từ chối khoản hoàn. Có thể kiểm tra và thử lại.',
           },
         });
-      } catch (releaseError) {
-        console.error(
-          `[staff-refund] Không thể trả yêu cầu ${claimedRefundId} về hàng đợi:`,
-          releaseError.message,
-        );
-      }
+      });
+      return res.json({
+        success: true,
+        data: { status: 'PENDING', requiresReconciliation: false },
+        message: 'VNPay xác nhận khoản hoàn bị từ chối. Yêu cầu đã trở lại hàng chờ.',
+      });
     }
+
+    const updated = await prisma.$transaction(
+      async (tx) => {
+        await tx.refundTransaction.update({
+          where: { id: refundTransaction.id },
+          data: reconciliationData,
+        });
+        return finalizeSuccessfulRefund(tx, {
+          refundRequestId: refundId,
+          refundTransactionId: refundTransaction.id,
+          processedById: req.user.id,
+          staffNotes: 'Đã xác nhận hoàn tiền thành công qua đối soát VNPay.',
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    await writeAuditLog({
+      req,
+      action: 'REFUND_RECONCILED_SUCCESS',
+      entityType: 'RefundRequest',
+      entityId: refundId,
+      metadata: {
+        bookingId: refundRequest.bookingId,
+        transactionId: refundTransaction.id,
+        amount: Number(refundRequest.amount),
+      },
+    });
+    await sendRefundStatusEmail({
+      to: refundRequest.booking.user.email,
+      fullName: refundRequest.booking.user.fullName,
+      bookingId: refundRequest.bookingId,
+      action: 'APPROVED',
+      refundAmount: Number(refundRequest.amount),
+      staffNotes: 'Khoản hoàn đã được VNPay xác nhận thành công.',
+    }).catch((emailError) => {
+      console.error('[staff-refund] Không thể gửi email đối soát:', emailError.message);
+    });
+
+    return res.json({ success: true, data: updated });
+  } catch (error) {
     if (error.statusCode) {
       return res.status(error.statusCode).json({
         success: false,
@@ -609,6 +828,8 @@ function getCheckinBlockReason(instance, now = new Date()) {
       ? `Vé dùng cho ngày ${visitDay}, chưa tới ngày tham quan.`
       : `Vé dùng cho ngày ${visitDay}, đã quá ngày tham quan.`;
   }
+  const timeBlockReason = getCheckinTimeBlockReason(booking, now);
+  if (timeBlockReason) return timeBlockReason;
   return null;
 }
 
@@ -629,7 +850,11 @@ async function lookupTicketByQr(req, res, next) {
               include: {
                 timeSlot: true,
                 ticketProduct: {
-                  include: { attraction: { select: { id: true, title: true } } },
+                  include: {
+                    attraction: {
+                      select: { id: true, title: true, openTime: true, closeTime: true },
+                    },
+                  },
                 },
               },
             },
@@ -665,8 +890,9 @@ async function lookupTicketByQr(req, res, next) {
   }
 }
 
-// POST /api/staff/checkin/:token — check-in cả đơn (mọi vé VALID của booking → USED).
-// E-ticket hiển thị MỘT mã QR cho cả đơn nên check-in theo đơn, không theo từng vé lẻ.
+// POST /api/staff/checkin/:token — check-in đúng vé được quét.
+// Mỗi TicketInstance có QR riêng; quét một QR chỉ được dùng một vé để hỗ trợ
+// nhóm khách đến tách lượt và tránh vô tình khóa toàn bộ booking.
 async function checkInTicket(req, res, next) {
   try {
     const token = normalizeQrToken(req.params.token);
@@ -685,7 +911,11 @@ async function checkInTicket(req, res, next) {
                   include: {
                     timeSlot: true,
                     ticketProduct: {
-                      include: { attraction: { select: { id: true, title: true } } },
+                      include: {
+                        attraction: {
+                          select: { id: true, title: true, openTime: true, closeTime: true },
+                        },
+                      },
                     },
                   },
                 },
@@ -709,10 +939,8 @@ async function checkInTicket(req, res, next) {
         // updateMany với guard status VALID: hai nhân viên quét cùng lúc thì chỉ
         // một request thực sự check-in, request sau thấy count = 0 -> đã dùng.
         const checkedInAt = new Date();
-        // E-ticket hiển thị MỘT mã QR cho cả đơn -> check-in TẤT CẢ vé VALID của booking,
-        // không chỉ instance vừa quét (tránh đơn nhiều vé không bao giờ check-in đủ).
         const updated = await tx.ticketInstance.updateMany({
-          where: { bookingId: instance.bookingId, status: 'VALID' },
+          where: { id: instance.id, status: 'VALID' },
           data: {
             status: 'USED',
             checkedInAt,
@@ -721,6 +949,21 @@ async function checkInTicket(req, res, next) {
         });
         if (updated.count === 0) {
           throw httpError(409, 'Vé này vừa được check-in bởi một nhân viên khác.');
+        }
+
+        // Booking nhiều vé chỉ hoàn tất ngay khi tất cả TicketInstance đều đã USED.
+        // Nếu còn vé chưa dùng, booking giữ CONFIRMED và completion worker sẽ quyết định
+        // COMPLETED/NO_SHOW sau khi ngày tham quan kết thúc.
+        const nonUsedTicketCount = await tx.ticketInstance.count({
+          where: { bookingId: instance.bookingId, status: { not: 'USED' } },
+        });
+        let bookingStatus = instance.booking.status;
+        if (nonUsedTicketCount === 0) {
+          const completed = await tx.booking.updateMany({
+            where: { id: instance.bookingId, status: 'CONFIRMED' },
+            data: { status: 'COMPLETED' },
+          });
+          if (completed.count === 1) bookingStatus = 'COMPLETED';
         }
 
         await writeAuditLog({
@@ -734,10 +977,16 @@ async function checkInTicket(req, res, next) {
             bookingId: instance.bookingId,
             attractionId,
             checkedInCount: updated.count,
+            ticketInstanceId: instance.id,
           },
         });
 
-        return { instance, checkedInCount: updated.count, checkedInAt };
+        return {
+          instance,
+          checkedInCount: updated.count,
+          checkedInAt,
+          bookingStatus,
+        };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -751,6 +1000,7 @@ async function checkInTicket(req, res, next) {
         checkedInCount: result.checkedInCount,
         checkedInAt: result.checkedInAt,
         checkedInBy: req.user.email,
+        bookingStatus: result.bookingStatus,
       },
     });
   } catch (error) {
@@ -772,7 +1022,7 @@ async function listTodayBookings(req, res, next) {
     const todayDate = new Date(`${today}T00:00:00.000Z`);
     let assignedAttractionIds = null;
 
-    if (req.user.role !== 'ADMIN') {
+    if (!hasRole(req.user, 'ADMIN')) {
       const assignments = await prisma.staffAttractionAssignment.findMany({
         where: { staffId: req.user.id, revokedAt: null },
         select: { attractionId: true },
@@ -848,9 +1098,15 @@ async function listStaffAssignments(req, res, next) {
   try {
     const staff = await prisma.user.findUnique({
       where: { id: req.params.staffId },
-      select: { id: true, email: true, fullName: true, role: true },
+      select: {
+        id: true,
+        email: true,
+        fullName: true,
+        role: true,
+        roleMemberships: { select: { role: true } },
+      },
     });
-    if (!staff || staff.role !== 'STAFF') {
+    if (!staff || !hasRole(staff, 'STAFF')) {
       return res.status(404).json({ message: 'Không tìm thấy tài khoản nhân viên.' });
     }
 
@@ -882,9 +1138,14 @@ async function replaceStaffAssignments(req, res, next) {
     const result = await prisma.$transaction(async (tx) => {
       const staff = await tx.user.findUnique({
         where: { id: req.params.staffId },
-        select: { id: true, role: true, employerPartnerId: true },
+        select: {
+          id: true,
+          role: true,
+          employerPartnerId: true,
+          roleMemberships: { select: { role: true } },
+        },
       });
-      if (!staff || staff.role !== 'STAFF') {
+      if (!staff || !hasRole(staff, 'STAFF')) {
         throw httpError(404, 'Không tìm thấy tài khoản nhân viên.');
       }
       // Nhân viên phải thuộc một đối tác trước khi được phân công địa điểm.
@@ -967,6 +1228,7 @@ async function replaceStaffAssignments(req, res, next) {
 module.exports = {
   listRefundRequests,
   processRefundRequest,
+  reconcileRefundRequest,
   reissueTicket,
   lookupTicketByQr,
   checkInTicket,

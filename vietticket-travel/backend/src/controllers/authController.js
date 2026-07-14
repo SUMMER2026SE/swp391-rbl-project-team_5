@@ -17,6 +17,7 @@ const {
   validateFullName,
   validatePassword,
 } = require('../utils/validators');
+const { getEffectiveRoles } = require('../utils/userRoles');
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY_MINUTES = 30;
@@ -35,6 +36,7 @@ function sanitizeUser(user) {
     email: user.email,
     fullName: user.fullName,
     role: user.role,
+    roles: getEffectiveRoles(user),
     employerPartnerId: user.employerPartnerId || null,
     provider: user.provider,
     isEmailVerified: user.isEmailVerified,
@@ -48,7 +50,7 @@ function sanitizeUser(user) {
 async function findUserForResponse(userId) {
   return prisma.user.findUnique({
     where: { id: userId },
-    include: { profile: true },
+    include: { profile: true, roleMemberships: true },
   });
 }
 
@@ -126,8 +128,9 @@ async function register(req, res, next) {
               phoneNumber,
             },
           },
+          roleMemberships: { create: { role: 'CUSTOMER' } },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
 
       verificationToken = await createVerificationToken(tx, createdUser.id);
@@ -212,7 +215,7 @@ async function verifyEmail(req, res, next) {
       const user = await tx.user.update({
         where: { id: verificationToken.userId },
         data: { isEmailVerified: true },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
 
       await tx.emailVerificationToken.deleteMany({
@@ -246,7 +249,7 @@ async function login(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     if (!user || !user.passwordHash) {
@@ -336,7 +339,7 @@ async function googleLogin(req, res, next) {
 
     let user = await prisma.user.findUnique({
       where: { email: googlePayload.email },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     if (!user) {
@@ -358,8 +361,9 @@ async function googleLogin(req, res, next) {
               providerAccountId: googlePayload.providerAccountId,
             },
           },
+          roleMemberships: { create: { role: 'CUSTOMER' } },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
     } else {
       if (user.status !== 'ACTIVE') {
@@ -378,7 +382,7 @@ async function googleLogin(req, res, next) {
             },
           },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
 
       await prisma.oAuthAccount.upsert({

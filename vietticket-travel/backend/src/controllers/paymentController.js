@@ -1,4 +1,3 @@
-const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { queueNewBookingNotification, emitBookingStatusUpdated } = require('../realtime/events');
@@ -8,10 +7,23 @@ const {
   buildVnpayUrl,
   verifyVnpaySignature,
   formatVnpDate,
+  createVnpRequestId,
   signRefundData,
+  signQueryData,
+  verifyRefundResponseSignature,
+  verifyQueryResponseSignature,
 } = require('../utils/vnpay');
-const { calculateRefundAmount, isBeforeRefundCutoff } = require('../utils/refundService');
+const {
+  getRefundEligibility,
+  releaseHeldInventory,
+  releaseInventory,
+} = require('../utils/refundService');
+const {
+  isTicketProductSaleEnabled,
+  publicAttractionWhere,
+} = require('../services/catalogVisibilityService');
 const { sendRefundRequestReceivedEmail } = require('../utils/mailer');
+const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const { getFrontendUrl } = require('../config/runtimeConfig');
 const {
   confirmReservationAndStock,
@@ -21,6 +33,7 @@ const {
 const PAYMENT_WINDOW_MS = 10 * 60 * 1000; // 10 phút (khớp vnp_ExpireDate)
 
 const MAX_PAYMENT_ATTEMPTS = 3;
+const VNPAY_API_TIMEOUT_MS = 15 * 1000;
 
 function httpError(statusCode, message) {
   const error = new Error(message);
@@ -50,7 +63,15 @@ async function createVNPayUrl(req, res, next) {
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        reservation: true,
+        reservation: {
+          include: {
+            ticketProduct: {
+              include: {
+                attraction: { include: { partner: { select: { status: true } } } },
+              },
+            },
+          },
+        },
         payments: {
           select: { id: true, status: true, transactionId: true, isDuplicate: true },
           orderBy: { createdAt: 'desc' },
@@ -65,6 +86,11 @@ async function createVNPayUrl(req, res, next) {
     }
     if (booking.status !== 'PENDING_PAYMENT') {
       return res.status(409).json({ message: 'Đơn không ở trạng thái chờ thanh toán.' });
+    }
+    if (!isTicketProductSaleEnabled(booking.reservation?.ticketProduct)) {
+      return res.status(409).json({
+        message: 'Gói vé đã tạm dừng bán và không thể tiếp tục thanh toán.',
+      });
     }
 
     if (Number(booking.totalAmount) <= 0) {
@@ -111,13 +137,18 @@ async function createVNPayUrl(req, res, next) {
           status: 'HELD',
           expiresAt: { gt: now },
           paymentAttemptCount: { lt: MAX_PAYMENT_ATTEMPTS },
+          ticketProduct: {
+            status: 'ACTIVE',
+            archivedAt: null,
+            attraction: publicAttractionWhere(),
+          },
         },
         data: {
           paymentAttemptCount: { increment: 1 },
         },
       });
       if (claimedAttempt.count !== 1) {
-        throw httpError(409, 'Đơn giữ chỗ đã hết hạn hoặc vượt quá số lần thanh toán.');
+        throw httpError(409, 'Đơn giữ chỗ đã hết hạn, gói vé đã dừng bán hoặc vượt quá số lần thanh toán.');
       }
       await tx.payment.create({
         data: {
@@ -169,7 +200,11 @@ async function reconcileVnpayPayment(query) {
             reservation: {
               include: {
                 ticketProduct: {
-                  include: { attraction: { select: { requiresManualApproval: true } } },
+                  include: {
+                    attraction: {
+                      include: { partner: { select: { status: true } } },
+                    },
+                  },
                 },
               },
             },
@@ -186,15 +221,27 @@ async function reconcileVnpayPayment(query) {
       return { code: '04', msg: 'Invalid amount', bookingId: booking.id };
     }
 
-    const needsApproval =
-      booking.reservation.ticketProduct.attraction.requiresManualApproval === true;
     const isSuccess = responseCode === '00' && transactionStatus === '00';
 
     const result = await prisma.$transaction(
       async (tx) => {
         const current = await tx.booking.findUnique({
           where: { id: booking.id },
-          include: { payments: true, reservation: true },
+          include: {
+            payments: true,
+            refundRequests: true,
+            reservation: {
+              include: {
+                ticketProduct: {
+                  include: {
+                    attraction: {
+                      include: { partner: { select: { status: true } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
         });
 
         const currentPayment = current.payments.find((p) => p.id === payment.id);
@@ -210,6 +257,9 @@ async function reconcileVnpayPayment(query) {
           (p) => p.status === 'SUCCESS' && p.id !== payment.id && !p.isDuplicate,
         );
         const reservation = current.reservation;
+        const saleEnabled = isTicketProductSaleEnabled(reservation?.ticketProduct);
+        const needsApproval =
+          reservation?.ticketProduct?.attraction?.requiresManualApproval === true;
         let bookingStatus = current.status;
 
         if (isSuccess) {
@@ -230,22 +280,28 @@ async function reconcileVnpayPayment(query) {
               where: { id: current.id },
               data: { refundRequired: true },
             });
-            let refundRequest = await tx.refundRequest.findUnique({
-              where: { bookingId: current.id },
+            const duplicateRequestKey = `duplicate:${payment.id}`;
+            const refundRequest = await tx.refundRequest.upsert({
+              where: { requestKey: duplicateRequestKey },
+              update: {},
+              create: {
+                bookingId: current.id,
+                requestKey: duplicateRequestKey,
+                requestedById: current.userId,
+                type: 'DUPLICATE_PAYMENT',
+                mandatory: true,
+                reason: `Duplicate VNPay payment captured: ${payment.transactionId}`,
+                originalAmount: payment.amount,
+                amount: payment.amount,
+                feeAmount: 0,
+                policySnapshot: current.snapshotRefundPolicy || null,
+                feeRateSnapshot: 0,
+                bookingStatusBeforeRequest: current.status,
+                status: 'PROCESSING',
+                processingStartedAt: new Date(),
+              },
               select: { id: true },
             });
-            if (!refundRequest) {
-              refundRequest = await tx.refundRequest.create({
-                data: {
-                  bookingId: current.id,
-                  requestedById: current.userId,
-                  reason: `Duplicate VNPay payment captured: ${payment.transactionId}`,
-                  amount: payment.amount,
-                  status: 'PENDING',
-                },
-                select: { id: true },
-              });
-            }
             await tx.refundTransaction.upsert({
               where: { gatewayRequestId: duplicateRefundRequestId },
               update: {},
@@ -256,7 +312,7 @@ async function reconcileVnpayPayment(query) {
                 gatewayRequestId: duplicateRefundRequestId,
                 transactionType: '02',
                 amount: payment.amount,
-                status: 'NEEDS_RECONCILIATION',
+                status: 'PENDING',
                 reason: 'Khách hàng thanh toán thành công nhiều lần cho cùng một booking.',
                 rawResponse: query,
               },
@@ -265,6 +321,7 @@ async function reconcileVnpayPayment(query) {
               code: '00',
               msg: 'Duplicate payment recorded for refund',
               bookingStatus,
+              shouldNotifyPaidStatus: false,
             };
           }
 
@@ -279,7 +336,11 @@ async function reconcileVnpayPayment(query) {
 
           // Chỉ xác nhận khi đơn còn chờ thanh toán & vé còn giữ chỗ.
           // Guard current.status tránh "hồi sinh" đơn đã CANCELLED.
-          if (current.status === 'PENDING_PAYMENT' && reservation.status === 'HELD') {
+          if (
+            current.status === 'PENDING_PAYMENT'
+            && reservation.status === 'HELD'
+            && saleEnabled
+          ) {
             await confirmReservationAndStock(tx, reservation);
             if (needsApproval) {
               await tx.booking.update({
@@ -300,27 +361,77 @@ async function reconcileVnpayPayment(query) {
               );
               bookingStatus = 'CONFIRMED';
             }
+            return {
+              code: '00',
+              msg: 'Confirm success',
+              bookingStatus,
+              shouldNotifyPaidStatus: true,
+            };
           } else {
+            const cancelledAt = new Date();
+            const saleDisabled = !saleEnabled;
+            const cancellationReason = saleDisabled
+              ? 'Thanh toán thành công sau khi đối tác hoặc gói vé đã tạm dừng bán.'
+              : 'Thanh toán thành công sau khi đơn giữ chỗ không còn hiệu lực.';
+
+            const shouldReturnUnfulfilledInventory =
+              current.status === 'PENDING_PAYMENT'
+              && ['HELD', 'CONFIRMED'].includes(reservation.status);
+            if (shouldReturnUnfulfilledInventory && reservation.status === 'HELD') {
+              await releaseHeldInventory(tx, reservation);
+            } else if (shouldReturnUnfulfilledInventory && reservation.status === 'CONFIRMED') {
+              await releaseInventory(tx, current);
+            }
+            if (shouldReturnUnfulfilledInventory && current.voucherId) {
+              await tx.voucher.updateMany({
+                where: { id: current.voucherId, usedCount: { gt: 0 } },
+                data: { usedCount: { decrement: 1 } },
+              });
+            }
+            await tx.payment.updateMany({
+              where: {
+                bookingId: current.id,
+                id: { not: payment.id },
+                status: 'PENDING',
+              },
+              data: {
+                status: 'FAILED',
+                failureReason: saleDisabled ? 'SALE_SUSPENDED' : 'BOOKING_EXPIRED',
+              },
+            });
             // Đã thu tiền nhưng vé đã bị thu hồi/đơn đã hủy -> cần hoàn tiền thủ công.
             await tx.booking.update({
               where: { id: current.id },
-              data: { status: 'CANCELLED', refundRequired: true },
+              data: {
+                status: 'CANCELLED',
+                refundRequired: true,
+                cancelledAt,
+                cancellationReason,
+                cancellationSource: saleDisabled
+                  ? 'SALE_SUSPENDED_AFTER_HOLD'
+                  : 'PAYMENT_AFTER_EXPIRY',
+              },
             });
-            let refundRequest = await tx.refundRequest.findUnique({
-              where: { bookingId: current.id },
-              select: { id: true },
+            const capturedBooking = {
+              ...current,
+              payments: current.payments.map((item) => (
+                item.id === payment.id
+                  ? {
+                      ...item,
+                      status: 'SUCCESS',
+                      paidAt: new Date(),
+                      paymentGateway: payment.paymentGateway,
+                    }
+                  : item
+              )),
+            };
+            await queueMandatoryRefund(tx, capturedBooking, {
+              now: cancelledAt,
+              type: 'SYSTEM_CANCELLATION',
+              reason: saleDisabled
+                ? 'Hệ thống tự động hủy và hoàn toàn bộ tiền vì đối tác hoặc gói vé đã tạm dừng bán trước khi giao dịch được xác nhận.'
+                : 'Hệ thống tự động hủy đơn do vé đã bị thu hồi hoặc đơn giữ chỗ hết hạn trước khi thanh toán.',
             });
-            if (!refundRequest) {
-              await tx.refundRequest.create({
-                data: {
-                  bookingId: current.id,
-                  requestedById: current.userId,
-                  reason: `Hệ thống tự động hủy đơn do vé đã bị thu hồi hoặc đơn giữ chỗ hết hạn trước khi thanh toán.`,
-                  amount: current.totalAmount,
-                  status: 'PENDING',
-                },
-              });
-            }
             bookingStatus = 'CANCELLED';
           }
         } else {
@@ -340,12 +451,16 @@ async function reconcileVnpayPayment(query) {
           code: '00',
           msg: 'Confirm success',
           bookingStatus,
+          shouldNotifyPaidStatus: false,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
-    if (['PENDING_PARTNER', 'CONFIRMED'].includes(result.bookingStatus)) {
+    if (
+      result.shouldNotifyPaidStatus
+      && ['PENDING_PARTNER', 'CONFIRMED'].includes(result.bookingStatus)
+    ) {
       // Thông báo cho Partner có đơn mới
       queueNewBookingNotification(booking.id);
 
@@ -441,53 +556,78 @@ async function createRefundRequest(req, res, next) {
     if (reason.length < 5) {
       return res.status(400).json({ message: 'Vui lòng nhập lý do hoàn tiền (tối thiểu 5 ký tự).' });
     }
+    if (reason.length > 1000) {
+      return res.status(400).json({ message: 'Lý do hoàn tiền không được vượt quá 1000 ký tự.' });
+    }
 
     const result = await prisma.$transaction(
       async (tx) => {
         const booking = await tx.booking.findUnique({
           where: { id: bookingId },
           include: {
-            reservation: { include: { ticketProduct: true } },
-            refundRequests: { select: { id: true } },
+            reservation: {
+              include: {
+                timeSlot: true,
+                ticketProduct: {
+                  include: {
+                    attraction: { select: { openTime: true, closeTime: true } },
+                  },
+                },
+              },
+            },
+            payments: {
+              where: { status: 'SUCCESS', isDuplicate: false },
+              select: {
+                id: true,
+                amount: true,
+                status: true,
+                isDuplicate: true,
+                paymentGateway: true,
+              },
+            },
+            ticketInstances: { select: { status: true } },
+            refundRequests: {
+              select: { id: true, type: true, status: true },
+            },
           },
         });
 
         if (!booking || booking.userId !== req.user.id) {
           throw httpError(404, 'Không tìm thấy đơn đặt vé.');
         }
-        if (booking.status !== 'CONFIRMED') {
-          throw httpError(409, 'Chỉ đơn đã xác nhận mới có thể yêu cầu hoàn tiền.');
+        const eligibility = getRefundEligibility(booking);
+        if (!eligibility.refundable) {
+          throw httpError(409, eligibility.notRefundableReason);
         }
-        const refundPolicy =
-          booking.snapshotRefundPolicy || booking.reservation.ticketProduct.refundPolicy;
-        if (refundPolicy === 'NON_REFUNDABLE') {
-          throw httpError(400, 'Vé này không áp dụng chính sách hoàn tiền.');
-        }
-        if (!isBeforeRefundCutoff(booking)) {
-          throw httpError(
-            409,
-            'Đã quá thời hạn hoàn tiền. Yêu cầu phải được gửi trước ngày sử dụng vé.',
-          );
-        }
-        if (booking.refundRequests.length > 0) {
-          throw httpError(409, 'Đơn này đã có yêu cầu hoàn tiền.');
+        const capturedPayment = booking.payments[0];
+        if (eligibility.refundAmount > Number(capturedPayment.amount)) {
+          throw httpError(409, 'Số tiền hoàn vượt quá giao dịch thanh toán gốc.');
         }
 
-        const { refundAmount } = calculateRefundAmount(booking);
+        const claimed = await tx.booking.updateMany({
+          where: { id: bookingId, status: 'CONFIRMED' },
+          data: { status: 'REFUND_REQUESTED' },
+        });
+        if (claimed.count !== 1) {
+          throw httpError(409, 'Đơn vừa được cập nhật ở một phiên khác. Vui lòng tải lại.');
+        }
 
         const refundRequest = await tx.refundRequest.create({
           data: {
             bookingId,
+            requestKey: `customer:${bookingId}`,
             requestedById: req.user.id,
+            type: 'CUSTOMER_CANCELLATION',
+            mandatory: false,
             reason,
-            amount: refundAmount,
+            originalAmount: booking.totalAmount,
+            amount: eligibility.refundAmount,
+            feeAmount: eligibility.feeAmount,
+            policySnapshot: eligibility.refundPolicy,
+            feeRateSnapshot: eligibility.refundFeeRate,
+            bookingStatusBeforeRequest: booking.status,
             status: 'PENDING',
           },
-        });
-
-        await tx.booking.update({
-          where: { id: bookingId },
-          data: { status: 'REFUND_REQUESTED' },
         });
 
         return { refundRequest, booking };
@@ -515,6 +655,12 @@ async function createRefundRequest(req, res, next) {
         error: { message: error.message },
       });
     }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)) {
+      return res.status(409).json({
+        success: false,
+        error: { message: 'Yêu cầu hoàn tiền đã được tạo hoặc đơn vừa thay đổi. Vui lòng tải lại.' },
+      });
+    }
     return next(error);
   }
 }
@@ -527,8 +673,27 @@ async function getRefundPreview(req, res, next) {
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        reservation: { include: { ticketProduct: true } },
-        refundRequests: { select: { id: true } },
+        reservation: {
+          include: {
+            timeSlot: true,
+            ticketProduct: {
+              include: {
+                attraction: { select: { openTime: true, closeTime: true } },
+              },
+            },
+          },
+        },
+        payments: {
+          where: { status: 'SUCCESS', isDuplicate: false },
+          select: {
+            amount: true,
+            status: true,
+            isDuplicate: true,
+            paymentGateway: true,
+          },
+        },
+        ticketInstances: { select: { status: true } },
+        refundRequests: { select: { id: true, type: true, status: true } },
       },
     });
 
@@ -536,24 +701,7 @@ async function getRefundPreview(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé.' });
     }
 
-    const ticketProduct = booking.reservation.ticketProduct;
-    const refundPolicy = booking.snapshotRefundPolicy || ticketProduct.refundPolicy;
-    const refundFeeRate = booking.snapshotRefundFeeRate ?? ticketProduct.refundFeeRate;
-    const { refundAmount, feeAmount } = calculateRefundAmount(booking);
-    const beforeCutoff = isBeforeRefundCutoff(booking);
-
-    // Lý do không đủ điều kiện (theo thứ tự ưu tiên) để UI hiển thị chính xác.
-    let notRefundableReason = null;
-    if (booking.status !== 'CONFIRMED') {
-      notRefundableReason = 'Chỉ đơn đã xác nhận mới có thể yêu cầu hoàn tiền.';
-    } else if (refundPolicy === 'NON_REFUNDABLE') {
-      notRefundableReason = 'Vé này không áp dụng chính sách hoàn tiền.';
-    } else if (booking.refundRequests.length > 0) {
-      notRefundableReason = 'Đơn này đã có yêu cầu hoàn tiền trước đó.';
-    } else if (!beforeCutoff) {
-      notRefundableReason =
-        'Đã quá thời hạn hoàn tiền. Yêu cầu phải được gửi trước ngày sử dụng vé.';
-    }
+    const eligibility = getRefundEligibility(booking);
 
     return res.json({
       success: true,
@@ -561,13 +709,15 @@ async function getRefundPreview(req, res, next) {
         bookingId: booking.id,
         status: booking.status,
         totalAmount: Number(booking.totalAmount),
-        refundPolicy,
-        refundFeeRate: Number(refundFeeRate),
-        feeAmount,
-        refundAmount,
-        refundable: notRefundableReason === null,
-        notRefundableReason,
-        hasRefundRequest: booking.refundRequests.length > 0,
+        refundPolicy: eligibility.refundPolicy,
+        refundFeeRate: Number(eligibility.refundFeeRate),
+        refundCutoffHours: eligibility.refundCutoffHours,
+        refundDeadline: eligibility.refundDeadline,
+        feeAmount: eligibility.feeAmount,
+        refundAmount: eligibility.refundAmount,
+        refundable: eligibility.refundable,
+        notRefundableReason: eligibility.notRefundableReason,
+        hasRefundRequest: Boolean(eligibility.customerRequest),
         visitDate: booking.reservation.date,
       },
     });
@@ -605,35 +755,134 @@ async function refundViaVnpay({
       'Thiếu thông tin giao dịch gốc để hoàn tiền (TxnRef/TransactionNo/PayDate).',
     );
   }
+  const refundAmount = Number(amount);
+  const capturedAmount = Number(payment.amount);
+  if (
+    !Number.isSafeInteger(refundAmount)
+    || refundAmount <= 0
+    || !Number.isSafeInteger(capturedAmount)
+    || refundAmount > capturedAmount
+  ) {
+    throw httpError(422, 'Số tiền hoàn phải là số nguyên VND và không vượt quá giao dịch gốc.');
+  }
+  if (!['02', '03'].includes(transactionType)) {
+    throw httpError(422, 'Loại giao dịch hoàn tiền phải là 02 (toàn phần) hoặc 03 (một phần).');
+  }
+  if (transactionType === '02' && refundAmount !== capturedAmount) {
+    throw httpError(422, 'Hoàn toàn phần phải bằng đúng số tiền của giao dịch gốc.');
+  }
+  if (transactionType === '03' && refundAmount >= capturedAmount) {
+    throw httpError(422, 'Hoàn một phần phải nhỏ hơn số tiền của giao dịch gốc.');
+  }
 
   const params = {
-    vnp_RequestId: requestId || randomUUID(),
+    vnp_RequestId: requestId || createVnpRequestId(),
     vnp_Version: '2.1.0',
     vnp_Command: 'refund',
     vnp_TmnCode: tmnCode,
     vnp_TransactionType: transactionType,
     vnp_TxnRef: payment.transactionId,
-    vnp_Amount: amountToVnp(amount),
+    vnp_Amount: amountToVnp(refundAmount),
     vnp_TransactionNo: vnpTransactionNo,
     vnp_TransactionDate: vnpPayDate,
-    vnp_CreateBy: createBy || 'system',
+    vnp_CreateBy: String(createBy || 'system').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32) || 'system',
     vnp_CreateDate: formatVnpDate(new Date()),
     vnp_IpAddr: ipAddr || '127.0.0.1',
     vnp_OrderInfo: orderInfo || `Hoan tien giao dich ${payment.transactionId}`,
   };
   params.vnp_SecureHash = signRefundData(params, secret);
 
+  let response;
+  try {
+    response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(VNPAY_API_TIMEOUT_MS),
+    });
+  } catch (error) {
+    error.gatewayAttempted = true;
+    throw error;
+  }
+  if (!response.ok) {
+    const error = httpError(502, `VNPay trả về HTTP ${response.status} khi gửi yêu cầu hoàn tiền.`);
+    error.gatewayAttempted = true;
+    throw error;
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!verifyRefundResponseSignature(result, secret)) {
+    const error = httpError(502, 'Chữ ký phản hồi hoàn tiền từ VNPay không hợp lệ.');
+    error.gatewayAttempted = true;
+    throw error;
+  }
+
+  return {
+    success:
+      result.vnp_ResponseCode === '00'
+      && result.vnp_TransactionStatus === '00',
+    requestId: params.vnp_RequestId,
+    responseCode: result.vnp_ResponseCode || null,
+    transactionStatus: result.vnp_TransactionStatus || null,
+    message: result.vnp_Message || null,
+    rawRequest: params,
+    raw: result,
+  };
+}
+
+async function queryVnpayTransaction({
+  payment,
+  ipAddr = '127.0.0.1',
+  orderInfo,
+  requestId,
+}) {
+  const tmnCode = process.env.VNP_TMNCODE;
+  const secret = process.env.VNP_HASHSECRET;
+  const apiUrl = process.env.VNP_API;
+  if (!tmnCode || !secret || !apiUrl) {
+    throw httpError(500, 'Thiếu cấu hình VNPay đối soát (VNP_TMNCODE/VNP_HASHSECRET/VNP_API).');
+  }
+
+  const raw = payment?.rawResponse || {};
+  const transactionNo = String(raw.vnp_TransactionNo || '');
+  const transactionDate = String(raw.vnp_PayDate || '');
+  if (!payment?.transactionId || !transactionDate) {
+    throw httpError(422, 'Thiếu thông tin giao dịch thanh toán gốc để đối soát VNPay.');
+  }
+
+  const params = {
+    vnp_RequestId: requestId || createVnpRequestId(),
+    vnp_Version: '2.1.0',
+    vnp_Command: 'querydr',
+    vnp_TmnCode: tmnCode,
+    vnp_TxnRef: payment.transactionId,
+    vnp_TransactionNo: transactionNo || undefined,
+    vnp_TransactionDate: transactionDate,
+    vnp_CreateDate: formatVnpDate(new Date()),
+    vnp_IpAddr: ipAddr,
+    vnp_OrderInfo: orderInfo || `Doi soat giao dich ${payment.transactionId}`,
+  };
+  params.vnp_SecureHash = signQueryData(params, secret);
+
   const response = await fetch(apiUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
+    signal: AbortSignal.timeout(VNPAY_API_TIMEOUT_MS),
   });
+  if (!response.ok) {
+    throw httpError(502, `VNPay trả về HTTP ${response.status} khi đối soát.`);
+  }
   const result = await response.json().catch(() => ({}));
+  if (!verifyQueryResponseSignature(result, secret)) {
+    throw httpError(502, 'Chữ ký phản hồi đối soát từ VNPay không hợp lệ.');
+  }
 
   return {
-    success: result.vnp_ResponseCode === '00',
     requestId: params.vnp_RequestId,
     responseCode: result.vnp_ResponseCode || null,
+    transactionStatus: result.vnp_TransactionStatus || null,
+    transactionType: result.vnp_TransactionType || null,
+    amount: Number(result.vnp_Amount || 0) / 100,
     message: result.vnp_Message || null,
     rawRequest: params,
     raw: result,
@@ -647,4 +896,5 @@ module.exports = {
   createRefundRequest,
   getRefundPreview,
   refundViaVnpay,
+  queryVnpayTransaction,
 };

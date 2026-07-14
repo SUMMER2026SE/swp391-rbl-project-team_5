@@ -5,6 +5,7 @@ const { createRandomToken, hashToken, addMinutes } = require('../utils/tokenUtil
 const { isValidEmail, validateFullName, isValidPhoneNumber } = require('../utils/validators');
 const { sendStaffInviteEmail, sendAccountStatusEmail } = require('../utils/mailer');
 const { writeAuditLog } = require('../utils/auditLog');
+const { hasRole } = require('../utils/userRoles');
 
 // Lời mời đặt mật khẩu có hạn dài hơn link quên mật khẩu thường (48 giờ) để nhân
 // viên có đủ thời gian kích hoạt tài khoản.
@@ -43,6 +44,7 @@ function toStaffResponse(staff) {
 
 const staffResponseInclude = {
   profile: { select: { phoneNumber: true } },
+  roleMemberships: { select: { role: true } },
   staffAssignments: {
     where: { revokedAt: null },
     include: { attraction: { select: { id: true, title: true, city: true } } },
@@ -53,9 +55,12 @@ const staffResponseInclude = {
 async function findOwnedStaff(client, partnerId, staffId, include = staffResponseInclude) {
   const staff = await client.user.findUnique({
     where: { id: staffId },
-    include,
+    include: {
+      ...include,
+      roleMemberships: { select: { role: true } },
+    },
   });
-  if (!staff || staff.role !== 'STAFF' || staff.employerPartnerId !== partnerId) {
+  if (!staff || !hasRole(staff, 'STAFF') || staff.employerPartnerId !== partnerId) {
     return null;
   }
   return staff;
@@ -79,7 +84,10 @@ async function createInviteToken(tx, userId) {
 async function listStaff(req, res, next) {
   try {
     const staff = await prisma.user.findMany({
-      where: { role: 'STAFF', employerPartnerId: req.partner.id },
+      where: {
+        roleMemberships: { some: { role: 'STAFF' } },
+        employerPartnerId: req.partner.id,
+      },
       orderBy: { createdAt: 'asc' },
       include: staffResponseInclude,
     });
@@ -129,6 +137,7 @@ async function createStaff(req, res, next) {
           passwordHash: null,
           employerPartnerId: req.partner.id,
           profile: { create: { phoneNumber } },
+          roleMemberships: { create: { role: 'STAFF' } },
         },
         include: staffResponseInclude,
       });

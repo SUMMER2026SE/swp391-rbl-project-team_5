@@ -1,21 +1,38 @@
 const prisma = require('../config/prisma');
+const { Prisma } = require('@prisma/client');
 const { sanitizeUser } = require('./authController');
 const { validateKyc } = require('../utils/partnerValidators');
 const { isValidPhoneNumber } = require('../utils/validators');
 const { emitBookingStatusUpdated } = require('../realtime/events');
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
-const { sendBookingRejectedEmail } = require('../utils/mailer');
+const {
+  sendBookingCancelledByPartnerEmail,
+  sendBookingRejectedEmail,
+} = require('../utils/mailer');
 const {
   confirmReservationAndStock,
   createTicketInstances,
 } = require('./bookingController');
 const { releaseInventory } = require('../utils/refundService');
+const {
+  getBookingActivityWindow,
+  getManualApprovalDeadline,
+} = require('../utils/activityTime');
+const { expirePendingPartnerBooking } = require('../utils/pendingPartnerWorker');
+const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
+const { writeAuditLog } = require('../utils/auditLog');
 const { isDocumentOwnedByUser } = require('../middleware/uploadMiddleware');
 const {
   buildTimeline,
   getPeriodStart,
   normalizePeriod,
 } = require('../services/analyticsService');
+const {
+  buildRecognizedBookingPeriodWhere,
+  recognizedAmountsOf,
+  recognizedAtOf,
+} = require('../services/financialReportService');
+const { hasAnyRole } = require('../utils/userRoles');
 
 function toNullable(value) {
   if (value === undefined || value === null) return undefined;
@@ -27,6 +44,10 @@ function bookingConflict(message = 'Đơn đặt vé đã được xử lý trư
   const error = new Error(message);
   error.statusCode = 409;
   return error;
+}
+
+function canSubmitPartnerKyc(user) {
+  return hasAnyRole(user, ['CUSTOMER', 'PARTNER']);
 }
 
 // Định dạng hồ sơ đối tác trả về cho FE (trang Cài đặt + Pending)
@@ -57,6 +78,16 @@ function toPartnerResponse(partner, user) {
 // POST /api/partners/register — Nộp hồ sơ KYC, tạo PartnerProfile ở trạng thái PENDING
 async function submitKyc(req, res, next) {
   try {
+    if (!canSubmitPartnerKyc(req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'CUSTOMER_OR_PARTNER_REQUIRED',
+          message: 'Chi tai khoan khach hang hoac doi tac can nop lai ho so moi co the dang ky doi tac.',
+        },
+      });
+    }
+
     const validationError = validateKyc(req.body);
     if (validationError) {
       return res.status(400).json({ message: validationError });
@@ -71,7 +102,8 @@ async function submitKyc(req, res, next) {
       where: { userId: req.user.id },
     });
 
-    const isResubmission = existing && ['REJECTED', 'SUSPENDED'].includes(existing.status);
+    // A suspension is an operational sanction and can only be lifted by an administrator.
+    const isResubmission = existing?.status === 'REJECTED';
 
     if (existing && !isResubmission) {
       return res.status(409).json({
@@ -108,7 +140,7 @@ async function submitKyc(req, res, next) {
 
     const refreshedUser = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     return res.status(isResubmission ? 200 : 201).json({
@@ -119,6 +151,18 @@ async function submitKyc(req, res, next) {
       user: sanitizeUser(refreshedUser),
     });
   } catch (error) {
+    const uniqueTarget = Array.isArray(error.meta?.target)
+      ? error.meta.target
+      : [error.meta?.target].filter(Boolean);
+    if (error.code === 'P2002' && uniqueTarget.some((target) => String(target).includes('taxCode'))) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'TAX_CODE_ALREADY_REGISTERED',
+          message: 'Mã số thuế này đã được sử dụng cho một hồ sơ đối tác khác.',
+        },
+      });
+    }
     next(error);
   }
 }
@@ -139,7 +183,7 @@ async function getMyPartner(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     const data = toPartnerResponse(partner, user);
@@ -195,7 +239,7 @@ async function updateSettings(req, res, next) {
 
     let user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     if (Object.keys(userUpdate).length > 0 || Object.keys(profileUpdate).length > 0) {
@@ -207,7 +251,7 @@ async function updateSettings(req, res, next) {
             upsert: { create: profileUpdate, update: profileUpdate },
           },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
     }
 
@@ -225,7 +269,6 @@ async function updateSettings(req, res, next) {
 async function getDashboard(req, res, next) {
   try {
     const partnerId = req.partner.id;
-    const commissionRate = req.partner.commissionRate ? Number(req.partner.commissionRate) : 0.10;
 
     const attractions = await prisma.attraction.findMany({
       where: { partnerId, archivedAt: null },
@@ -245,6 +288,8 @@ async function getDashboard(req, res, next) {
     let revenueThisMonth = 0;
     let ticketsSoldThisMonth = 0;
     let totalRevenue = 0;
+    let netRevenueThisMonth = 0;
+    let totalNetRevenue = 0;
     let totalTicketsSold = 0;
     let pendingBookings = 0;
     let occupancyRate = 0;
@@ -254,27 +299,46 @@ async function getDashboard(req, res, next) {
     // (tránh lệch số liệu khi partner đã lưu trữ địa điểm/vé từng có đơn đã thanh toán).
     {
       const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startOfMonth = getPeriodStart('month', now);
       const revenueBookings = await prisma.booking.findMany({
         where: {
-          status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
-          payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+          ...buildRecognizedBookingPeriodWhere(new Date(0), now),
           reservation: { ticketProduct: { attraction: { partnerId } } },
         },
         select: {
+          status: true,
           createdAt: true,
+          snapshotVisitDate: true,
+          commissionRateSnapshot: true,
+          commissionAmountSnapshot: true,
+          partnerNetAmountSnapshot: true,
           payments: { where: { status: 'SUCCESS', isDuplicate: false }, select: { amount: true } },
-          reservation: { select: { quantity: true } },
+          refundTransactions: {
+            where: { status: 'SUCCESS' },
+            select: {
+              amount: true,
+              processedAt: true,
+              reconciledAt: true,
+              createdAt: true,
+              refundRequest: { select: { type: true } },
+            },
+          },
+          reservation: { select: { quantity: true, date: true } },
         },
       });
       revenueBookings.forEach((b) => {
-        const amount = b.payments.reduce((sum, p) => sum + Number(p.amount), 0);
-        const qty = b.reservation ? b.reservation.quantity : 0;
-        totalRevenue += amount;
+        const recognized = recognizedAmountsOf(b);
+        if (recognized.netAmount <= 0) return;
+        const qty = ['COMPLETED', 'NO_SHOW'].includes(b.status)
+          ? Number(b.reservation?.quantity || 0)
+          : 0;
+        totalRevenue += recognized.netAmount;
+        totalNetRevenue += recognized.partnerPayableAmount;
         totalTicketsSold += qty;
-        const createdAtDate = b.createdAt ? new Date(b.createdAt) : now;
-        if (createdAtDate >= startOfMonth) {
-          revenueThisMonth += amount;
+        const recognizedAt = new Date(recognizedAtOf(b) || now);
+        if (recognizedAt >= startOfMonth) {
+          revenueThisMonth += recognized.netAmount;
+          netRevenueThisMonth += recognized.partnerPayableAmount;
           ticketsSoldThisMonth += qty;
           totalBookingsThisMonth += 1;
         }
@@ -414,8 +478,8 @@ async function getDashboard(req, res, next) {
       ticketsSoldThisMonth,
       totalRevenue,
       totalTicketsSold,
-      netRevenueThisMonth: revenueThisMonth * (1 - commissionRate),
-      netTotalRevenue: totalRevenue * (1 - commissionRate),
+      netRevenueThisMonth,
+      netTotalRevenue: totalNetRevenue,
       occupancyRate,
       pendingBookings,
     };
@@ -434,13 +498,9 @@ async function getReports(req, res, next) {
   try {
     const period = normalizePeriod(String(req.query.period || '').trim());
     const startDate = getPeriodStart(period);
-    const commissionRate = Number(req.partner.commissionRate || 0.1);
-
     const bookings = await prisma.booking.findMany({
       where: {
-        createdAt: { gte: startDate },
-        status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
-        payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+        ...buildRecognizedBookingPeriodWhere(startDate),
         reservation: {
           ticketProduct: {
             attraction: { partnerId: req.partner.id },
@@ -448,14 +508,30 @@ async function getReports(req, res, next) {
         },
       },
       select: {
+        status: true,
         createdAt: true,
+        snapshotVisitDate: true,
+        commissionRateSnapshot: true,
+        commissionAmountSnapshot: true,
+        partnerNetAmountSnapshot: true,
         payments: {
           where: { status: 'SUCCESS', isDuplicate: false },
           select: { amount: true },
         },
+        refundTransactions: {
+          where: { status: 'SUCCESS' },
+          select: {
+            amount: true,
+            processedAt: true,
+            reconciledAt: true,
+            createdAt: true,
+            refundRequest: { select: { type: true } },
+          },
+        },
         reservation: {
           select: {
             quantity: true,
+            date: true,
             ticketProduct: {
               select: {
                 attraction: { select: { id: true, title: true } },
@@ -467,19 +543,36 @@ async function getReports(req, res, next) {
       orderBy: { createdAt: 'asc' },
     });
 
-    const revenueOf = (booking) => booking.payments.reduce(
-      (sum, payment) => sum + Number(payment.amount),
-      0,
-    );
+    const recognizedBookings = bookings
+      .map((booking) => ({
+        booking,
+        recognized: recognizedAmountsOf(booking),
+        recognizedAt: recognizedAtOf(booking),
+      }))
+      .filter((entry) => entry.recognized.netAmount > 0);
     const byAttraction = new Map();
+    let paymentGross = 0;
+    let refundedAmount = 0;
     let grossRevenue = 0;
     let ticketsSold = 0;
+    let commission = 0;
+    let netRevenue = 0;
+    let retainedCancellationFees = 0;
 
-    for (const booking of bookings) {
-      const revenue = revenueOf(booking);
-      const quantity = Number(booking.reservation.quantity || 0);
+    for (const { booking, recognized } of recognizedBookings) {
+      const revenue = recognized.netAmount;
+      const quantity = ['COMPLETED', 'NO_SHOW'].includes(booking.status)
+        ? Number(booking.reservation.quantity || 0)
+        : 0;
       const attraction = booking.reservation.ticketProduct.attraction;
+      paymentGross += recognized.grossAmount;
+      refundedAmount += recognized.refundAmount;
       grossRevenue += revenue;
+      commission += recognized.commissionAmount;
+      netRevenue += recognized.partnerPayableAmount;
+      if (booking.status === 'REFUNDED') {
+        retainedCancellationFees += recognized.netAmount;
+      }
       ticketsSold += quantity;
 
       const current = byAttraction.get(attraction.id) || {
@@ -507,13 +600,24 @@ async function getReports(req, res, next) {
       data: {
         period,
         summary: {
-          bookings: bookings.length,
+          bookings: recognizedBookings.length,
           ticketsSold,
+          paymentGross,
+          refundedAmount,
           grossRevenue,
-          commission: grossRevenue * commissionRate,
-          netRevenue: grossRevenue * (1 - commissionRate),
+          commission,
+          netRevenue,
+          retainedCancellationFees,
         },
-        timeline: buildTimeline(bookings, period, revenueOf),
+        timeline: buildTimeline(
+          recognizedBookings.map(({ booking, recognized, recognizedAt }) => ({
+            ...booking,
+            recognized,
+            createdAt: recognizedAt,
+          })),
+          period,
+          (booking) => booking.recognized.netAmount,
+        ),
         attractions,
       },
     });
@@ -702,11 +806,26 @@ async function approveBooking(req, res, next) {
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
+        payments: {
+          where: { status: 'SUCCESS', isDuplicate: false },
+          select: {
+            id: true,
+            status: true,
+            isDuplicate: true,
+            paidAt: true,
+            createdAt: true,
+          },
+        },
         ticketInstances: { select: { id: true } },
         reservation: {
           include: {
+            timeSlot: true,
             ticketProduct: {
-              include: { attraction: { select: { partnerId: true } } },
+              include: {
+                attraction: {
+                  select: { partnerId: true, openTime: true, closeTime: true },
+                },
+              },
             },
           },
         },
@@ -732,16 +851,41 @@ async function approveBooking(req, res, next) {
       });
     }
 
+    const now = new Date();
+    const approvalDeadline = getManualApprovalDeadline(booking);
+    if (!approvalDeadline || now >= approvalDeadline) {
+      await expirePendingPartnerBooking(bookingId, { now });
+      return res.status(409).json({
+        success: false,
+        message: 'Đơn đã quá thời hạn duyệt hoặc hoạt động đã bắt đầu. Hệ thống đã chuyển đơn sang quy trình hoàn tiền.',
+      });
+    }
+
     await prisma.$transaction(async (tx) => {
       // Re-read TRONG transaction: guard bằng dữ liệu mới nhất để hai request
       // duyệt đồng thời không trừ kho / tạo vé hai lần.
       const current = await tx.booking.findUnique({
         where: { id: bookingId },
         include: {
+          payments: {
+            where: { status: 'SUCCESS', isDuplicate: false },
+            select: {
+              id: true,
+              status: true,
+              isDuplicate: true,
+              paidAt: true,
+              createdAt: true,
+            },
+          },
           reservation: {
             include: {
+              timeSlot: true,
               ticketProduct: {
-                include: { attraction: { select: { partnerId: true } } },
+                include: {
+                  attraction: {
+                    select: { partnerId: true, openTime: true, closeTime: true },
+                  },
+                },
               },
             },
           },
@@ -754,6 +898,10 @@ async function approveBooking(req, res, next) {
       }
       if (current.reservation.ticketProduct.attraction.partnerId !== partnerId) {
         throw bookingConflict('Bạn không có quyền duyệt đơn này.');
+      }
+      const currentDeadline = getManualApprovalDeadline(current);
+      if (!currentDeadline || new Date() >= currentDeadline) {
+        throw bookingConflict('Đơn đã quá thời hạn duyệt hoặc hoạt động đã bắt đầu.');
       }
       const claimed = await tx.booking.updateMany({
         where: { id: bookingId, status: 'PENDING_PARTNER' },
@@ -822,8 +970,17 @@ async function rejectBooking(req, res, next) {
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        payments: { where: { status: 'SUCCESS', isDuplicate: false }, select: { id: true } },
-        refundRequests: { select: { id: true } },
+        payments: {
+          where: { status: 'SUCCESS', isDuplicate: false },
+          select: {
+            id: true,
+            status: true,
+            isDuplicate: true,
+            paymentGateway: true,
+            amount: true,
+          },
+        },
+        refundRequests: { select: { id: true, status: true } },
         reservation: {
           include: {
             ticketProduct: {
@@ -850,13 +1007,23 @@ async function rejectBooking(req, res, next) {
     }
 
     const hasPaid = booking.payments.length > 0;
+    const cancelledAt = new Date();
 
     await prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
         include: {
-          payments: { where: { status: 'SUCCESS', isDuplicate: false }, select: { id: true } },
-          refundRequests: { select: { id: true } },
+          payments: {
+            where: { status: 'SUCCESS', isDuplicate: false },
+            select: {
+              id: true,
+              status: true,
+              isDuplicate: true,
+              paymentGateway: true,
+              amount: true,
+            },
+          },
+          refundRequests: { select: { id: true, status: true } },
           reservation: {
             include: {
               ticketProduct: {
@@ -877,7 +1044,13 @@ async function rejectBooking(req, res, next) {
       const hasPaid = booking.payments.length > 0;
       const claimed = await tx.booking.updateMany({
         where: { id: bookingId, status: 'PENDING_PARTNER' },
-        data: { status: 'CANCELLED', refundRequired: hasPaid },
+        data: {
+          status: 'CANCELLED',
+          refundRequired: hasPaid,
+          cancelledAt,
+          cancellationReason: reason,
+          cancellationSource: 'PARTNER_REJECTION',
+        },
       });
       if (claimed.count !== 1) {
         throw bookingConflict();
@@ -948,15 +1121,11 @@ async function rejectBooking(req, res, next) {
 
       // 5. Đơn đã thu tiền -> tạo RefundRequest hoàn 100% (partner từ chối thì
       //    khách không chịu phí hủy) để Staff duyệt hoàn qua luồng sẵn có.
-      if (hasPaid && booking.refundRequests.length === 0) {
-        await tx.refundRequest.create({
-          data: {
-            bookingId,
-            requestedById: booking.userId,
-            reason: `Đối tác từ chối đơn đặt vé. Lý do: ${reason}`,
-            amount: booking.totalAmount,
-            status: 'PENDING',
-          },
+      if (hasPaid) {
+        await queueMandatoryRefund(tx, booking, {
+          now: cancelledAt,
+          type: 'PARTNER_CANCELLATION',
+          reason: `Đối tác từ chối đơn đặt vé. Lý do: ${reason}`,
         });
       }
     });
@@ -993,6 +1162,157 @@ async function rejectBooking(req, res, next) {
   }
 }
 
+// PATCH /api/partners/bookings/:id/cancel — Partner hủy đơn đã xác nhận trước giờ sử dụng.
+async function cancelConfirmedBooking(req, res, next) {
+  try {
+    const partnerId = req.partner.id;
+    const bookingId = req.params.id;
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng nhập lý do hủy (tối thiểu 5 ký tự).',
+      });
+    }
+
+    const include = {
+      payments: {
+        where: { status: 'SUCCESS', isDuplicate: false },
+        select: {
+          id: true,
+          status: true,
+          isDuplicate: true,
+          paymentGateway: true,
+          amount: true,
+        },
+      },
+      refundRequests: { select: { id: true, status: true } },
+      ticketInstances: { select: { id: true, status: true } },
+      reservation: {
+        include: {
+          timeSlot: true,
+          ticketProduct: {
+            include: {
+              attraction: {
+                select: {
+                  id: true,
+                  title: true,
+                  partnerId: true,
+                  openTime: true,
+                  closeTime: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const booking = await prisma.booking.findUnique({ where: { id: bookingId }, include });
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt vé.' });
+    }
+    if (booking.reservation.ticketProduct.attraction.partnerId !== partnerId) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền hủy đơn này.' });
+    }
+    if (booking.status !== 'CONFIRMED') {
+      return res.status(409).json({
+        success: false,
+        message: 'Chỉ đơn đã xác nhận và chưa sử dụng mới có thể được Partner hủy.',
+      });
+    }
+    if (booking.ticketInstances.some((ticket) => ticket.status === 'USED')) {
+      return res.status(409).json({ success: false, message: 'Không thể hủy đơn đã có vé check-in.' });
+    }
+    const now = new Date();
+    const { startsAt } = getBookingActivityWindow(booking);
+    if (!startsAt || now >= startsAt) {
+      return res.status(409).json({
+        success: false,
+        message: 'Không thể hủy đơn sau khi hoạt động đã bắt đầu. Vui lòng liên hệ Staff để xử lý ngoại lệ.',
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const current = await tx.booking.findUnique({ where: { id: bookingId }, include });
+      if (!current || current.status !== 'CONFIRMED') throw bookingConflict();
+      if (current.reservation.ticketProduct.attraction.partnerId !== partnerId) {
+        throw bookingConflict('Bạn không có quyền hủy đơn này.');
+      }
+      if (current.ticketInstances.some((ticket) => ticket.status === 'USED')) {
+        throw bookingConflict('Không thể hủy đơn đã có vé check-in.');
+      }
+      const currentStart = getBookingActivityWindow(current).startsAt;
+      if (!currentStart || new Date() >= currentStart) {
+        throw bookingConflict('Hoạt động đã bắt đầu, không thể hủy theo luồng Partner.');
+      }
+
+      const hasPaid = current.payments.length > 0;
+      const claimed = await tx.booking.updateMany({
+        where: { id: bookingId, status: 'CONFIRMED' },
+        data: {
+          status: 'CANCELLED',
+          refundRequired: hasPaid,
+          cancelledAt: now,
+          cancellationReason: reason,
+          cancellationSource: 'PARTNER',
+        },
+      });
+      if (claimed.count !== 1) throw bookingConflict();
+
+      await releaseInventory(tx, current);
+      await tx.ticketInstance.updateMany({
+        where: { bookingId, status: 'VALID' },
+        data: { status: 'EXPIRED' },
+      });
+      if (current.voucherId) {
+        await tx.voucher.updateMany({
+          where: { id: current.voucherId, usedCount: { gt: 0 } },
+          data: { usedCount: { decrement: 1 } },
+        });
+      }
+      if (hasPaid) {
+        await queueMandatoryRefund(tx, current, {
+          type: 'PARTNER_CANCELLATION',
+          reason: `Đối tác hủy đơn đã xác nhận. Lý do: ${reason}`,
+          now,
+        });
+      }
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'PARTNER_CANCELLED_CONFIRMED_BOOKING',
+        entityType: 'Booking',
+        entityId: bookingId,
+        metadata: { reason, refundRequired: hasPaid },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    emitBookingStatusUpdated({
+      customerId: booking.userId,
+      bookingId,
+      status: 'CANCELLED',
+      message: `Đơn ${bookingId.slice(0, 8).toUpperCase()} đã bị đối tác hủy. Yêu cầu hoàn tiền 100% đang được xử lý tự động.`,
+    });
+    sendBookingCancelledByPartnerEmail({
+      to: booking.email,
+      fullName: booking.fullName,
+      bookingId,
+      reason,
+      refundAmount: Number(booking.totalAmount),
+    }).catch((error) => {
+      console.error('[partner-cancel] Không thể gửi email:', error.message);
+    });
+
+    return res.json({
+      success: true,
+      message: 'Đã hủy đơn, hoàn kho và chuyển khoản hoàn 100% sang xử lý tự động.',
+      data: { id: bookingId, status: 'cancelled', refundRequired: booking.payments.length > 0 },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   toPartnerResponse,
   submitKyc,
@@ -1003,6 +1323,7 @@ module.exports = {
   getPartnerBookings,
   approveBooking,
   rejectBooking,
+  cancelConfirmedBooking,
   // Aliases để tương thích với MPhu
   registerPartner: submitKyc,
   getMyPartnerProfile: getMyPartner,

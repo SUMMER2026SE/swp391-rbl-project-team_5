@@ -3,8 +3,10 @@ const { sanitizeUser } = require('./authController');
 const {
   sendAccountStatusEmail,
   sendPartnerReviewEmail,
+  sendPartnerOperationalStatusEmail,
   sendAttractionReviewEmail,
   sendAttractionViolationEmail,
+  sendAttractionRestoredEmail,
 } = require('../utils/mailer');
 const { writeAuditLog } = require('../utils/auditLog');
 const {
@@ -13,11 +15,18 @@ const {
   validateSubmissionSnapshot,
 } = require('../services/attractionWorkflowService');
 const {
-  buildTimeline,
   getPeriodStart,
   normalizePeriod,
 } = require('../services/analyticsService');
+const {
+  PAYMENT_STATUSES,
+  REFUND_STATUSES,
+  TRANSACTION_TYPES,
+  getPlatformFinancialReport,
+  listPlatformFinancialTransactions,
+} = require('../services/financialReportService');
 const { refreshAttractionMinPrice } = require('../services/catalogService');
+const { grantRole, revokeRole } = require('../utils/userRoles');
 
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
@@ -26,6 +35,20 @@ const ALLOWED_ATTRACTION_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED',
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
+const FINANCIAL_TRANSACTION_STATUSES = new Set([
+  ...PAYMENT_STATUSES,
+  ...REFUND_STATUSES,
+]);
+
+function nextPublicationStatusAfterApproval(attraction) {
+  if (
+    attraction?.publishedAt
+    && ['ACTIVE', 'PAUSED'].includes(attraction.publicationStatus)
+  ) {
+    return attraction.publicationStatus;
+  }
+  return 'ACTIVE';
+}
 
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -56,7 +79,7 @@ function buildUserWhere({ search, role, status }) {
   }
 
   if (role) {
-    where.role = role;
+    where.roleMemberships = { some: { role } };
   }
 
   if (status) {
@@ -100,13 +123,13 @@ async function getUsers(req, res, next) {
       prisma.user.count(),
       prisma.user.count({
         where: {
-          role: 'CUSTOMER',
+          roleMemberships: { some: { role: 'CUSTOMER' } },
           status: 'ACTIVE',
         },
       }),
       prisma.user.count({
         where: {
-          role: 'PARTNER',
+          roleMemberships: { some: { role: 'PARTNER' } },
         },
       }),
       prisma.user.count({
@@ -116,7 +139,7 @@ async function getUsers(req, res, next) {
       }),
       prisma.user.findMany({
         where,
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
@@ -156,7 +179,7 @@ async function changeUserStatus(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     if (!user) {
@@ -176,7 +199,7 @@ async function changeUserStatus(req, res, next) {
           status,
           tokenVersion: { increment: 1 },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
 
       if (status === 'LOCKED') {
@@ -338,6 +361,7 @@ async function getAttractions(req, res, next) {
         select: {
           id: true,
           businessName: true,
+          status: true,
           user: { select: { email: true, fullName: true } },
         },
       },
@@ -427,10 +451,15 @@ async function reviewPartner(req, res, next) {
     }
 
     if (action === 'APPROVED') {
-      await prisma.$transaction([
-        prisma.partnerProfile.update({ where: { id }, data: { status: 'APPROVED', rejectionReason: null } }),
-        prisma.user.update({ where: { id: partner.userId }, data: { role: 'PARTNER' } }),
-      ]);
+      await prisma.$transaction(async (tx) => {
+        await tx.partnerProfile.update({
+          where: { id },
+          data: { status: 'APPROVED', rejectionReason: null },
+        });
+        await tx.user.update({ where: { id: partner.userId }, data: { role: 'PARTNER' } });
+        await grantRole(tx, partner.userId, 'CUSTOMER');
+        await grantRole(tx, partner.userId, 'PARTNER');
+      });
 
       // send email async
       sendPartnerReviewEmail({ to: partner.user.email, businessName: partner.businessName, action: 'APPROVED' }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
@@ -439,19 +468,126 @@ async function reviewPartner(req, res, next) {
     }
 
     // REJECTED
-    await prisma.$transaction([
-      prisma.partnerProfile.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.partnerProfile.update({
         where: { id },
         data: { status: 'REJECTED', rejectionReason },
-      }),
-      prisma.user.update({
+      });
+      await tx.user.update({
         where: { id: partner.userId },
         data: { role: 'CUSTOMER' },
-      }),
-    ]);
+      });
+      await grantRole(tx, partner.userId, 'CUSTOMER');
+      await revokeRole(tx, partner.userId, 'PARTNER');
+    });
     sendPartnerReviewEmail({ to: partner.user.email, businessName: partner.businessName, action: 'REJECTED', rejectionReason }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
 
     return res.status(200).json({ success: true, message: `Trạng thái đối tác đã được cập nhật thành ${action}` });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function changePartnerOperationalStatus(req, res, next) {
+  try {
+    const id = req.params.id;
+    const status = String(req.body?.status || '').trim().toUpperCase();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!['APPROVED', 'SUSPENDED'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'status must be APPROVED or SUSPENDED',
+        },
+      });
+    }
+    if (status === 'SUSPENDED' && !reason) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'reason is required when suspending' },
+      });
+    }
+    if (reason.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'reason must not exceed 1000 characters' },
+      });
+    }
+
+    const partner = await prisma.partnerProfile.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!partner) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Partner profile not found' },
+      });
+    }
+
+    const expectedStatus = status === 'SUSPENDED' ? 'APPROVED' : 'SUSPENDED';
+    if (partner.status !== expectedStatus) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATUS_TRANSITION',
+          message: `Partner must be ${expectedStatus} before changing to ${status}.`,
+        },
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.partnerProfile.updateMany({
+        where: { id, status: expectedStatus },
+        data: {
+          status,
+          rejectionReason: status === 'SUSPENDED' ? reason : null,
+        },
+      });
+      if (updated.count !== 1) {
+        const error = new Error('Partner status was changed by another administrator.');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: status === 'SUSPENDED' ? 'PARTNER_SUSPENDED' : 'PARTNER_RESTORED',
+        entityType: 'PARTNER',
+        entityId: id,
+        metadata: {
+          previousStatus: expectedStatus,
+          status,
+          reason: status === 'SUSPENDED' ? reason : null,
+        },
+      });
+    });
+
+    if (partner.user?.email) {
+      sendPartnerOperationalStatusEmail({
+        to: partner.user.email,
+        businessName: partner.businessName,
+        status,
+        reason,
+      }).catch((error) => {
+        console.error('[Admin] sendPartnerOperationalStatusEmail error:', error);
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: status === 'SUSPENDED'
+        ? 'Đã đình chỉ đối tác và dừng toàn bộ lượt bán mới.'
+        : 'Đã khôi phục đối tác. Các địa điểm vẫn giữ nguyên trạng thái mở hoặc tạm dừng trước đó.',
+      data: {
+        ...partner,
+        status,
+        rejectionReason: status === 'SUSPENDED' ? reason : null,
+      },
+    });
   } catch (error) {
     return next(error);
   }
@@ -548,7 +684,7 @@ async function reviewAttraction(req, res, next) {
           where: { id },
           data: {
             status: 'APPROVED',
-            publicationStatus: 'ACTIVE',
+            publicationStatus: nextPublicationStatusAfterApproval(attraction),
             rejectionReason: null,
             draftData: clearJsonField(),
             submittedData: clearJsonField(),
@@ -618,32 +754,134 @@ async function hideAttraction(req, res, next) {
     if (!reason || String(reason).trim() === '') return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } });
 
     const attraction = await prisma.attraction.findUnique({ where: { id }, include: { partner: { include: { user: true } } } });
-    if (!attraction) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
+    if (!attraction || attraction.archivedAt) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
+    if (attraction.status !== 'APPROVED' || !attraction.publishedAt) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATUS_TRANSITION',
+          message: 'Chỉ có thể đình chỉ địa điểm đã được phê duyệt và phát hành.',
+        },
+      });
+    }
 
-    await prisma.attraction.update({
-      where: { id },
-      data: {
-        status: 'SUSPENDED',
-        publicationStatus: 'PAUSED',
-        rejectionReason: String(reason).trim(),
-        reviewedAt: new Date(),
-        reviewedById: req.user?.id || null,
-      },
-    });
-    await writeAuditLog({
-      req,
-      action: 'ATTRACTION_SUSPENDED',
-      entityType: 'ATTRACTION',
-      entityId: id,
-      metadata: { reason: String(reason).trim() },
+    const suspensionReason = String(reason).trim();
+    const reviewedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.attraction.updateMany({
+        where: { id, status: 'APPROVED', archivedAt: null },
+        data: {
+          status: 'SUSPENDED',
+          publicationStatus: 'PAUSED',
+          rejectionReason: suspensionReason,
+          reviewedAt,
+          reviewedById: req.user?.id || null,
+        },
+      });
+      if (updated.count !== 1) {
+        const error = new Error('Attraction status was changed by another administrator.');
+        error.statusCode = 409;
+        throw error;
+      }
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'ATTRACTION_SUSPENDED',
+        entityType: 'ATTRACTION',
+        entityId: id,
+        metadata: {
+          reason: suspensionReason,
+          previousPublicationStatus: attraction.publicationStatus,
+        },
+      });
     });
 
     // send email but don't block
     if (attraction.partner && attraction.partner.user && attraction.partner.user.email) {
-      sendAttractionViolationEmail({ to: attraction.partner.user.email, partnerName: attraction.partner.businessName, attractionTitle: attraction.title, reason }).catch((err) => console.error('[Admin] Lỗi gửi email vi phạm:', err));
+      sendAttractionViolationEmail({ to: attraction.partner.user.email, partnerName: attraction.partner.businessName, attractionTitle: attraction.title, reason: suspensionReason }).catch((err) => console.error('[Admin] Lỗi gửi email vi phạm:', err));
     }
 
     return res.status(200).json({ success: true, message: 'Địa điểm đã bị ẩn thành công và email cảnh báo đã gửi tới đối tác.' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function restoreAttraction(req, res, next) {
+  try {
+    const id = req.params.id;
+    const attraction = await prisma.attraction.findUnique({
+      where: { id },
+      include: { partner: { include: { user: true } } },
+    });
+    if (!attraction || attraction.archivedAt) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Attraction not found' },
+      });
+    }
+    if (attraction.status !== 'SUSPENDED') {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATUS_TRANSITION',
+          message: 'Chỉ có thể khôi phục địa điểm đang bị đình chỉ.',
+        },
+      });
+    }
+
+    const reviewedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      const updated = await tx.attraction.updateMany({
+        where: { id, status: 'SUSPENDED', archivedAt: null },
+        data: {
+          status: 'APPROVED',
+          publicationStatus: 'PAUSED',
+          rejectionReason: null,
+          reviewedAt,
+          reviewedById: req.user?.id || null,
+        },
+      });
+      if (updated.count !== 1) {
+        const error = new Error('Attraction status was changed by another administrator.');
+        error.statusCode = 409;
+        throw error;
+      }
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'ATTRACTION_RESTORED',
+        entityType: 'ATTRACTION',
+        entityId: id,
+        metadata: {
+          previousStatus: 'SUSPENDED',
+          publicationStatus: 'PAUSED',
+          previousReason: attraction.rejectionReason || null,
+        },
+      });
+    });
+
+    const recipient = attraction.partner?.user?.email;
+    if (recipient) {
+      sendAttractionRestoredEmail({
+        to: recipient,
+        partnerName: attraction.partner.businessName,
+        attractionTitle: attraction.title,
+      }).catch((error) => {
+        console.error('[Admin] sendAttractionRestoredEmail error:', error);
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Đã khôi phục địa điểm ở trạng thái tạm dừng. Đối tác phải chủ động mở bán lại.',
+      data: {
+        ...attraction,
+        status: 'APPROVED',
+        publicationStatus: 'PAUSED',
+        rejectionReason: null,
+      },
+    });
   } catch (error) {
     return next(error);
   }
@@ -813,7 +1051,7 @@ async function getDashboard(req, res, next) {
       pendingPartnersCount,
       newPartners,
       periodBookings,
-      successfulPayments,
+      financialReport,
       pendingPartners,
       pendingAttractions,
     ] = await Promise.all([
@@ -825,21 +1063,13 @@ async function getDashboard(req, res, next) {
           publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
           status: { not: 'SUSPENDED' },
+          partner: { status: 'APPROVED' },
         },
       }),
       prisma.partnerProfile.count({ where: { status: 'PENDING' } }),
       prisma.partnerProfile.count({ where: { createdAt: { gte: startDate } } }),
       prisma.booking.count({ where: { createdAt: { gte: startDate } } }),
-      prisma.payment.findMany({
-        where: {
-          status: 'SUCCESS',
-          isDuplicate: false,
-          createdAt: { gte: startDate },
-          booking: { status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] } },
-        },
-        select: { amount: true, createdAt: true },
-        orderBy: { createdAt: 'asc' },
-      }),
+      getPlatformFinancialReport(period),
       prisma.partnerProfile.findMany({
         where: { status: 'PENDING' },
         take: 5,
@@ -871,17 +1101,14 @@ async function getDashboard(req, res, next) {
       }),
     ]);
 
-    const revenue = successfulPayments.reduce(
-      (sum, payment) => sum + Number(payment.amount),
-      0,
-    );
-
     return res.json({
       success: true,
       data: {
         period,
         stats: {
-          revenue,
+          // Compatibility: revenue now means net gateway cash flow, not GMV.
+          revenue: financialReport.summary.netCashAmount,
+          ...financialReport.summary,
           totalUsers,
           totalAttractions,
           activeAttractions,
@@ -889,7 +1116,7 @@ async function getDashboard(req, res, next) {
           newPartners,
           bookings: periodBookings,
         },
-        trend: buildTimeline(successfulPayments, period, (payment) => payment.amount),
+        trend: financialReport.timeline,
         pendingPartners,
         pendingAttractions: pendingAttractions.map((attraction) => ({
           ...attraction,
@@ -899,6 +1126,128 @@ async function getDashboard(req, res, next) {
           primaryImage: attraction.images[0]?.imageUrl || null,
           images: undefined,
         })),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getFinancialReport(req, res, next) {
+  try {
+    const period = normalizePeriod(String(req.query.period || '').trim());
+    const report = await getPlatformFinancialReport(period);
+
+    return res.json({ success: true, data: report });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getFinancialTransactions(req, res, next) {
+  try {
+    const type = String(req.query.type || 'ALL').trim().toUpperCase();
+    const status = String(req.query.status || '').trim().toUpperCase();
+
+    if (!TRANSACTION_TYPES.has(type)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_TRANSACTION_TYPE', message: 'Loại giao dịch không hợp lệ.' },
+      });
+    }
+    if (status && !FINANCIAL_TRANSACTION_STATUSES.has(status)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_TRANSACTION_STATUS', message: 'Trạng thái giao dịch không hợp lệ.' },
+      });
+    }
+
+    const result = await listPlatformFinancialTransactions({
+      period: String(req.query.period || '').trim(),
+      type,
+      status,
+      search: req.query.search,
+      limit: req.query.limit,
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function changePartnerCommissionRate(req, res, next) {
+  try {
+    const rawCommissionRate = req.body?.commissionRatePercent;
+    const commissionRatePercent = Number(rawCommissionRate);
+    if (
+      rawCommissionRate == null
+      || String(rawCommissionRate).trim() === ''
+      || !Number.isInteger(commissionRatePercent)
+      || commissionRatePercent < 0
+      || commissionRatePercent > 100
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_COMMISSION_RATE',
+          message: 'Tỷ lệ hoa hồng phải là số nguyên từ 0 đến 100.',
+        },
+      });
+    }
+
+    const partner = await prisma.partnerProfile.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        businessName: true,
+        commissionRate: true,
+      },
+    });
+    if (!partner) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'PARTNER_NOT_FOUND', message: 'Không tìm thấy đối tác.' },
+      });
+    }
+
+    const previousRate = Number(partner.commissionRate);
+    const commissionRate = commissionRatePercent / 100;
+    const updated = await prisma.$transaction(async (tx) => {
+      const profile = await tx.partnerProfile.update({
+        where: { id: partner.id },
+        data: { commissionRate },
+        select: {
+          id: true,
+          businessName: true,
+          status: true,
+          commissionRate: true,
+        },
+      });
+
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'PARTNER_COMMISSION_RATE_CHANGED',
+        entityType: 'PARTNER',
+        entityId: partner.id,
+        metadata: {
+          previousRate,
+          commissionRate,
+          appliesTo: 'FUTURE_BOOKINGS_ONLY',
+        },
+      });
+
+      return profile;
+    });
+
+    return res.json({
+      success: true,
+      message: 'Đã cập nhật tỷ lệ hoa hồng cho các booking tạo mới.',
+      data: {
+        ...updated,
+        commissionRate: Number(updated.commissionRate),
+        commissionRatePercent: Number(updated.commissionRate) * 100,
       },
     });
   } catch (error) {
@@ -1025,10 +1374,15 @@ module.exports = {
   getPartners,
   getAttractions,
   reviewPartner,
+  changePartnerOperationalStatus,
   reviewAttraction,
   hideAttraction,
+  restoreAttraction,
   getAdminBookings,
   getDashboard,
+  getFinancialReport,
+  getFinancialTransactions,
+  changePartnerCommissionRate,
   listCategories,
   createCategory,
   updateCategory,

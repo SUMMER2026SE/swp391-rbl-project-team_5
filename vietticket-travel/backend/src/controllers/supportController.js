@@ -2,6 +2,7 @@
 
 const prisma = require('../config/prisma');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
+const { hasRole } = require('../utils/userRoles');
 const {
   emitSupportMessage,
   emitSupportTicketUpdated,
@@ -25,6 +26,12 @@ function assertSupportStaff(user) {
   }
 }
 
+function getSupportSenderRole(user) {
+  if (hasRole(user, 'ADMIN')) return 'ADMIN';
+  if (isSupportStaff(user)) return 'STAFF';
+  return 'CUSTOMER';
+}
+
 function sendError(res, error, next) {
   if (error.statusCode) {
     return res.status(error.statusCode).json({
@@ -42,14 +49,19 @@ async function attachSenders(messages) {
 
   const users = await prisma.user.findMany({
     where: { id: { in: ids } },
-    select: { id: true, fullName: true, role: true },
+    select: {
+      id: true,
+      fullName: true,
+      role: true,
+      roleMemberships: { select: { role: true } },
+    },
   });
   const byId = new Map(users.map((u) => [u.id, u]));
 
   return messages.map((m) => ({
     ...m,
     senderName: byId.get(m.senderId)?.fullName || 'Người dùng',
-    senderRole: byId.get(m.senderId)?.role || 'CUSTOMER',
+    senderRole: getSupportSenderRole(byId.get(m.senderId)),
   }));
 }
 
@@ -217,7 +229,7 @@ async function sendMessage(req, res, next) {
     const enriched = {
       ...message,
       senderName: req.user.fullName,
-      senderRole: req.user.role,
+      senderRole: getSupportSenderRole(req.user),
     };
 
     emitSupportMessage(ticketId, enriched);

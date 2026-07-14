@@ -67,6 +67,7 @@ router.put('/attractions/:id/schedule', scheduleController.saveSchedule);
 router.get('/bookings', restrictTo('PARTNER'), partnerController.getPartnerBookings);
 router.patch('/bookings/:id/approve', restrictTo('PARTNER'), partnerController.approveBooking);
 router.patch('/bookings/:id/reject', restrictTo('PARTNER'), partnerController.rejectBooking);
+router.patch('/bookings/:id/cancel', restrictTo('PARTNER'), partnerController.cancelConfirmedBooking);
 
 // Đánh giá (phản hồi & thống kê phía đối tác)
 router.get('/reviews', restrictTo('PARTNER'), reviewController.listPartnerReviews);

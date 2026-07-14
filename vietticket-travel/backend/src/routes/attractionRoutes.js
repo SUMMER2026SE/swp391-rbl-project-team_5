@@ -11,7 +11,7 @@ const router = express.Router();
 router.get('/', searchAttractions);
 router.get('/map-points', getMapPoints); // phải đặt trước '/:id'
 router.get('/:id', getAttractionDetail);
-router.post('/:id/favorite', protect, toggleFavorite);
+router.post('/:id/favorite', protect, restrictTo('CUSTOMER'), toggleFavorite);
 
 // Partner routes
 router.post(

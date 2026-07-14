@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { hasRole } = require('../utils/userRoles');
 
 // Đảm bảo người dùng đã có hồ sơ đối tác (PartnerProfile).
 // Nạp hồ sơ vào req.partner để các controller dùng partnerId.
@@ -45,7 +46,7 @@ function requireApprovedPartner(req, res, next) {
 // (ví dụ bị admin đình chỉ - SUSPENDED). ADMIN không thuộc đối tác nào -> bỏ qua.
 async function requireActiveEmployer(req, res, next) {
   try {
-    if (req.user?.role === 'ADMIN') return next();
+    if (hasRole(req.user, 'ADMIN')) return next();
 
     const employerId = req.user?.employerPartnerId;
     if (!employerId) {
@@ -74,4 +75,42 @@ async function requireActiveEmployer(req, res, next) {
   }
 }
 
-module.exports = { requirePartner, requireApprovedPartner, requireActiveEmployer };
+// A suspended partner must stop selling and managing its catalogue, but its on-site
+// staff still need to honour tickets that the platform already confirmed.
+async function requireCheckInEmployer(req, res, next) {
+  try {
+    if (hasRole(req.user, 'ADMIN')) return next();
+
+    const employerId = req.user?.employerPartnerId;
+    if (!employerId) {
+      return res.status(403).json({
+        message: 'Tài khoản nhân viên chưa thuộc đối tác nào.',
+        code: 'EMPLOYER_REQUIRED',
+      });
+    }
+
+    const employer = await prisma.partnerProfile.findUnique({
+      where: { id: employerId },
+      select: { status: true },
+    });
+
+    if (!employer || !['APPROVED', 'SUSPENDED'].includes(employer.status)) {
+      return res.status(403).json({
+        message: 'Đối tác chủ quản không đủ điều kiện thực hiện check-in.',
+        code: 'EMPLOYER_CHECKIN_UNAVAILABLE',
+        employerStatus: employer?.status || null,
+      });
+    }
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+module.exports = {
+  requirePartner,
+  requireApprovedPartner,
+  requireActiveEmployer,
+  requireCheckInEmployer,
+};

@@ -14,6 +14,7 @@ const {
 const { startCleanupWorker } = require('./utils/cleanupWorker');
 const { startCompletionWorker } = require('./utils/completionWorker');
 const { startRefundWorker } = require('./utils/refundWorker');
+const { startPendingPartnerWorker } = require('./utils/pendingPartnerWorker');
 
 const PORT = process.env.PORT || 5000;
 
@@ -32,6 +33,9 @@ const completionHandle = startCompletionWorker();
 
 // Worker đối soát hoàn tiền VNPay tự động.
 const refundHandle = startRefundWorker();
+
+// Worker tự hủy và tạo yêu cầu hoàn tiền cho đơn đã chờ đối tác quá 24 giờ.
+const pendingPartnerHandle = startPendingPartnerWorker();
 
 let shutdownPromise = null;
 
@@ -52,6 +56,7 @@ function shutdown({ exit = true } = {}) {
   clearInterval(cleanupHandle);
   clearInterval(completionHandle);
   clearInterval(refundHandle);
+  clearInterval(pendingPartnerHandle);
 
   shutdownPromise = (async () => {
     await closeSocketServer();
