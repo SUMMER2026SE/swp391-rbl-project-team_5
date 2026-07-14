@@ -15,19 +15,6 @@ function RouteLoading() {
   );
 }
 
-function RouteLoading() {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-[#f9f9fc] px-5">
-      <div
-        className="rounded-lg border border-[#bec8ca]/60 bg-white px-6 py-5 text-sm font-semibold text-[#3f484a] shadow-[0_8px_30px_rgba(0,40,50,0.08)]"
-        role="status"
-      >
-        Đang kiểm tra phiên đăng nhập...
-      </div>
-    </main>
-  );
-}
-
 /**
  * AdminRoute protects admin routes.
  * It checks if the user is authenticated and has the ADMIN role.
