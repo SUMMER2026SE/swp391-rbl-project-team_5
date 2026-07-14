@@ -24,25 +24,26 @@ enum UserStatus {
 }
 
 model User {
-  id              String       @id @default(uuid())
-  email           String       @unique
-  passwordHash    String?
-  fullName        String
-  role            UserRole     @default(CUSTOMER)
-  provider        AuthProvider @default(LOCAL)
-  isEmailVerified Boolean      @default(false)
-  status          UserStatus   @default(ACTIVE)
-  tokenVersion    Int          @default(0)
+  id                String       @id @default(uuid())
+  email             String       @unique
+  passwordHash      String?
+  fullName          String
+  role              UserRole     @default(CUSTOMER)
+  provider          AuthProvider @default(LOCAL)
+  isEmailVerified   Boolean      @default(false)
+  status            UserStatus   @default(ACTIVE)
+  tokenVersion      Int          @default(0)
   // Đối tác chủ quản của nhân viên này. Chỉ set khi role = STAFF.
   employerPartnerId String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   profile                 UserProfile?
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
   oauthAccounts           OAuthAccount[]
   authSessions            AuthSession[]
+  roleMemberships         UserRoleMembership[]
   partnerProfile          PartnerProfile?
   employer                PartnerProfile?             @relation("PartnerStaff", fields: [employerPartnerId], references: [id], onDelete: Cascade)
   favoriteAttractions     FavoriteAttraction[]
@@ -57,6 +58,17 @@ model User {
   savedItineraries        SavedItinerary[]
 
   @@index([employerPartnerId])
+}
+
+model UserRoleMembership {
+  userId    String
+  role      UserRole
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, role])
+  @@index([role])
 }
 
 model UserProfile {
@@ -238,7 +250,7 @@ model PartnerProfile {
   userId             String        @unique
   businessName       String
   businessLicenseUrl String?
-  taxCode            String?
+  taxCode            String        @unique
   bankName           String?
   branchName         String?
   bankAccountNumber  String?
@@ -371,19 +383,20 @@ model AttractionCategory {
 }
 
 model TicketProduct {
-  id            String           @id @default(uuid())
-  attractionId  String
-  name          String
-  type          TicketType       @default(ADULT)
-  description   String           @db.Text
-  originalPrice Decimal          @db.Decimal(12, 2)
-  sellingPrice  Decimal          @db.Decimal(12, 2)
-  status        TicketStatus     @default(ACTIVE)
-  refundPolicy  RefundPolicyType @default(NON_REFUNDABLE)
-  refundFeeRate Decimal          @default(0.0) @db.Decimal(5, 2)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  archivedAt    DateTime?
+  id                String           @id @default(uuid())
+  attractionId      String
+  name              String
+  type              TicketType       @default(ADULT)
+  description       String           @db.Text
+  originalPrice     Decimal          @db.Decimal(12, 2)
+  sellingPrice      Decimal          @db.Decimal(12, 2)
+  status            TicketStatus     @default(ACTIVE)
+  refundPolicy      RefundPolicyType @default(NON_REFUNDABLE)
+  refundFeeRate     Decimal          @default(0.0) @db.Decimal(5, 2)
+  refundCutoffHours Int              @default(24)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  archivedAt        DateTime?
 
   attraction      Attraction       @relation(fields: [attractionId], references: [id], onDelete: Cascade)
   timeSlots       TimeSlot[]
@@ -508,7 +521,7 @@ model Booking {
   totalAmount                Decimal          @db.Decimal(12, 2)
   status                     BookingStatus    @default(PENDING_PAYMENT)
   refundRequired             Boolean          @default(false) // Đã thu tiền nhưng đơn bị hủy/không giữ được vé → cần hoàn tiền thủ công
-  paymentMethod              String?
+  paymentMethod              String           @default("vnpay")
   fullName                   String
   email                      String
   phone                      String?
@@ -526,8 +539,15 @@ model Booking {
   snapshotUnitPrice          Decimal          @default(0.0) @db.Decimal(12, 2)
   snapshotRefundPolicy       RefundPolicyType @default(NON_REFUNDABLE)
   snapshotRefundFeeRate      Decimal          @default(0.0) @db.Decimal(5, 2)
+  snapshotRefundCutoffHours  Int              @default(24)
   snapshotVisitDate          DateTime?        @db.Date
   snapshotTimeSlotLabel      String?
+  commissionRateSnapshot     Decimal          @default(0.10) @db.Decimal(5, 2)
+  commissionAmountSnapshot   Decimal          @default(0.0) @db.Decimal(12, 2)
+  partnerNetAmountSnapshot   Decimal          @default(0.0) @db.Decimal(12, 2)
+  cancelledAt                DateTime?
+  cancellationReason         String?          @db.Text
+  cancellationSource         String?
   createdAt                  DateTime         @default(now())
   updatedAt                  DateTime         @updatedAt
 
@@ -545,6 +565,7 @@ model Booking {
   @@index([status])
   @@index([snapshotAttractionId])
   @@index([snapshotVisitDate])
+  @@index([cancelledAt])
 }
 
 model Payment {
@@ -622,6 +643,13 @@ enum RefundStatus {
   REJECTED
 }
 
+enum RefundRequestType {
+  CUSTOMER_CANCELLATION
+  PARTNER_CANCELLATION
+  SYSTEM_CANCELLATION
+  DUPLICATE_PAYMENT
+}
+
 enum RefundTransactionStatus {
   PENDING
   PROCESSING
@@ -637,43 +665,58 @@ enum SupportStatus {
 }
 
 model RefundRequest {
-  id                  String       @id @default(uuid())
-  bookingId           String       @unique
-  requestedById       String
-  reason              String       @db.Text
-  amount              Decimal      @db.Decimal(12, 2)
-  status              RefundStatus @default(PENDING)
-  staffNotes          String?      @db.Text
-  processedById       String?
-  processingStartedAt DateTime?
-  createdAt           DateTime     @default(now())
-  processedAt         DateTime?
-  updatedAt           DateTime     @updatedAt
+  id                         String            @id @default(uuid())
+  bookingId                  String
+  requestKey                 String            @unique
+  requestedById              String
+  type                       RefundRequestType @default(CUSTOMER_CANCELLATION)
+  mandatory                  Boolean           @default(false)
+  reason                     String            @db.Text
+  originalAmount             Decimal           @db.Decimal(12, 2)
+  amount                     Decimal           @db.Decimal(12, 2)
+  feeAmount                  Decimal           @default(0.0) @db.Decimal(12, 2)
+  policySnapshot             RefundPolicyType?
+  feeRateSnapshot            Decimal?          @db.Decimal(5, 2)
+  bookingStatusBeforeRequest BookingStatus?
+  status                     RefundStatus      @default(PENDING)
+  staffNotes                 String?           @db.Text
+  processedById              String?
+  processingStartedAt        DateTime?
+  createdAt                  DateTime          @default(now())
+  processedAt                DateTime?
+  updatedAt                  DateTime          @updatedAt
 
   booking            Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   refundTransactions RefundTransaction[]
 
+  @@index([bookingId])
   @@index([status])
   @@index([requestedById])
+  @@index([type, status])
 }
 
 model RefundTransaction {
-  id               String                  @id @default(uuid())
-  bookingId        String
-  paymentId        String?
-  refundRequestId  String?
-  gateway          String                  @default("VNPAY")
-  gatewayRequestId String                  @unique
-  transactionType  String?
-  amount           Decimal                 @db.Decimal(12, 2)
-  status           RefundTransactionStatus @default(PENDING)
-  reason           String?                 @db.Text
-  rawRequest       Json?
-  rawResponse      Json?
-  processedById    String?
-  processedAt      DateTime?
-  createdAt        DateTime                @default(now())
-  updatedAt        DateTime                @updatedAt
+  id                       String                  @id @default(uuid())
+  bookingId                String
+  paymentId                String?
+  refundRequestId          String?
+  gateway                  String                  @default("VNPAY")
+  gatewayRequestId         String                  @unique
+  transactionType          String?
+  amount                   Decimal                 @db.Decimal(12, 2)
+  status                   RefundTransactionStatus @default(PENDING)
+  reason                   String?                 @db.Text
+  rawRequest               Json?
+  rawResponse              Json?
+  gatewayResponseCode      String?
+  gatewayTransactionStatus String?
+  gatewayTransactionId     String?
+  processedById            String?
+  submittedAt              DateTime?
+  reconciledAt             DateTime?
+  processedAt              DateTime?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
 
   booking       Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   payment       Payment?       @relation(fields: [paymentId], references: [id], onDelete: SetNull)
@@ -750,10 +793,10 @@ model SupportMessage {
 model SavedItinerary {
   id        String   @id @default(uuid())
   userId    String
-  planId    String   // client-generated ID (clientPlanId hoặc UUID)
+  planId    String // client-generated ID (clientPlanId hoặc UUID)
   title     String
-  data      Json     // full plan snapshot
-  criteria  Json?    // tham số tạo lịch (city, days, budget, ...)
+  data      Json // full plan snapshot
+  criteria  Json? // tham số tạo lịch (city, days, budget, ...)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

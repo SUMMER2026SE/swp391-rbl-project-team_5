@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt');
 const prisma = require('./src/config/prisma');
+const { grantRole } = require('./src/utils/userRoles');
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
@@ -23,16 +24,20 @@ async function createAdmin() {
 
     if (existingUser) {
       console.log(`Tài khoản ${ADMIN_EMAIL} đã tồn tại trong hệ thống.`);
-      
-      // If it exists but is not ADMIN, update its role
-      if (existingUser.role !== 'ADMIN') {
-        console.log('Đang cập nhật vai trò thành ADMIN...');
-        await prisma.user.update({
-          where: { id: existingUser.id },
-          data: { role: 'ADMIN', status: 'ACTIVE', isEmailVerified: true },
-        });
-        console.log('Cập nhật vai trò Admin thành công!');
-      }
+      console.log('Đang đảm bảo vai trò, trạng thái và mật khẩu Admin theo biến môi trường...');
+      const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+      await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          fullName: ADMIN_FULLNAME || existingUser.fullName,
+          isEmailVerified: true,
+          passwordHash,
+          role: 'ADMIN',
+          status: 'ACTIVE',
+        },
+      });
+      await grantRole(prisma, existingUser.id, 'ADMIN');
+      console.log('Cập nhật tài khoản Admin thành công!');
       return;
     }
 
@@ -56,6 +61,7 @@ async function createAdmin() {
             address: 'Hà Nội, Việt Nam',
           },
         },
+        roleMemberships: { create: { role: 'ADMIN' } },
       },
     });
 

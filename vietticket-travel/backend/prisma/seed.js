@@ -4,6 +4,7 @@ require('dotenv').config({ quiet: true });
 
 const bcrypt = require('bcrypt');
 const prisma = require('../src/config/prisma');
+const { grantRole } = require('../src/utils/userRoles');
 
 const PARTNER_EMAIL = 'partner@vietticket.com';
 const PARTNER_PASSWORD = 'Partner@123';
@@ -78,6 +79,9 @@ async function seedPartner() {
         isEmailVerified: true,
         status: 'ACTIVE',
         profile: { create: { phoneNumber: '0901234567' } },
+        roleMemberships: {
+          create: [{ role: 'CUSTOMER' }, { role: 'PARTNER' }],
+        },
       },
     });
     console.log(`✓ Đã tạo tài khoản đối tác: ${PARTNER_EMAIL} / ${PARTNER_PASSWORD}`);
@@ -88,6 +92,9 @@ async function seedPartner() {
     });
     console.log(`✓ Tài khoản ${PARTNER_EMAIL} đã tồn tại — đảm bảo role PARTNER.`);
   }
+
+  await grantRole(prisma, user.id, 'CUSTOMER');
+  await grantRole(prisma, user.id, 'PARTNER');
 
   const partner = await prisma.partnerProfile.upsert({
     where: { userId: user.id },

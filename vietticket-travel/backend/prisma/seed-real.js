@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const prisma = require('../src/config/prisma');
+const { grantRole } = require('../src/utils/userRoles');
 const { realAttractions } = require('./data/realAttractions');
 const { attractionContent } = require('./data/attractionContent');
 
@@ -37,6 +38,9 @@ async function ensurePartner() {
         isEmailVerified: true,
         status: 'ACTIVE',
         profile: { create: { phoneNumber: '0901234567' } },
+        roleMemberships: {
+          create: [{ role: 'CUSTOMER' }, { role: 'PARTNER' }],
+        },
       },
     });
   } else {
@@ -45,6 +49,9 @@ async function ensurePartner() {
       data: { role: 'PARTNER', isEmailVerified: true, status: 'ACTIVE' },
     });
   }
+
+  await grantRole(prisma, user.id, 'CUSTOMER');
+  await grantRole(prisma, user.id, 'PARTNER');
 
   const partner = await prisma.partnerProfile.upsert({
     where: { userId: user.id },

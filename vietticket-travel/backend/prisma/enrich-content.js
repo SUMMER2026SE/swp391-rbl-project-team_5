@@ -25,8 +25,21 @@ const COMMONS_HEADERS = {
   'User-Agent': 'VietTicketSeed/1.0 (student project; contact: dev@vietticket.local)',
 };
 
-// Loại ảnh không phải "ảnh chụp địa điểm" (bản đồ, logo, sơ đồ...).
-const JUNK_NAME = /map|logo|flag|coat[_ ]of[_ ]arms|locator|diagram|plan\b|seal|emblem|banner|icon|screenshot/i;
+// Loại ảnh không phải "ảnh chụp địa điểm" (bản đồ, logo, sơ đồ...),
+// tài liệu lưu trữ/thư tịch, biểu đồ và một số nguồn rác nước ngoài
+// hay lọt lưới khi tìm kiếm mờ trên Commons.
+const JUNK_NAME =
+  /map|logo|flag|coat[_ ]of[_ ]arms|locator|diagram|plan\b|seal|emblem|banner|icon|screenshot|infographic|capacity|generation|chart|thumbnail|luu tru|ban tau|but phe|tan luat|tang san|tuyen cao|kham thien|hoang de|nha may det|diep ca|goethe|prokudin|e coli|sacrament|\binstitut\b|mumlava/i;
+
+// Chuẩn hóa tên file để so khớp JUNK_NAME kể cả khi có dấu tiếng Việt
+// và dấu gạch dưới (ví dụ "Bản_tấu", "Lưu_trữ").
+const normName = (s) =>
+  (s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[_-]/g, ' ')
+    .toLowerCase();
 
 async function searchCommonsImages(query) {
   const params = new URLSearchParams({
@@ -69,7 +82,7 @@ function isUsable(img) {
   if ((img.width || 0) < 800 || (img.height || 0) < 500) return false;
   const ratio = img.width / img.height;
   if (ratio < 0.5 || ratio > 2.6) return false; // bỏ ảnh panorama quá dẹt / quá dọc
-  if (JUNK_NAME.test(img.title)) return false;
+  if (JUNK_NAME.test(normName(img.title))) return false;
   return true;
 }
 
