@@ -3,14 +3,20 @@ const mockPrisma = {
     findUnique: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
+    upsert: jest.fn(),
     update: jest.fn(),
     count: jest.fn(),
+  },
+  userRoleMembership: {
+    upsert: jest.fn(),
+    deleteMany: jest.fn(),
   },
   partnerProfile: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     count: jest.fn(),
   },
   attraction: {
@@ -40,6 +46,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     updateMany: jest.fn(),
     upsert: jest.fn(),
+    count: jest.fn(),
   },
   category: {
     findUnique: jest.fn(),
@@ -86,6 +93,7 @@ const mockPrisma = {
     updateMany: jest.fn(),
   },
   attractionDailyStock: {
+    findMany: jest.fn(),
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -100,9 +108,12 @@ const mockPrisma = {
   },
   reservation: {
     create: jest.fn(),
+    count: jest.fn(),
+    findFirst: jest.fn(),
     findUnique: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   booking: {
     create: jest.fn(),
@@ -118,10 +129,12 @@ const mockPrisma = {
     findMany: jest.fn(),
     findUnique: jest.fn(),
     create: jest.fn(),
+    upsert: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
     count: jest.fn(),
     groupBy: jest.fn(),
+    aggregate: jest.fn(),
   },
   voucher: {
     findUnique: jest.fn(),
@@ -129,6 +142,7 @@ const mockPrisma = {
   },
   payment: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -136,11 +150,13 @@ const mockPrisma = {
   },
   refundTransaction: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
     upsert: jest.fn(),
+    aggregate: jest.fn(),
   },
   authSession: {
     findUnique: jest.fn(),

@@ -4,6 +4,7 @@ jest.mock('../utils/mailer', () => ({
   sendReissueTicketEmail: jest.fn().mockResolvedValue({ sent: true }),
 }));
 jest.mock('../controllers/paymentController', () => ({
+  queryVnpayTransaction: jest.fn(),
   refundViaVnpay: jest.fn(),
 }));
 
@@ -12,10 +13,14 @@ const {
   sendRefundStatusEmail,
   sendReissueTicketEmail,
 } = require('../utils/mailer');
-const { refundViaVnpay } = require('../controllers/paymentController');
+const {
+  queryVnpayTransaction,
+  refundViaVnpay,
+} = require('../controllers/paymentController');
 const {
   listRefundRequests,
   processRefundRequest,
+  reconcileRefundRequest,
   reissueTicket,
 } = require('../controllers/staffController');
 
@@ -40,18 +45,36 @@ function makeReqRes(overrides = {}) {
   return { req, res, next: jest.fn() };
 }
 
+function paymentFixture(overrides = {}) {
+  return {
+    id: 'payment-1',
+    amount: 100000,
+    status: 'SUCCESS',
+    isDuplicate: false,
+    paymentGateway: 'VNPAY',
+    transactionId: 'txn-ref-1',
+    rawResponse: { vnp_TransactionNo: '99999', vnp_PayDate: '20260610120000' },
+    ...overrides,
+  };
+}
+
 function refundFixture(overrides = {}) {
   return {
     id: 'refund-1',
     bookingId: 'booking-1',
+    type: 'CUSTOMER_CANCELLATION',
+    mandatory: false,
+    reason: 'Khách thay đổi kế hoạch',
     amount: 90000,
     status: 'PENDING',
+    refundTransactions: [],
     booking: {
       id: 'booking-1',
       status: 'REFUND_REQUESTED',
       totalAmount: 100000,
-      // Mặc định không có thanh toán online -> bỏ qua bước gọi cổng VNPay.
-      payments: [],
+      payments: [paymentFixture()],
+      refundTransactions: [],
+      ticketInstances: [{ id: 'ticket-instance-1', status: 'VALID' }],
       user: { fullName: 'Nguyen Van A', email: 'a@example.com' },
       reservation: {
         id: 'reservation-1',
@@ -74,9 +97,18 @@ function refundFixture(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   prisma.refundRequest.updateMany.mockResolvedValue({ count: 1 });
-  prisma.refundTransaction.create.mockResolvedValue({ id: 'refund-txn-1' });
+  prisma.refundTransaction.create.mockResolvedValue({
+    id: 'refund-txn-1',
+    gatewayRequestId: 'gateway-request-1',
+  });
   prisma.refundTransaction.update.mockResolvedValue({ id: 'refund-txn-1' });
   prisma.payment.update.mockResolvedValue({});
+  refundViaVnpay.mockResolvedValue({
+    success: true,
+    responseCode: '00',
+    transactionStatus: '00',
+    raw: { vnp_ResponseCode: '00', vnp_TransactionStatus: '00' },
+  });
 });
 
 describe('listRefundRequests', () => {
@@ -181,7 +213,9 @@ describe('processRefundRequest', () => {
           ...request,
           status: 'APPROVED',
         }),
+        count: jest.fn().mockResolvedValue(0),
       },
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
       dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       timeSlotStock: { updateMany: jest.fn() },
@@ -202,7 +236,10 @@ describe('processRefundRequest', () => {
 
     expect(tx.dailyStock.updateMany).toHaveBeenCalled();
     expect(tx.ticketInstance.updateMany).toHaveBeenCalledWith({
-      where: { bookingId: 'booking-1' },
+      where: {
+        bookingId: 'booking-1',
+        status: { in: ['VALID', 'EXPIRED'] },
+      },
       data: { status: 'REFUNDED' },
     });
     expect(tx.booking.update).toHaveBeenCalledWith({
@@ -252,20 +289,16 @@ describe('processRefundRequest', () => {
     const request = refundFixture({
       booking: {
         ...refundFixture().booking,
-        payments: [
-          {
-            paymentGateway: 'VNPAY',
-            transactionId: 'txn-ref-1',
-            rawResponse: { vnp_TransactionNo: '99999', vnp_PayDate: '20260610120000' },
-          },
-        ],
+        payments: [paymentFixture()],
       },
     });
     const tx = {
       refundRequest: {
         findUnique: jest.fn().mockResolvedValue({ ...request, status: 'PROCESSING' }),
         update: jest.fn().mockResolvedValue({ ...request, status: 'APPROVED' }),
+        count: jest.fn().mockResolvedValue(0),
       },
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
       dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       timeSlotStock: { updateMany: jest.fn() },
@@ -275,7 +308,12 @@ describe('processRefundRequest', () => {
     };
     prisma.refundRequest.findUnique.mockResolvedValue(request);
     prisma.$transaction.mockImplementation((callback) => callback(tx));
-    refundViaVnpay.mockResolvedValue({ success: true, responseCode: '00' });
+    refundViaVnpay.mockResolvedValue({
+      success: true,
+      responseCode: '00',
+      transactionStatus: '00',
+      raw: { vnp_ResponseCode: '00', vnp_TransactionStatus: '00' },
+    });
 
     const { req, res, next } = makeReqRes({
       user: { id: 'staff-1', email: 'staff@example.com' },
@@ -299,21 +337,123 @@ describe('processRefundRequest', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  test('aborts (502) and does NOT touch the DB when the gateway rejects', async () => {
+  test('does not allow staff to reject a mandatory refund', async () => {
+    prisma.refundRequest.findUnique.mockResolvedValue(refundFixture({
+      type: 'PARTNER_CANCELLATION',
+      mandatory: true,
+    }));
+    const { req, res, next } = makeReqRes({
+      params: { refundId: 'refund-1' },
+      body: { action: 'REJECTED', staffNotes: 'Không muốn xử lý.' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(prisma.refundRequest.updateMany).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('does not resend a duplicate-payment refund that already needs reconciliation', async () => {
+    const duplicatePayment = {
+      id: 'pay-dup',
+      amount: 100000,
+      paymentGateway: 'VNPAY',
+      status: 'SUCCESS',
+      isDuplicate: true,
+      transactionId: 'txn-dup',
+      rawResponse: { vnp_TransactionNo: '88888', vnp_PayDate: '20260610123000' },
+    };
+    const originalPayment = {
+      id: 'pay-original',
+      amount: 100000,
+      paymentGateway: 'VNPAY',
+      status: 'SUCCESS',
+      isDuplicate: false,
+      transactionId: 'txn-original',
+      rawResponse: { vnp_TransactionNo: '99999', vnp_PayDate: '20260610120000' },
+    };
+    const request = refundFixture({
+      type: 'DUPLICATE_PAYMENT',
+      mandatory: true,
+      amount: 100000,
+      reason: 'Duplicate VNPay payment captured: txn-dup',
+      booking: {
+        ...refundFixture().booking,
+        status: 'CONFIRMED',
+        refundRequired: true,
+        payments: [duplicatePayment, originalPayment],
+      },
+      refundTransactions: [
+        {
+          id: 'dup-refund-txn',
+          gatewayRequestId: 'dup-request-1',
+          status: 'NEEDS_RECONCILIATION',
+          payment: duplicatePayment,
+        },
+      ],
+    });
+    const tx = {
+      refundRequest: {
+        findUnique: jest.fn().mockResolvedValue({ ...request, status: 'PROCESSING' }),
+        update: jest.fn().mockResolvedValue({ ...request, status: 'APPROVED' }),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
+      dailyStock: { updateMany: jest.fn() },
+      attractionDailyStock: { updateMany: jest.fn() },
+      timeSlotStock: { updateMany: jest.fn() },
+      reservation: { update: jest.fn() },
+      ticketInstance: { updateMany: jest.fn() },
+      booking: { update: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    prisma.refundTransaction.update
+      .mockResolvedValueOnce({ id: 'dup-refund-txn', gatewayRequestId: 'dup-request-1' })
+      .mockResolvedValue({ id: 'dup-refund-txn' });
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    refundViaVnpay.mockResolvedValue({ success: true, responseCode: '00', raw: { vnp_ResponseCode: '00' } });
+
+    const { req, res, next } = makeReqRes({
+      user: { id: 'staff-1', email: 'staff@example.com' },
+      params: { refundId: 'refund-1' },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(refundViaVnpay).not.toHaveBeenCalled();
+    expect(prisma.refundTransaction.create).not.toHaveBeenCalled();
+    expect(tx.dailyStock.updateMany).not.toHaveBeenCalled();
+    expect(tx.ticketInstance.updateMany).not.toHaveBeenCalled();
+    expect(tx.booking.update).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true }),
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('gateway rejection marks the attempt failed and safely reopens the request', async () => {
     const request = refundFixture({
       booking: {
         ...refundFixture().booking,
-        payments: [
-          {
-            paymentGateway: 'VNPAY',
-            transactionId: 'txn-ref-1',
-            rawResponse: { vnp_TransactionNo: '99999', vnp_PayDate: '20260610120000' },
-          },
-        ],
+        payments: [paymentFixture()],
       },
     });
     prisma.refundRequest.findUnique.mockResolvedValue(request);
-    refundViaVnpay.mockResolvedValue({ success: false, responseCode: '02', message: 'fail' });
+    const tx = {
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
+      refundRequest: { update: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    refundViaVnpay.mockResolvedValue({
+      success: false,
+      responseCode: '02',
+      transactionStatus: '09',
+      message: 'fail',
+      raw: { vnp_ResponseCode: '02', vnp_TransactionStatus: '09' },
+    });
 
     const { req, res, next } = makeReqRes({
       user: { id: 'staff-1', email: 'staff@example.com' },
@@ -324,7 +464,125 @@ describe('processRefundRequest', () => {
     await processRefundRequest(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(502);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'FAILED' }),
+    }));
+    expect(tx.refundRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'PENDING' }),
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('reconcileRefundRequest', () => {
+  test('finalizes booking only after querydr matches refund type, amount and status', async () => {
+    const request = refundFixture({
+      status: 'PROCESSING',
+      refundTransactions: [{
+        id: 'refund-txn-1',
+        bookingId: 'booking-1',
+        refundRequestId: 'refund-1',
+        paymentId: 'payment-1',
+        amount: 90000,
+        transactionType: '03',
+        status: 'NEEDS_RECONCILIATION',
+        rawResponse: { vnp_ResponseCode: '94' },
+        payment: paymentFixture(),
+      }],
+    });
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    queryVnpayTransaction.mockResolvedValue({
+      responseCode: '00',
+      transactionStatus: '00',
+      transactionType: '03',
+      amount: 90000,
+      raw: {
+        vnp_ResponseCode: '00',
+        vnp_TransactionStatus: '00',
+        vnp_TransactionType: '03',
+        vnp_Amount: '9000000',
+        vnp_TransactionNo: 'refund-vnp-1',
+      },
+    });
+    const tx = {
+      refundRequest: {
+        findUnique: jest.fn().mockResolvedValue(request),
+        update: jest.fn().mockResolvedValue({ ...request, status: 'APPROVED' }),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
+      dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      reservation: { update: jest.fn().mockResolvedValue({}) },
+      ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      booking: { update: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const { req, res, next } = makeReqRes({
+      user: { id: 'staff-1', email: 'staff@example.com' },
+      params: { refundId: 'refund-1' },
+    });
+
+    await reconcileRefundRequest(req, res, next);
+
+    expect(queryVnpayTransaction).toHaveBeenCalledWith(expect.objectContaining({
+      payment: request.refundTransactions[0].payment,
+    }));
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('preflight gateway error is FAILED and reopens the request without reconciliation', async () => {
+    const request = refundFixture();
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    const tx = {
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
+      refundRequest: { update: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const preflightError = new Error('Thiếu dữ liệu giao dịch gốc.');
+    preflightError.statusCode = 422;
+    refundViaVnpay.mockRejectedValue(preflightError);
+    const { req, res, next } = makeReqRes({
+      user: { id: 'staff-1', email: 'staff@example.com' },
+      params: { refundId: 'refund-1' },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(tx.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'FAILED' }),
+    }));
+    expect(tx.refundRequest.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'PENDING' }),
+    }));
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('network error after gateway submission is kept for reconciliation', async () => {
+    prisma.refundRequest.findUnique.mockResolvedValue(refundFixture());
+    const networkError = new Error('Network timeout');
+    networkError.gatewayAttempted = true;
+    refundViaVnpay.mockRejectedValue(networkError);
+    const { req, res, next } = makeReqRes({
+      user: { id: 'staff-1', email: 'staff@example.com' },
+      params: { refundId: 'refund-1' },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(prisma.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'NEEDS_RECONCILIATION' }),
+    }));
+    expect(res.status).toHaveBeenCalledWith(202);
     expect(next).not.toHaveBeenCalled();
   });
 });

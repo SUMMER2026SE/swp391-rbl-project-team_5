@@ -71,6 +71,7 @@ function makeBookableProduct(ticketId, attractionId, capacity = 100, timeSlots =
       publicationStatus: 'ACTIVE',
       status: 'ACTIVE',
       archivedAt: null,
+      partner: { status: 'APPROVED' },
       defaultCapacity: capacity,
       openDays: null,
       openTime: '08:00',
@@ -107,6 +108,7 @@ describe('AI catalog', () => {
           publicationStatus: 'ACTIVE',
           archivedAt: null,
           status: { not: 'SUSPENDED' },
+          partner: { status: 'APPROVED' },
           ticketProducts: { some: { status: 'ACTIVE', archivedAt: null } },
         }),
         take: 3,
@@ -162,7 +164,7 @@ describe('AI catalog', () => {
     mockPrisma.dailyStock.findUnique.mockImplementation(({ where }) => {
       const ticketId = where.ticketProductId_date.ticketProductId;
       if (ticketId === 'ticket-a2') {
-        return Promise.resolve({ capacity: 0, bookedQuantity: 0, heldQuantity: 0 });
+        return Promise.resolve({ capacity: 100, bookedQuantity: 100, heldQuantity: 0 });
       }
       return Promise.resolve(null);
     });
@@ -232,7 +234,7 @@ describe('recommendAttractions', () => {
     mockPrisma.dailyStock.findUnique.mockImplementation(({ where }) => {
       const ticketId = where.ticketProductId_date.ticketProductId;
       if (ticketId === 'ticket-a2') {
-        return Promise.resolve({ capacity: 1, bookedQuantity: 0, heldQuantity: 0 });
+        return Promise.resolve({ capacity: 100, bookedQuantity: 99, heldQuantity: 0 });
       }
       return Promise.resolve(null);
     });
@@ -441,7 +443,7 @@ describe('generateItinerary', () => {
     mockPrisma.dailyStock.findUnique.mockImplementation(({ where }) => {
       const ticketId = where.ticketProductId_date.ticketProductId;
       if (ticketId === 'ticket-a2') {
-        return Promise.resolve({ capacity: 1, bookedQuantity: 0, heldQuantity: 0 });
+        return Promise.resolve({ capacity: 100, bookedQuantity: 99, heldQuantity: 0 });
       }
       return Promise.resolve(null);
     });

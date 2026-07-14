@@ -19,10 +19,32 @@ describe('partner mappings and validation', () => {
     expect(refundPolicyFromClient('FREE_CANCELLATION')).toBe('FREE_CANCELLATION');
   });
 
-  test('taxCode là trường không bắt buộc trong KYC', () => {
+  test('KYC requires a tax code', () => {
     expect(validateKyc({
       businessName: 'VietTicket Partner',
       businessLicenseUrl: 'http://localhost/api/upload/documents/user-1-license.pdf',
-    })).toBe('');
+    })).toBe('Vui lòng nhập mã số thuế.');
   });
+
+  test.each(['0312345678', '0312345678123'])(
+    'KYC accepts a valid %s tax code',
+    (taxCode) => {
+      expect(validateKyc({
+        businessName: 'VietTicket Partner',
+        taxCode,
+        businessLicenseUrl: 'http://localhost/api/upload/documents/user-1-license.pdf',
+      })).toBe('');
+    },
+  );
+
+  test.each(['031234567', '03123456789', '0312345678A'])(
+    'KYC rejects an invalid %s tax code',
+    (taxCode) => {
+      expect(validateKyc({
+        businessName: 'VietTicket Partner',
+        taxCode,
+        businessLicenseUrl: 'http://localhost/api/upload/documents/user-1-license.pdf',
+      })).toBe('Mã số thuế phải gồm 10 hoặc 13 chữ số.');
+    },
+  );
 });

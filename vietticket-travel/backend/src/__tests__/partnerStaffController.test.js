@@ -41,6 +41,7 @@ function staffFixture(overrides = {}) {
     status: 'ACTIVE',
     passwordHash: 'hashed',
     employerPartnerId: 'partner-1',
+    roleMemberships: [{ role: 'STAFF' }],
     createdAt: new Date('2026-06-18T00:00:00.000Z'),
     profile: { phoneNumber: '0901234567' },
     staffAssignments: [],
@@ -61,7 +62,10 @@ describe('listStaff', () => {
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { role: 'STAFF', employerPartnerId: 'partner-1' },
+        where: {
+          roleMemberships: { some: { role: 'STAFF' } },
+          employerPartnerId: 'partner-1',
+        },
       }),
     );
     expect(res.json).toHaveBeenCalledWith(

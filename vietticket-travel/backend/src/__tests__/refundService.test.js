@@ -1,5 +1,7 @@
 const {
   calculateRefundAmount,
+  getRefundDeadline,
+  getRefundEligibility,
   releaseInventory,
   isBeforeRefundCutoff,
   todayInVietnam,
@@ -18,15 +20,33 @@ describe('isBeforeRefundCutoff', () => {
   // 10:00 sáng 15/06/2026 giờ VN = 03:00 UTC cùng ngày.
   const nowVn = new Date('2026-06-15T03:00:00.000Z');
 
-  const bookingWithVisitDate = (date) => ({
-    reservation: { date: new Date(`${date}T00:00:00.000Z`) },
+  const bookingWithVisitDate = (date, refundCutoffHours = 24) => ({
+    reservation: {
+      date: new Date(`${date}T00:00:00.000Z`),
+      timeSlot: { startTime: '10:00', endTime: '12:00' },
+      ticketProduct: { refundCutoffHours },
+    },
   });
 
-  test('cho phép khi ngày tham quan ở tương lai', () => {
-    expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-16'), nowVn)).toBe(true);
+  test('cho phép khi còn sớm hơn deadline hoàn tiền', () => {
+    expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-17'), nowVn)).toBe(true);
   });
 
-  test('chặn ngay TRONG ngày tham quan (vé đang được sử dụng)', () => {
+  test('chặn đúng tại deadline 24 giờ trước hoạt động', () => {
+    const booking = bookingWithVisitDate('2026-06-16');
+    expect(getRefundDeadline(booking)).toEqual(nowVn);
+    expect(isBeforeRefundCutoff(booking, nowVn)).toBe(false);
+  });
+
+  test('cho phép ngay trước deadline', () => {
+    const booking = bookingWithVisitDate('2026-06-16');
+    expect(isBeforeRefundCutoff(
+      booking,
+      new Date(nowVn.getTime() - 1),
+    )).toBe(true);
+  });
+
+  test('chặn trong ngày tham quan', () => {
     expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-15'), nowVn)).toBe(false);
   });
 
@@ -34,10 +54,9 @@ describe('isBeforeRefundCutoff', () => {
     expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-14'), nowVn)).toBe(false);
   });
 
-  test('dùng ngày theo giờ VN: 19:00 UTC 14/06 đã là ngày 15/06 ở VN', () => {
+  test('todayInVietnam dùng đúng ngày theo giờ VN', () => {
     const lateUtc = new Date('2026-06-14T19:00:00.000Z'); // 02:00 sáng 15/06 giờ VN
     expect(todayInVietnam(lateUtc)).toBe('2026-06-15');
-    expect(isBeforeRefundCutoff(bookingWithVisitDate('2026-06-15'), lateUtc)).toBe(false);
   });
 
   test('chặn khi booking thiếu ngày tham quan', () => {
@@ -89,6 +108,69 @@ describe('calculateRefundAmount', () => {
       feeAmount: 100000,
       policyLabel: 'NON_REFUNDABLE',
     });
+  });
+});
+
+describe('getRefundEligibility', () => {
+  function eligibleBooking(overrides = {}) {
+    return {
+      status: 'CONFIRMED',
+      totalAmount: 100000,
+      snapshotRefundPolicy: 'FREE_CANCELLATION',
+      snapshotRefundFeeRate: 0,
+      snapshotRefundCutoffHours: 24,
+      reservation: {
+        date: new Date('2026-06-20T00:00:00.000Z'),
+        timeSlot: { startTime: '10:00', endTime: '12:00' },
+        ticketProduct: { refundPolicy: 'FREE_CANCELLATION' },
+      },
+      payments: [{
+        status: 'SUCCESS',
+        isDuplicate: false,
+        paymentGateway: 'VNPAY',
+      }],
+      ticketInstances: [{ status: 'VALID' }],
+      refundRequests: [],
+      ...overrides,
+    };
+  }
+
+  const now = new Date('2026-06-18T00:00:00.000Z');
+
+  test('cho phép booking hợp lệ trước deadline', () => {
+    expect(getRefundEligibility(eligibleBooking(), now)).toEqual(
+      expect.objectContaining({ refundable: true, refundAmount: 100000 }),
+    );
+  });
+
+  test('chặn booking đã có vé check-in', () => {
+    const booking = eligibleBooking({ ticketInstances: [{ status: 'USED' }] });
+    expect(getRefundEligibility(booking, now)).toEqual(expect.objectContaining({
+      refundable: false,
+      notRefundableReason: expect.stringMatching(/đã có vé được sử dụng/i),
+    }));
+  });
+
+  test('chặn payment không thuộc gateway hỗ trợ hoàn về phương thức gốc', () => {
+    const booking = eligibleBooking({
+      payments: [{ status: 'SUCCESS', isDuplicate: false, paymentGateway: 'CASH' }],
+    });
+    expect(getRefundEligibility(booking, now)).toEqual(expect.objectContaining({
+      refundable: false,
+      notRefundableReason: expect.stringMatching(/VNPay/i),
+    }));
+  });
+
+  test('chặn nếu đã có customer cancellation, không nhầm với duplicate payment', () => {
+    const duplicateOnly = eligibleBooking({
+      refundRequests: [{ type: 'DUPLICATE_PAYMENT', status: 'PROCESSING' }],
+    });
+    expect(getRefundEligibility(duplicateOnly, now).refundable).toBe(true);
+
+    const withCustomerRequest = eligibleBooking({
+      refundRequests: [{ type: 'CUSTOMER_CANCELLATION', status: 'REJECTED' }],
+    });
+    expect(getRefundEligibility(withCustomerRequest, now).refundable).toBe(false);
   });
 });
 

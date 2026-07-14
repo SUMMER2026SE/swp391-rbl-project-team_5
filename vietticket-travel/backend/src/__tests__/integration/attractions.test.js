@@ -28,7 +28,7 @@ describe('GET /api/attractions', () => {
 
 describe('GET /api/attractions/:id', () => {
   test('✅ Trả 200 khi tìm thấy', async () => {
-    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', title: 'Test', status: 'APPROVED', publicationStatus: 'ACTIVE', publishedAt: new Date('2026-06-01T00:00:00.000Z'), images: [], categories: [], ticketProducts: [] });
+    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', title: 'Test', status: 'APPROVED', publicationStatus: 'ACTIVE', publishedAt: new Date('2026-06-01T00:00:00.000Z'), archivedAt: null, partner: { status: 'APPROVED' }, images: [], categories: [], ticketProducts: [] });
     const res = await request(app).get('/api/attractions/attr-001');
     expect(res.status).toBe(200);
   });

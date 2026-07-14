@@ -224,6 +224,37 @@ describe('setupTimeSlots', () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
+  test('❌ Trả 400 khi giờ bắt đầu không trước giờ kết thúc', async () => {
+    mockPrisma.ticketProduct.findUnique.mockResolvedValue({ id: 'tkt-001', attraction: { partnerId: 'partner-001' } });
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });
+    const req = {
+      user: { id: 'user-001' }, params: { ticketProductId: 'tkt-001' },
+      body: { slots: [{ startTime: '11:00', endTime: '08:00', maxCapacity: 10 }] },
+    };
+    const res = createRes();
+    await setupTimeSlots(req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  test('❌ Trả 400 khi các khung giờ bị chồng lấn', async () => {
+    mockPrisma.ticketProduct.findUnique.mockResolvedValue({ id: 'tkt-001', attraction: { partnerId: 'partner-001' } });
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });
+    const req = {
+      user: { id: 'user-001' }, params: { ticketProductId: 'tkt-001' },
+      body: {
+        slots: [
+          { startTime: '08:00', endTime: '11:00', maxCapacity: 10 },
+          { startTime: '10:30', endTime: '12:00', maxCapacity: 10 },
+        ],
+      },
+    };
+    const res = createRes();
+    await setupTimeSlots(req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test('❌ Trả 403 khi không phải chủ sở hữu vé', async () => {
     mockPrisma.ticketProduct.findUnique.mockResolvedValue({ id: 'tkt-001', attraction: { partnerId: 'other' } });
     mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });

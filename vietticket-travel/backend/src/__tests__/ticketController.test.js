@@ -22,6 +22,7 @@ const attraction = {
   closeTime: '17:00',
   specialDates: [],
   timeSlots: [],
+  partner: { status: 'APPROVED' },
 };
 
 function productWithSlots(slots = []) {
@@ -77,6 +78,8 @@ describe('reserveTickets - chống overbooking', () => {
         update: jest.fn(),
       },
       reservation: {
+        count: jest.fn().mockResolvedValue(0),
+        findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'res-001' }),
       },
     };
@@ -117,14 +120,14 @@ describe('reserveTickets - chống overbooking', () => {
     const tx = makeTx({
       daily: {
         id: 'daily-2',
-        capacity: 10,
-        bookedQuantity: 8,
+        capacity: 100,
+        bookedQuantity: 98,
         heldQuantity: 1,
       },
       attractionStock: {
         id: 'attr-stock-2',
         capacity: 100,
-        bookedQty: 8,
+        bookedQty: 98,
         heldQty: 1,
       },
     });
@@ -143,6 +146,36 @@ describe('reserveTickets - chống overbooking', () => {
     const res = makeRes();
     await reserveTickets(makeReq(body), res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(status);
+  });
+
+  test('chặn khi người dùng đã có lượt giữ chỗ trùng lựa chọn', async () => {
+    const tx = makeTx({
+      daily: { id: 'daily-3', capacity: 100, bookedQuantity: 0, heldQuantity: 0 },
+      attractionStock: { id: 'attr-stock-3', capacity: 100, bookedQty: 0, heldQty: 0 },
+    });
+    tx.reservation.findFirst.mockResolvedValue({ id: 'existing-hold' });
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(tx.dailyStock.update).not.toHaveBeenCalled();
+  });
+
+  test('chặn lượt giữ chỗ thứ tư của cùng người dùng', async () => {
+    const tx = makeTx({
+      daily: { id: 'daily-4', capacity: 100, bookedQuantity: 0, heldQuantity: 0 },
+      attractionStock: { id: 'attr-stock-4', capacity: 100, bookedQty: 0, heldQty: 0 },
+    });
+    tx.reservation.count.mockResolvedValue(3);
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(tx.dailyStock.update).not.toHaveBeenCalled();
   });
 });
 
@@ -167,7 +200,7 @@ describe('checkAvailability', () => {
 
     const res = makeRes();
     await checkAvailability(
-      { params: { ticketProductId: 'tkt-001' }, query: { date: '2026-06-15' } },
+      { params: { ticketProductId: 'tkt-001' }, query: { date: VISIT_DATE } },
       res,
       jest.fn(),
     );
@@ -190,7 +223,7 @@ describe('checkAvailability', () => {
 
     const res = makeRes();
     await checkAvailability(
-      { params: { ticketProductId: 'tkt-001' }, query: { date: '2026-06-15' } },
+      { params: { ticketProductId: 'tkt-001' }, query: { date: VISIT_DATE } },
       res,
       jest.fn(),
     );

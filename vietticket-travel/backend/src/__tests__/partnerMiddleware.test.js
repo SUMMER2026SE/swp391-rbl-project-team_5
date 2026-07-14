@@ -4,6 +4,7 @@ const {
   requirePartner,
   requireApprovedPartner,
   requireActiveEmployer,
+  requireCheckInEmployer,
 } = require('../middleware/partnerMiddleware');
 
 afterEach(() => jest.clearAllMocks());
@@ -88,6 +89,32 @@ describe('partner middleware', () => {
 
       expect(next).toHaveBeenCalled();
       expect(mockPrisma.partnerProfile.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('requireCheckInEmployer', () => {
+    test('cho phép staff phục vụ vé đã xác nhận khi đối tác bị SUSPENDED', async () => {
+      mockPrisma.partnerProfile.findUnique.mockResolvedValue({ status: 'SUSPENDED' });
+      const req = { user: { id: 'staff-001', role: 'STAFF', employerPartnerId: 'partner-001' } };
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+      const next = jest.fn();
+
+      await requireCheckInEmployer(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    test('chặn check-in khi hồ sơ chủ quản chưa từng được duyệt', async () => {
+      mockPrisma.partnerProfile.findUnique.mockResolvedValue({ status: 'PENDING' });
+      const req = { user: { id: 'staff-001', role: 'STAFF', employerPartnerId: 'partner-001' } };
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+      const next = jest.fn();
+
+      await requireCheckInEmployer(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(next).not.toHaveBeenCalled();
     });
   });
 });

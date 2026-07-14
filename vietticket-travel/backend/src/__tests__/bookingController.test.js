@@ -94,8 +94,17 @@ describe('createBooking', () => {
       expiresAt: new Date(Date.now() + 600000),
       ticketProduct: {
         id: 'ticket-1',
+        status: 'ACTIVE',
+        archivedAt: null,
         sellingPrice: new Decimal(120000),
-        attraction: { requiresManualApproval: false },
+        attraction: {
+          publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+          publicationStatus: 'ACTIVE',
+          status: 'APPROVED',
+          archivedAt: null,
+          requiresManualApproval: false,
+          partner: { status: 'APPROVED' },
+        },
       },
     };
     const voucher = {
@@ -143,11 +152,16 @@ describe('createBooking', () => {
                 name: 'Vé người lớn',
                 attraction: {
                   id: 'attraction-1',
+                  publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+                  publicationStatus: 'ACTIVE',
+                  status: 'APPROVED',
+                  archivedAt: null,
                   title: 'Test Attraction',
                   address: '1 Test',
                   district: null,
                   city: 'Đà Nẵng',
                   images: [],
+                  partner: { status: 'APPROVED' },
                 },
               },
             },

@@ -5,6 +5,7 @@ const {
   getPartnerBookings,
   approveBooking,
   rejectBooking,
+  cancelConfirmedBooking,
   getDashboard,
 } = require('../controllers/partnerController');
 
@@ -14,6 +15,7 @@ const BOOKING_ID   = 'booking-001';
 const ATTRACTION_ID = 'attraction-001';
 const TICKET_ID    = 'ticket-001';
 const RESERVATION_ID = 'reservation-001';
+const FUTURE_VISIT_DATE = new Date(Date.now() + 48 * 60 * 60 * 1000);
 
 function makeReqRes(overrides = {}) {
   const req = {
@@ -42,16 +44,24 @@ function makeBooking(statusOverride = 'PENDING_PARTNER') {
     totalAmount: 500000,
     fullName: 'Nguyễn Văn A',
     phone: '0901234567',
-    createdAt: new Date('2026-06-01T08:00:00Z'),
+    createdAt: new Date(),
     ticketInstances: [],
     // PENDING_PARTNER nghĩa là đã thanh toán thành công qua cổng
-    payments: [{ id: 'pay-001' }],
+    payments: [{
+      id: 'pay-001',
+      status: 'SUCCESS',
+      isDuplicate: false,
+      paymentGateway: 'VNPAY',
+      amount: 500000,
+      paidAt: new Date(),
+      createdAt: new Date(),
+    }],
     refundRequests: [],
     reservation: {
       id: RESERVATION_ID,
       ticketProductId: TICKET_ID,
       timeSlotId: null,
-      date: new Date('2026-06-10T00:00:00Z'),
+      date: FUTURE_VISIT_DATE,
       quantity: 2,
       status: statusOverride === 'CONFIRMED' ? 'CONFIRMED' : 'HELD',
       ticketProduct: {
@@ -62,6 +72,8 @@ function makeBooking(statusOverride = 'PENDING_PARTNER') {
           id: ATTRACTION_ID,
           title: 'Sun World',
           partnerId: PARTNER_ID,
+          openTime: '08:00',
+          closeTime: '17:00',
         },
       },
     },
@@ -414,7 +426,14 @@ describe('rejectBooking', () => {
         findUnique:  jest.fn().mockResolvedValue(booking),
         updateMany:  jest.fn().mockResolvedValue({ count: claimCount }),
       },
-      refundRequest: { create:     jest.fn().mockResolvedValue({ id: 'refund-001' }) },
+      refundRequest: {
+        upsert: jest.fn().mockResolvedValue({ id: 'refund-001', status: 'PROCESSING' }),
+        update: jest.fn(),
+      },
+      refundTransaction: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'refund-tx-001', status: 'PENDING' }),
+      },
       voucher:       { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     };
   }
@@ -472,15 +491,28 @@ describe('rejectBooking', () => {
 
     expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
       where: { id: BOOKING_ID, status: 'PENDING_PARTNER' },
-      data: { status: 'CANCELLED', refundRequired: true },
+      data: expect.objectContaining({ status: 'CANCELLED', refundRequired: true }),
     });
-    expect(capturedTx.refundRequest.create).toHaveBeenCalledWith(
+    expect(capturedTx.refundRequest.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { requestKey: `mandatory:PARTNER_CANCELLATION:${BOOKING_ID}` },
+        create: expect.objectContaining({
+          bookingId: BOOKING_ID,
+          amount: 500000, // hoàn 100%, không trừ phí
+          status: 'PROCESSING',
+          type: 'PARTNER_CANCELLATION',
+          mandatory: true,
+          reason: expect.stringContaining(REASON),
+        }),
+      }),
+    );
+    expect(capturedTx.refundTransaction.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           bookingId: BOOKING_ID,
-          amount: 500000, // hoàn 100%, không trừ phí
+          paymentId: 'pay-001',
+          refundRequestId: 'refund-001',
           status: 'PENDING',
-          reason: expect.stringContaining(REASON),
         }),
       }),
     );
@@ -505,12 +537,12 @@ describe('rejectBooking', () => {
 
     expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
       where: { id: BOOKING_ID, status: 'PENDING_PARTNER' },
-      data: { status: 'CANCELLED', refundRequired: false },
+      data: expect.objectContaining({ status: 'CANCELLED', refundRequired: false }),
     });
-    expect(capturedTx.refundRequest.create).not.toHaveBeenCalled();
+    expect(capturedTx.refundRequest.upsert).not.toHaveBeenCalled();
   });
 
-  test('✅ Không tạo RefundRequest trùng nếu booking đã có sẵn yêu cầu hoàn tiền', async () => {
+  test('✅ Dùng requestKey riêng để không xung đột với yêu cầu hoàn tiền khác của booking', async () => {
     const booking = makeBooking('PENDING_PARTNER');
     booking.refundRequests = [{ id: 'refund-cũ' }];
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
@@ -527,7 +559,11 @@ describe('rejectBooking', () => {
     });
     await rejectBooking(req, res, jest.fn());
 
-    expect(capturedTx.refundRequest.create).not.toHaveBeenCalled();
+    expect(capturedTx.refundRequest.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { requestKey: `mandatory:PARTNER_CANCELLATION:${BOOKING_ID}` },
+      }),
+    );
   });
 
   test('❌ Hai request từ chối đồng thời: claim thất bại thì không hoàn kho hoặc tạo refund', async () => {
@@ -550,7 +586,7 @@ describe('rejectBooking', () => {
       expect.objectContaining({ statusCode: 409 }),
     );
     expect(capturedTx.dailyStock.updateMany).not.toHaveBeenCalled();
-    expect(capturedTx.refundRequest.create).not.toHaveBeenCalled();
+    expect(capturedTx.refundRequest.upsert).not.toHaveBeenCalled();
   });
 
   test('❌ Trả 400 khi thiếu lý do từ chối', async () => {
@@ -598,7 +634,7 @@ describe('rejectBooking', () => {
     );
     expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
       where: { id: BOOKING_ID, status: 'PENDING_PARTNER' },
-      data: { status: 'CANCELLED', refundRequired: true },
+      data: expect.objectContaining({ status: 'CANCELLED', refundRequired: true }),
     });
   });
 
@@ -806,5 +842,84 @@ describe('getDashboard', () => {
     await getDashboard(req, res, next);
 
     expect(next).toHaveBeenCalledWith(expect.any(Error));
+  });
+});
+
+describe('cancelConfirmedBooking', () => {
+  const REASON = 'Diem tham quan dong cua dot xuat de bao tri';
+
+  function makeCancelTx(booking) {
+    return {
+      booking: {
+        findUnique: jest.fn().mockResolvedValue(booking),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      reservation: { update: jest.fn().mockResolvedValue({}) },
+      ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+      voucher: { updateMany: jest.fn() },
+      refundRequest: {
+        upsert: jest.fn().mockResolvedValue({ id: 'refund-cancel', status: 'PROCESSING' }),
+        update: jest.fn(),
+      },
+      refundTransaction: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'refund-tx-cancel', status: 'PENDING' }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+  }
+
+  test('cancels an unused confirmed booking, releases inventory and queues a full refund', async () => {
+    const booking = makeBooking('CONFIRMED');
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+    let tx;
+    mockPrisma.$transaction.mockImplementation(async (callback) => {
+      tx = makeCancelTx(booking);
+      return callback(tx);
+    });
+
+    const { req, res, next } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
+    await cancelConfirmedBooking(req, res, next);
+
+    expect(tx.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, status: 'CONFIRMED' },
+      data: expect.objectContaining({
+        status: 'CANCELLED',
+        refundRequired: true,
+        cancellationReason: REASON,
+        cancellationSource: 'PARTNER',
+      }),
+    });
+    expect(tx.dailyStock.updateMany).toHaveBeenCalled();
+    expect(tx.ticketInstance.updateMany).toHaveBeenCalledWith({
+      where: { bookingId: BOOKING_ID, status: 'VALID' },
+      data: { status: 'EXPIRED' },
+    });
+    expect(tx.refundTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amount: 500000, status: 'PENDING' }),
+    });
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+  });
+
+  test('does not cancel a confirmed booking after its activity has started', async () => {
+    const booking = makeBooking('CONFIRMED');
+    booking.reservation.date = new Date('2026-01-01T00:00:00.000Z');
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+
+    const { req, res } = makeReqRes({
+      params: { id: BOOKING_ID },
+      body: { reason: REASON },
+    });
+    await cancelConfirmedBooking(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 });
