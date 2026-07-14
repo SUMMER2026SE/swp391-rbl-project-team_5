@@ -12,6 +12,13 @@ export function reviewPartner(id, action, rejectionReason) {
   })
 }
 
+export function changePartnerStatus(id, status, reason) {
+  return apiRequest(`/admin/partners/${id}/status`, {
+    method: 'PATCH',
+    body: { status, reason },
+  })
+}
+
 export function getAttractions(params = {}) {
   const normalized = typeof params === 'string' ? { status: params } : params
   const query = new URLSearchParams()
@@ -37,8 +44,34 @@ export function hideAttraction(id, reason) {
   })
 }
 
+export function restoreAttraction(id) {
+  return apiRequest(`/admin/attractions/${id}/restore`, { method: 'PUT' })
+}
+
 export function getDashboard(period = 'month') {
   return apiRequest(`/admin/dashboard?period=${encodeURIComponent(period)}`, { method: 'GET' })
+}
+
+export function getFinancialReport(period = 'month') {
+  return apiRequest(`/admin/financial-report?period=${encodeURIComponent(period)}`, { method: 'GET' })
+}
+
+export function getFinancialTransactions(params = {}) {
+  const query = new URLSearchParams()
+  if (params.period) query.set('period', params.period)
+  if (params.type && params.type !== 'ALL') query.set('type', params.type)
+  if (params.status) query.set('status', params.status)
+  if (params.search) query.set('search', params.search)
+  if (params.limit) query.set('limit', params.limit)
+  const qs = query.toString()
+  return apiRequest(`/admin/financial-transactions${qs ? `?${qs}` : ''}`, { method: 'GET' })
+}
+
+export function changePartnerCommissionRate(id, commissionRatePercent) {
+  return apiRequest(`/admin/partners/${id}/commission`, {
+    method: 'PATCH',
+    body: { commissionRatePercent },
+  })
 }
 
 export function getCategories() {

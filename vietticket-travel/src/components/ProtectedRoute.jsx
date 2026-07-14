@@ -1,8 +1,9 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/useAuth.js'
+import { hasAnyRole, hasRole } from '../utils/userRoles.js'
 
 function isPlatformStaff(user) {
-  return user?.role === 'ADMIN' || (user?.role === 'STAFF' && !user.employerPartnerId)
+  return hasRole(user, 'ADMIN') || (hasRole(user, 'STAFF') && !user?.employerPartnerId)
 }
 
 function RouteLoading() {
@@ -35,7 +36,7 @@ function ProtectedRoute({
     return <Navigate to="/login" replace state={{ from: location }} />
   }
 
-  if (allowedRoles && !allowedRoles.includes(user?.role)) {
+  if (allowedRoles && !hasAnyRole(user, allowedRoles)) {
     return <Navigate to="/" replace />
   }
 
@@ -43,7 +44,7 @@ function ProtectedRoute({
     return <Navigate to="/staff/checkin" replace />
   }
 
-  if (requirePartnerStaff && user?.role === 'STAFF' && !user?.employerPartnerId) {
+  if (requirePartnerStaff && hasRole(user, 'STAFF') && !user?.employerPartnerId) {
     return <Navigate to="/staff/tickets" replace />
   }
 

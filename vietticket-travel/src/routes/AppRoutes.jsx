@@ -42,6 +42,7 @@ const AttractionApprovalPage = lazy(() => import('../pages/admin/AttractionAppro
 const ViolationManagementPage = lazy(() => import('../pages/admin/ViolationManagementPage.jsx'))
 const CategoryManagementPage = lazy(() => import('../pages/admin/CategoryManagementPage.jsx'))
 const BookingManagementPage = lazy(() => import('../pages/admin/BookingManagementPage.jsx'))
+const FinancialReportPage = lazy(() => import('../pages/admin/FinancialReportPage.jsx'))
 const CheckinPage = lazy(() => import('../pages/staff/CheckinPage.jsx'))
 const RefundManagementPage = lazy(() => import('../pages/staff/RefundManagementPage.jsx'))
 const SupportTicketsPage = lazy(() => import('../pages/staff/SupportTicketsPage.jsx'))
@@ -235,6 +236,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <BookingManagementPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/reports"
+        element={
+          <AdminRoute>
+            <FinancialReportPage />
           </AdminRoute>
         }
       />

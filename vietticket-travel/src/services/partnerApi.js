@@ -184,6 +184,13 @@ export function rejectBooking(id, reason) {
   })
 }
 
+export function cancelConfirmedBooking(id, reason) {
+  return apiRequest(`/partners/bookings/${id}/cancel`, {
+    method: 'PATCH',
+    body: { reason },
+  })
+}
+
 // ----- Nhân viên (mỗi đối tác tự quản lý nhân viên của mình) -----
 export function listStaff() {
   return apiRequest('/partners/staff', { method: 'GET' })

@@ -24,6 +24,10 @@ export function processRefundRequest(refundId, action, staffNotes) {
   })
 }
 
+export function reconcileRefundRequest(refundId) {
+  return apiRequest(`/staff/refunds/${refundId}/reconcile`, { method: 'POST' })
+}
+
 // ----- Cấp lại vé -----
 export function reissueTicket(bookingId) {
   return apiRequest(`/staff/bookings/${bookingId}/reissue`, { method: 'POST' })
@@ -39,7 +43,7 @@ export function lookupTicketByQr(token) {
   return apiRequest(`/staff/checkin/${encodeURIComponent(token)}`, { method: 'GET' })
 }
 
-// Check-in cả đơn (mọi vé VALID -> USED).
+// Check-in đúng một TicketInstance ứng với mã QR được quét.
 export function checkInTicket(token) {
   return apiRequest(`/staff/checkin/${encodeURIComponent(token)}`, { method: 'POST' })
 }
@@ -59,6 +63,7 @@ export function replaceStaffAssignments(staffId, attractionIds) {
 const staffApi = {
   listRefundRequests,
   processRefundRequest,
+  reconcileRefundRequest,
   reissueTicket,
   listTodayBookings,
   lookupTicketByQr,
