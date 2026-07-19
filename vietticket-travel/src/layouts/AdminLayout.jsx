@@ -7,13 +7,13 @@ import '../styles/admin.css';
  * AdminLayout – wraps every admin page with the shared sidebar + header.
  * Children render inside the scrollable main area.
  */
-export default function AdminLayout({ children, searchPlaceholder }) {
+export default function AdminLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
     <div className="admin-layout">
       <AdminSidebar isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} />
-      <AdminHeader placeholder={searchPlaceholder} onMenuClick={() => setIsSidebarOpen(true)} />
+      <AdminHeader onMenuClick={() => setIsSidebarOpen(true)} />
       
       {isSidebarOpen && (
         <div

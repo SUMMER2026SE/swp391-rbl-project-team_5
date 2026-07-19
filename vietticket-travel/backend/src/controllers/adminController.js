@@ -1,3 +1,4 @@
+const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
 const {
@@ -7,6 +8,7 @@ const {
   sendAttractionReviewEmail,
   sendAttractionViolationEmail,
   sendAttractionRestoredEmail,
+  sendStaffInviteEmail,
 } = require('../utils/mailer');
 const { writeAuditLog } = require('../utils/auditLog');
 const {
@@ -26,12 +28,25 @@ const {
   listPlatformFinancialTransactions,
 } = require('../services/financialReportService');
 const { refreshAttractionMinPrice } = require('../services/catalogService');
-const { grantRole, revokeRole } = require('../utils/userRoles');
+const { disconnectPartnerSockets, disconnectUserSockets } = require('../realtime/events');
+const { grantRole, hasRole, revokeRole } = require('../utils/userRoles');
+const { MAX_VND_AMOUNT } = require('../utils/money');
+const { validateKyc } = require('../utils/partnerValidators');
+const { isDocumentOwnedByUser } = require('../middleware/uploadMiddleware');
+const { selectBookingPayment } = require('./bookingController');
+const { addMinutes, createRandomToken, hashToken } = require('../utils/tokenUtils');
+const {
+  isValidEmail,
+  isValidPhoneNumber,
+  validateFullName,
+} = require('../utils/validators');
 
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
 const ALLOWED_PARTNER_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
-const ALLOWED_ATTRACTION_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'];
+const ALLOWED_ATTRACTION_STATUSES = ['DRAFT', 'PENDING', 'APPROVED', 'REJECTED'];
+const ALLOWED_ATTRACTION_PUBLICATION_STATUSES = ['PAUSED', 'ACTIVE', 'ARCHIVED'];
+const ALLOWED_ATTRACTION_OPERATIONAL_STATUSES = ['ACTIVE', 'SUSPENDED'];
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
@@ -39,6 +54,10 @@ const FINANCIAL_TRANSACTION_STATUSES = new Set([
   ...PAYMENT_STATUSES,
   ...REFUND_STATUSES,
 ]);
+const VOUCHER_DISCOUNT_TYPES = ['FIXED', 'PERCENTAGE'];
+const VOUCHER_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_-]{2,31}$/;
+const MAX_VOUCHER_USAGE_LIMIT = 1_000_000;
+const PLATFORM_STAFF_INVITE_EXPIRY_MINUTES = 60 * 48;
 
 function nextPublicationStatusAfterApproval(attraction) {
   if (
@@ -65,6 +84,23 @@ function parseBoolean(value) {
   if (typeof value === 'string') return value.toLowerCase() === 'true';
 
   return Boolean(value);
+}
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function createPlatformStaffInviteToken(tx, userId) {
+  await tx.passwordResetToken.deleteMany({ where: { userId } });
+  const rawToken = createRandomToken();
+  await tx.passwordResetToken.create({
+    data: {
+      userId,
+      token: hashToken(rawToken),
+      expiresAt: addMinutes(PLATFORM_STAFF_INVITE_EXPIRY_MINUTES),
+    },
+  });
+  return rawToken;
 }
 
 function buildUserWhere({ search, role, status }) {
@@ -148,7 +184,10 @@ async function getUsers(req, res, next) {
     ]);
 
     return res.status(200).json({
-      users: users.map(sanitizeUser),
+      users: users.map((user) => ({
+        ...sanitizeUser(user),
+        activated: Boolean(user.passwordHash),
+      })),
       pagination: {
         total,
         page,
@@ -176,6 +215,11 @@ async function changeUserStatus(req, res, next) {
     if (!ALLOWED_STATUSES.includes(status)) {
       return res.status(400).json({ message: 'Trạng thái tài khoản không hợp lệ.' });
     }
+    if (status === 'LOCKED' && (reason.length < 10 || reason.length > 500)) {
+      return res.status(400).json({
+        message: 'Lý do khóa tài khoản phải có từ 10 đến 500 ký tự.',
+      });
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -193,6 +237,20 @@ async function changeUserStatus(req, res, next) {
     }
 
     const updatedUser = await prisma.$transaction(async (tx) => {
+      if (status === 'LOCKED' && hasRole(user, 'ADMIN')) {
+        const activeAdminCount = await tx.user.count({
+          where: {
+            status: 'ACTIVE',
+            roleMemberships: { some: { role: 'ADMIN' } },
+          },
+        });
+        if (activeAdminCount <= 1) {
+          const error = new Error('Không thể khóa quản trị viên hoạt động cuối cùng.');
+          error.statusCode = 409;
+          throw error;
+        }
+      }
+
       const nextUser = await tx.user.update({
         where: { id: userId },
         data: {
@@ -209,8 +267,19 @@ async function changeUserStatus(req, res, next) {
         });
       }
 
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: status === 'LOCKED' ? 'USER_ACCOUNT_LOCKED' : 'USER_ACCOUNT_UNLOCKED',
+        entityType: 'USER',
+        entityId: userId,
+        metadata: { reason: reason || null, previousStatus: user.status, status },
+      });
+
       return nextUser;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (status === 'LOCKED') disconnectUserSockets(userId);
 
     if (sendEmail) {
       sendAccountStatusEmail({
@@ -232,11 +301,203 @@ async function changeUserStatus(req, res, next) {
   }
 }
 
+async function createPlatformStaff(req, res, next) {
+  try {
+    const fullName = String(req.body?.fullName || '').trim().replace(/\s+/g, ' ');
+    const email = normalizeEmail(req.body?.email);
+    const phoneNumber = req.body?.phoneNumber
+      ? String(req.body.phoneNumber).trim()
+      : null;
+    const fullNameError = validateFullName(fullName);
+
+    if (fullNameError) return res.status(400).json({ message: fullNameError });
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ message: 'Email không hợp lệ.' });
+    }
+    if (!isValidPhoneNumber(phoneNumber)) {
+      return res.status(400).json({ message: 'Số điện thoại không hợp lệ.' });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(409).json({
+        message: 'Email này đã được sử dụng cho một tài khoản khác.',
+      });
+    }
+
+    let rawInviteToken;
+    const staff = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          fullName,
+          email,
+          role: 'STAFF',
+          provider: 'LOCAL',
+          isEmailVerified: true,
+          passwordHash: null,
+          employerPartnerId: null,
+          profile: { create: { phoneNumber } },
+          roleMemberships: { create: { role: 'STAFF' } },
+        },
+        include: { profile: true, roleMemberships: true },
+      });
+      rawInviteToken = await createPlatformStaffInviteToken(tx, created.id);
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'PLATFORM_STAFF_CREATED',
+        entityType: 'USER',
+        entityId: created.id,
+        metadata: { email },
+      });
+      return created;
+    });
+
+    let emailDelivered = true;
+    try {
+      await sendStaffInviteEmail({
+        to: email,
+        fullName,
+        businessName: 'VietTicket Operations',
+        token: rawInviteToken,
+      });
+    } catch (error) {
+      emailDelivered = false;
+      console.error('[Admin] Không thể gửi lời mời nhân viên nền tảng:', error.message);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: emailDelivered
+        ? 'Đã tạo nhân viên nền tảng và gửi email kích hoạt.'
+        : 'Đã tạo tài khoản nhưng chưa gửi được email. Hãy dùng chức năng gửi lại lời mời.',
+      emailDelivered,
+      user: { ...sanitizeUser(staff), activated: false },
+    });
+  } catch (error) {
+    if (error?.code === 'P2002') {
+      return res.status(409).json({
+        message: 'Email này đã được sử dụng cho một tài khoản khác.',
+      });
+    }
+    return next(error);
+  }
+}
+
+async function resendPlatformStaffInvite(req, res, next) {
+  try {
+    const staff = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { roleMemberships: true },
+    });
+    if (!staff || staff.employerPartnerId || !hasRole(staff, 'STAFF')) {
+      return res.status(404).json({ message: 'Không tìm thấy nhân viên nền tảng.' });
+    }
+    if (staff.passwordHash) {
+      return res.status(409).json({ message: 'Tài khoản này đã được kích hoạt.' });
+    }
+    if (staff.status !== 'ACTIVE') {
+      return res.status(409).json({
+        message: 'Hãy mở khóa tài khoản trước khi gửi lại lời mời.',
+      });
+    }
+
+    let rawInviteToken;
+    await prisma.$transaction(async (tx) => {
+      rawInviteToken = await createPlatformStaffInviteToken(tx, staff.id);
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'PLATFORM_STAFF_INVITE_RESENT',
+        entityType: 'USER',
+        entityId: staff.id,
+        metadata: { email: staff.email },
+      });
+    });
+    await sendStaffInviteEmail({
+      to: staff.email,
+      fullName: staff.fullName,
+      businessName: 'VietTicket Operations',
+      token: rawInviteToken,
+    });
+
+    return res.json({ success: true, message: 'Đã gửi lại email kích hoạt.' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function getAuditLogs(req, res, next) {
+  try {
+    const page = parsePositiveInteger(req.query.page, DEFAULT_PAGE);
+    const limit = Math.min(parsePositiveInteger(req.query.limit, 25), MAX_LIMIT);
+    const skip = (page - 1) * limit;
+    const search = String(req.query.search || '').trim().slice(0, 200);
+    const action = String(req.query.action || '').trim().toUpperCase().slice(0, 100);
+    const entityType = String(req.query.entityType || '').trim().toUpperCase().slice(0, 100);
+    const actorId = String(req.query.actorId || '').trim();
+    const where = {};
+
+    if (action) where.action = action;
+    if (entityType) {
+      const aliases = {
+        USER: ['USER', 'User'],
+        BOOKING: ['BOOKING', 'Booking'],
+        REFUND_REQUEST: ['REFUND_REQUEST', 'RefundRequest'],
+        REVIEW: ['REVIEW', 'Review'],
+        SUPPORT_TICKET: ['SUPPORT_TICKET', 'SupportTicket'],
+        TICKET: ['TICKET', 'Ticket'],
+      };
+      where.entityType = { in: aliases[entityType] || [entityType] };
+    }
+    if (actorId) where.actorId = actorId;
+    if (search) {
+      where.OR = [
+        { action: { contains: search, mode: 'insensitive' } },
+        { entityType: { contains: search, mode: 'insensitive' } },
+        { entityId: { contains: search, mode: 'insensitive' } },
+        { actor: { fullName: { contains: search, mode: 'insensitive' } } },
+        { actor: { email: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [logs, total] = await prisma.$transaction([
+      prisma.auditLog.findMany({
+        where,
+        include: {
+          actor: { select: { id: true, fullName: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.auditLog.count({ where }),
+    ]);
+
+    return res.json({
+      success: true,
+      data: logs,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 // ---------- New admin functions for Partner/Attraction review ----------
 
 async function getPartners(req, res, next) {
   try {
+    const page = parsePositiveInteger(req.query.page, DEFAULT_PAGE);
+    const limit = Math.min(parsePositiveInteger(req.query.limit, DEFAULT_LIMIT), MAX_LIMIT);
+    const skip = (page - 1) * limit;
     const status = String(req.query.status || '').trim().toUpperCase();
+    const search = String(req.query.search || '').trim().slice(0, 200);
     const where = {};
 
     if (status && !ALLOWED_PARTNER_STATUSES.includes(status)) {
@@ -247,29 +508,99 @@ async function getPartners(req, res, next) {
     }
 
     if (status) where.status = status;
+    if (search) {
+      where.OR = [
+        { businessName: { contains: search, mode: 'insensitive' } },
+        { taxCode: { contains: search, mode: 'insensitive' } },
+        { representativeName: { contains: search, mode: 'insensitive' } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        { user: { fullName: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
 
-    const partners = await prisma.partnerProfile.findMany({
-      where,
-      select: {
+    const partnerSelect = {
         id: true,
         businessName: true,
         businessLicenseUrl: true,
         taxCode: true,
+        registrationDate: true,
+        representativeName: true,
+        representativePhone: true,
+        businessAddress: true,
+        bankName: true,
+        branchName: true,
+        bankAccountNumber: true,
+        bankAccountName: true,
+        swiftCode: true,
+        payoutCurrency: true,
+        website: true,
+        description: true,
+        kycConsentAccepted: true,
+        kycConsentVersion: true,
+        kycConsentAcceptedAt: true,
         status: true,
         rejectionReason: true,
         createdAt: true,
         user: {
           select: {
+            id: true,
             email: true,
             fullName: true,
             profile: { select: { phoneNumber: true } },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
+      };
+    const [partners, total, statusGroups] = await prisma.$transaction([
+      prisma.partnerProfile.findMany({
+        where,
+        select: partnerSelect,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.partnerProfile.count({ where }),
+      prisma.partnerProfile.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+    ]);
+
+    const data = partners.map((partner) => {
+      const documentIsValid = isDocumentOwnedByUser(
+        partner.businessLicenseUrl,
+        partner.user?.id,
+        req,
+      );
+      return {
+        ...partner,
+        businessLicenseUrl: documentIsValid ? partner.businessLicenseUrl : '',
+        documentValidationStatus: documentIsValid ? 'VALID' : 'MISSING_OR_UNTRUSTED',
+      };
     });
 
-    return res.status(200).json({ success: true, data: partners });
+    const byStatus = Object.fromEntries(
+      ALLOWED_PARTNER_STATUSES.map((value) => [value, 0]),
+    );
+    for (const group of statusGroups || []) {
+      if (Object.hasOwn(byStatus, group.status)) {
+        byStatus[group.status] = Number(group?._count?._all || 0);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      stats: {
+        total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+        byStatus,
+      },
+    });
   } catch (error) {
     return next(error);
   }
@@ -299,6 +630,10 @@ function mapModerationAttraction(attraction, auditLogs, reviewerNames) {
     longitude: snapshot?.longitude ?? attraction.longitude,
     status: attraction.status,
     publicationStatus: attraction.publicationStatus,
+    operationalStatus: attraction.operationalStatus,
+    suspensionReason: attraction.suspensionReason,
+    suspendedAt: attraction.suspendedAt,
+    suspendedById: attraction.suspendedById,
     rejectionReason: attraction.rejectionReason,
     revision: attraction.revision,
     submittedAt: attraction.submittedAt,
@@ -338,16 +673,69 @@ async function getAttractions(req, res, next) {
     const limit = Math.min(parsePositiveInteger(req.query.limit, DEFAULT_LIMIT), MAX_LIMIT);
     const skip = (page - 1) * limit;
     const status = String(req.query.status || '').trim().toUpperCase();
+    const statuses = String(req.query.statuses || '')
+      .split(',')
+      .map((value) => value.trim().toUpperCase())
+      .filter(Boolean);
+    const uniqueStatuses = [...new Set(statuses)];
+    const publicationStatus = String(req.query.publicationStatus || '').trim().toUpperCase();
+    const operationalStatus = String(req.query.operationalStatus || '').trim().toUpperCase();
+    const published = String(req.query.published || '').trim().toLowerCase();
+    const partnerId = String(req.query.partnerId || '').trim();
+    const categoryId = String(req.query.categoryId || '').trim();
     const search = String(req.query.search || '').trim();
     const where = { archivedAt: null };
 
+    if (status && uniqueStatuses.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Use either status or statuses, not both' },
+      });
+    }
     if (status && !ALLOWED_ATTRACTION_STATUSES.includes(status)) {
       return res.status(400).json({
         success: false,
         error: { code: 'VALIDATION_ERROR', message: 'Attraction status is invalid' },
       });
     }
+    if (uniqueStatuses.some((value) => !ALLOWED_ATTRACTION_STATUSES.includes(value))) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'One or more attraction statuses are invalid' },
+      });
+    }
+    if (
+      publicationStatus
+      && !ALLOWED_ATTRACTION_PUBLICATION_STATUSES.includes(publicationStatus)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Publication status is invalid' },
+      });
+    }
+    if (
+      operationalStatus
+      && !ALLOWED_ATTRACTION_OPERATIONAL_STATUSES.includes(operationalStatus)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Operational status is invalid' },
+      });
+    }
+    if (published && !['true', 'false'].includes(published)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Published filter must be true or false' },
+      });
+    }
     if (status) where.status = status;
+    if (uniqueStatuses.length > 0) where.status = { in: uniqueStatuses };
+    if (publicationStatus) where.publicationStatus = publicationStatus;
+    if (operationalStatus) where.operationalStatus = operationalStatus;
+    if (published === 'true') where.publishedAt = { not: null };
+    if (published === 'false') where.publishedAt = null;
+    if (partnerId) where.partnerId = partnerId;
+    if (categoryId) where.categories = { some: { categoryId } };
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
@@ -378,7 +766,7 @@ async function getAttractions(req, res, next) {
       specialDates: { orderBy: { date: 'asc' } },
     };
 
-    const [attractions, total] = await prisma.$transaction([
+    const [attractions, total, statusGroups = [], operationalGroups = []] = await prisma.$transaction([
       prisma.attraction.findMany({
         where,
         include,
@@ -387,6 +775,16 @@ async function getAttractions(req, res, next) {
         take: limit,
       }),
       prisma.attraction.count({ where }),
+      prisma.attraction.groupBy({
+        by: ['status'],
+        where: { archivedAt: null },
+        _count: { _all: true },
+      }),
+      prisma.attraction.groupBy({
+        by: ['publicationStatus', 'operationalStatus'],
+        where: { archivedAt: null, publishedAt: { not: null } },
+        _count: { _all: true },
+      }),
     ]);
 
     const ids = attractions.map((attraction) => attraction.id);
@@ -419,6 +817,24 @@ async function getAttractions(req, res, next) {
       logsByAttraction.get(attraction.id) || [],
       reviewerNames,
     ));
+    const byStatus = Object.fromEntries(
+      ALLOWED_ATTRACTION_STATUSES.map((value) => [value, 0]),
+    );
+    const operational = { active: 0, paused: 0, hidden: 0 };
+    for (const group of statusGroups || []) {
+      const count = Number(group?._count?._all || 0);
+      if (Object.hasOwn(byStatus, group.status)) byStatus[group.status] += count;
+    }
+    for (const group of operationalGroups || []) {
+      const count = Number(group?._count?._all || 0);
+      if (group.operationalStatus === 'SUSPENDED') {
+        operational.hidden += count;
+      } else if (group.publicationStatus === 'ACTIVE') {
+        operational.active += count;
+      } else if (group.publicationStatus === 'PAUSED') {
+        operational.paused += count;
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -428,6 +844,11 @@ async function getAttractions(req, res, next) {
         page,
         limit,
         totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      stats: {
+        total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
+        byStatus,
+        operational,
       },
     });
   } catch (error) {
@@ -442,8 +863,20 @@ async function reviewPartner(req, res, next) {
     if (!['APPROVED', 'REJECTED'].includes(action)) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'action must be APPROVED or REJECTED' } });
     if (action === 'REJECTED' && (!rejectionReason || String(rejectionReason).trim() === '')) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'rejectionReason is required when rejecting' } });
 
-    const partner = await prisma.partnerProfile.findUnique({ where: { id }, include: { user: true } });
+    const partner = await prisma.partnerProfile.findUnique({
+      where: { id },
+      include: { user: { select: { id: true, email: true } } },
+    });
     if (!partner) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Partner profile not found' } });
+    if (partner.userId === req.user?.id) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'SELF_REVIEW_FORBIDDEN',
+          message: 'Quản trị viên không được tự xét duyệt hồ sơ đối tác của chính mình.',
+        },
+      });
+    }
 
     // Chỉ xét duyệt hồ sơ đang chờ; tránh REJECTED lặp lại làm hạ role partner đã được duyệt.
     if (partner.status !== 'PENDING') {
@@ -451,36 +884,124 @@ async function reviewPartner(req, res, next) {
     }
 
     if (action === 'APPROVED') {
-      await prisma.$transaction(async (tx) => {
-        await tx.partnerProfile.update({
-          where: { id },
-          data: { status: 'APPROVED', rejectionReason: null },
-        });
-        await tx.user.update({ where: { id: partner.userId }, data: { role: 'PARTNER' } });
-        await grantRole(tx, partner.userId, 'CUSTOMER');
-        await grantRole(tx, partner.userId, 'PARTNER');
+      const registrationDate = partner.registrationDate instanceof Date
+        && !Number.isNaN(partner.registrationDate.getTime())
+        ? partner.registrationDate.toISOString().slice(0, 10)
+        : String(partner.registrationDate || '').slice(0, 10);
+      const kycValidationError = validateKyc({
+        businessName: partner.businessName,
+        businessLicenseUrl: partner.businessLicenseUrl,
+        taxCode: partner.taxCode,
+        registrationDate,
+        representativeName: partner.representativeName,
+        representativePhone: partner.representativePhone,
+        businessAddress: partner.businessAddress,
+        bankName: partner.bankName,
+        branchName: partner.branchName,
+        bankAccountNumber: partner.bankAccountNumber,
+        bankAccountName: partner.bankAccountName,
+        swiftCode: partner.swiftCode,
+        payoutCurrency: partner.payoutCurrency,
+        kycConsentAccepted: partner.kycConsentAccepted,
       });
-
-      // send email async
-      sendPartnerReviewEmail({ to: partner.user.email, businessName: partner.businessName, action: 'APPROVED' }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
-
-      return res.status(200).json({ success: true, message: `Trạng thái đối tác đã được cập nhật thành ${action}` });
+      if (kycValidationError) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'PARTNER_KYC_INCOMPLETE',
+            message: `Không thể phê duyệt hồ sơ KYC chưa đầy đủ: ${kycValidationError}`,
+          },
+        });
+      }
+      if (!isDocumentOwnedByUser(partner.businessLicenseUrl, partner.userId, req)) {
+        return res.status(409).json({
+          success: false,
+          error: {
+            code: 'PARTNER_KYC_DOCUMENT_INVALID',
+            message: 'Không thể phê duyệt vì tài liệu pháp lý bị thiếu hoặc không còn đáng tin cậy.',
+          },
+        });
+      }
     }
 
-    // REJECTED
-    await prisma.$transaction(async (tx) => {
-      await tx.partnerProfile.update({
-        where: { id },
-        data: { status: 'REJECTED', rejectionReason },
+    const normalizedRejectionReason =
+      action === 'REJECTED' ? String(rejectionReason).trim() : null;
+    let reviewCommitted;
+
+    try {
+      reviewCommitted = await prisma.$transaction(async (tx) => {
+        // Claim the pending profile and apply every role/audit side effect in
+        // one transaction. A competing reviewer acts on a stale PENDING row
+        // and therefore cannot update any row.
+        const claimed = await tx.partnerProfile.updateMany({
+          where: { id, status: 'PENDING' },
+          data: {
+            status: action,
+            rejectionReason: normalizedRejectionReason,
+          },
+        });
+        if (claimed.count !== 1) return false;
+
+        if (action === 'APPROVED') {
+          await tx.user.update({ where: { id: partner.userId }, data: { role: 'PARTNER' } });
+          await grantRole(tx, partner.userId, 'CUSTOMER');
+          await grantRole(tx, partner.userId, 'PARTNER');
+        } else {
+          await tx.user.update({
+            where: { id: partner.userId },
+            data: { role: 'CUSTOMER' },
+          });
+          await grantRole(tx, partner.userId, 'CUSTOMER');
+          await revokeRole(tx, partner.userId, 'PARTNER');
+        }
+
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: action === 'APPROVED'
+            ? 'PARTNER_KYC_APPROVED'
+            : 'PARTNER_KYC_REJECTED',
+          entityType: 'PARTNER',
+          entityId: id,
+          metadata: {
+            previousStatus: partner.status,
+            ...(normalizedRejectionReason
+              ? { rejectionReason: normalizedRejectionReason }
+              : {}),
+          },
+        });
+
+        return true;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      // PostgreSQL can surface a serialization conflict instead of a zero-row
+      // conditional update when both reviewers commit at nearly the same time.
+      if (error?.code === 'P2034') {
+        reviewCommitted = false;
+      } else {
+        throw error;
+      }
+    }
+
+    if (!reviewCommitted) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'PARTNER_REVIEW_CONFLICT',
+          message: 'Hồ sơ vừa được quản trị viên khác xử lý. Vui lòng tải lại danh sách.',
+        },
       });
-      await tx.user.update({
-        where: { id: partner.userId },
-        data: { role: 'CUSTOMER' },
-      });
-      await grantRole(tx, partner.userId, 'CUSTOMER');
-      await revokeRole(tx, partner.userId, 'PARTNER');
-    });
-    sendPartnerReviewEmail({ to: partner.user.email, businessName: partner.businessName, action: 'REJECTED', rejectionReason }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
+    }
+
+    // Notify only after the state, role memberships, and audit log commit.
+    sendPartnerReviewEmail({
+      to: partner.user.email,
+      businessName: partner.businessName,
+      action,
+      ...(normalizedRejectionReason
+        ? { rejectionReason: normalizedRejectionReason }
+        : {}),
+    }).catch((err) => console.error('[Admin] sendPartnerReviewEmail error:', err));
 
     return res.status(200).json({ success: true, message: `Trạng thái đối tác đã được cập nhật thành ${action}` });
   } catch (error) {
@@ -518,7 +1039,7 @@ async function changePartnerOperationalStatus(req, res, next) {
 
     const partner = await prisma.partnerProfile.findUnique({
       where: { id },
-      include: { user: true },
+      include: { user: { select: { email: true } } },
     });
     if (!partner) {
       return res.status(404).json({
@@ -566,6 +1087,8 @@ async function changePartnerOperationalStatus(req, res, next) {
       });
     });
 
+    if (status === 'SUSPENDED') disconnectPartnerSockets(id);
+
     if (partner.user?.email) {
       sendPartnerOperationalStatusEmail({
         to: partner.user.email,
@@ -583,7 +1106,8 @@ async function changePartnerOperationalStatus(req, res, next) {
         ? 'Đã đình chỉ đối tác và dừng toàn bộ lượt bán mới.'
         : 'Đã khôi phục đối tác. Các địa điểm vẫn giữ nguyên trạng thái mở hoặc tạm dừng trước đó.',
       data: {
-        ...partner,
+        ...Object.fromEntries(Object.entries(partner).filter(([key]) => key !== 'user')),
+        user: partner.user,
         status,
         rejectionReason: status === 'SUSPENDED' ? reason : null,
       },
@@ -616,7 +1140,7 @@ async function reviewAttraction(req, res, next) {
 
     const attraction = await prisma.attraction.findUnique({
       where: { id },
-      include: { partner: { include: { user: true } } },
+      include: { partner: { include: { user: { select: { email: true } } } } },
     });
     if (!attraction || attraction.archivedAt) {
       return res.status(404).json({
@@ -753,9 +1277,12 @@ async function hideAttraction(req, res, next) {
     const { reason } = req.body || {};
     if (!reason || String(reason).trim() === '') return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } });
 
-    const attraction = await prisma.attraction.findUnique({ where: { id }, include: { partner: { include: { user: true } } } });
+    const attraction = await prisma.attraction.findUnique({
+      where: { id },
+      include: { partner: { include: { user: { select: { email: true } } } } },
+    });
     if (!attraction || attraction.archivedAt) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
-    if (attraction.status !== 'APPROVED' || !attraction.publishedAt) {
+    if (!attraction.publishedAt || attraction.operationalStatus === 'SUSPENDED') {
       return res.status(409).json({
         success: false,
         error: {
@@ -766,16 +1293,21 @@ async function hideAttraction(req, res, next) {
     }
 
     const suspensionReason = String(reason).trim();
-    const reviewedAt = new Date();
+    const suspendedAt = new Date();
     await prisma.$transaction(async (tx) => {
       const updated = await tx.attraction.updateMany({
-        where: { id, status: 'APPROVED', archivedAt: null },
+        where: {
+          id,
+          publishedAt: { not: null },
+          operationalStatus: 'ACTIVE',
+          archivedAt: null,
+        },
         data: {
-          status: 'SUSPENDED',
+          operationalStatus: 'SUSPENDED',
           publicationStatus: 'PAUSED',
-          rejectionReason: suspensionReason,
-          reviewedAt,
-          reviewedById: req.user?.id || null,
+          suspensionReason,
+          suspendedAt,
+          suspendedById: req.user?.id || null,
         },
       });
       if (updated.count !== 1) {
@@ -791,6 +1323,7 @@ async function hideAttraction(req, res, next) {
         entityId: id,
         metadata: {
           reason: suspensionReason,
+          previousReviewStatus: attraction.status,
           previousPublicationStatus: attraction.publicationStatus,
         },
       });
@@ -812,7 +1345,7 @@ async function restoreAttraction(req, res, next) {
     const id = req.params.id;
     const attraction = await prisma.attraction.findUnique({
       where: { id },
-      include: { partner: { include: { user: true } } },
+      include: { partner: { include: { user: { select: { email: true } } } } },
     });
     if (!attraction || attraction.archivedAt) {
       return res.status(404).json({
@@ -820,7 +1353,7 @@ async function restoreAttraction(req, res, next) {
         error: { code: 'NOT_FOUND', message: 'Attraction not found' },
       });
     }
-    if (attraction.status !== 'SUSPENDED') {
+    if (attraction.operationalStatus !== 'SUSPENDED') {
       return res.status(409).json({
         success: false,
         error: {
@@ -830,16 +1363,15 @@ async function restoreAttraction(req, res, next) {
       });
     }
 
-    const reviewedAt = new Date();
     await prisma.$transaction(async (tx) => {
       const updated = await tx.attraction.updateMany({
-        where: { id, status: 'SUSPENDED', archivedAt: null },
+        where: { id, operationalStatus: 'SUSPENDED', archivedAt: null },
         data: {
-          status: 'APPROVED',
+          operationalStatus: 'ACTIVE',
           publicationStatus: 'PAUSED',
-          rejectionReason: null,
-          reviewedAt,
-          reviewedById: req.user?.id || null,
+          suspensionReason: null,
+          suspendedAt: null,
+          suspendedById: null,
         },
       });
       if (updated.count !== 1) {
@@ -854,9 +1386,10 @@ async function restoreAttraction(req, res, next) {
         entityType: 'ATTRACTION',
         entityId: id,
         metadata: {
-          previousStatus: 'SUSPENDED',
+          reviewStatus: attraction.status,
+          previousOperationalStatus: 'SUSPENDED',
           publicationStatus: 'PAUSED',
-          previousReason: attraction.rejectionReason || null,
+          previousReason: attraction.suspensionReason || null,
         },
       });
     });
@@ -877,9 +1410,11 @@ async function restoreAttraction(req, res, next) {
       message: 'Đã khôi phục địa điểm ở trạng thái tạm dừng. Đối tác phải chủ động mở bán lại.',
       data: {
         ...attraction,
-        status: 'APPROVED',
+        operationalStatus: 'ACTIVE',
         publicationStatus: 'PAUSED',
-        rejectionReason: null,
+        suspensionReason: null,
+        suspendedAt: null,
+        suspendedById: null,
       },
     });
   } catch (error) {
@@ -942,13 +1477,12 @@ async function getAdminBookings(req, res, next) {
           include: {
             payments: {
               orderBy: { createdAt: 'desc' },
-              select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true },
+              select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true, isDuplicate: true },
             },
             refundRequests: { select: { status: true } },
             ticketInstances: {
               select: {
                 id: true,
-                qrCodeToken: true,
                 status: true,
                 checkedInAt: true,
                 checkedInBy: { select: { fullName: true } },
@@ -984,7 +1518,7 @@ async function getAdminBookings(req, res, next) {
       ]);
 
     const data = bookings.map((b) => {
-      const latestPayment = b.payments[0] || null;
+      const latestPayment = selectBookingPayment(b.payments);
       const timeSlot = b.reservation.timeSlot;
       return {
         id: b.id,
@@ -1062,7 +1596,7 @@ async function getDashboard(req, res, next) {
           archivedAt: null,
           publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
-          status: { not: 'SUSPENDED' },
+          operationalStatus: 'ACTIVE',
           partner: { status: 'APPROVED' },
         },
       }),
@@ -1316,7 +1850,18 @@ async function createCategory(req, res, next) {
   try {
     const payload = categoryPayload(req.body);
     if (payload.error) return res.status(400).json({ message: payload.error });
-    const category = await prisma.category.create({ data: payload.data });
+    const category = await prisma.$transaction(async (tx) => {
+      const created = await tx.category.create({ data: payload.data });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'CATEGORY_CREATED',
+        entityType: 'CATEGORY',
+        entityId: created.id,
+        metadata: { name: created.name },
+      });
+      return created;
+    });
     return res.status(201).json({ success: true, data: category });
   } catch (error) {
     if (error.code === 'P2002') {
@@ -1333,9 +1878,32 @@ async function updateCategory(req, res, next) {
     if (Object.keys(payload.data).length === 0) {
       return res.status(400).json({ message: 'Không có dữ liệu cần cập nhật.' });
     }
-    const category = await prisma.category.update({
-      where: { id: req.params.id },
-      data: payload.data,
+    const existing = await prisma.category.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      return res.status(404).json({ message: 'Không tìm thấy danh mục.' });
+    }
+    const category = await prisma.$transaction(async (tx) => {
+      const updated = await tx.category.update({
+        where: { id: req.params.id },
+        data: payload.data,
+      });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'CATEGORY_UPDATED',
+        entityType: 'CATEGORY',
+        entityId: updated.id,
+        metadata: {
+          before: {
+            name: existing.name,
+            description: existing.description,
+            icon: existing.icon,
+            isActive: existing.isActive,
+          },
+          changes: payload.data,
+        },
+      });
+      return updated;
     });
     return res.json({ success: true, data: category });
   } catch (error) {
@@ -1361,15 +1929,288 @@ async function deleteCategory(req, res, next) {
         message: 'Danh mục đang được sử dụng. Hãy chuyển sang trạng thái ẩn thay vì xóa.',
       });
     }
-    await prisma.category.delete({ where: { id: category.id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.category.delete({ where: { id: category.id } });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'CATEGORY_DELETED',
+        entityType: 'CATEGORY',
+        entityId: category.id,
+        metadata: { name: category.name },
+      });
+    });
     return res.json({ message: 'Đã xóa danh mục.' });
   } catch (error) {
     return next(error);
   }
 }
 
+function serializeVoucher(voucher, now = new Date()) {
+  const expired = voucher.expiryDate <= now;
+  const exhausted = voucher.usageLimit != null && voucher.usedCount >= voucher.usageLimit;
+
+  return {
+    ...voucher,
+    discountValue: Number(voucher.discountValue),
+    maxDiscount: voucher.maxDiscount == null ? null : Number(voucher.maxDiscount),
+    minSpend: voucher.minSpend == null ? null : Number(voucher.minSpend),
+    operationalStatus: !voucher.isActive
+      ? 'INACTIVE'
+      : expired
+        ? 'EXPIRED'
+        : exhausted
+          ? 'EXHAUSTED'
+          : 'ACTIVE',
+  };
+}
+
+function parseVoucherMoney(value, fieldName, { nullable = false, allowZero = false } = {}) {
+  if (value === null || value === undefined || value === '') {
+    return nullable ? { value: null } : { error: `${fieldName} là bắt buộc.` };
+  }
+
+  const parsed = Number(value);
+  const minimum = allowZero ? 0 : 1;
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > MAX_VND_AMOUNT) {
+    return {
+      error: `${fieldName} phải là số nguyên từ ${minimum.toLocaleString('vi-VN')} đến ${MAX_VND_AMOUNT.toLocaleString('vi-VN')} VND.`,
+    };
+  }
+
+  return { value: parsed };
+}
+
+function parseVoucherUsageLimit(value) {
+  if (value === null || value === undefined || value === '') return { value: null };
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_VOUCHER_USAGE_LIMIT) {
+    return {
+      error: `Giới hạn sử dụng phải là số nguyên từ 1 đến ${MAX_VOUCHER_USAGE_LIMIT.toLocaleString('vi-VN')}.`,
+    };
+  }
+
+  return { value: parsed };
+}
+
+function voucherPayload(body, { partial = false, currentVoucher = null } = {}) {
+  const data = {};
+
+  if (partial && body.discountType !== undefined && body.discountValue === undefined) {
+    return { error: 'Cần nhập lại giá trị giảm khi thay đổi loại voucher.' };
+  }
+
+  if (!partial || body.code !== undefined) {
+    const code = String(body.code || '').trim().toUpperCase();
+    if (!VOUCHER_CODE_PATTERN.test(code)) {
+      return {
+        error: 'Mã voucher phải có 3-32 ký tự, chỉ gồm chữ in hoa, số, dấu gạch ngang hoặc gạch dưới.',
+      };
+    }
+    data.code = code;
+  }
+
+  if (!partial || body.discountType !== undefined) {
+    const discountType = String(body.discountType || '').trim().toUpperCase();
+    if (!VOUCHER_DISCOUNT_TYPES.includes(discountType)) {
+      return { error: 'Loại giảm giá không hợp lệ.' };
+    }
+    data.discountType = discountType;
+  }
+
+  const effectiveType = data.discountType || currentVoucher?.discountType;
+  if (!partial || body.discountValue !== undefined) {
+    const parsed = parseVoucherMoney(body.discountValue, 'Giá trị giảm');
+    if (parsed.error) return parsed;
+    if (effectiveType === 'PERCENTAGE' && parsed.value > 100) {
+      return { error: 'Voucher phần trăm phải có giá trị từ 1 đến 100.' };
+    }
+    data.discountValue = parsed.value;
+  }
+
+  if (!partial || body.maxDiscount !== undefined || body.discountType !== undefined) {
+    if (effectiveType === 'FIXED') {
+      data.maxDiscount = null;
+    } else {
+      const parsed = parseVoucherMoney(body.maxDiscount, 'Mức giảm tối đa', { nullable: true });
+      if (parsed.error) return parsed;
+      data.maxDiscount = parsed.value;
+    }
+  }
+
+  if (!partial || body.minSpend !== undefined) {
+    const parsed = parseVoucherMoney(body.minSpend, 'Giá trị đơn tối thiểu', {
+      nullable: true,
+      allowZero: true,
+    });
+    if (parsed.error) return parsed;
+    data.minSpend = parsed.value;
+  }
+
+  if (!partial || body.expiryDate !== undefined) {
+    const expiryDate = new Date(body.expiryDate);
+    if (Number.isNaN(expiryDate.getTime()) || (!partial && expiryDate <= new Date())) {
+      return {
+        error: partial
+          ? 'Thời hạn voucher không hợp lệ.'
+          : 'Thời hạn voucher phải là một thời điểm hợp lệ trong tương lai.',
+      };
+    }
+    data.expiryDate = expiryDate;
+  }
+
+  if (!partial || body.usageLimit !== undefined) {
+    const parsed = parseVoucherUsageLimit(body.usageLimit);
+    if (parsed.error) return parsed;
+    if (currentVoucher && parsed.value != null && parsed.value < currentVoucher.usedCount) {
+      return { error: 'Giới hạn sử dụng không thể nhỏ hơn số lượt đã dùng.' };
+    }
+    data.usageLimit = parsed.value;
+  }
+
+  if (body.isActive !== undefined) data.isActive = parseBoolean(body.isActive);
+
+  return { data };
+}
+
+async function listVouchers(req, res, next) {
+  try {
+    const page = parsePositiveInteger(req.query.page, DEFAULT_PAGE);
+    const requestedLimit = parsePositiveInteger(req.query.limit, DEFAULT_LIMIT);
+    const limit = Math.min(requestedLimit, MAX_LIMIT);
+    const skip = (page - 1) * limit;
+    const search = String(req.query.search || '').trim().toUpperCase();
+    const activeFilter = String(req.query.isActive || '').trim().toLowerCase();
+    const where = {};
+
+    if (search) where.code = { contains: search, mode: 'insensitive' };
+    if (activeFilter === 'true' || activeFilter === 'false') {
+      where.isActive = activeFilter === 'true';
+    }
+
+    const [vouchers, total] = await prisma.$transaction([
+      prisma.voucher.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { code: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.voucher.count({ where }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: vouchers.map((voucher) => serializeVoucher(voucher)),
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+async function createVoucher(req, res, next) {
+  try {
+    const payload = voucherPayload(req.body);
+    if (payload.error) return res.status(400).json({ message: payload.error });
+
+    const voucher = await prisma.$transaction(async (tx) => {
+      const created = await tx.voucher.create({ data: payload.data });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'VOUCHER_CREATED',
+        entityType: 'VOUCHER',
+        entityId: created.id,
+        metadata: { code: created.code },
+      });
+      return created;
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: serializeVoucher(voucher),
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Mã voucher đã tồn tại.' });
+    }
+    return next(error);
+  }
+}
+
+async function updateVoucher(req, res, next) {
+  try {
+    const currentVoucher = await prisma.voucher.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!currentVoucher) {
+      return res.status(404).json({ message: 'Không tìm thấy voucher.' });
+    }
+
+    const payload = voucherPayload(req.body, { partial: true, currentVoucher });
+    if (payload.error) return res.status(400).json({ message: payload.error });
+    if (Object.keys(payload.data).length === 0) {
+      return res.status(400).json({ message: 'Không có dữ liệu cần cập nhật.' });
+    }
+
+    const protectedFields = [
+      'code',
+      'discountType',
+      'discountValue',
+      'maxDiscount',
+      'minSpend',
+    ];
+    const changesFinancialTerms = protectedFields.some(
+      (field) => Object.prototype.hasOwnProperty.call(payload.data, field),
+    );
+    if (currentVoucher.usedCount > 0 && changesFinancialTerms) {
+      return res.status(409).json({
+        message: 'Voucher đã được sử dụng. Chỉ có thể đổi thời hạn, giới hạn lượt dùng hoặc trạng thái.',
+      });
+    }
+
+    const voucher = await prisma.$transaction(async (tx) => {
+      const updated = await tx.voucher.update({
+        where: { id: currentVoucher.id },
+        data: payload.data,
+      });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'VOUCHER_UPDATED',
+        entityType: 'VOUCHER',
+        entityId: updated.id,
+        metadata: {
+          code: updated.code,
+          changedFields: Object.keys(payload.data),
+        },
+      });
+      return updated;
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: serializeVoucher(voucher),
+    });
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Mã voucher đã tồn tại.' });
+    }
+    return next(error);
+  }
+}
+
 module.exports = {
   changeUserStatus,
+  createPlatformStaff,
+  resendPlatformStaffInvite,
+  getAuditLogs,
   getUsers,
   getPartners,
   getAttractions,
@@ -1387,5 +2228,8 @@ module.exports = {
   createCategory,
   updateCategory,
   deleteCategory,
+  listVouchers,
+  createVoucher,
+  updateVoucher,
 };
 

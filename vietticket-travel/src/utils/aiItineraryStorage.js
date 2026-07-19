@@ -22,6 +22,33 @@ function readJsonArray(storage, key) {
   }
 }
 
+function normalizedOwnerId(ownerId) {
+  return String(ownerId || '').trim()
+}
+
+function scopedStorageKey(baseKey, ownerId) {
+  return `${baseKey}:${normalizedOwnerId(ownerId) || 'guest'}`
+}
+
+function readScopedArray(storage, baseKey, ownerId) {
+  if (!storage) return []
+  const owner = normalizedOwnerId(ownerId)
+  const key = scopedStorageKey(baseKey, owner)
+
+  if (storage.getItem(key) != null) {
+    return readJsonArray(storage, key)
+  }
+
+  // Di chuyển an toàn dữ liệu cũ: tài khoản chỉ nhận các bản đã mang đúng
+  // ownerId; bản không xác định chủ sở hữu chỉ được giữ trong vùng guest.
+  const legacy = readJsonArray(storage, baseKey)
+  const compatible = legacy.filter((item) =>
+    owner ? item?.ownerId === owner : !item?.ownerId,
+  )
+  if (compatible.length > 0) storage.setItem(key, JSON.stringify(compatible))
+  return compatible
+}
+
 export function createItinerarySnapshot(plan, criteria = {}, now = Date.now()) {
   if (!plan || typeof plan !== 'object') return null
 
@@ -35,48 +62,70 @@ export function createItinerarySnapshot(plan, criteria = {}, now = Date.now()) {
   }
 }
 
-export function loadSavedItineraries(storage = getDefaultStorage()) {
-  return readJsonArray(storage, SAVED_ITINERARIES_KEY)
+export function loadSavedItineraries(storage = getDefaultStorage(), ownerId = '') {
+  return readScopedArray(storage, SAVED_ITINERARIES_KEY, ownerId)
 }
 
-export function saveItinerarySnapshot(snapshot, storage = getDefaultStorage()) {
+export function saveItinerarySnapshot(
+  snapshot,
+  storage = getDefaultStorage(),
+  ownerId = snapshot?.ownerId || '',
+) {
   if (!storage || !snapshot?.id) return null
 
-  const current = loadSavedItineraries(storage)
+  const owner = normalizedOwnerId(ownerId)
+  const scopedSnapshot = { ...snapshot, ownerId: owner || null }
+  const current = loadSavedItineraries(storage, owner)
   const next = [
-    snapshot,
-    ...current.filter((item) => item?.id !== snapshot.id),
+    scopedSnapshot,
+    ...current.filter((item) => item?.id !== scopedSnapshot.id),
   ].slice(0, MAX_SAVED_ITINERARIES)
 
-  storage.setItem(SAVED_ITINERARIES_KEY, JSON.stringify(next))
-  return snapshot
+  storage.setItem(scopedStorageKey(SAVED_ITINERARIES_KEY, owner), JSON.stringify(next))
+  return scopedSnapshot
 }
 
-export function removeItinerarySnapshot(planId, storage = getDefaultStorage()) {
+export function removeItinerarySnapshot(
+  planId,
+  storage = getDefaultStorage(),
+  ownerId = '',
+) {
   if (!storage || !planId) return []
 
-  const next = loadSavedItineraries(storage).filter((item) => item?.id !== planId)
-  storage.setItem(SAVED_ITINERARIES_KEY, JSON.stringify(next))
+  const owner = normalizedOwnerId(ownerId)
+  const next = loadSavedItineraries(storage, owner).filter((item) => item?.id !== planId)
+  storage.setItem(scopedStorageKey(SAVED_ITINERARIES_KEY, owner), JSON.stringify(next))
   return next
 }
 
-export function saveItineraryFeedback(planId, value, storage = getDefaultStorage()) {
+export function saveItineraryFeedback(
+  planId,
+  value,
+  storage = getDefaultStorage(),
+  ownerId = '',
+) {
   if (!storage || !planId || !['up', 'down'].includes(value)) return null
 
-  const current = readJsonArray(storage, ITINERARY_FEEDBACK_KEY)
+  const owner = normalizedOwnerId(ownerId)
+  const current = readScopedArray(storage, ITINERARY_FEEDBACK_KEY, owner)
   const feedback = {
     planId,
     value,
+    ownerId: owner || null,
     updatedAt: new Date().toISOString(),
   }
   const next = [feedback, ...current.filter((item) => item?.planId !== planId)]
-  storage.setItem(ITINERARY_FEEDBACK_KEY, JSON.stringify(next))
+  storage.setItem(scopedStorageKey(ITINERARY_FEEDBACK_KEY, owner), JSON.stringify(next))
   return feedback
 }
 
-export function getItineraryFeedback(planId, storage = getDefaultStorage()) {
+export function getItineraryFeedback(
+  planId,
+  storage = getDefaultStorage(),
+  ownerId = '',
+) {
   if (!storage || !planId) return ''
-  const found = readJsonArray(storage, ITINERARY_FEEDBACK_KEY).find(
+  const found = readScopedArray(storage, ITINERARY_FEEDBACK_KEY, ownerId).find(
     (item) => item?.planId === planId,
   )
   return found?.value || ''
@@ -150,16 +199,24 @@ export async function syncItineraryToServer(snapshot, saveApiFn) {
  * @param {object}   [storage] - localStorage instance (default).
  * @returns {Promise<Array>} Danh sách merged itineraries.
  */
-export async function loadItinerariesFromServer(getApiFn, getByIdFn, storage = getDefaultStorage()) {
-  if (typeof getApiFn !== 'function') return loadSavedItineraries(storage)
+export async function loadItinerariesFromServer(
+  getApiFn,
+  getByIdFn,
+  storage = getDefaultStorage(),
+  ownerId = '',
+) {
+  const owner = normalizedOwnerId(ownerId)
+  if (!owner || typeof getApiFn !== 'function') {
+    return loadSavedItineraries(storage, owner)
+  }
 
   try {
     const response = await getApiFn()
     const serverList = Array.isArray(response?.data) ? response.data : []
 
-    if (serverList.length === 0) return loadSavedItineraries(storage)
+    if (serverList.length === 0) return loadSavedItineraries(storage, owner)
 
-    const localList = loadSavedItineraries(storage)
+    const localList = loadSavedItineraries(storage, owner)
     const localById = new Map(localList.map((item) => [item.id, item]))
 
     const merged = [...localList]
@@ -184,6 +241,7 @@ export async function loadItinerariesFromServer(getApiFn, getByIdFn, storage = g
                   createdAt: detail.data.createdAt,
                   updatedAt: detail.data.updatedAt,
                   criteria: detail.data.criteria || null,
+                  ownerId: owner,
                   plan: detail.data.data,
                 }
                 if (mergedIds.has(planId)) {
@@ -212,12 +270,12 @@ export async function loadItinerariesFromServer(getApiFn, getByIdFn, storage = g
       .slice(0, MAX_SAVED_ITINERARIES)
 
     if (storage) {
-      storage.setItem(SAVED_ITINERARIES_KEY, JSON.stringify(sorted))
+      storage.setItem(scopedStorageKey(SAVED_ITINERARIES_KEY, owner), JSON.stringify(sorted))
     }
 
     return sorted
   } catch {
     // Server offline hoặc chưa đăng nhập -> trả về bản local.
-    return loadSavedItineraries(storage)
+    return loadSavedItineraries(storage, owner)
   }
 }

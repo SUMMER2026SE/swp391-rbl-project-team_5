@@ -14,6 +14,7 @@ const STATUS_LABEL = {
   rejected: 'REJECTED',
   suspended: 'SUSPENDED',
 };
+const PAGE_SIZE = 10;
 
 function formatDate(value) {
   if (!value) return '—';
@@ -57,10 +58,10 @@ function mapAttraction(attraction) {
 }
 
 const SYSTEM_STATS = [
-  { id: 'pending', icon: 'pending_actions', variant: 'pending', label: 'Tổng chờ duyệt', getter: (list) => list.filter((item) => item.status === 'pending').length },
-  { id: 'approved', icon: 'check_circle', variant: 'approved', label: 'Đã duyệt', getter: (list) => list.filter((item) => item.status === 'approved').length },
-  { id: 'rejected', icon: 'cancel', variant: 'rejected', label: 'Đã từ chối', getter: (list) => list.filter((item) => item.status === 'rejected').length },
-  { id: 'time', icon: 'database', variant: 'time', label: 'Tổng địa điểm', getter: (list) => list.length },
+  { id: 'pending', icon: 'pending_actions', variant: 'pending', label: 'Tổng chờ duyệt', status: 'PENDING' },
+  { id: 'approved', icon: 'check_circle', variant: 'approved', label: 'Đã duyệt', status: 'APPROVED' },
+  { id: 'rejected', icon: 'cancel', variant: 'rejected', label: 'Đã từ chối', status: 'REJECTED' },
+  { id: 'time', icon: 'database', variant: 'time', label: 'Tổng địa điểm', status: 'TOTAL' },
 ];
 
 export default function AttractionApprovalPage() {
@@ -71,6 +72,10 @@ export default function AttractionApprovalPage() {
   const [selectedAttraction, setSelectedAttraction] = useState(null);
   const [rejectTarget, setRejectTarget] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
+  const [serverStats, setServerStats] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -78,8 +83,24 @@ export default function AttractionApprovalPage() {
     async function loadAttractions() {
       setLoading(true);
       try {
-        const result = await adminApi.listAttractions({ limit: 100 });
-        if (active) setAttractions((result.data || []).map(mapAttraction));
+        const result = await adminApi.listAttractions({
+          status: filterStatus,
+          page,
+          limit: PAGE_SIZE,
+        });
+        if (active) {
+          const nextPagination = result.pagination || {
+            total: (result.data || []).length,
+            totalPages: 1,
+          };
+          if (page > nextPagination.totalPages) {
+            setPage(nextPagination.totalPages);
+            return;
+          }
+          setAttractions((result.data || []).map(mapAttraction));
+          setPagination(nextPagination);
+          setServerStats(result.stats || null);
+        }
       } catch (error) {
         if (active) toast.error(error.message);
       } finally {
@@ -91,18 +112,14 @@ export default function AttractionApprovalPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [filterStatus, page, reloadKey]);
 
   async function handleApprove(id) {
     const name = attractions.find((item) => item.id === id)?.name;
     setActionId(id);
     try {
       await adminApi.reviewAttraction(id, 'APPROVED');
-      setAttractions((current) =>
-        current.map((item) =>
-          item.id === id ? { ...item, status: 'approved', rejectReason: '' } : item,
-        ),
-      );
+      setReloadKey((value) => value + 1);
       toast.success(`Đã phê duyệt địa điểm: ${name}`);
     } catch (error) {
       toast.error(error.message);
@@ -127,13 +144,7 @@ export default function AttractionApprovalPage() {
     setActionId(target.id);
     try {
       await adminApi.reviewAttraction(target.id, 'REJECTED', reason);
-      setAttractions((current) =>
-        current.map((item) =>
-          item.id === target.id
-            ? { ...item, status: 'rejected', rejectReason: reason }
-            : item,
-        ),
-      );
+      setReloadKey((value) => value + 1);
       toast.info(`Đã từ chối địa điểm: ${target.name}`);
       setRejectTarget(null);
       setSelectedAttraction(null);
@@ -148,9 +159,7 @@ export default function AttractionApprovalPage() {
     setSelectedAttraction(attraction);
   }
 
-  const displayed = filterStatus === 'all'
-    ? attractions
-    : attractions.filter((item) => item.status === filterStatus);
+  const displayed = attractions;
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm địa điểm, đối tác...">
@@ -164,7 +173,10 @@ export default function AttractionApprovalPage() {
           {['all', 'pending', 'approved', 'rejected', 'suspended'].map((status) => (
             <button
               key={status}
-              onClick={() => setFilterStatus(status)}
+              onClick={() => {
+                setFilterStatus(status);
+                setPage(1);
+              }}
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
@@ -318,14 +330,24 @@ export default function AttractionApprovalPage() {
 
         <div className="admin-pagination">
           <span className="admin-pagination__info">
-            Hiển thị <strong>{displayed.length}</strong> / <strong>{attractions.length}</strong> địa điểm
+            Hiển thị <strong>{displayed.length}</strong> / <strong>{pagination.total}</strong> địa điểm
           </span>
           <div className="admin-pagination__controls">
-            <button className="admin-pagination__btn" disabled>
+            <button
+              className="admin-pagination__btn"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_left</span>
             </button>
-            <button className="admin-pagination__btn active">1</button>
-            <button className="admin-pagination__btn" disabled>
+            <button className="admin-pagination__btn active" disabled>
+              {page}/{pagination.totalPages}
+            </button>
+            <button
+              className="admin-pagination__btn"
+              disabled={page >= pagination.totalPages || loading}
+              onClick={() => setPage((value) => Math.min(pagination.totalPages, value + 1))}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_right</span>
             </button>
           </div>
@@ -340,7 +362,11 @@ export default function AttractionApprovalPage() {
             </div>
             <div>
               <p className="admin-mini-stat__label">{stat.label}</p>
-              <p className="admin-mini-stat__value">{stat.getter(attractions)}</p>
+              <p className="admin-mini-stat__value">
+                {stat.status === 'TOTAL'
+                  ? Number(serverStats?.total || 0)
+                  : Number(serverStats?.byStatus?.[stat.status] || 0)}
+              </p>
             </div>
           </div>
         ))}

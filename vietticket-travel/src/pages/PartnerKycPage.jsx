@@ -95,10 +95,10 @@ function PartnerKycPage() {
           setFormData({
             businessName: p.businessName || '',
             taxCode: p.taxCode || '',
-            registrationDate: '', // not stored in DB
-            representativeName: p.displayName || '',
-            representativePhone: p.phone || '',
-            businessAddress: '', // not stored in DB
+            registrationDate: p.registrationDate || '',
+            representativeName: p.representativeName || '',
+            representativePhone: p.representativePhone || '',
+            businessAddress: p.businessAddress || '',
             bankName: p.bankName || '',
             branchName: p.branchName || '',
             bankAccountNumber: p.bankAccountNumber || '',
@@ -111,7 +111,10 @@ function PartnerKycPage() {
             setBankSearch(p.bankName)
           }
           if (p.businessLicenseUrl) {
-            setUploadedFile({ name: 'Giấy phép kinh doanh đã tải lên' })
+            setUploadedFile({
+              name: 'Giấy phép kinh doanh đã tải lên',
+              size: null,
+            })
           }
         }
       })
@@ -139,7 +142,7 @@ function PartnerKycPage() {
       if (!formData.representativeName.trim()) errs.representativeName = 'Tên người đại diện không được để trống.'
       if (!formData.representativePhone.trim()) {
         errs.representativePhone = 'Số điện thoại không được để trống.'
-      } else if (!/^(0[3|5|7|8|9])([0-9]{8})$/.test(formData.representativePhone.trim())) {
+      } else if (!/^0[35789][0-9]{8}$/.test(formData.representativePhone.trim())) {
         errs.representativePhone = 'Số điện thoại không đúng định dạng (ví dụ: 0901234567).'
       }
       if (!formData.businessAddress.trim()) errs.businessAddress = 'Địa chỉ trụ sở chính không được để trống.'
@@ -298,6 +301,10 @@ function PartnerKycPage() {
       toast.error('Vui lòng kiểm tra lại thông tin hồ sơ pháp lý.')
       return
     }
+    if (!agreedToTerms) {
+      toast.error('Bạn cần xác nhận cam kết và đồng ý điều khoản KYC trước khi nộp hồ sơ.')
+      return
+    }
 
     setIsSubmitting(true)
     
@@ -307,12 +314,17 @@ function PartnerKycPage() {
         businessName: formData.businessName,
         businessLicenseUrl: formData.businessLicenseUrl,
         taxCode: formData.taxCode,
+        registrationDate: formData.registrationDate,
+        representativeName: formData.representativeName,
+        representativePhone: formData.representativePhone,
+        businessAddress: formData.businessAddress,
         bankName: formData.bankName,
         branchName: formData.branchName,
         bankAccountNumber: formData.bankAccountNumber,
         bankAccountName: formData.bankAccountName,
         swiftCode: formData.swiftCode,
         payoutCurrency: formData.payoutCurrency,
+        kycConsentAccepted: agreedToTerms,
       })
 
       toast.success('Nộp hồ sơ xác thực đối tác thành công! Vui lòng chờ admin phê duyệt.')
@@ -878,7 +890,11 @@ function PartnerKycPage() {
                         </div>
                         <div className="flex flex-col">
                           <span className="text-sm font-medium text-[#191c1d]">{uploadedFile.name}</span>
-                          <span className="text-xs text-[#6f797a]">{(uploadedFile.size / 1024 / 1024).toFixed(2)} MB</span>
+                          <span className="text-xs text-[#6f797a]">
+                            {Number.isFinite(uploadedFile.size)
+                              ? `${(uploadedFile.size / 1024 / 1024).toFixed(2)} MB`
+                              : 'Tài liệu đã lưu an toàn'}
+                          </span>
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
@@ -943,9 +959,9 @@ function PartnerKycPage() {
                   </div>
                   <span className="text-sm text-[#3f484a] leading-tight select-none">
                     Tôi cam đoan mọi thông tin và tài liệu cung cấp là chính xác. Tôi đồng ý với{' '}
-                    <a className="text-[#006068] hover:underline font-semibold" href="#">Điều khoản dịch vụ</a>
+                    <Link className="text-[#006068] hover:underline font-semibold" to="/terms">Điều khoản dịch vụ</Link>
                     {' '}và{' '}
-                    <a className="text-[#006068] hover:underline font-semibold" href="#">Chính sách bảo mật</a>.
+                    <Link className="text-[#006068] hover:underline font-semibold" to="/privacy">Chính sách bảo mật</Link>.
                   </span>
                 </label>
               </div>

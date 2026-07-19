@@ -24,13 +24,6 @@ const navItems = [
     active: 'support',
   },
   {
-    label: 'Phương thức thanh toán',
-    icon: 'credit_card',
-    to: null,
-    active: 'payment',
-    comingSoon: true,
-  },
-  {
     label: 'Đổi mật khẩu',
     icon: 'lock_reset',
     to: '/change-password',
@@ -134,33 +127,18 @@ function AccountLayout({ active = 'profile', children }) {
                 Cổng đối tác
               </Link>
             )}
-            {visibleNavItems.map((item) =>
-              item.comingSoon ? (
-                <span
-                  className="account-nav-item--disabled"
-                  key={item.label}
-                  title="Tính năng đang phát triển"
-                  aria-disabled="true"
-                >
+            {visibleNavItems.map((item) => (
+              <Link
+                className={item.active === active ? 'active' : ''}
+                key={item.label}
+                to={item.to}
+              >
                   <span className="material-symbols-outlined" aria-hidden="true">
                     {item.icon}
                   </span>
                   {item.label}
-                  <span className="account-nav-badge">Sắp ra mắt</span>
-                </span>
-              ) : (
-                <Link
-                  className={item.active === active ? 'active' : ''}
-                  key={item.label}
-                  to={item.to}
-                >
-                  <span className="material-symbols-outlined" aria-hidden="true">
-                    {item.icon}
-                  </span>
-                  {item.label}
-                </Link>
-              ),
-            )}
+              </Link>
+            ))}
             <button type="button" onClick={handleLogout}>
               <span className="material-symbols-outlined" aria-hidden="true">
                 logout

@@ -50,6 +50,11 @@ function buildAttractionSnapshot(attraction) {
       refundPolicy: t.refundPolicy,
       refundFeeRate: normalizeRefundFeeRate(t.refundPolicy, t.refundFeeRate),
       refundCutoffHours: Number(t.refundCutoffHours ?? 24),
+      minAgeYears: t.minAgeYears ?? null,
+      maxAgeYears: t.maxAgeYears ?? null,
+      minHeightCm: t.minHeightCm ?? null,
+      maxHeightCm: t.maxHeightCm ?? null,
+      requiresAdult: Boolean(t.requiresAdult),
     }));
 
   const timeSlots = (attraction.timeSlots || [])
@@ -82,6 +87,9 @@ function buildAttractionSnapshot(attraction) {
     latitude: attraction.latitude ?? null,
     longitude: attraction.longitude ?? null,
     requiresManualApproval: Boolean(attraction.requiresManualApproval),
+    recommendedVisitMinutes: Number(attraction.recommendedVisitMinutes ?? 150),
+    environment: attraction.environment || 'MIXED',
+    isFullDay: Boolean(attraction.isFullDay),
     category: attraction.categories?.[0]?.category
       ? {
           id: attraction.categories[0].category.id,
@@ -118,6 +126,11 @@ function mergeSnapshot(snapshot, data, category) {
     ...(data.requiresManualApproval !== undefined
       ? { requiresManualApproval: Boolean(data.requiresManualApproval) }
       : {}),
+    ...(data.recommendedVisitMinutes !== undefined
+      ? { recommendedVisitMinutes: Number(data.recommendedVisitMinutes) }
+      : {}),
+    ...(data.environment !== undefined ? { environment: data.environment } : {}),
+    ...(data.isFullDay !== undefined ? { isFullDay: Boolean(data.isFullDay) } : {}),
     ...(category !== undefined
       ? { category: category ? { id: category.id, name: category.name } : null }
       : {}),
@@ -144,6 +157,20 @@ function validateSubmissionSnapshot(snapshot) {
     missing.push('giờ mở cửa và đóng cửa');
   } else if (snapshot.openTime >= snapshot.closeTime) {
     missing.push('giờ đóng cửa phải sau giờ mở cửa');
+  }
+  const recommendedVisitMinutes = Number(snapshot.recommendedVisitMinutes ?? 150);
+  if (
+    !Number.isInteger(recommendedVisitMinutes)
+    || recommendedVisitMinutes < 30
+    || recommendedVisitMinutes > 720
+  ) {
+    missing.push('thời lượng tham quan đề xuất từ 30 đến 720 phút');
+  }
+  if (snapshot.isFullDay && recommendedVisitMinutes < 360) {
+    missing.push('trải nghiệm cả ngày phải có thời lượng ít nhất 360 phút');
+  }
+  if (!['INDOOR', 'OUTDOOR', 'MIXED'].includes(snapshot.environment || 'MIXED')) {
+    missing.push('môi trường trải nghiệm hợp lệ');
   }
   const latitude = Number(snapshot.latitude);
   const longitude = Number(snapshot.longitude);
@@ -279,7 +306,7 @@ function isPubliclyAvailable(attraction) {
     attraction?.publicationStatus === 'ACTIVE'
     && Boolean(attraction.publishedAt)
     && !attraction.archivedAt
-    && attraction.status !== 'SUSPENDED'
+    && attraction.operationalStatus !== 'SUSPENDED'
   );
 }
 
@@ -289,7 +316,7 @@ function assertPartnerCanEdit(attraction) {
     error.statusCode = 409;
     throw error;
   }
-  if (attraction.status === 'SUSPENDED') {
+  if (attraction.operationalStatus === 'SUSPENDED') {
     const error = new Error('Địa điểm đang bị đình chỉ và không thể chỉnh sửa.');
     error.statusCode = 403;
     throw error;
@@ -423,6 +450,9 @@ async function applyApprovedSnapshot(tx, attractionId, snapshot) {
       ...(snapshot.requiresManualApproval !== undefined
         ? { requiresManualApproval: Boolean(snapshot.requiresManualApproval) }
         : {}),
+      recommendedVisitMinutes: Number(snapshot.recommendedVisitMinutes ?? 150),
+      environment: snapshot.environment || 'MIXED',
+      isFullDay: Boolean(snapshot.isFullDay),
     },
   });
 
@@ -479,6 +509,11 @@ async function applyApprovedSnapshot(tx, attractionId, snapshot) {
               ticket.refundFeeRate,
             ),
             refundCutoffHours: ticket.refundCutoffHours ?? 24,
+            minAgeYears: ticket.minAgeYears ?? null,
+            maxAgeYears: ticket.maxAgeYears ?? null,
+            minHeightCm: ticket.minHeightCm ?? null,
+            maxHeightCm: ticket.maxHeightCm ?? null,
+            requiresAdult: Boolean(ticket.requiresAdult),
           },
         });
         if (updated.count !== 1) {
@@ -502,6 +537,11 @@ async function applyApprovedSnapshot(tx, attractionId, snapshot) {
               ticket.refundFeeRate,
             ),
             refundCutoffHours: ticket.refundCutoffHours ?? 24,
+            minAgeYears: ticket.minAgeYears ?? null,
+            maxAgeYears: ticket.maxAgeYears ?? null,
+            minHeightCm: ticket.minHeightCm ?? null,
+            maxHeightCm: ticket.maxHeightCm ?? null,
+            requiresAdult: Boolean(ticket.requiresAdult),
           },
         });
       }

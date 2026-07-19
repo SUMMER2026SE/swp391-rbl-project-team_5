@@ -2,6 +2,11 @@ const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { isTicketProductSaleEnabled } = require('../services/catalogVisibilityService');
+const { MAX_TICKETS_PER_ORDER } = require('../config/bookingPolicy');
+const {
+  MIN_VNPAY_AMOUNT,
+  parseVndInteger,
+} = require('../utils/money');
 
 
 const { Decimal } = Prisma;
@@ -60,6 +65,24 @@ function dateOnly(value) {
   return value ? new Date(value).toISOString().slice(0, 10) : '';
 }
 
+function selectBookingPayment(payments = []) {
+  // A customer can open several VNPay attempts before one callback arrives.
+  // The most recently created attempt may still be PENDING even though an
+  // older, canonical attempt already paid the booking. Duplicate captures are
+  // refund-only records and must not become the booking's payment state.
+  const successfulPayment = payments.find(
+    (payment) => payment?.status === 'SUCCESS' && !payment.isDuplicate,
+  );
+  if (successfulPayment) return successfulPayment;
+
+  const latestCanonicalAttempt = payments.find((payment) => !payment?.isDuplicate);
+  return latestCanonicalAttempt || null;
+}
+
+function resolveBookingPaymentStatus(payments = []) {
+  return selectBookingPayment(payments)?.status || 'PENDING';
+}
+
 function getAttractionLocation(attraction) {
   return [attraction.address, attraction.district, attraction.city]
     .filter(Boolean)
@@ -88,10 +111,13 @@ function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
     snapshotTicketName: product.name,
     snapshotTicketType: product.type || 'ADULT',
     snapshotTicketDescription: product.description || null,
-    snapshotUnitPrice: product.sellingPrice,
-    snapshotRefundPolicy: product.refundPolicy || 'NON_REFUNDABLE',
-    snapshotRefundFeeRate: product.refundFeeRate || 0,
-    snapshotRefundCutoffHours: product.refundCutoffHours ?? 24,
+    snapshotUnitPrice: reservation.snapshotUnitPrice ?? product.sellingPrice,
+    snapshotRefundPolicy:
+      reservation.snapshotRefundPolicy ?? product.refundPolicy ?? 'NON_REFUNDABLE',
+    snapshotRefundFeeRate:
+      reservation.snapshotRefundFeeRate ?? product.refundFeeRate ?? 0,
+    snapshotRefundCutoffHours:
+      reservation.snapshotRefundCutoffHours ?? product.refundCutoffHours ?? 24,
     snapshotVisitDate: reservation.date,
     snapshotTimeSlotLabel: reservation.timeSlot
       ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
@@ -148,7 +174,10 @@ function getBookingSnapshotView(booking) {
 function toReservationResponse(reservation) {
   const product = reservation.ticketProduct;
   const attraction = product.attraction;
-  const subtotalAmount = product.sellingPrice.mul(reservation.quantity);
+  const unitPrice = new Decimal(
+    reservation.snapshotUnitPrice ?? product.sellingPrice,
+  );
+  const subtotalAmount = unitPrice.mul(reservation.quantity);
 
   return {
     id: reservation.id,
@@ -164,7 +193,7 @@ function toReservationResponse(reservation) {
     timeSlotId: reservation.timeSlotId,
     timeSlotLabel: getTimeSlotLabel(reservation.timeSlot),
     quantity: reservation.quantity,
-    unitPrice: decimalToNumber(product.sellingPrice),
+    unitPrice: decimalToNumber(unitPrice),
     subtotalAmount: decimalToNumber(subtotalAmount),
     discountAmount: 0,
     totalAmount: decimalToNumber(subtotalAmount),
@@ -183,7 +212,7 @@ function toBookingResponse(booking) {
   const reservation = booking.reservation;
   const product = reservation.ticketProduct;
   const snapshot = getBookingSnapshotView(booking);
-  const latestPayment = booking.payments[0] || null;
+  const paymentStatus = resolveBookingPaymentStatus(booking.payments);
 
   return {
     id: booking.id,
@@ -217,7 +246,7 @@ function toBookingResponse(booking) {
     },
     note: booking.note || '',
     status: booking.status.toLowerCase().replace('pending_payment', 'unpaid'),
-    paymentStatus: latestPayment?.status.toLowerCase() || 'pending',
+    paymentStatus: paymentStatus.toLowerCase(),
     paymentMethod: booking.paymentMethod || '',
     refundPolicy: snapshot.refundPolicy,
     refundFeeRate: decimalToNumber(snapshot.refundFeeRate),
@@ -263,6 +292,49 @@ function validateVoucher(voucher, subtotalAmount, now = new Date()) {
     throw error;
   }
 
+  const discountValue = Number(voucher.discountValue);
+  if (
+    voucher.discountType === 'FIXED'
+    && parseVndInteger(discountValue) === null
+  ) {
+    const error = new Error('Giá trị giảm cố định phải là số nguyên VND hợp lệ.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (
+    voucher.discountType === 'PERCENTAGE'
+    && (
+      !Number.isFinite(discountValue)
+      || discountValue <= 0
+      || discountValue > 100
+    )
+  ) {
+    const error = new Error('Phần trăm ưu đãi phải lớn hơn 0 và không vượt quá 100.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!['FIXED', 'PERCENTAGE'].includes(voucher.discountType)) {
+    const error = new Error('Loại mã ưu đãi không hợp lệ.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (
+    voucher.maxDiscount != null
+    && parseVndInteger(voucher.maxDiscount) === null
+  ) {
+    const error = new Error('Mức giảm tối đa phải là số nguyên VND hợp lệ.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (
+    voucher.minSpend != null
+    && parseVndInteger(voucher.minSpend, { allowZero: true }) === null
+  ) {
+    const error = new Error('Mức chi tiêu tối thiểu phải là số nguyên VND hợp lệ.');
+    error.statusCode = 400;
+    throw error;
+  }
+
   if (voucher.minSpend && subtotalAmount.lessThan(voucher.minSpend)) {
     const minimum = decimalToNumber(voucher.minSpend).toLocaleString('vi-VN');
     const error = new Error(`Đơn hàng cần tối thiểu ${minimum} VND để dùng mã này.`);
@@ -280,7 +352,7 @@ function calculateDiscount(voucher, subtotalAmount) {
     discountAmount = subtotalAmount
       .mul(voucher.discountValue)
       .div(100)
-      .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+      .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
 
     if (voucher.maxDiscount && discountAmount.greaterThan(voucher.maxDiscount)) {
       discountAmount = new Decimal(voucher.maxDiscount);
@@ -446,16 +518,13 @@ async function validateAndApplyVoucher(req, res, next) {
       return res.status(400).json({ message: 'Vui lòng nhập mã ưu đãi.' });
     }
 
-    let subtotalAmount;
-    try {
-      subtotalAmount = new Decimal(subtotalRaw);
-    } catch {
-      return res.status(400).json({ message: 'Tạm tính không hợp lệ.' });
+    const parsedSubtotal = parseVndInteger(subtotalRaw);
+    if (parsedSubtotal === null) {
+      return res.status(400).json({
+        message: 'Tạm tính phải là số nguyên VND hợp lệ lớn hơn 0.',
+      });
     }
-
-    if (!subtotalAmount.isPositive()) {
-      return res.status(400).json({ message: 'Tạm tính phải lớn hơn 0.' });
-    }
+    const subtotalAmount = new Decimal(parsedSubtotal);
 
     const { voucher, discountAmount } = await findVoucher(
       prisma,
@@ -464,8 +533,14 @@ async function validateAndApplyVoucher(req, res, next) {
       new Date(),
     );
     const totalAmount = subtotalAmount.minus(discountAmount);
-    if (!totalAmount.isPositive()) {
+    const parsedTotal = parseVndInteger(totalAmount);
+    if (parsedTotal === null) {
       return res.status(400).json({ message: 'Tổng tiền sau ưu đãi phải lớn hơn 0.' });
+    }
+    if (parsedTotal < MIN_VNPAY_AMOUNT) {
+      return res.status(400).json({
+        message: `Tổng tiền thanh toán VNPay tối thiểu là ${MIN_VNPAY_AMOUNT.toLocaleString('vi-VN')} VND.`,
+      });
     }
 
     return res.json({
@@ -568,6 +643,17 @@ async function createBooking(req, res, next) {
           error.statusCode = 409;
           throw error;
         }
+        if (
+          !Number.isSafeInteger(reservation.quantity)
+          || reservation.quantity < 1
+          || reservation.quantity > MAX_TICKETS_PER_ORDER
+        ) {
+          const error = new Error(
+            `Số lượng vé mỗi đơn phải từ 1 đến ${MAX_TICKETS_PER_ORDER}.`,
+          );
+          error.statusCode = 400;
+          throw error;
+        }
 
         const existingBooking = await tx.booking.findUnique({
           where: { reservationId },
@@ -578,9 +664,20 @@ async function createBooking(req, res, next) {
           throw error;
         }
 
-        const subtotalAmount = reservation.ticketProduct.sellingPrice.mul(
-          reservation.quantity,
+        const unitPrice = parseVndInteger(
+          reservation.snapshotUnitPrice ?? reservation.ticketProduct.sellingPrice,
         );
+        if (unitPrice === null) {
+          const error = new Error('Giá bán phải là số nguyên VND hợp lệ.');
+          error.statusCode = 400;
+          throw error;
+        }
+        const subtotalAmount = new Decimal(unitPrice).mul(reservation.quantity);
+        if (parseVndInteger(subtotalAmount) === null) {
+          const error = new Error('Tạm tính đơn hàng vượt giới hạn tiền tệ cho phép.');
+          error.statusCode = 400;
+          throw error;
+        }
         const { voucher, discountAmount } = await findVoucher(
           tx,
           voucherCode,
@@ -588,20 +685,30 @@ async function createBooking(req, res, next) {
           now,
         );
         const totalAmount = subtotalAmount.minus(discountAmount);
-        if (!totalAmount.isPositive()) {
+        const parsedTotal = parseVndInteger(totalAmount);
+        if (parsedTotal === null) {
           const error = new Error('Tổng tiền sau ưu đãi phải lớn hơn 0.');
           error.statusCode = 400;
           throw error;
         }
+        if (parsedTotal < MIN_VNPAY_AMOUNT) {
+          const error = new Error(
+            `Tổng tiền thanh toán VNPay tối thiểu là ${MIN_VNPAY_AMOUNT.toLocaleString('vi-VN')} VND.`,
+          );
+          error.statusCode = 400;
+          throw error;
+        }
         const rawCommissionRate = Number(
-          reservation.ticketProduct.attraction.partner?.commissionRate ?? 0.10,
+          reservation.snapshotCommissionRate
+            ?? reservation.ticketProduct.attraction.partner?.commissionRate
+            ?? 0.10,
         );
         const commissionRate = Number.isFinite(rawCommissionRate)
           ? Math.min(Math.max(rawCommissionRate, 0), 1)
           : 0.10;
         const commissionAmount = totalAmount
           .mul(commissionRate)
-          .toDecimalPlaces(2);
+          .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
         const partnerNetAmount = totalAmount.minus(commissionAmount);
 
         if (voucher) {
@@ -682,4 +789,6 @@ module.exports = {
   createTicketInstances,
   buildBookingSnapshot,
   getBookingSnapshotView,
+  resolveBookingPaymentStatus,
+  selectBookingPayment,
 };

@@ -7,9 +7,13 @@ jest.mock('../utils/mailer', () => ({
   sendAttractionViolationEmail: jest.fn().mockResolvedValue(),
   sendAttractionRestoredEmail: jest.fn().mockResolvedValue(),
 }));
+jest.mock('../middleware/uploadMiddleware', () => ({
+  isDocumentOwnedByUser: jest.fn(() => true),
+}));
 
 const mockPrisma = require('./helpers/mockPrisma');
 const mailer = require('../utils/mailer');
+const { isDocumentOwnedByUser } = require('../middleware/uploadMiddleware');
 const {
   getPartners,
   reviewPartner,
@@ -19,16 +23,51 @@ const {
   restoreAttraction,
 } = require('../controllers/adminController');
 
-afterEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  isDocumentOwnedByUser.mockReturnValue(true);
+  mockPrisma.partnerProfile.count.mockResolvedValue(0);
+  mockPrisma.partnerProfile.groupBy.mockResolvedValue([]);
+  mockPrisma.$transaction.mockImplementation((operations) => (
+    Array.isArray(operations) ? Promise.all(operations) : operations(mockPrisma)
+  ));
+});
 
 function createRes() {
   return { status: jest.fn().mockReturnThis(), json: jest.fn() };
 }
 
+const COMPLETE_KYC = {
+  id: 'p-001',
+  userId: 'user-001',
+  businessName: 'Cty A',
+  businessLicenseUrl: 'https://api.vietticket.test/api/upload/documents/user-001-kyc.pdf',
+  taxCode: '0102030405',
+  registrationDate: new Date('2020-01-15T00:00:00.000Z'),
+  representativeName: 'Nguyen Van A',
+  representativePhone: '0901234567',
+  businessAddress: '1 Nguyen Hue, HCM',
+  bankName: 'Vietcombank',
+  branchName: 'HCM',
+  bankAccountNumber: '0123456789',
+  bankAccountName: 'NGUYEN VAN A',
+  swiftCode: null,
+  payoutCurrency: 'VND',
+  kycConsentAccepted: true,
+  kycConsentVersion: '2026-07-17-v1',
+  kycConsentAcceptedAt: new Date('2026-07-17T00:00:00.000Z'),
+  status: 'PENDING',
+  user: { id: 'user-001', email: 'a@x.com' },
+};
+
 describe('getPartners', () => {
   test('✅ Trả danh sách đối tác lọc theo status=PENDING', async () => {
     mockPrisma.partnerProfile.findMany.mockResolvedValue([
       { id: 'p-001', businessName: 'Cty A', status: 'PENDING', taxCode: '0102030405', createdAt: new Date() },
+    ]);
+    mockPrisma.partnerProfile.count.mockResolvedValue(1);
+    mockPrisma.partnerProfile.groupBy.mockResolvedValue([
+      { status: 'PENDING', _count: { _all: 1 } },
     ]);
     const req = { query: { status: 'PENDING' } };
     const res = createRes();
@@ -36,6 +75,13 @@ describe('getPartners', () => {
 
     expect(mockPrisma.partnerProfile.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { status: 'PENDING' } }));
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      pagination: expect.objectContaining({ total: 1, page: 1 }),
+      stats: expect.objectContaining({
+        total: 1,
+        byStatus: expect.objectContaining({ PENDING: 1 }),
+      }),
+    }));
   });
 
   test('❌ Trả 400 khi status không hợp lệ', async () => {
@@ -45,22 +91,53 @@ describe('getPartners', () => {
     expect(res.status).toHaveBeenCalledWith(400);
     expect(mockPrisma.partnerProfile.findMany).not.toHaveBeenCalled();
   });
+
+  test('never exposes a legacy untrusted legal-document URL to an administrator', async () => {
+    isDocumentOwnedByUser.mockReturnValue(false);
+    mockPrisma.partnerProfile.findMany.mockResolvedValue([{
+      id: 'p-legacy',
+      businessName: 'Legacy Partner',
+      businessLicenseUrl: 'https://phishing.example/fake-license.pdf',
+      status: 'PENDING',
+      user: { id: 'user-legacy', email: 'legacy@example.com' },
+    }]);
+    const res = createRes();
+
+    await getPartners({ query: {} }, res, jest.fn());
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: [
+        expect.objectContaining({
+          businessLicenseUrl: '',
+          documentValidationStatus: 'MISSING_OR_UNTRUSTED',
+        }),
+      ],
+    }));
+  });
 });
 
 describe('reviewPartner', () => {
   test('✅ APPROVED nâng quyền user lên PARTNER + gửi email', async () => {
-    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-001', userId: 'user-001', businessName: 'Cty A', status: 'PENDING', user: { email: 'a@x.com' } });
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ ...COMPLETE_KYC });
     const tx = {
-      partnerProfile: { update: jest.fn() },
+      partnerProfile: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       user: { update: jest.fn() },
       userRoleMembership: { upsert: jest.fn() },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
     const req = { params: { id: 'p-001' }, body: { action: 'APPROVED' } };
     const res = createRes();
     await reviewPartner(req, res, jest.fn());
 
-    expect(mockPrisma.$transaction).toHaveBeenCalled();
+    expect(mockPrisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable' },
+    );
+    expect(tx.partnerProfile.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p-001', status: 'PENDING' },
+      data: { status: 'APPROVED', rejectionReason: null },
+    });
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'user-001' },
       data: { role: 'PARTNER' },
@@ -75,6 +152,49 @@ describe('reviewPartner', () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
+  test('fails closed when an administrator tries to approve incomplete legacy KYC', async () => {
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({
+      id: 'p-legacy',
+      userId: 'user-legacy',
+      businessName: 'Legacy Partner',
+      businessLicenseUrl: 'https://api.vietticket.test/api/upload/documents/user-legacy-kyc.pdf',
+      taxCode: '0102030405',
+      status: 'PENDING',
+      user: { id: 'user-legacy', email: 'legacy@example.com' },
+    });
+    const res = createRes();
+
+    await reviewPartner({
+      user: { id: 'admin-1', role: 'ADMIN' },
+      params: { id: 'p-legacy' },
+      body: { action: 'APPROVED' },
+    }, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'PARTNER_KYC_INCOMPLETE' }),
+    }));
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  test('fails closed when the stored KYC document is missing or untrusted', async () => {
+    isDocumentOwnedByUser.mockReturnValue(false);
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ ...COMPLETE_KYC });
+    const res = createRes();
+
+    await reviewPartner({
+      user: { id: 'admin-1', role: 'ADMIN' },
+      params: { id: 'p-001' },
+      body: { action: 'APPROVED' },
+    }, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'PARTNER_KYC_DOCUMENT_INVALID' }),
+    }));
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test('❌ REJECTED yêu cầu rejectionReason', async () => {
     const req = { params: { id: 'p-001' }, body: { action: 'REJECTED' } };
     const res = createRes();
@@ -85,12 +205,13 @@ describe('reviewPartner', () => {
   test('✅ REJECTED kèm lý do hợp lệ', async () => {
     mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'p-001', userId: 'user-001', businessName: 'Cty A', status: 'PENDING', user: { email: 'a@x.com' } });
     const tx = {
-      partnerProfile: { update: jest.fn() },
+      partnerProfile: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       user: { update: jest.fn() },
       userRoleMembership: {
         upsert: jest.fn(),
         deleteMany: jest.fn(),
       },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
     const req = { params: { id: 'p-001' }, body: { action: 'REJECTED', rejectionReason: 'Hồ sơ thiếu giấy phép' } };
@@ -110,6 +231,106 @@ describe('reviewPartner', () => {
     expect(res.status).toHaveBeenCalledWith(200);
   });
 
+  test('returns 409 and performs no side effects when a stale reviewer loses the atomic claim', async () => {
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ ...COMPLETE_KYC });
+    const tx = {
+      partnerProfile: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      user: { update: jest.fn() },
+      userRoleMembership: {
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      auditLog: { create: jest.fn() },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+    const res = createRes();
+
+    await reviewPartner({
+      user: { id: 'admin-stale', role: 'ADMIN' },
+      params: { id: 'p-001' },
+      body: { action: 'APPROVED' },
+    }, res, jest.fn());
+
+    expect(tx.partnerProfile.updateMany).toHaveBeenCalledWith({
+      where: { id: 'p-001', status: 'PENDING' },
+      data: { status: 'APPROVED', rejectionReason: null },
+    });
+    expect(tx.user.update).not.toHaveBeenCalled();
+    expect(tx.userRoleMembership.upsert).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+    expect(mailer.sendPartnerReviewEmail).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'PARTNER_REVIEW_CONFLICT' }),
+    }));
+  });
+
+  test('maps a database serialization conflict to the same safe 409 response', async () => {
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ ...COMPLETE_KYC });
+    mockPrisma.$transaction.mockRejectedValue({ code: 'P2034' });
+    const res = createRes();
+    const next = jest.fn();
+
+    await reviewPartner({
+      user: { id: 'admin-racing', role: 'ADMIN' },
+      params: { id: 'p-001' },
+      body: { action: 'APPROVED' },
+    }, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(mailer.sendPartnerReviewEmail).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'PARTNER_REVIEW_CONFLICT' }),
+    }));
+  });
+
+  test('allows exactly one winner when two administrators review the same pending profile', async () => {
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ ...COMPLETE_KYC });
+    let claimed = false;
+    const tx = {
+      partnerProfile: {
+        updateMany: jest.fn().mockImplementation(async () => {
+          if (claimed) return { count: 0 };
+          claimed = true;
+          return { count: 1 };
+        }),
+      },
+      user: { update: jest.fn() },
+      userRoleMembership: {
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+    const approveRes = createRes();
+    const rejectRes = createRes();
+
+    await Promise.all([
+      reviewPartner({
+        user: { id: 'admin-approve', role: 'ADMIN' },
+        params: { id: 'p-001' },
+        body: { action: 'APPROVED' },
+      }, approveRes, jest.fn()),
+      reviewPartner({
+        user: { id: 'admin-reject', role: 'ADMIN' },
+        params: { id: 'p-001' },
+        body: { action: 'REJECTED', rejectionReason: 'Giấy phép không đạt yêu cầu' },
+      }, rejectRes, jest.fn()),
+    ]);
+
+    const statuses = [
+      approveRes.status.mock.calls[0][0],
+      rejectRes.status.mock.calls[0][0],
+    ].sort();
+    expect(statuses).toEqual([200, 409]);
+    expect(tx.partnerProfile.updateMany).toHaveBeenCalledTimes(2);
+    expect(tx.user.update).toHaveBeenCalledTimes(1);
+    expect(tx.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(mailer.sendPartnerReviewEmail).toHaveBeenCalledTimes(1);
+  });
+
   test('❌ Trả 400 khi action không hợp lệ', async () => {
     const req = { params: { id: 'p-001' }, body: { action: 'MAYBE' } };
     const res = createRes();
@@ -123,6 +344,26 @@ describe('reviewPartner', () => {
     const res = createRes();
     await reviewPartner(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  test('does not allow an administrator to review their own partner profile', async () => {
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({
+      id: 'p-self',
+      userId: 'admin-1',
+      businessName: 'Self-owned business',
+      status: 'PENDING',
+      user: { email: 'admin@example.com' },
+    });
+    const res = createRes();
+
+    await reviewPartner({
+      user: { id: 'admin-1', role: 'ADMIN' },
+      params: { id: 'p-self' },
+      body: { action: 'APPROVED' },
+    }, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
   });
 });
 
@@ -429,9 +670,9 @@ describe('reviewAttraction', () => {
 });
 
 describe('hideAttraction', () => {
-  test('✅ Ẩn địa điểm (SUSPENDED) + gửi email vi phạm', async () => {
+  test('✅ Đình chỉ vận hành mà không ghi đè trạng thái kiểm duyệt + gửi email', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({
-      id: 'attr-001', title: 'Suối Tiên', status: 'APPROVED',
+      id: 'attr-001', title: 'Suối Tiên', status: 'DRAFT',
       publicationStatus: 'ACTIVE', archivedAt: null,
       publishedAt: new Date('2026-06-01T00:00:00.000Z'),
       partner: { businessName: 'Cty A', user: { email: 'a@x.com' } },
@@ -447,11 +688,13 @@ describe('hideAttraction', () => {
 
     expect(tx.attraction.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        status: 'SUSPENDED',
+        operationalStatus: 'SUSPENDED',
         publicationStatus: 'PAUSED',
-        rejectionReason: 'Vé lậu trái phép',
+        suspensionReason: 'Vé lậu trái phép',
       }),
     }));
+    expect(tx.attraction.updateMany.mock.calls[0][0].data).not.toHaveProperty('status');
+    expect(tx.attraction.updateMany.mock.calls[0][0].data).not.toHaveProperty('rejectionReason');
     expect(mailer.sendAttractionViolationEmail).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
   });
@@ -473,13 +716,15 @@ describe('hideAttraction', () => {
 });
 
 describe('restoreAttraction', () => {
-  test('khôi phục về APPROVED nhưng giữ PAUSED để đối tác tự mở bán', async () => {
+  test('khôi phục vận hành nhưng giữ trạng thái kiểm duyệt và PAUSED để đối tác tự mở bán', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({
       id: 'attr-001',
       title: 'Suối Tiên',
-      status: 'SUSPENDED',
+      status: 'PENDING',
+      operationalStatus: 'SUSPENDED',
       publicationStatus: 'PAUSED',
-      rejectionReason: 'Vi phạm',
+      rejectionReason: null,
+      suspensionReason: 'Vi phạm',
       archivedAt: null,
       partner: { businessName: 'Cty A', user: { email: 'a@x.com' } },
     });
@@ -498,9 +743,9 @@ describe('restoreAttraction', () => {
 
     expect(tx.attraction.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        status: 'APPROVED',
+        operationalStatus: 'ACTIVE',
         publicationStatus: 'PAUSED',
-        rejectionReason: null,
+        suspensionReason: null,
       }),
     }));
     expect(mailer.sendAttractionRestoredEmail).toHaveBeenCalled();

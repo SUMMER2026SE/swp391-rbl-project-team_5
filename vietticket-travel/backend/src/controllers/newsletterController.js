@@ -1,4 +1,8 @@
 const prisma = require('../config/prisma');
+const {
+  createNewsletterUnsubscribeToken,
+  verifyNewsletterUnsubscribeToken,
+} = require('../utils/newsletterToken');
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -23,4 +27,32 @@ async function subscribe(req, res, next) {
   }
 }
 
-module.exports = { subscribe };
+async function unsubscribe(req, res, next) {
+  try {
+    const verified = verifyNewsletterUnsubscribeToken(
+      req.body?.token || req.query?.token,
+    );
+    if (!verified) {
+      return res.status(400).json({
+        message: 'Liên kết hủy nhận tin không hợp lệ hoặc đã hết hạn.',
+      });
+    }
+
+    await prisma.newsletterSubscription.updateMany({
+      where: { email: verified.email, isActive: true },
+      data: { isActive: false },
+    });
+
+    return res.status(200).json({
+      message: 'Đã ghi nhận yêu cầu hủy nhận tin cho địa chỉ email này.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+module.exports = {
+  createNewsletterUnsubscribeToken,
+  subscribe,
+  unsubscribe,
+};

@@ -2,39 +2,75 @@ jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 const mockPrisma = require('./helpers/mockPrisma');
 const { updateSettings, getDashboard } = require('../controllers/partnerController');
 
-afterEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockPrisma.$transaction.mockImplementation((callback) => callback(mockPrisma));
+  mockPrisma.auditLog.create.mockResolvedValue({});
+});
 
 function createRes() {
   return { status: jest.fn().mockReturnThis(), json: jest.fn() };
 }
 
-const PARTNER = { id: 'partner-001', status: 'APPROVED' };
+const PARTNER = {
+  id: 'partner-001',
+  status: 'APPROVED',
+  bankName: 'Vietcombank',
+  branchName: 'HCM',
+  bankAccountNumber: '0123456789',
+  bankAccountName: 'NGUYEN VAN A',
+  swiftCode: null,
+  payoutCurrency: 'VND',
+};
 
 describe('updateSettings', () => {
-  test('✅ Cập nhật thông tin doanh nghiệp + tài khoản', async () => {
-    mockPrisma.partnerProfile.update.mockResolvedValue({ id: 'partner-001', businessName: 'Tên mới', status: 'APPROVED' });
+  test('✅ Cập nhật thông tin hiển thị nhưng không sửa tên pháp lý', async () => {
+    mockPrisma.partnerProfile.update.mockResolvedValue({
+      ...PARTNER,
+      businessName: 'Tên pháp lý',
+      website: 'https://example.com',
+    });
     mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-001', fullName: 'A', email: 'a@x.com', profile: {} });
     mockPrisma.user.update.mockResolvedValue({ id: 'user-001', fullName: 'B', email: 'a@x.com', profile: { phoneNumber: '0987654321' } });
 
     const req = {
       partner: PARTNER, user: { id: 'user-001' },
-      body: { businessName: 'Tên mới', displayName: 'B', phone: '0987654321' },
+      headers: {},
+      body: {
+        displayName: 'Thương hiệu B',
+        phone: '0987654321',
+        website: 'https://example.com',
+      },
     };
     const res = createRes();
     await updateSettings(req, res, jest.fn());
 
     expect(mockPrisma.partnerProfile.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'partner-001' },
-      data: expect.objectContaining({ businessName: 'Tên mới' }),
+      data: expect.objectContaining({ website: 'https://example.com' }),
+    }));
+    expect(mockPrisma.partnerProfile.update.mock.calls[0][0].data)
+      .not.toHaveProperty('businessName');
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'PARTNER_PROFILE_UPDATED',
+        metadata: expect.objectContaining({
+          changedFields: expect.arrayContaining(['website', 'fullName', 'phoneNumber']),
+        }),
+      }),
     }));
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ partner: expect.any(Object) }));
   });
 
-  test('❌ Trả 400 khi businessName rỗng', async () => {
+  test('❌ Không cho đổi tên pháp lý qua API cài đặt', async () => {
     const req = { partner: PARTNER, user: { id: 'user-001' }, body: { businessName: '   ' } };
     const res = createRes();
     await updateSettings(req, res, jest.fn());
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'KYC_CHANGE_REQUIRES_REVIEW',
+      fields: ['businessName'],
+    }));
   });
 
   test('❌ Trả 400 khi số điện thoại không hợp lệ', async () => {
@@ -42,6 +78,44 @@ describe('updateSettings', () => {
     const res = createRes();
     await updateSettings(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test('requires payout changes to go through KYC review', async () => {
+    const req = {
+      partner: PARTNER,
+      user: { id: 'user-001' },
+      body: { bankAccountNumber: '9876543210' },
+    };
+    const res = createRes();
+
+    await updateSettings(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'KYC_CHANGE_REQUIRES_REVIEW',
+      fields: ['bankAccountNumber'],
+    }));
+    expect(mockPrisma.partnerProfile.update).not.toHaveBeenCalled();
+  });
+
+  test('also blocks payout changes for OAuth accounts instead of bypassing reauthentication', async () => {
+    const req = {
+      partner: PARTNER,
+      user: { id: 'user-001' },
+      headers: {},
+      body: {
+        bankAccountNumber: '9876543210',
+      },
+    };
+    const res = createRes();
+
+    await updateSettings(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'KYC_CHANGE_REQUIRES_REVIEW',
+    }));
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
   });
 });
 

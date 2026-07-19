@@ -10,10 +10,11 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
 const TICKET_TYPES = [
-  { value: 'ADULT',  label: 'Người lớn',  icon: 'person',        desc: 'Khách từ 12 tuổi trở lên' },
-  { value: 'CHILD',  label: 'Trẻ em',     icon: 'child_care',    desc: 'Trẻ em từ 3 – 11 tuổi' },
-  { value: 'FAMILY', label: 'Gia đình',   icon: 'family_restroom', desc: '2 người lớn + 2 trẻ em' },
-  { value: 'GROUP',  label: 'Nhóm',       icon: 'groups',        desc: 'Từ 10 người trở lên' },
+  { value: 'ADULT',  label: 'Người lớn',  icon: 'person',        desc: 'Theo điều kiện của điểm' },
+  { value: 'CHILD',  label: 'Trẻ em',     icon: 'child_care',    desc: 'Cần khai báo tuổi/chiều cao' },
+  { value: 'STUDENT', label: 'Học sinh / sinh viên', icon: 'school', desc: 'Yêu cầu xuất trình giấy tờ hợp lệ' },
+  { value: 'FAMILY', label: 'Gia đình',   icon: 'family_restroom', desc: 'Nêu rõ phạm vi gói trong mô tả' },
+  { value: 'GROUP',  label: 'Nhóm',       icon: 'groups',        desc: 'Nêu rõ quy mô nhóm trong mô tả' },
 ]
 
 const REFUND_POLICIES = [
@@ -36,6 +37,8 @@ function PartnerTicketFormPage() {
     name: '', type: 'ADULT', originalPrice: '', sellingPrice: '',
     description: '', refundPolicy: 'PARTIAL', refundFeePercent: '10',
     refundCutoffHours: '24', status: 'active',
+    minAgeYears: '', maxAgeYears: '', minHeightCm: '', maxHeightCm: '',
+    requiresAdult: false,
   })
 
   useEffect(() => {
@@ -63,6 +66,11 @@ function PartnerTicketFormPage() {
           refundFeePercent: String(Math.round(Number(t.refundFeeRate ?? 0.1) * 100)),
           refundCutoffHours: String(t.refundCutoffHours ?? 24),
           status: t.status ?? 'active',
+          minAgeYears: t.minAgeYears ?? '',
+          maxAgeYears: t.maxAgeYears ?? '',
+          minHeightCm: t.minHeightCm ?? '',
+          maxHeightCm: t.maxHeightCm ?? '',
+          requiresAdult: Boolean(t.requiresAdult),
         })
       } catch (err) {
         if (!active) return
@@ -99,6 +107,37 @@ function PartnerTicketFormPage() {
         || Number(form.refundCutoffHours) > 720)
       ? 'Thời hạn hủy phải là số giờ nguyên từ 0 đến 720.'
       : '',
+    eligibility: (() => {
+      const fields = [
+        ['minAgeYears', 0, 120],
+        ['maxAgeYears', 0, 120],
+        ['minHeightCm', 30, 250],
+        ['maxHeightCm', 30, 250],
+      ]
+      for (const [field, min, max] of fields) {
+        if (form[field] === '') continue
+        const value = Number(form[field])
+        if (!Number.isInteger(value) || value < min || value > max) {
+          return `Điều kiện ${field.includes('Age') ? 'tuổi' : 'chiều cao'} không hợp lệ.`
+        }
+      }
+      if (
+        form.minAgeYears !== ''
+        && form.maxAgeYears !== ''
+        && Number(form.minAgeYears) > Number(form.maxAgeYears)
+      ) return 'Tuổi tối thiểu không được lớn hơn tuổi tối đa.'
+      if (
+        form.minHeightCm !== ''
+        && form.maxHeightCm !== ''
+        && Number(form.minHeightCm) > Number(form.maxHeightCm)
+      ) return 'Chiều cao tối thiểu không được lớn hơn chiều cao tối đa.'
+      if (
+        form.type === 'CHILD'
+        && [form.minAgeYears, form.maxAgeYears, form.minHeightCm, form.maxHeightCm]
+          .every((value) => value === '')
+      ) return 'Vé trẻ em cần ít nhất một điều kiện tuổi hoặc chiều cao.'
+      return ''
+    })(),
   }
   const isValid = Object.values(errors).every((e) => !e)
 
@@ -113,6 +152,7 @@ function PartnerTicketFormPage() {
       sellingPrice: true,
       refundFeePercent: true,
       refundCutoffHours: true,
+      eligibility: true,
     })
     if (!isValid) { toast.error('Vui lòng kiểm tra lại thông tin.'); return }
     const payload = {
@@ -129,6 +169,11 @@ function PartnerTicketFormPage() {
         ? 24
         : Number(form.refundCutoffHours),
       status: form.status,
+      minAgeYears: form.minAgeYears === '' ? null : Number(form.minAgeYears),
+      maxAgeYears: form.maxAgeYears === '' ? null : Number(form.maxAgeYears),
+      minHeightCm: form.minHeightCm === '' ? null : Number(form.minHeightCm),
+      maxHeightCm: form.maxHeightCm === '' ? null : Number(form.maxHeightCm),
+      requiresAdult: form.type === 'CHILD' && form.requiresAdult,
     }
     setIsSubmitting(true)
     try {
@@ -200,12 +245,6 @@ function PartnerTicketFormPage() {
                   className={`${inputCls(false)} resize-none`}
                 />
               </FormField>
-              {form.type === 'CHILD' && (
-                <div className="rounded-lg bg-[#00474d]/5 border border-[#00474d]/20 p-3 text-xs text-[#00474d] font-semibold flex items-start gap-2">
-                  <span className="material-symbols-outlined text-[16px] mt-0.5" aria-hidden="true">info</span>
-                  <p>Mẹo: Hãy ghi rõ điều kiện áp dụng cho Trẻ em (ví dụ: Chiều cao dưới 1m4 hoặc Độ tuổi từ 3 – 11 tuổi) trong Mô tả gói vé để soát vé dễ dàng hơn tại quầy.</p>
-                </div>
-              )}
               {form.type === 'GROUP' && (
                 <div className="rounded-lg bg-[#00474d]/5 border border-[#00474d]/20 p-3 text-xs text-[#00474d] font-semibold flex items-start gap-2">
                   <span className="material-symbols-outlined text-[16px] mt-0.5" aria-hidden="true">info</span>
@@ -217,7 +256,7 @@ function PartnerTicketFormPage() {
 
           {/* Ticket Type */}
           <FormCard title="Loại vé" icon="sell">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               {TICKET_TYPES.map((t) => (
                 <button
                   key={t.value} type="button"
@@ -234,6 +273,51 @@ function PartnerTicketFormPage() {
                 </button>
               ))}
             </div>
+          </FormCard>
+
+          <FormCard title="Điều kiện áp dụng" icon="rule">
+            <p className="mb-4 text-xs text-[#3f484a]">
+              Khai báo có cấu trúc để khách và bộ lập lịch không chọn nhầm loại vé. Để trống trường không áp dụng.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {[
+                ['minAgeYears', 'Tuổi tối thiểu', 0, 120, 'tuổi'],
+                ['maxAgeYears', 'Tuổi tối đa', 0, 120, 'tuổi'],
+                ['minHeightCm', 'Chiều cao tối thiểu', 30, 250, 'cm'],
+                ['maxHeightCm', 'Chiều cao tối đa', 30, 250, 'cm'],
+              ].map(([field, label, min, max, unit]) => (
+                <FormField key={field} label={label}>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min={min}
+                      max={max}
+                      step="1"
+                      value={form[field]}
+                      onChange={(e) => update(field, e.target.value)}
+                      className={`${inputCls(touched.eligibility && errors.eligibility)} pr-14`}
+                    />
+                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[#6f797a]">
+                      {unit}
+                    </span>
+                  </div>
+                </FormField>
+              ))}
+            </div>
+            {form.type === 'CHILD' && (
+              <label className="mt-4 flex items-center gap-3 rounded-lg border border-[#dbe4e8] bg-[#f8fafb] p-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.requiresAdult}
+                  onChange={(e) => update('requiresAdult', e.target.checked)}
+                  className="accent-[#00474d]"
+                />
+                Trẻ phải đi cùng ít nhất một người lớn
+              </label>
+            )}
+            {touched.eligibility && errors.eligibility && (
+              <p className="mt-2 text-xs font-semibold text-[#ba1a1a]">{errors.eligibility}</p>
+            )}
           </FormCard>
 
           {/* Pricing */}

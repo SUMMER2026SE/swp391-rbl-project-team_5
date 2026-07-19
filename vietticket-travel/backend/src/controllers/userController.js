@@ -1,6 +1,9 @@
 const bcrypt = require('bcrypt');
 const prisma = require('../config/prisma');
 const { sanitizeUser } = require('./authController');
+const { createAuthSession } = require('../utils/authSession');
+const { setAuthCookie } = require('../utils/authCookie');
+const { disconnectUserSockets } = require('../realtime/events');
 const {
   isValidAvatarUrl,
   isValidGender,
@@ -203,22 +206,25 @@ async function changePassword(req, res, next) {
 
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
-    const sessionRevokeWhere = {
-      userId: user.id,
-      revokedAt: null,
-      ...(req.authSession?.id ? { id: { not: req.authSession.id } } : {}),
-    };
-
-    await prisma.$transaction([
-      prisma.user.update({
+    const updatedUser = await prisma.$transaction(async (tx) => {
+      const nextUser = await tx.user.update({
         where: { id: user.id },
-        data: { passwordHash },
-      }),
-      prisma.authSession.updateMany({
-        where: sessionRevokeWhere,
+        data: {
+          passwordHash,
+          tokenVersion: { increment: 1 },
+        },
+        select: { id: true, tokenVersion: true },
+      });
+      await tx.authSession.updateMany({
+        where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },
-      }),
-    ]);
+      });
+      return nextUser;
+    });
+
+    const { token } = await createAuthSession(req, updatedUser);
+    setAuthCookie(res, token);
+    disconnectUserSockets(user.id);
 
     return res.json({ message: 'Cập nhật mật khẩu thành công.' });
   } catch (error) {

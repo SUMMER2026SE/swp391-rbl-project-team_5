@@ -4,36 +4,44 @@ import AdminLayout from '../../layouts/AdminLayout.jsx'
 import reviewService from '../../services/reviewService.js'
 import '../../styles/admin.css'
 
+const PAGE_SIZE = 10
+
 export default function ReviewModerationPage() {
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actionId, setActionId] = useState('')
+  const [moderationTarget, setModerationTarget] = useState(null)
+  const [moderationReason, setModerationReason] = useState('')
 
   // Filters
   const [searchText, setSearchText] = useState('')
   const [filterRating, setFilterRating] = useState('all')
-
-  const fetchReviews = async (showLoading = false) => {
-    if (showLoading) setLoading(true)
-    setError('')
-    try {
-      const data = await reviewService.getAdminReviews()
-      setReviews(data)
-    } catch (err) {
-      setError(err?.message || 'Không thể tải danh sách đánh giá. Vui lòng thử lại.')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1 })
+  const [stats, setStats] = useState({ visible: 0, hidden: 0 })
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     document.title = 'Kiểm duyệt Đánh giá | VietTicket Admin'
     let active = true
-    reviewService.getAdminReviews()
-      .then((data) => {
+    const timer = window.setTimeout(() => {
+      setLoading(true)
+      setError('')
+      reviewService.getAdminReviews({
+        page,
+        limit: PAGE_SIZE,
+        search: searchText.trim(),
+        rating: filterRating,
+      })
+      .then((result) => {
         if (active) {
-          setReviews(data)
+          setReviews(result.data || [])
+          setPagination(result.pagination || {
+            total: (result.data || []).length,
+            totalPages: 1,
+          })
+          setStats(result.stats || { visible: 0, hidden: 0 })
           setLoading(false)
         }
       })
@@ -43,23 +51,33 @@ export default function ReviewModerationPage() {
           setLoading(false)
         }
       })
+    }, 300)
 
     return () => {
       active = false
+      window.clearTimeout(timer)
     }
-  }, [])
+  }, [filterRating, page, reloadKey, searchText])
 
-  const handleToggleHide = async (review) => {
-    const nextHiddenStatus = !review.isHidden
-    setActionId(review.id)
+  const handleToggleHide = async () => {
+    if (!moderationTarget) return
+    const reason = moderationReason.trim()
+    if (reason.length < 10) {
+      toast.warning('Vui lòng nhập lý do kiểm duyệt tối thiểu 10 ký tự.')
+      return
+    }
+    const nextHiddenStatus = !moderationTarget.isHidden
+    setActionId(moderationTarget.id)
     try {
-      await reviewService.moderateReview(review.id, nextHiddenStatus)
+      await reviewService.moderateReview(moderationTarget.id, nextHiddenStatus, reason)
       toast.success(
         nextHiddenStatus
           ? 'Đã ẩn đánh giá vi phạm thành công!'
           : 'Đã hiển thị lại đánh giá thành công!'
       )
-      fetchReviews()
+      setModerationTarget(null)
+      setModerationReason('')
+      setReloadKey((value) => value + 1)
     } catch (err) {
       toast.error(err?.message || 'Không thể thực hiện kiểm duyệt. Vui lòng thử lại.')
     } finally {
@@ -70,21 +88,10 @@ export default function ReviewModerationPage() {
   const handleResetFilters = () => {
     setSearchText('')
     setFilterRating('all')
+    setPage(1)
   }
 
-  // Filter logic
-  const filteredReviews = reviews.filter((review) => {
-    const commentMatch =
-      !searchText ||
-      (review.comment || '').toLowerCase().includes(searchText.toLowerCase()) ||
-      (review.user?.fullName || '').toLowerCase().includes(searchText.toLowerCase()) ||
-      (review.attraction?.title || '').toLowerCase().includes(searchText.toLowerCase())
-
-    const ratingMatch =
-      filterRating === 'all' || review.rating === parseInt(filterRating)
-
-    return commentMatch && ratingMatch
-  })
+  const filteredReviews = reviews
 
   const formatDate = (dateStr) => {
     if (!dateStr) return ''
@@ -92,8 +99,8 @@ export default function ReviewModerationPage() {
     return isNaN(date.getTime()) ? dateStr : date.toLocaleDateString('vi-VN')
   }
 
-  const activeCount = reviews.filter((r) => !r.isHidden).length
-  const hiddenCount = reviews.filter((r) => r.isHidden).length
+  const activeCount = Number(stats.visible || 0)
+  const hiddenCount = Number(stats.hidden || 0)
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm đánh giá...">
@@ -154,7 +161,10 @@ export default function ReviewModerationPage() {
             placeholder="Tìm theo từ khóa bình luận, tên khách, tên địa điểm..."
             type="text"
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            onChange={(e) => {
+              setSearchText(e.target.value)
+              setPage(1)
+            }}
             style={{
               width: '100%',
               minHeight: 46,
@@ -172,7 +182,10 @@ export default function ReviewModerationPage() {
           <select
             id="filterRating"
             value={filterRating}
-            onChange={(e) => setFilterRating(e.target.value)}
+            onChange={(e) => {
+              setFilterRating(e.target.value)
+              setPage(1)
+            }}
             style={{
               width: '100%',
               minHeight: 46,
@@ -245,7 +258,7 @@ export default function ReviewModerationPage() {
                     <div style={{ marginTop: 8, color: 'var(--adm-outline)', fontWeight: 600 }}>{error}</div>
                     <button
                       type="button"
-                      onClick={() => fetchReviews(true)}
+                      onClick={() => setReloadKey((value) => value + 1)}
                       style={{
                         marginTop: 16,
                         padding: '8px 20px',
@@ -354,7 +367,10 @@ export default function ReviewModerationPage() {
                         <button
                           className="btn-warn"
                           disabled={actionId === review.id}
-                          onClick={() => handleToggleHide(review)}
+                          onClick={() => {
+                            setModerationTarget(review)
+                            setModerationReason('')
+                          }}
                           type="button"
                           style={{
                             display: 'inline-flex',
@@ -379,7 +395,10 @@ export default function ReviewModerationPage() {
                       ) : (
                         <button
                           disabled={actionId === review.id}
-                          onClick={() => handleToggleHide(review)}
+                          onClick={() => {
+                            setModerationTarget(review)
+                            setModerationReason('')
+                          }}
                           type="button"
                           style={{
                             display: 'inline-flex',
@@ -408,7 +427,87 @@ export default function ReviewModerationPage() {
             </tbody>
           </table>
         </div>
+        <div className="admin-pagination">
+          <p className="admin-pagination__info">
+            Hiển thị <strong>{reviews.length}</strong> / <strong>{pagination.total}</strong> đánh giá
+          </p>
+          <div className="admin-pagination__controls">
+            <button
+              className="admin-pagination__btn"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+              type="button"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_left</span>
+            </button>
+            <button className="admin-pagination__btn active" disabled type="button">
+              {page}/{pagination.totalPages}
+            </button>
+            <button
+              className="admin-pagination__btn"
+              disabled={page >= pagination.totalPages || loading}
+              onClick={() => setPage((value) => Math.min(pagination.totalPages, value + 1))}
+              type="button"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_right</span>
+            </button>
+          </div>
+        </div>
       </div>
+
+      {moderationTarget && (
+        <div
+          className="admin-modal-overlay"
+          onClick={actionId ? undefined : () => setModerationTarget(null)}
+        >
+          <div
+            className="admin-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="review-moderation-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="review-moderation-title" className="admin-modal__title">
+              {moderationTarget.isHidden ? 'Hiển thị lại đánh giá' : 'Ẩn đánh giá vi phạm'}
+            </h3>
+            <p className="admin-modal__body">
+              Ghi rõ căn cứ xử lý để khách hàng, đối tác và giảng viên có thể truy vết quyết định kiểm duyệt.
+            </p>
+            <label className="admin-field">
+              <span>Lý do kiểm duyệt</span>
+              <textarea
+                value={moderationReason}
+                onChange={(event) => setModerationReason(event.target.value)}
+                maxLength={500}
+                disabled={Boolean(actionId)}
+                placeholder={
+                  moderationTarget.isHidden
+                    ? 'Ví dụ: Đã xác minh nội dung không vi phạm và khôi phục hiển thị.'
+                    : 'Ví dụ: Nội dung chứa thông tin cá nhân và ngôn từ xúc phạm.'
+                }
+              />
+            </label>
+            <div className="admin-modal__actions">
+              <button
+                className="admin-modal__cancel"
+                type="button"
+                disabled={Boolean(actionId)}
+                onClick={() => setModerationTarget(null)}
+              >
+                Hủy
+              </button>
+              <button
+                className="admin-modal__confirm"
+                type="button"
+                disabled={Boolean(actionId) || moderationReason.trim().length < 10}
+                onClick={() => void handleToggleHide()}
+              >
+                {actionId ? 'Đang xử lý…' : 'Xác nhận'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   )
 }

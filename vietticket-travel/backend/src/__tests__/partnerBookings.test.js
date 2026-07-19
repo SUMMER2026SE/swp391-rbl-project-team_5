@@ -91,7 +91,8 @@ describe('getPartnerBookings', () => {
     mockPrisma.ticketProduct.findMany.mockResolvedValue([{ id: TICKET_ID }]);
     mockPrisma.reservation.findMany.mockResolvedValue([{ id: RESERVATION_ID }]);
     mockPrisma.booking.count.mockResolvedValue(1);
-    mockPrisma.booking.findMany.mockResolvedValue([
+    mockPrisma.booking.findMany
+      .mockResolvedValueOnce([
       {
         id: BOOKING_ID,
         fullName: 'Nguyễn Văn A',
@@ -109,6 +110,20 @@ describe('getPartnerBookings', () => {
           },
         },
       },
+      ])
+      .mockResolvedValueOnce([
+        {
+          status: 'COMPLETED',
+          commissionRateSnapshot: 0.16,
+          commissionAmountSnapshot: 80000,
+          partnerNetAmountSnapshot: 420000,
+          payments: [{ amount: 500000 }],
+          refundTransactions: [],
+        },
+      ]);
+    mockPrisma.booking.groupBy.mockResolvedValue([
+      { status: 'CONFIRMED', _count: { _all: 3 } },
+      { status: 'PENDING_PARTNER', _count: { _all: 2 } },
     ]);
 
     const { req, res, next } = makeReqRes({ query: { page: '1', limit: '10' } });
@@ -125,8 +140,20 @@ describe('getPartnerBookings', () => {
           }),
         ]),
         pagination: expect.objectContaining({ total: 1, page: 1 }),
+        stats: {
+          total: 5,
+          confirmed: 3,
+          pendingPartner: 2,
+          recognizedRevenue: 420000,
+        },
       }),
     );
+    expect(mockPrisma.booking.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+        status: { not: 'PENDING_PAYMENT' },
+      }),
+    });
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -139,6 +166,12 @@ describe('getPartnerBookings', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true, data: [] }),
     );
+    expect(res.json.mock.calls[0][0].stats).toEqual({
+      total: 0,
+      confirmed: 0,
+      pendingPartner: 0,
+      recognizedRevenue: 0,
+    });
   });
 
   test('✅ Trả về mảng rỗng khi không có ticketProduct', async () => {
@@ -791,6 +824,12 @@ describe('getDashboard', () => {
         recentBookings: expect.arrayContaining([
           expect.objectContaining({ customer: 'Nguyễn Văn A' }),
         ]),
+      }),
+    );
+    expect(mockPrisma.booking.findMany.mock.calls[1][0].where).toEqual(
+      expect.objectContaining({
+        status: { not: 'PENDING_PAYMENT' },
+        payments: { some: { status: 'SUCCESS', isDuplicate: false } },
       }),
     );
     expect(next).not.toHaveBeenCalled();

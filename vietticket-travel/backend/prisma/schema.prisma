@@ -33,6 +33,10 @@ model User {
   isEmailVerified   Boolean      @default(false)
   status            UserStatus   @default(ACTIVE)
   tokenVersion      Int          @default(0)
+  termsAcceptedAt   DateTime?
+  termsVersion      String?
+  privacyVersion    String?
+  consentIpAddress  String?
   // Đối tác chủ quản của nhân viên này. Chỉ set khi role = STAFF.
   employerPartnerId String?
   createdAt         DateTime     @default(now())
@@ -51,6 +55,7 @@ model User {
   reservations            Reservation[]
   bookings                Booking[]
   supportTickets          SupportTicket[]
+  assignedSupportTickets  SupportTicket[]             @relation("SupportAssignedStaff")
   staffAssignments        StaffAttractionAssignment[] @relation("StaffAssignments")
   createdStaffAssignments StaffAttractionAssignment[] @relation("StaffAssignmentsCreatedBy")
   checkedInTickets        TicketInstance[]            @relation("TicketCheckedInBy")
@@ -154,13 +159,23 @@ enum AttractionStatus {
   PENDING
   APPROVED
   REJECTED
-  SUSPENDED
 }
 
 enum AttractionPublicationStatus {
   PAUSED
   ACTIVE
   ARCHIVED
+}
+
+enum AttractionOperationalStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AttractionEnvironment {
+  INDOOR
+  OUTDOOR
+  MIXED
 }
 
 enum TicketStatus {
@@ -171,6 +186,7 @@ enum TicketStatus {
 enum TicketType {
   ADULT
   CHILD
+  STUDENT
   FAMILY
   GROUP
 }
@@ -206,6 +222,13 @@ enum PaymentStatus {
   FAILED
 }
 
+enum SettlementStatus {
+  DRAFT
+  APPROVED
+  PAID
+  CANCELLED
+}
+
 enum TicketInstanceStatus {
   VALID
   USED
@@ -219,17 +242,22 @@ enum VoucherDiscountType {
 }
 
 model Reservation {
-  id                  String            @id @default(uuid())
-  userId              String
-  ticketProductId     String
-  timeSlotId          String?
-  date                DateTime          @db.Date
-  quantity            Int
-  status              ReservationStatus @default(HELD)
-  expiresAt           DateTime
-  paymentDeadline     DateTime?
-  paymentAttemptCount Int               @default(0)
-  createdAt           DateTime          @default(now())
+  id                        String            @id @default(uuid())
+  userId                    String
+  ticketProductId           String
+  timeSlotId                String?
+  date                      DateTime          @db.Date
+  quantity                  Int
+  status                    ReservationStatus @default(HELD)
+  expiresAt                 DateTime
+  paymentDeadline           DateTime?
+  paymentAttemptCount       Int               @default(0)
+  snapshotUnitPrice         Decimal?          @db.Decimal(12, 2)
+  snapshotRefundPolicy      RefundPolicyType?
+  snapshotRefundFeeRate     Decimal?          @db.Decimal(5, 2)
+  snapshotRefundCutoffHours Int?
+  snapshotCommissionRate    Decimal?          @db.Decimal(5, 2)
+  createdAt                 DateTime          @default(now())
 
   user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticketProduct TicketProduct @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
@@ -246,28 +274,37 @@ model Reservation {
 // ==========================================
 
 model PartnerProfile {
-  id                 String        @id @default(uuid())
-  userId             String        @unique
-  businessName       String
-  businessLicenseUrl String?
-  taxCode            String        @unique
-  bankName           String?
-  branchName         String?
-  bankAccountNumber  String?
-  bankAccountName    String?
-  swiftCode          String?
-  payoutCurrency     String        @default("VND")
-  website            String?
-  description        String?
-  commissionRate     Decimal       @default(0.10) @db.Decimal(5, 2)
-  status             PartnerStatus @default(PENDING)
-  rejectionReason    String?
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id                   String        @id @default(uuid())
+  userId               String        @unique
+  businessName         String
+  businessLicenseUrl   String?
+  taxCode              String        @unique
+  registrationDate     DateTime?     @db.Date
+  representativeName   String?
+  representativePhone  String?
+  businessAddress      String?
+  bankName             String?
+  branchName           String?
+  bankAccountNumber    String?
+  bankAccountName      String?
+  swiftCode            String?
+  payoutCurrency       String        @default("VND")
+  website              String?
+  description          String?
+  kycConsentAccepted   Boolean       @default(false)
+  kycConsentVersion    String?
+  kycConsentAcceptedAt DateTime?
+  kycConsentIpAddress  String?
+  commissionRate       Decimal       @default(0.10) @db.Decimal(5, 2)
+  status               PartnerStatus @default(PENDING)
+  rejectionReason      String?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
 
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   attractions  Attraction[]
-  staffMembers User[]       @relation("PartnerStaff")
+  staffMembers User[]              @relation("PartnerStaff")
+  settlements  PartnerSettlement[]
 }
 
 model StaffAttractionAssignment {
@@ -288,36 +325,43 @@ model StaffAttractionAssignment {
 }
 
 model Attraction {
-  id                     String                      @id @default(uuid())
-  partnerId              String
-  title                  String
-  description            String                      @db.Text
-  address                String
-  city                   String
-  district               String?
-  openTime               String? // Giờ mở cửa, định dạng "HH:MM"
-  closeTime              String? // Giờ đóng cửa, định dạng "HH:MM"
-  openDays               String? // 7 ngày trong tuần dạng CSV bool, vd "1,1,1,1,1,0,0"
-  defaultCapacity        Int                         @default(100)
-  requiresManualApproval Boolean                     @default(false) // Đơn đặt vé cần đối tác duyệt thủ công
-  latitude               Float?
-  longitude              Float?
-  status                 AttractionStatus            @default(DRAFT)
-  publicationStatus      AttractionPublicationStatus @default(PAUSED)
-  rejectionReason        String?
-  draftData              Json?
-  submittedData          Json?
-  revision               Int                         @default(0)
-  submittedAt            DateTime?
-  reviewedAt             DateTime?
-  reviewedById           String?
-  publishedAt            DateTime?
-  averageRating          Float                       @default(0.0)
-  totalReviews           Int                         @default(0)
-  minTicketPrice         Decimal?                    @db.Decimal(12, 2)
-  createdAt              DateTime                    @default(now())
-  updatedAt              DateTime                    @updatedAt
-  archivedAt             DateTime?
+  id                      String                      @id @default(uuid())
+  partnerId               String
+  title                   String
+  description             String                      @db.Text
+  address                 String
+  city                    String
+  district                String?
+  openTime                String? // Giờ mở cửa, định dạng "HH:MM"
+  closeTime               String? // Giờ đóng cửa, định dạng "HH:MM"
+  openDays                String? // 7 ngày trong tuần dạng CSV bool, vd "1,1,1,1,1,0,0"
+  defaultCapacity         Int                         @default(100)
+  requiresManualApproval  Boolean                     @default(false) // Đơn đặt vé cần đối tác duyệt thủ công
+  recommendedVisitMinutes Int                         @default(150)
+  environment             AttractionEnvironment       @default(MIXED)
+  isFullDay               Boolean                     @default(false)
+  latitude                Float?
+  longitude               Float?
+  status                  AttractionStatus            @default(DRAFT)
+  publicationStatus       AttractionPublicationStatus @default(PAUSED)
+  operationalStatus       AttractionOperationalStatus @default(ACTIVE)
+  suspensionReason        String?
+  suspendedAt             DateTime?
+  suspendedById           String?
+  rejectionReason         String?
+  draftData               Json?
+  submittedData           Json?
+  revision                Int                         @default(0)
+  submittedAt             DateTime?
+  reviewedAt              DateTime?
+  reviewedById            String?
+  publishedAt             DateTime?
+  averageRating           Float                       @default(0.0)
+  totalReviews            Int                         @default(0)
+  minTicketPrice          Decimal?                    @db.Decimal(12, 2)
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+  archivedAt              DateTime?
 
   partner        PartnerProfile       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   images         AttractionImage[]
@@ -334,6 +378,7 @@ model Attraction {
   @@index([city])
   @@index([status])
   @@index([publicationStatus])
+  @@index([operationalStatus])
   @@index([archivedAt])
   @@index([minTicketPrice])
 }
@@ -394,6 +439,11 @@ model TicketProduct {
   refundPolicy      RefundPolicyType @default(NON_REFUNDABLE)
   refundFeeRate     Decimal          @default(0.0) @db.Decimal(5, 2)
   refundCutoffHours Int              @default(24)
+  minAgeYears       Int?
+  maxAgeYears       Int?
+  minHeightCm       Int?
+  maxHeightCm       Int?
+  requiresAdult     Boolean          @default(false)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   archivedAt        DateTime?
@@ -491,17 +541,20 @@ model FavoriteAttraction {
 }
 
 model Review {
-  id           String    @id @default(uuid())
-  userId       String
-  attractionId String
-  bookingId    String?   @unique
-  rating       Int
-  comment      String?   @db.Text
-  isHidden     Boolean   @default(false)
-  replyComment String?   @db.Text
-  repliedAt    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id               String    @id @default(uuid())
+  userId           String
+  attractionId     String
+  bookingId        String?   @unique
+  rating           Int
+  comment          String?   @db.Text
+  isHidden         Boolean   @default(false)
+  moderationReason String?   @db.Text
+  moderatedAt      DateTime?
+  moderatedById    String?
+  replyComment     String?   @db.Text
+  repliedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
@@ -551,14 +604,15 @@ model Booking {
   createdAt                  DateTime         @default(now())
   updatedAt                  DateTime         @updatedAt
 
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reservation        Reservation         @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  voucher            Voucher?            @relation(fields: [voucherId], references: [id])
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation        Reservation             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  voucher            Voucher?                @relation(fields: [voucherId], references: [id])
   payments           Payment[]
   ticketInstances    TicketInstance[]
   refundRequests     RefundRequest[]
   refundTransactions RefundTransaction[]
   review             Review?
+  settlementItems    PartnerSettlementItem[]
 
   @@index([userId])
   @@index([voucherId])
@@ -566,6 +620,62 @@ model Booking {
   @@index([snapshotAttractionId])
   @@index([snapshotVisitDate])
   @@index([cancelledAt])
+}
+
+model PartnerSettlement {
+  id                       String           @id @default(uuid())
+  partnerId                String
+  periodStart              DateTime         @db.Date
+  periodEnd                DateTime         @db.Date
+  status                   SettlementStatus @default(DRAFT)
+  currency                 String           @default("VND")
+  grossAmount              Decimal          @db.Decimal(14, 2)
+  refundAmount             Decimal          @default(0.0) @db.Decimal(14, 2)
+  netAmount                Decimal          @db.Decimal(14, 2)
+  commissionAmount         Decimal          @db.Decimal(14, 2)
+  payableAmount            Decimal          @db.Decimal(14, 2)
+  bookingCount             Int
+  bankNameSnapshot         String
+  bankAccountNameSnapshot  String
+  bankAccountLast4Snapshot String
+  createdById              String?
+  approvedById             String?
+  approvedAt               DateTime?
+  paidById                 String?
+  paidAt                   DateTime?
+  bankReference            String?          @unique
+  cancelledById            String?
+  cancelledAt              DateTime?
+  cancellationReason       String?          @db.Text
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  partner PartnerProfile          @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  items   PartnerSettlementItem[]
+
+  @@index([partnerId, periodStart, periodEnd])
+  @@index([partnerId, status])
+  @@index([status, createdAt])
+  @@index([periodStart, periodEnd])
+}
+
+model PartnerSettlementItem {
+  id               String    @id @default(uuid())
+  settlementId     String
+  bookingId        String
+  grossAmount      Decimal   @db.Decimal(14, 2)
+  refundAmount     Decimal   @default(0.0) @db.Decimal(14, 2)
+  netAmount        Decimal   @db.Decimal(14, 2)
+  commissionAmount Decimal   @db.Decimal(14, 2)
+  payableAmount    Decimal   @db.Decimal(14, 2)
+  releasedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  settlement PartnerSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  booking    Booking           @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@index([settlementId])
+  @@index([bookingId, releasedAt])
 }
 
 model Payment {
@@ -664,6 +774,13 @@ enum SupportStatus {
   RESOLVED
 }
 
+enum SupportPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
 model RefundRequest {
   id                         String            @id @default(uuid())
   bookingId                  String
@@ -756,20 +873,30 @@ model AuditLog {
 }
 
 model SupportTicket {
-  id          String        @id @default(uuid())
-  userId      String
-  bookingId   String?
-  subject     String
-  description String        @db.Text
-  status      SupportStatus @default(OPEN)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id               String          @id @default(uuid())
+  userId           String
+  bookingId        String?
+  subject          String
+  description      String          @db.Text
+  status           SupportStatus   @default(OPEN)
+  priority         SupportPriority @default(NORMAL)
+  assignedToId     String?
+  assignedAt       DateTime?
+  firstRespondedAt DateTime?
+  resolvedAt       DateTime?
+  resolutionCode   String?
+  resolutionNote   String?         @db.Text
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages SupportMessage[]
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo User?            @relation("SupportAssignedStaff", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   SupportMessage[]
 
   @@index([userId])
   @@index([status])
+  @@index([priority, status, createdAt])
+  @@index([assignedToId, status])
 }
 
 model SupportMessage {

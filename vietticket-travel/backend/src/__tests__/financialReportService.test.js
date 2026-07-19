@@ -82,6 +82,24 @@ describe('financial report calculations', () => {
     });
   });
 
+  test('rounds recomputed post-refund commission to integer VND', () => {
+    const recognized = recognizedAmountsOf({
+      commissionRateSnapshot: 0.1,
+      payments: [{ amount: 99999 }],
+      refundTransactions: [
+        { amount: 1, refundRequest: { type: 'CUSTOMER_CANCELLATION' } },
+      ],
+    });
+
+    expect(recognized).toEqual({
+      grossAmount: 99999,
+      refundAmount: 1,
+      netAmount: 99998,
+      commissionAmount: 10000,
+      partnerPayableAmount: 89998,
+    });
+  });
+
   test('uses paidAt and processedAt for financial timeline buckets', () => {
     const now = new Date('2026-06-12T12:00:00.000Z');
     const timeline = buildFinancialTimeline(

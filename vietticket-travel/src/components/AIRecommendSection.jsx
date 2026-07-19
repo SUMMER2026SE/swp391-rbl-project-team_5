@@ -18,10 +18,42 @@ function formatCurrency(value) {
   return `${new Intl.NumberFormat('vi-VN').format(amount)} VND`
 }
 
+function refundPolicyLabel(ticket) {
+  if (ticket?.refundPolicy === 'NON_REFUNDABLE') return 'Không hoàn tiền'
+  if (ticket?.refundPolicy === 'FREE_CANCELLATION') {
+    return ticket.refundCutoffHours
+      ? `Hủy miễn phí trước ${ticket.refundCutoffHours} giờ`
+      : 'Hủy miễn phí theo hạn của vé'
+  }
+  if (ticket?.refundPolicy === 'REFUND_WITH_FEE') {
+    const feeRate = Number(ticket.refundFeeRate)
+    const feeText = Number.isFinite(feeRate) && feeRate > 0
+      ? ` ${Math.round(feeRate * 100)}%`
+      : ''
+    return ticket.refundCutoffHours
+      ? `Phí hủy${feeText}, trước ${ticket.refundCutoffHours} giờ`
+      : `Phí hủy${feeText} theo điều kiện vé`
+  }
+  return ''
+}
+
 function todayInputValue() {
   const date = new Date()
   const timezoneOffset = date.getTimezoneOffset() * 60000
   return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 10)
+}
+
+function formatCheckedAt(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
 }
 
 const inputClass =
@@ -53,7 +85,7 @@ function AIRecommendSection() {
   const [city, setCity] = useState('')
   const [categories, setCategories] = useState([])
   const [priority, setPriority] = useState('balanced')
-  const [companion, setCompanion] = useState('solo')
+  const [companion, setCompanion] = useState('couple')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
 
@@ -266,15 +298,38 @@ function AIRecommendSection() {
             </div>
           )}
 
+          {result.interestMatch?.interestFallbackUsed && (
+            <div className="rounded-3xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+              {result.interestMatch.fallbackMessage}
+            </div>
+          )}
+
+          {result.rankingNotice && (
+            <div className="rounded-3xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+              {result.rankingNotice}
+            </div>
+          )}
+
           {result.availabilityChecked && (
             <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
-              Đã kiểm tra tình trạng còn vé cho ngày {result.availabilityDate || visitDate}.
+              Đã kiểm tra tình trạng còn vé cho ngày {result.availabilityDate || visitDate}
+              {formatCheckedAt(result.availabilityCheckedAt)
+                ? ` lúc ${formatCheckedAt(result.availabilityCheckedAt)}`
+                : ''}.
+              {' '}Số lượng có thể thay đổi và sẽ được kiểm tra lại khi đặt vé.
             </div>
           )}
 
           {Array.isArray(result.recommendedAttractions) && result.recommendedAttractions.length > 0 && (
             <div>
-              <h3 className="mb-4 text-xl font-bold text-[#00474d]">Địa điểm gợi ý</h3>
+              <h3 className="mb-2 text-xl font-bold text-[#00474d]">
+                Các lựa chọn phù hợp
+              </h3>
+              {result.recommendationMode === 'INDEPENDENT_ALTERNATIVES' && (
+                <p className="mb-4 text-sm text-[#64748b]">
+                  Mỗi thẻ là một lựa chọn độc lập, không phải các điểm được xếp chung trong một ngày.
+                </p>
+              )}
               <div className="grid gap-4 md:grid-cols-3">
                 {result.recommendedAttractions.map((item, index) => {
                   const attractionId = item.attractionId || item.id
@@ -288,6 +343,11 @@ function AIRecommendSection() {
                         {item.title || item.name || 'Địa điểm thú vị'}
                       </h4>
                       <p className="mb-4 text-sm text-[#475569]">{item.reason || 'Lý do gợi ý cho bạn.'}</p>
+                      {item.suggestedVisitTime?.label && (
+                        <p className="mb-2 text-xs font-semibold text-[#00629d]">
+                          Khung giờ vào cửa chung: {item.suggestedVisitTime.label}
+                        </p>
+                      )}
                       {item.availabilityNote && (
                         <p className="mb-4 text-xs font-semibold text-emerald-700">{item.availabilityNote}</p>
                       )}
@@ -308,7 +368,9 @@ function AIRecommendSection() {
 
           {ticketPackages.length > 0 && (
             <div>
-              <h3 className="mb-4 text-xl font-bold text-[#00474d]">Gói vé đề xuất</h3>
+              <h3 className="mb-4 text-xl font-bold text-[#00474d]">
+                Chi phí theo từng lựa chọn
+              </h3>
               <div className="space-y-4">
                 {ticketPackages.map((ticketPackage, index) => {
                   const attractionId =
@@ -341,14 +403,30 @@ function AIRecommendSection() {
                             {ticketPackage.packageDescription}
                           </p>
                         )}
+                        {ticketPackage.suggestedVisitTime?.label && (
+                          <p className="mt-2 text-xs font-semibold text-[#00629d]">
+                            Khung giờ vào cửa chung: {ticketPackage.suggestedVisitTime.label}
+                          </p>
+                        )}
                         <div className="mt-2 text-sm text-[#475569]">
                           {ticketLines.length > 0 ? (
                             <ul className="list-disc space-y-1 pl-5">
-                              {ticketLines.map((ticket, ticketIndex) => (
-                                <li key={ticketIndex}>
-                                  {ticket.ticketName || ticket.name || ticket.title || ''} — {ticket.quantity} vé × {(ticket.unitPrice || 0).toLocaleString('vi-VN')}đ
-                                </li>
-                              ))}
+                              {ticketLines.map((ticket, ticketIndex) => {
+                                const slot = ticket.suggestedTimeSlot
+                                const refundLabel = refundPolicyLabel(ticket)
+                                return (
+                                  <li key={ticketIndex}>
+                                    {ticket.ticketName || ticket.name || ticket.title || ''} — {ticket.quantity} vé × {(ticket.unitPrice || 0).toLocaleString('vi-VN')}đ
+                                    {slot?.startTime && slot?.endTime
+                                      ? ` · ${slot.startTime}-${slot.endTime}`
+                                      : ''}
+                                    {refundLabel ? ` · ${refundLabel}` : ''}
+                                    {ticket.eligibility?.note
+                                      ? ` · ${ticket.eligibility.note}`
+                                      : ''}
+                                  </li>
+                                )
+                              })}
                             </ul>
                           ) : (
                             <p>Thông tin vé sẽ được hiển thị sau khi chọn.</p>

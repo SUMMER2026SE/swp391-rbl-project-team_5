@@ -3,7 +3,12 @@ import '../styles/admin.css'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
-import { getUsers, changeUserStatus } from '../services/adminApi.js'
+import {
+  changeUserStatus,
+  createPlatformStaff,
+  getUsers,
+  resendPlatformStaffInvite,
+} from '../services/adminApi.js'
 import AdminSidebar from '../components/admin/AdminSidebar.jsx'
 import { getUserRoles, hasRole } from '../utils/userRoles.js'
 
@@ -43,6 +48,10 @@ function AdminUserManagementPage() {
   const [lockSendEmail, setLockSendEmail] = useState(true)
   const [unlockSendEmail, setUnlockSendEmail] = useState(true)
   const [statusActionUserId, setStatusActionUserId] = useState(null)
+  const [showStaffModal, setShowStaffModal] = useState(false)
+  const [staffDraft, setStaffDraft] = useState({ fullName: '', email: '', phoneNumber: '' })
+  const [isCreatingStaff, setIsCreatingStaff] = useState(false)
+  const [resendingInviteId, setResendingInviteId] = useState('')
 
   useEffect(() => {
     document.title = 'Quản lý Người dùng | VietTicket Travel'
@@ -190,9 +199,44 @@ function AdminUserManagementPage() {
     }
   }
 
+  async function handleCreateStaff(event) {
+    event.preventDefault()
+    if (isCreatingStaff) return
+    setIsCreatingStaff(true)
+    try {
+      const response = await createPlatformStaff(staffDraft)
+      toast[response.emailDelivered ? 'success' : 'warning'](response.message)
+      setStaffDraft({ fullName: '', email: '', phoneNumber: '' })
+      setShowStaffModal(false)
+      setPage(1)
+      setRefetchIndex((prev) => prev + 1)
+    } catch (error) {
+      toast.error(error.message || 'Không thể tạo nhân viên nền tảng.')
+    } finally {
+      setIsCreatingStaff(false)
+    }
+  }
+
+  async function handleResendInvite(userId) {
+    if (resendingInviteId) return
+    setResendingInviteId(userId)
+    try {
+      const response = await resendPlatformStaffInvite(userId)
+      toast.success(response.message)
+    } catch (error) {
+      toast.error(error.message || 'Không thể gửi lại lời mời.')
+    } finally {
+      setResendingInviteId('')
+    }
+  }
+
   const handleLockSubmit = async (event) => {
     event.preventDefault()
     if (targetUserId === null || isStatusActionPending) return
+    if (lockReason.trim().length < 10) {
+      toast.warning('Lý do khóa phải có ít nhất 10 ký tự.')
+      return
+    }
     await handleLockAccount(targetUserId, lockReason, lockSendEmail)
   }
 
@@ -266,9 +310,23 @@ function AdminUserManagementPage() {
         </header>
 
         <div className="admin-content">
-          <section className="admin-page-heading" aria-labelledby="admin-user-title">
-            <h2 id="admin-user-title">Quản lý Tài khoản</h2>
-            <p>Xem danh sách, kiểm soát trạng thái hoạt động của thành viên và đối tác.</p>
+          <section
+            className="admin-page-heading"
+            aria-labelledby="admin-user-title"
+            style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}
+          >
+            <div>
+              <h2 id="admin-user-title">Quản lý Tài khoản</h2>
+              <p>Xem danh sách, kiểm soát trạng thái hoạt động của thành viên và đối tác.</p>
+            </div>
+            <button
+              type="button"
+              className="admin-modal-button admin-modal-button--primary"
+              onClick={() => setShowStaffModal(true)}
+            >
+              <span className="material-symbols-outlined" aria-hidden="true">person_add</span>
+              Thêm nhân viên nền tảng
+            </button>
           </section>
 
           <section className="admin-stats-grid" aria-label="Thống kê tài khoản">
@@ -463,6 +521,23 @@ function AdminUserManagementPage() {
                         </td>
                         <td className="admin-table-cell--right">
                           <div className="admin-row-actions">
+                            {hasRole(user, 'STAFF')
+                              && !user.employerPartnerId
+                              && !user.activated
+                              && user.status === 'ACTIVE' && (
+                                <button
+                                  className="admin-row-action admin-row-action--primary"
+                                  disabled={Boolean(resendingInviteId)}
+                                  type="button"
+                                  title="Gửi lại email kích hoạt"
+                                  aria-label={`Gửi lại lời mời cho ${user.fullName}`}
+                                  onClick={() => void handleResendInvite(user.id)}
+                                >
+                                  <span className="material-symbols-outlined" aria-hidden="true">
+                                    {resendingInviteId === user.id ? 'progress_activity' : 'forward_to_inbox'}
+                                  </span>
+                                </button>
+                              )}
                             {user.status === 'ACTIVE' ? (
                               <button
                                 className="admin-row-action admin-row-action--danger"
@@ -492,18 +567,6 @@ function AdminUserManagementPage() {
                                 </span>
                               </button>
                             )}
-                            <button
-                              className="admin-row-action admin-row-action--secondary"
-                              id={`btn-edit-user-${user.id}`}
-                              type="button"
-                              title="Tính năng đang phát triển"
-                              aria-label={`Chỉnh sửa tài khoản ${user.fullName}`}
-                              disabled
-                            >
-                              <span className="material-symbols-outlined" aria-hidden="true">
-                                  edit
-                              </span>
-                            </button>
                           </div>
                         </td>
                       </tr>
@@ -619,6 +682,9 @@ function AdminUserManagementPage() {
                   id="lock-reason-input"
                   disabled={isStatusActionPending}
                   value={lockReason}
+                  minLength="10"
+                  maxLength="500"
+                  required
                   placeholder="Nhập lý do chi tiết..."
                   onChange={(event) => setLockReason(event.target.value)}
                 />
@@ -718,6 +784,94 @@ function AdminUserManagementPage() {
           )}
         </div>
       ) : null}
+
+      {showStaffModal && (
+        <div className="admin-modal-container">
+          <button
+            className="admin-modal-backdrop"
+            type="button"
+            disabled={isCreatingStaff}
+            aria-label="Đóng hộp thoại"
+            onClick={() => setShowStaffModal(false)}
+          />
+          <form
+            className="admin-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-platform-staff-title"
+            onSubmit={handleCreateStaff}
+          >
+            <div className="admin-modal__header">
+              <span className="admin-modal__icon admin-modal__icon--primary" aria-hidden="true">
+                <span className="material-symbols-outlined">support_agent</span>
+              </span>
+              <div>
+                <h3 id="create-platform-staff-title">Thêm nhân viên nền tảng</h3>
+                <p>Nhân viên được quyền xử lý CSKH, hoàn tiền và kiểm duyệt đánh giá.</p>
+              </div>
+            </div>
+            <label className="admin-field">
+              <span>Họ và tên</span>
+              <input
+                required
+                minLength="2"
+                maxLength="50"
+                disabled={isCreatingStaff}
+                value={staffDraft.fullName}
+                onChange={(event) => setStaffDraft((current) => ({
+                  ...current,
+                  fullName: event.target.value,
+                }))}
+              />
+            </label>
+            <label className="admin-field">
+              <span>Email công việc</span>
+              <input
+                required
+                type="email"
+                disabled={isCreatingStaff}
+                value={staffDraft.email}
+                onChange={(event) => setStaffDraft((current) => ({
+                  ...current,
+                  email: event.target.value,
+                }))}
+              />
+            </label>
+            <label className="admin-field">
+              <span>Số điện thoại (không bắt buộc)</span>
+              <input
+                inputMode="tel"
+                disabled={isCreatingStaff}
+                value={staffDraft.phoneNumber}
+                onChange={(event) => setStaffDraft((current) => ({
+                  ...current,
+                  phoneNumber: event.target.value,
+                }))}
+              />
+            </label>
+            <p className="admin-modal__body-text">
+              Hệ thống sẽ gửi liên kết đặt mật khẩu có hiệu lực trong 48 giờ.
+            </p>
+            <div className="admin-modal__actions">
+              <button
+                className="admin-modal-button admin-modal-button--secondary"
+                type="button"
+                disabled={isCreatingStaff}
+                onClick={() => setShowStaffModal(false)}
+              >
+                Hủy
+              </button>
+              <button
+                className="admin-modal-button admin-modal-button--primary"
+                type="submit"
+                disabled={isCreatingStaff}
+              >
+                {isCreatingStaff ? 'Đang tạo...' : 'Tạo và gửi lời mời'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
 }

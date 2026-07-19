@@ -44,7 +44,10 @@ function amountOf(value) {
 }
 
 function roundMoney(value) {
-  return Math.round((amountOf(value) + Number.EPSILON) * 100) / 100;
+  // VND is accounted as an integer throughout checkout/refund. Recomputed
+  // commission after a partial refund must follow the same half-up rule and
+  // never reintroduce fractional đồng in financial reports.
+  return Math.round(amountOf(value));
 }
 
 function paymentOccurredAt(payment) {

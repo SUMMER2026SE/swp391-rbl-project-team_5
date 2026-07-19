@@ -9,6 +9,7 @@ const {
   canJoinSupportTicket,
   parseCookies,
   readSocketToken,
+  revalidateSocket,
 } = require('../realtime/socketServer');
 
 afterEach(() => jest.clearAllMocks());
@@ -135,5 +136,40 @@ describe('socketServer helpers', () => {
     expect(readSocketToken({
       handshake: { headers: {}, auth: { token: 'auth-token' } },
     })).toBe('auth-token');
+  });
+
+  test('disconnects an already-connected socket after its account is locked', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({
+      id: 'user-locked',
+      role: 'CUSTOMER',
+      status: 'LOCKED',
+      tokenVersion: 0,
+      employerPartnerId: null,
+      roleMemberships: [{ role: 'CUSTOMER' }],
+      partnerProfile: null,
+    });
+    mockPrisma.authSession.findUnique.mockResolvedValue({
+      id: 'session-1',
+      userId: 'user-locked',
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const socket = {
+      authContext: {
+        userId: 'user-locked',
+        sessionId: 'session-1',
+        tokenVersion: 0,
+      },
+      emit: jest.fn(),
+      disconnect: jest.fn(),
+    };
+
+    await expect(revalidateSocket(socket)).resolves.toBeNull();
+
+    expect(socket.emit).toHaveBeenCalledWith(
+      'AUTHORIZATION_REVOKED',
+      expect.any(Object),
+    );
+    expect(socket.disconnect).toHaveBeenCalledWith(true);
   });
 });

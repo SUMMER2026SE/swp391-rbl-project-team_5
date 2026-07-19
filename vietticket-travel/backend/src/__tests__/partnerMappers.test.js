@@ -106,6 +106,11 @@ describe('bộ chuyển đổi bản ghi', () => {
       refundPolicy: 'FULL',
       refundFeeRate: 0,
       refundCutoffHours: 24,
+      minAgeYears: null,
+      maxAgeYears: null,
+      minHeightCm: null,
+      maxHeightCm: null,
+      requiresAdult: false,
       status: 'active',
     });
   });

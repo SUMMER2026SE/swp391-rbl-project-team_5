@@ -3,6 +3,7 @@ import {
   buildItineraryShareText,
   createItinerarySnapshot,
   getItineraryFeedback,
+  loadItinerariesFromServer,
   loadSavedItineraries,
   removeItinerarySnapshot,
   saveItineraryFeedback,
@@ -36,8 +37,8 @@ describe('ai itinerary storage helpers', () => {
     saveItinerarySnapshot(snapshot, storage)
     saveItinerarySnapshot({ ...snapshot, title: 'Bản mới' }, storage)
 
-    expect(loadSavedItineraries(storage)).toHaveLength(1)
-    expect(loadSavedItineraries(storage)[0].title).toBe('Bản mới')
+    expect(loadSavedItineraries(storage, 'user-1')).toHaveLength(1)
+    expect(loadSavedItineraries(storage, 'user-1')[0].title).toBe('Bản mới')
   })
 
   it('stores one feedback value per itinerary', () => {
@@ -47,6 +48,49 @@ describe('ai itinerary storage helpers', () => {
     saveItineraryFeedback('plan-1', 'down', storage)
 
     expect(getItineraryFeedback('plan-1', storage)).toBe('down')
+  })
+
+  it('isolates saved plans and feedback by account on a shared device', () => {
+    const storage = makeStorage()
+
+    saveItinerarySnapshot({ id: 'user-1-plan', title: 'Plan 1' }, storage, 'user-1')
+    saveItinerarySnapshot({ id: 'user-2-plan', title: 'Plan 2' }, storage, 'user-2')
+    saveItineraryFeedback('user-1-plan', 'up', storage, 'user-1')
+
+    expect(loadSavedItineraries(storage, 'user-1').map((item) => item.id)).toEqual([
+      'user-1-plan',
+    ])
+    expect(loadSavedItineraries(storage, 'user-2').map((item) => item.id)).toEqual([
+      'user-2-plan',
+    ])
+    expect(loadSavedItineraries(storage, '')).toEqual([])
+    expect(getItineraryFeedback('user-1-plan', storage, 'user-2')).toBe('')
+  })
+
+  it('marks server snapshots with the authenticated owner before local persistence', async () => {
+    const storage = makeStorage()
+    const getList = async () => ({
+      data: [{ planId: 'server-plan', updatedAt: '2026-07-01T00:00:00.000Z' }],
+    })
+    const getDetail = async () => ({
+      data: {
+        planId: 'server-plan',
+        title: 'Server plan',
+        createdAt: '2026-07-01T00:00:00.000Z',
+        updatedAt: '2026-07-01T00:00:00.000Z',
+        data: { title: 'Server plan', days: [] },
+      },
+    })
+
+    const merged = await loadItinerariesFromServer(
+      getList,
+      getDetail,
+      storage,
+      'user-1',
+    )
+
+    expect(merged[0]).toMatchObject({ id: 'server-plan', ownerId: 'user-1' })
+    expect(loadSavedItineraries(storage, 'user-2')).toEqual([])
   })
 
   it('removes a saved itinerary by id', () => {

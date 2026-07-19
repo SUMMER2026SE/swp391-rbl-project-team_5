@@ -5,8 +5,8 @@ function publicAttractionWhere(extra = {}) {
     ...extra,
     publishedAt: { not: null },
     publicationStatus: 'ACTIVE',
+    operationalStatus: 'ACTIVE',
     archivedAt: null,
-    status: { not: 'SUSPENDED' },
     partner: { status: 'APPROVED' },
   };
 }
@@ -16,7 +16,7 @@ function isAttractionSaleEnabled(attraction) {
     attraction
     && attraction.publishedAt
     && attraction.publicationStatus === 'ACTIVE'
-    && attraction.status !== 'SUSPENDED'
+    && attraction.operationalStatus !== 'SUSPENDED'
     && !attraction.archivedAt
     && attraction.partner?.status === 'APPROVED',
   );

@@ -7,9 +7,13 @@ import Seo from '../components/Seo.jsx'
 import AIItineraryPlanner from '../components/AIItineraryPlanner.jsx'
 import RecentlyViewedAttractions from '../components/RecentlyViewedAttractions.jsx'
 import { useAuth } from '../context/useAuth.js'
-import { featuredDestinations, footerLinks } from '../data/landingData.js'
+import { footerLinks } from '../data/landingData.js'
 import { getMapPoints, searchAttractions } from '../services/attractionApi.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
+import {
+  DEFAULT_ATTRACTION_PRICE_RANGE,
+  parseAttractionPriceRange,
+} from '../utils/searchAttractionParams.js'
 import fallbackAttractionImage from '../assets/ninh_binh.webp'
 
 const AttractionsMap = lazy(() => import('../components/AttractionsMap.jsx'))
@@ -49,7 +53,7 @@ const searchNavLinks = [
 
 const fallbackImage = fallbackAttractionImage
 const DEFAULT_CITY = 'Tất cả thành phố'
-const DEFAULT_PRICE_RANGE = 5000000
+const DEFAULT_PRICE_RANGE = DEFAULT_ATTRACTION_PRICE_RANGE
 const DEFAULT_SORT = 'popular'
 const SEARCH_PAGE_SIZE = 9
 
@@ -142,12 +146,6 @@ const normalizePage = (value) => {
   return Number.isInteger(page) && page > 0 ? page : 1
 }
 
-const normalizePriceRange = (value) => {
-  const price = Number(value)
-  if (!Number.isFinite(price)) return DEFAULT_PRICE_RANGE
-  return Math.max(0, Math.min(DEFAULT_PRICE_RANGE, price))
-}
-
 const normalizeVisitDate = (value) =>
   /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? String(value) : ''
 
@@ -175,12 +173,11 @@ const normalizeStars = (value) => {
 
 const parseSearchParams = (search) => {
   const params = new URLSearchParams(search)
-  const priceParam = params.get('maxPrice') || params.get('priceRange')
   const starParam = params.get('stars') || params.get('minRating')
 
   return {
     currentPage: normalizePage(params.get('page')),
-    priceRange: normalizePriceRange(priceParam),
+    priceRange: parseAttractionPriceRange(search, DEFAULT_PRICE_RANGE),
     searchQuery: params.get('search') || '',
     selectedCategory: params.get('category') || 'All',
     selectedCity: params.get('city') || DEFAULT_CITY,
@@ -524,21 +521,6 @@ export default function SearchAttractionsPage() {
 
   const pageNumbers = getPageNumbers(currentPage, totalPages)
 
-  // Khi API chưa có địa điểm phù hợp, gợi ý các điểm tham quan nổi bật tuyển chọn
-  // (lọc theo bộ lọc hiện tại; nếu không khớp thì hiển thị toàn bộ danh sách nổi bật).
-  const matchedFeatured = featuredDestinations.filter((item) => {
-    const normalizedFallbackQuery = debouncedSearchQuery.trim().toLowerCase()
-    if (selectedCity !== DEFAULT_CITY && item.city !== selectedCity) return false
-    if (selectedCategory !== 'All' && item.category !== selectedCategory) return false
-    if (
-      normalizedFallbackQuery &&
-      !`${item.title} ${item.city}`.toLowerCase().includes(normalizedFallbackQuery)
-    ) {
-      return false
-    }
-    return true
-  })
-  const featuredFallback = matchedFeatured.length > 0 ? matchedFeatured : featuredDestinations
   const resultSummary = loading
     ? 'Đang tải địa điểm...'
     : totalItems > attractions.length
@@ -613,9 +595,12 @@ export default function SearchAttractionsPage() {
                     event_available
                   </span>
                   <span>
-                    Đang tìm cho
+                    Ngữ cảnh đặt vé:
                     {visitDate ? ` ngày ${formatTripDate(visitDate)}` : ''}
                     {guestCount > 1 ? `, ${guestCount} khách` : ''}
+                  </span>
+                  <span className="text-xs font-medium text-[#3f484a]">
+                    Số chỗ sẽ được kiểm tra khi bạn chọn gói vé.
                   </span>
                   <button
                     className="ml-auto rounded-full bg-white px-3 py-1 text-xs font-bold text-[#006068] transition hover:bg-[#d7f7fb]"
@@ -843,11 +828,11 @@ export default function SearchAttractionsPage() {
                     travel_explore
                   </span>
                   <h2 className="text-lg font-bold text-[#00474d]">
-                    Chưa có địa điểm khớp bộ lọc — gợi ý điểm tham quan nổi bật
+                    Không tìm thấy địa điểm khớp bộ lọc
                   </h2>
                   <p className="mx-auto mt-1 max-w-md text-sm font-medium text-[#3f484a]">
                     {errorMessage ||
-                      'Dưới đây là những điểm tham quan nổi bật được yêu thích nhất trên VietTicket.'}
+                      'Hãy thử xóa bớt bộ lọc, đổi khoảng giá hoặc dùng từ khóa khác.'}
                   </p>
                 </div>
               )}
@@ -868,15 +853,7 @@ export default function SearchAttractionsPage() {
                       detailBookingQuery={detailBookingQuery}
                     />
                   ))
-                ) : (
-                  featuredFallback.map((item) => (
-                    <FeaturedFallbackCard
-                      attraction={item}
-                      key={item.id}
-                      navigate={navigate}
-                    />
-                  ))
-                )}
+                ) : null}
               </div>
 
               {!loading && totalPages > 1 && (
@@ -1074,85 +1051,6 @@ function SkeletonCards({ count = SEARCH_PAGE_SIZE }) {
       </div>
     </div>
   ))
-}
-
-function FeaturedFallbackCard({ attraction, navigate }) {
-  const title = attraction.title || 'Điểm tham quan'
-  const location = attraction.city ? `${attraction.city}, Việt Nam` : 'Việt Nam'
-  const rating = Number(attraction.averageRating || 0)
-  const totalReviews = Number(attraction.totalReviews || 0)
-  const goToSearch = () =>
-    navigate(`/attractions?search=${encodeURIComponent(attraction.searchQuery || title)}`)
-
-  return (
-    <article className="group overflow-hidden rounded-lg border border-[#bec8ca]/50 bg-white shadow-[0_4px_20px_rgba(0,40,50,0.05)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_12px_32px_rgba(0,40,50,0.12)]">
-      <div className="relative h-48 overflow-hidden">
-        <img
-          alt={title}
-          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          onError={handleImageFallback}
-          src={attraction.primaryImage || fallbackImage}
-        />
-        <div className="absolute left-3 top-3 rounded-full bg-[#00629d] px-2 py-1 text-xs font-bold text-white shadow-sm">
-          Nổi bật
-        </div>
-        <div className="absolute right-3 top-3 flex items-center gap-1 rounded-lg bg-white/90 px-2 py-1 shadow-sm backdrop-blur-md">
-          <span
-            className="material-symbols-outlined text-[16px] text-[#ffba20]"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >
-            star
-          </span>
-          <span className="text-xs font-semibold text-[#191c1d]">
-            {rating > 0 ? rating.toFixed(1) : 'New'}
-          </span>
-        </div>
-      </div>
-
-      <div className="flex min-h-[220px] flex-col gap-3 p-4">
-        <h3 className="text-xl font-bold leading-tight text-[#00474d]">{title}</h3>
-        <div className="flex items-center gap-1 text-sm font-medium text-[#3f484a]">
-          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
-            location_on
-          </span>
-          {location}
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded-full bg-[#eefcff] px-2.5 py-1 text-[11px] font-bold text-[#00474d]">
-            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
-              travel_explore
-            </span>
-            Gợi ý nổi bật
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-[#fff7df] px-2.5 py-1 text-[11px] font-bold text-[#6b4b00]">
-            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
-              confirmation_number
-            </span>
-            Vé điện tử
-          </span>
-        </div>
-        <p className="text-xs font-semibold text-[#5f6b6d]">
-          {totalReviews > 0
-            ? `${totalReviews.toLocaleString('vi-VN')} đánh giá từ du khách`
-            : 'Đề xuất dựa trên bộ lọc hiện tại'}
-        </p>
-
-        <div className="mt-auto flex items-end justify-between gap-4">
-          <div className="flex flex-col">
-            <span className="text-xs font-semibold text-[#3f484a]">Giá từ</span>
-            <span className="text-lg font-bold text-[#00629d]">{formatCurrency(attraction.minPrice)}</span>
-          </div>
-          <button
-            className="rounded-lg border border-[#00474d]/20 bg-[#00474d]/5 px-4 py-2 text-sm font-bold text-[#00474d] transition hover:bg-[#00474d] hover:text-white"
-            onClick={goToSearch}
-            type="button"
-          >
-            Khám phá
-          </button>
-        </div>
-      </div>
-    </article>
-  )
 }
 
 function PaginationButton({ disabled, icon, onClick }) {

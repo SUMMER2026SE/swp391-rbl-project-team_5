@@ -3,12 +3,23 @@
 const prisma = require('../config/prisma');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { hasRole } = require('../utils/userRoles');
+const { writeAuditLog } = require('../utils/auditLog');
 const {
   emitSupportMessage,
   emitSupportTicketUpdated,
 } = require('../realtime/events');
 
 const SUPPORT_STATUSES = new Set(['OPEN', 'IN_PROGRESS', 'RESOLVED']);
+const SUPPORT_PRIORITIES = new Set(['LOW', 'NORMAL', 'HIGH', 'URGENT']);
+const RESOLUTION_CODES = new Set([
+  'RESOLVED_INFORMATION',
+  'REFUND_GUIDANCE',
+  'TECHNICAL_FIXED',
+  'PARTNER_FOLLOW_UP',
+  'OTHER',
+]);
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_PAGE_SIZE = 100;
 
 function httpError(statusCode, message) {
   const error = new Error(message);
@@ -30,6 +41,17 @@ function getSupportSenderRole(user) {
   if (hasRole(user, 'ADMIN')) return 'ADMIN';
   if (isSupportStaff(user)) return 'STAFF';
   return 'CUSTOMER';
+}
+
+function inferPriority(subject, bookingId) {
+  const normalized = String(subject || '').toLowerCase();
+  if (bookingId && /(thanh toán|hoàn|payment|refund)/u.test(normalized)) return 'HIGH';
+  return 'NORMAL';
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function sendError(res, error, next) {
@@ -73,8 +95,12 @@ async function createTicket(req, res, next) {
     const bookingId = String(req.body?.bookingId || '').trim() || null;
 
     if (!subject) throw httpError(400, 'Vui lòng nhập tiêu đề yêu cầu.');
+    if (subject.length > 200) throw httpError(400, 'Tiêu đề không được vượt quá 200 ký tự.');
     if (description.length < 10) {
       throw httpError(400, 'Nội dung chi tiết cần tối thiểu 10 ký tự.');
+    }
+    if (description.length > 5000) {
+      throw httpError(400, 'Nội dung chi tiết không được vượt quá 5.000 ký tự.');
     }
 
     if (bookingId) {
@@ -95,6 +121,7 @@ async function createTicket(req, res, next) {
         subject,
         description,
         status: 'OPEN',
+        priority: inferPriority(subject, bookingId),
         messages: {
           create: { senderId: req.user.id, message: description },
         },
@@ -133,10 +160,21 @@ async function listAllTickets(req, res, next) {
     if (status && !SUPPORT_STATUSES.has(status)) {
       throw httpError(400, 'Trạng thái không hợp lệ.');
     }
+    const priority = String(req.query.priority || '').trim().toUpperCase();
+    if (priority && !SUPPORT_PRIORITIES.has(priority)) {
+      throw httpError(400, 'Mức ưu tiên không hợp lệ.');
+    }
     const search = String(req.query.search || '').trim();
+    const assignment = String(req.query.assignment || '').trim().toLowerCase();
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(parsePositiveInt(req.query.limit, DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
+    const skip = (page - 1) * limit;
 
     const where = {};
     if (status) where.status = status;
+    if (priority) where.priority = priority;
+    if (assignment === 'me') where.assignedToId = req.user.id;
+    if (assignment === 'unassigned') where.assignedToId = null;
     if (search) {
       where.OR = [
         { id: { contains: search, mode: 'insensitive' } },
@@ -145,15 +183,44 @@ async function listAllTickets(req, res, next) {
       ];
     }
 
-    const tickets = await prisma.supportTicket.findMany({
-      where,
-      orderBy: { updatedAt: 'desc' },
-      include: {
-        user: { select: { fullName: true, email: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+    const [tickets, total, statusGroups = []] = await Promise.all([
+      prisma.supportTicket.findMany({
+        where,
+        orderBy: [
+          { priority: 'desc' },
+          { createdAt: 'asc' },
+        ],
+        skip,
+        take: limit,
+        include: {
+          user: { select: { fullName: true, email: true } },
+          assignedTo: { select: { id: true, fullName: true, email: true } },
+          messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      }),
+      prisma.supportTicket.count({ where }),
+      prisma.supportTicket.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
+    ]);
+    const stats = { OPEN: 0, IN_PROGRESS: 0, RESOLVED: 0 };
+    for (const group of statusGroups || []) {
+      if (Object.hasOwn(stats, group.status)) {
+        stats[group.status] = Number(group?._count?._all || 0);
+      }
+    }
+    return res.json({
+      success: true,
+      data: tickets,
+      stats,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
       },
     });
-    return res.json({ success: true, data: tickets });
   } catch (error) {
     return sendError(res, error, next);
   }
@@ -174,6 +241,9 @@ async function getTicketDetail(req, res, next) {
             email: true,
             profile: { select: { phoneNumber: true, avatarUrl: true } },
           },
+        },
+        assignedTo: {
+          select: { id: true, fullName: true, email: true },
         },
         messages: { orderBy: { createdAt: 'asc' } },
       },
@@ -197,10 +267,17 @@ async function sendMessage(req, res, next) {
     const { ticketId } = req.params;
     const text = String(req.body?.message || '').trim();
     if (!text) throw httpError(400, 'Nội dung tin nhắn không được để trống.');
+    if (text.length > 5000) throw httpError(400, 'Tin nhắn không được vượt quá 5.000 ký tự.');
 
     const ticket = await prisma.supportTicket.findUnique({
       where: { id: ticketId },
-      select: { id: true, userId: true, status: true },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        assignedToId: true,
+        firstRespondedAt: true,
+      },
     });
     if (!ticket) throw httpError(404, 'Không tìm thấy yêu cầu hỗ trợ.');
 
@@ -211,20 +288,57 @@ async function sendMessage(req, res, next) {
     if (ticket.status === 'RESOLVED') {
       throw httpError(409, 'Yêu cầu này đã được đóng. Vui lòng tạo yêu cầu mới.');
     }
+    if (staff && ticket.assignedToId && ticket.assignedToId !== req.user.id) {
+      throw httpError(409, 'Yêu cầu này đang được một nhân viên khác xử lý.');
+    }
 
     // Staff trả lời lần đầu cho ticket OPEN -> tự chuyển IN_PROGRESS.
     const shouldProgress = staff && ticket.status === 'OPEN';
 
-    const [message] = await prisma.$transaction([
-      prisma.supportMessage.create({
+    const now = new Date();
+    const message = await prisma.$transaction(async (tx) => {
+      if (staff) {
+        const claimed = await tx.supportTicket.updateMany({
+          where: {
+            id: ticketId,
+            status: { not: 'RESOLVED' },
+            OR: [
+              { assignedToId: null },
+              { assignedToId: req.user.id },
+            ],
+          },
+          data: {
+            status: 'IN_PROGRESS',
+            assignedToId: req.user.id,
+            assignedAt: ticket.assignedToId ? undefined : now,
+            firstRespondedAt: ticket.firstRespondedAt || now,
+          },
+        });
+        if (claimed.count !== 1) {
+          throw httpError(409, 'Yêu cầu vừa được nhận bởi một nhân viên khác.');
+        }
+      } else {
+        await tx.supportTicket.update({
+          where: { id: ticketId },
+          data: { status: ticket.status },
+        });
+      }
+
+      const created = await tx.supportMessage.create({
         data: { ticketId, senderId: req.user.id, message: text },
-      }),
-      // Ghi cùng status hiện tại để @updatedAt tự cập nhật -> ticket nổi lên đầu hàng đợi.
-      prisma.supportTicket.update({
-        where: { id: ticketId },
-        data: { status: shouldProgress ? 'IN_PROGRESS' : ticket.status },
-      }),
-    ]);
+      });
+      if (staff && !ticket.assignedToId) {
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: 'SUPPORT_TICKET_CLAIMED',
+          entityType: 'SupportTicket',
+          entityId: ticketId,
+          metadata: { source: 'FIRST_RESPONSE' },
+        });
+      }
+      return created;
+    });
 
     const enriched = {
       ...message,
@@ -250,19 +364,129 @@ async function updateTicketStatus(req, res, next) {
 
     const { ticketId } = req.params;
     const status = String(req.body?.status || '').trim().toUpperCase();
+    const resolutionCode = String(req.body?.resolutionCode || '').trim().toUpperCase();
+    const resolutionNote = String(req.body?.resolutionNote || '').trim();
     if (!SUPPORT_STATUSES.has(status)) {
       throw httpError(400, 'Trạng thái không hợp lệ.');
     }
 
     const ticket = await prisma.supportTicket.findUnique({
       where: { id: ticketId },
-      select: { id: true },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        assignedToId: true,
+      },
     });
     if (!ticket) throw httpError(404, 'Không tìm thấy yêu cầu hỗ trợ.');
 
-    const updated = await prisma.supportTicket.update({
-      where: { id: ticketId },
-      data: { status },
+    const updated = await prisma.$transaction(async (tx) => {
+      const now = new Date();
+      if (status === 'IN_PROGRESS') {
+        if (ticket.status === 'RESOLVED') {
+          throw httpError(409, 'Yêu cầu đã đóng; hãy mở lại trước khi nhận xử lý.');
+        }
+        const claimed = await tx.supportTicket.updateMany({
+          where: {
+            id: ticketId,
+            status: { not: 'RESOLVED' },
+            OR: [
+              { assignedToId: null },
+              { assignedToId: req.user.id },
+            ],
+          },
+          data: {
+            status: 'IN_PROGRESS',
+            assignedToId: req.user.id,
+            assignedAt: ticket.assignedToId ? undefined : now,
+          },
+        });
+        if (claimed.count !== 1) {
+          throw httpError(409, 'Yêu cầu đang được một nhân viên khác xử lý.');
+        }
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: 'SUPPORT_TICKET_CLAIMED',
+          entityType: 'SupportTicket',
+          entityId: ticketId,
+        });
+        return tx.supportTicket.findUnique({
+          where: { id: ticketId },
+          include: { assignedTo: { select: { id: true, fullName: true, email: true } } },
+        });
+      }
+
+      if (status === 'RESOLVED') {
+        if (ticket.status === 'RESOLVED') {
+          throw httpError(409, 'Yêu cầu này đã được giải quyết trước đó.');
+        }
+        if (ticket.assignedToId !== req.user.id) {
+          throw httpError(409, 'Bạn phải nhận xử lý yêu cầu trước khi đóng.');
+        }
+        if (!RESOLUTION_CODES.has(resolutionCode)) {
+          throw httpError(400, 'Vui lòng chọn kết quả xử lý hợp lệ.');
+        }
+        if (resolutionNote.length < 10 || resolutionNote.length > 2000) {
+          throw httpError(400, 'Kết luận xử lý phải từ 10 đến 2.000 ký tự.');
+        }
+        const staffReplyCount = await tx.supportMessage.count({
+          where: {
+            ticketId,
+            senderId: { not: ticket.userId },
+          },
+        });
+        if (staffReplyCount < 1) {
+          throw httpError(409, 'Phải gửi ít nhất một phản hồi cho khách trước khi đóng yêu cầu.');
+        }
+        const resolved = await tx.supportTicket.update({
+          where: { id: ticketId },
+          data: {
+            status: 'RESOLVED',
+            resolvedAt: now,
+            resolutionCode,
+            resolutionNote,
+          },
+          include: { assignedTo: { select: { id: true, fullName: true, email: true } } },
+        });
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: 'SUPPORT_TICKET_RESOLVED',
+          entityType: 'SupportTicket',
+          entityId: ticketId,
+          metadata: { resolutionCode, resolutionNote },
+        });
+        return resolved;
+      }
+
+      if (ticket.status !== 'RESOLVED') {
+        throw httpError(409, 'Chỉ yêu cầu đã giải quyết mới có thể được mở lại.');
+      }
+      if (resolutionNote.length < 10 || resolutionNote.length > 2000) {
+        throw httpError(400, 'Lý do mở lại phải từ 10 đến 2.000 ký tự.');
+      }
+      const reopened = await tx.supportTicket.update({
+        where: { id: ticketId },
+        data: {
+          status: 'OPEN',
+          assignedToId: null,
+          assignedAt: null,
+          resolvedAt: null,
+          resolutionCode: null,
+          resolutionNote: null,
+        },
+      });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'SUPPORT_TICKET_REOPENED',
+        entityType: 'SupportTicket',
+        entityId: ticketId,
+        metadata: { reason: resolutionNote },
+      });
+      return reopened;
     });
 
     emitSupportTicketUpdated(ticketId, { ticketId, status });

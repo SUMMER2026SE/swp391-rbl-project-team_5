@@ -155,11 +155,11 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const loginWithGoogle = async ({ credential } = {}) => {
+  const loginWithGoogle = async ({ credential, acceptedTerms } = {}) => {
     try {
       const data = await apiRequest('/auth/google', {
         method: 'POST',
-        body: { credential },
+        body: { credential, acceptedTerms },
       })
 
       const nextUser = persistSession(data.user)
@@ -179,6 +179,7 @@ export function AuthProvider({ children }) {
           email: payload.email,
           phoneNumber: cleanPhone,
           password: payload.password,
+          acceptedTerms: payload.acceptedTerms,
         },
       })
 

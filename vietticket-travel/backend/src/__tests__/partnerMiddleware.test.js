@@ -3,6 +3,7 @@ const mockPrisma = require('./helpers/mockPrisma');
 const {
   requirePartner,
   requireApprovedPartner,
+  requireOwnedAttraction,
   requireActiveEmployer,
   requireCheckInEmployer,
 } = require('../middleware/partnerMiddleware');
@@ -42,6 +43,51 @@ describe('partner middleware', () => {
     requireApprovedPartner(req, res, next);
 
     expect(next).toHaveBeenCalled();
+  });
+
+  describe('requireOwnedAttraction', () => {
+    test('allows the current partner to continue before any upload is processed', async () => {
+      const attraction = {
+        id: 'attr-001',
+        partnerId: 'partner-001',
+        archivedAt: null,
+      };
+      mockPrisma.attraction.findUnique.mockResolvedValue(attraction);
+      const req = {
+        params: { id: attraction.id },
+        partner: { id: 'partner-001' },
+      };
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+      const next = jest.fn();
+
+      await requireOwnedAttraction(req, res, next);
+
+      expect(mockPrisma.attraction.findUnique).toHaveBeenCalledWith({
+        where: { id: attraction.id },
+        select: { id: true, partnerId: true, archivedAt: true },
+      });
+      expect(req.ownedAttraction).toEqual(attraction);
+      expect(next).toHaveBeenCalled();
+    });
+
+    test('returns the same 404 for a missing or foreign attraction', async () => {
+      mockPrisma.attraction.findUnique.mockResolvedValue({
+        id: 'attr-foreign',
+        partnerId: 'partner-002',
+        archivedAt: null,
+      });
+      const req = {
+        params: { id: 'attr-foreign' },
+        partner: { id: 'partner-001' },
+      };
+      const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+      const next = jest.fn();
+
+      await requireOwnedAttraction(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(next).not.toHaveBeenCalled();
+    });
   });
 
   describe('requireActiveEmployer', () => {

@@ -3,6 +3,8 @@ const { Prisma } = require('@prisma/client');
 const mockPrisma = require('./helpers/mockPrisma');
 const { reserveTickets, checkAvailability } = require('../controllers/ticketController');
 
+const { Decimal } = Prisma;
+
 afterEach(() => jest.clearAllMocks());
 
 // Ngày tham quan động (mai theo giờ VN) để test không phụ thuộc ngày chạy.
@@ -22,7 +24,7 @@ const attraction = {
   closeTime: '17:00',
   specialDates: [],
   timeSlots: [],
-  partner: { status: 'APPROVED' },
+  partner: { status: 'APPROVED', commissionRate: new Decimal('0.2') },
 };
 
 function productWithSlots(slots = []) {
@@ -31,6 +33,10 @@ function productWithSlots(slots = []) {
     status: 'ACTIVE',
     archivedAt: null,
     attractionId: attraction.id,
+    sellingPrice: new Decimal(125001),
+    refundPolicy: 'REFUND_WITH_FEE',
+    refundFeeRate: new Decimal('0.15'),
+    refundCutoffHours: 48,
     timeSlots: slots,
     attraction,
   };
@@ -51,10 +57,10 @@ describe('reserveTickets - chống overbooking', () => {
     };
   }
 
-  function makeTx({ daily, attractionStock }) {
+  function makeTx({ daily, attractionStock, product = productWithSlots() }) {
     return {
       ticketProduct: {
-        findUnique: jest.fn().mockResolvedValue(productWithSlots()),
+        findUnique: jest.fn().mockResolvedValue(product),
       },
       dailyStock: {
         findUnique: jest.fn().mockResolvedValue(daily),
@@ -110,6 +116,15 @@ describe('reserveTickets - chống overbooking', () => {
       where: { id: 'attr-stock-1' },
       data: { heldQty: { increment: 2 } },
     });
+    expect(tx.reservation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        snapshotUnitPrice: 125001,
+        snapshotRefundPolicy: 'REFUND_WITH_FEE',
+        snapshotRefundFeeRate: 0.15,
+        snapshotRefundCutoffHours: 48,
+        snapshotCommissionRate: 0.2,
+      }),
+    });
     expect(mockPrisma.$transaction).toHaveBeenCalledWith(
       expect.any(Function),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -138,10 +153,43 @@ describe('reserveTickets - chống overbooking', () => {
     expect(res.status).toHaveBeenCalledWith(409);
   });
 
+  test('không giữ chỗ nếu giá vé live không phải số nguyên VND', async () => {
+    const tx = makeTx({
+      daily: {
+        id: 'daily-invalid-price',
+        capacity: 100,
+        bookedQuantity: 0,
+        heldQuantity: 0,
+      },
+      attractionStock: {
+        id: 'attr-stock-invalid-price',
+        capacity: 100,
+        bookedQty: 0,
+        heldQty: 0,
+      },
+      product: {
+        ...productWithSlots(),
+        sellingPrice: new Decimal('125000.5'),
+      },
+    });
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(tx.dailyStock.update).not.toHaveBeenCalled();
+    expect(tx.reservation.create).not.toHaveBeenCalled();
+  });
+
   test.each([
     [{ quantity: 0 }, 400],
     [{ quantity: 1.5 }, 400],
+    [{ quantity: 21 }, 400],
+    [{ quantity: Number.MAX_SAFE_INTEGER + 1 }, 400],
     [{ date: 'ngay-sai' }, 400],
+    [{ date: '2026-02-31' }, 400],
+    [{ date: '2026-02-29' }, 400],
   ])('từ chối dữ liệu không hợp lệ %#', async (body, status) => {
     const res = makeRes();
     await reserveTickets(makeReq(body), res, jest.fn());

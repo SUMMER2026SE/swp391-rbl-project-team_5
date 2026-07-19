@@ -297,7 +297,7 @@ const realAttractions = [
       },
       {
         name: 'Vé học sinh / sinh viên',
-        type: 'CHILD',
+        type: 'STUDENT',
         description: 'Áp dụng cho học sinh, sinh viên (xuất trình thẻ).',
         originalPrice: 45000,
         sellingPrice: 45000,
@@ -390,7 +390,7 @@ const realAttractions = [
       },
       {
         name: 'Vé học sinh / sinh viên',
-        type: 'CHILD',
+        type: 'STUDENT',
         description: 'Áp dụng cho học sinh, sinh viên có thẻ.',
         originalPrice: 35000,
         sellingPrice: 35000,
@@ -834,7 +834,7 @@ const realAttractions = [
     googleQuery: 'Vietnam Museum of Ethnology Hanoi',
     ticketProducts: [
       { name: 'Vé người lớn', type: 'ADULT', description: 'Vé vào cửa khu trưng bày trong nhà và ngoài trời.', originalPrice: 40000, sellingPrice: 40000, refundPolicy: 'NON_REFUNDABLE', timeSlots: dayHalfSlots(120) },
-      { name: 'Vé sinh viên', type: 'CHILD', description: 'Áp dụng cho sinh viên (xuất trình thẻ).', originalPrice: 20000, sellingPrice: 20000, refundPolicy: 'NON_REFUNDABLE', timeSlots: dayHalfSlots(80) },
+      { name: 'Vé sinh viên', type: 'STUDENT', description: 'Áp dụng cho sinh viên (xuất trình thẻ).', originalPrice: 20000, sellingPrice: 20000, refundPolicy: 'NON_REFUNDABLE', timeSlots: dayHalfSlots(80) },
     ],
   },
   {

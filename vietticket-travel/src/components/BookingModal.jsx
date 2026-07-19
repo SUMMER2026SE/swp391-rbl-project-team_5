@@ -6,6 +6,7 @@ import { useAuth } from '../context/useAuth.js'
 import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
 import { markItineraryQueueItemReserved } from '../utils/aiItineraryBookingQueue.js'
 import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
+import { getTicketEligibilityLabel } from '../utils/ticketType.js'
 
 const formatCurrency = (value) => {
   const amount = Number(value)
@@ -74,10 +75,11 @@ const clampQuantityToLimit = (quantity, availableTickets) => {
 }
 
 const TICKET_TYPE_META = {
-  ADULT: { label: 'Vé người lớn', ageLabel: 'Áp dụng theo điều kiện của gói vé' },
-  CHILD: { label: 'Vé trẻ em', ageLabel: 'Vui lòng kiểm tra giới hạn độ tuổi trong mô tả' },
-  FAMILY: { label: 'Vé gia đình', ageLabel: 'Một vé tương ứng với một gói gia đình' },
-  GROUP: { label: 'Vé nhóm', ageLabel: 'Một vé tương ứng với một gói nhóm' },
+  ADULT: { label: 'Vé người lớn' },
+  CHILD: { label: 'Vé trẻ em' },
+  STUDENT: { label: 'Vé học sinh / sinh viên' },
+  FAMILY: { label: 'Vé gia đình' },
+  GROUP: { label: 'Vé nhóm' },
 }
 
 export default function BookingModal({
@@ -583,7 +585,7 @@ export default function BookingModal({
               </div>
 
               <TicketCountRow
-                ageLabel={ticketTypeMeta.ageLabel}
+                ageLabel={getTicketEligibilityLabel(ticketProduct)}
                 count={quantity}
                 disableIncrement={maxQuantity !== null && quantity >= maxQuantity}
                 label={ticketTypeMeta.label}

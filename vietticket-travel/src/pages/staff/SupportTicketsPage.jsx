@@ -3,6 +3,7 @@ import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import useSocket from '../../context/useSocket.js'
 import supportApi from '../../services/supportApi.js'
+import { useAuth } from '../../context/useAuth.js'
 
 const FILTERS = [
   { value: '', label: 'Tất cả' },
@@ -10,6 +11,21 @@ const FILTERS = [
   { value: 'IN_PROGRESS', label: 'Đang xử lý' },
   { value: 'RESOLVED', label: 'Đã xong' },
 ]
+
+const PRIORITIES = [
+  { value: '', label: 'Mọi mức độ' },
+  { value: 'URGENT', label: 'Khẩn cấp' },
+  { value: 'HIGH', label: 'Cao' },
+  { value: 'NORMAL', label: 'Bình thường' },
+  { value: 'LOW', label: 'Thấp' },
+]
+
+const PRIORITY_META = {
+  URGENT: { label: 'Khẩn cấp', className: 'bg-red-100 text-red-700' },
+  HIGH: { label: 'Cao', className: 'bg-orange-100 text-orange-700' },
+  NORMAL: { label: 'Bình thường', className: 'bg-blue-50 text-blue-700' },
+  LOW: { label: 'Thấp', className: 'bg-slate-100 text-slate-600' },
+}
 
 const STATUS_META = {
   OPEN: { label: 'Chờ xử lý', className: 'bg-surface-container-high text-on-surface-variant' },
@@ -40,25 +56,56 @@ function StatusBadge({ status }) {
   )
 }
 
+function PriorityBadge({ priority }) {
+  const meta = PRIORITY_META[priority] || PRIORITY_META.NORMAL
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${meta.className}`}>
+      {meta.label}
+    </span>
+  )
+}
+
 export default function SupportTicketsPage() {
   const socket = useSocket()
+  const { user } = useAuth()
   const [tickets, setTickets] = useState([])
   const [filter, setFilter] = useState('')
+  const [priority, setPriority] = useState('')
+  const [assignment, setAssignment] = useState('')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 25,
+    total: 0,
+    totalPages: 1,
+  })
+  const [stats, setStats] = useState({ OPEN: 0, IN_PROGRESS: 0, RESOLVED: 0 })
   const [activeId, setActiveId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [draft, setDraft] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [showResolve, setShowResolve] = useState(false)
+  const [resolutionCode, setResolutionCode] = useState('RESOLVED_INFORMATION')
+  const [resolutionNote, setResolutionNote] = useState('')
   const messagesEndRef = useRef(null)
 
   const loadTickets = useCallback(async () => {
     try {
-      const data = await supportApi.getAllTickets({ status: filter, search })
-      setTickets(data)
+      const result = await supportApi.getAllTickets({
+        status: filter,
+        search,
+        priority,
+        assignment,
+        page,
+      })
+      setTickets(result.data)
+      setPagination(result.pagination)
+      setStats(result.stats)
     } catch (error) {
       toast.error(error.message)
     }
-  }, [filter, search])
+  }, [assignment, filter, page, priority, search])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadTickets(), 300)
@@ -118,6 +165,11 @@ export default function SupportTicketsPage() {
     try {
       await supportApi.sendTicketMessage(activeId, text)
       setDraft('')
+      if (!detail?.assignedToId) {
+        const updated = await supportApi.getTicketDetail(activeId)
+        setDetail(updated)
+        void loadTickets()
+      }
     } catch (error) {
       toast.error(error.message)
     } finally {
@@ -126,8 +178,19 @@ export default function SupportTicketsPage() {
   }
 
   async function handleResolve() {
+    const note = resolutionNote.trim()
+    if (note.length < 10) {
+      toast.warning('Vui lòng nhập kết luận xử lý tối thiểu 10 ký tự.')
+      return
+    }
     try {
-      await supportApi.updateTicketStatus(activeId, 'RESOLVED')
+      const updated = await supportApi.updateTicketStatus(activeId, 'RESOLVED', {
+        resolutionCode,
+        resolutionNote: note,
+      })
+      setDetail((current) => (current ? { ...current, ...updated } : current))
+      setShowResolve(false)
+      setResolutionNote('')
       toast.success('Đã đánh dấu yêu cầu là đã giải quyết.')
     } catch (error) {
       toast.error(error.message)
@@ -136,7 +199,9 @@ export default function SupportTicketsPage() {
 
   async function handleClaim() {
     try {
-      await supportApi.updateTicketStatus(activeId, 'IN_PROGRESS')
+      const updated = await supportApi.updateTicketStatus(activeId, 'IN_PROGRESS')
+      setDetail((current) => (current ? { ...current, ...updated } : current))
+      void loadTickets()
       toast.success('Đã nhận xử lý ticket.')
     } catch (error) {
       toast.error(error.message)
@@ -145,6 +210,7 @@ export default function SupportTicketsPage() {
 
   const isResolved = detail?.status === 'RESOLVED'
   const isOpen = detail?.status === 'OPEN'
+  const assignedToMe = detail?.assignedToId === user?.id
   const customer = detail?.user
 
   return (
@@ -163,7 +229,10 @@ export default function SupportTicketsPage() {
                 type="search"
                 placeholder="Tìm mã ticket, khách hàng..."
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                onChange={(event) => {
+                  setSearch(event.target.value)
+                  setPage(1)
+                }}
               />
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -171,7 +240,10 @@ export default function SupportTicketsPage() {
                 <button
                   key={f.value}
                   type="button"
-                  onClick={() => setFilter(f.value)}
+                  onClick={() => {
+                    setFilter(f.value)
+                    setPage(1)
+                  }}
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
                     filter === f.value
                       ? 'bg-primary text-on-primary'
@@ -182,6 +254,37 @@ export default function SupportTicketsPage() {
                 </button>
               ))}
             </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <select
+                value={priority}
+                onChange={(event) => {
+                  setPriority(event.target.value)
+                  setPage(1)
+                }}
+                className="min-w-0 rounded-lg border border-outline-variant bg-surface px-2 py-1.5 text-xs"
+                aria-label="Lọc theo mức độ ưu tiên"
+              >
+                {PRIORITIES.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+              <select
+                value={assignment}
+                onChange={(event) => {
+                  setAssignment(event.target.value)
+                  setPage(1)
+                }}
+                className="min-w-0 rounded-lg border border-outline-variant bg-surface px-2 py-1.5 text-xs"
+                aria-label="Lọc theo người phụ trách"
+              >
+                <option value="">Mọi phân công</option>
+                <option value="MINE">Của tôi</option>
+                <option value="UNASSIGNED">Chưa nhận</option>
+              </select>
+            </div>
+            <p className="mt-2 text-[11px] text-on-surface-variant">
+              Chờ {stats.OPEN || 0} · Đang xử lý {stats.IN_PROGRESS || 0} · Đã xong {stats.RESOLVED || 0}
+            </p>
           </div>
           <div className="flex-1 overflow-y-auto">
             {tickets.length === 0 ? (
@@ -208,6 +311,12 @@ export default function SupportTicketsPage() {
                         <StatusBadge status={ticket.status} />
                       </div>
                       <div className="flex items-center justify-between gap-2">
+                        <PriorityBadge priority={ticket.priority} />
+                        <span className="truncate text-[10px] text-on-surface-variant">
+                          {ticket.assignedTo?.fullName || 'Chưa phân công'}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
                         <span className="truncate text-xs text-on-surface-variant">
                           {ticket.user?.fullName || 'Khách'} · {last?.message || ''}
                         </span>
@@ -222,6 +331,29 @@ export default function SupportTicketsPage() {
                 })
             )}
           </div>
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-outline-variant px-3 py-2">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                className="rounded-lg border border-outline-variant px-2 py-1 text-xs font-semibold disabled:opacity-40"
+              >
+                Trước
+              </button>
+              <span className="text-xs text-on-surface-variant">
+                {pagination.page}/{pagination.totalPages} · {pagination.total} ticket
+              </span>
+              <button
+                type="button"
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((current) => Math.min(pagination.totalPages, current + 1))}
+                className="rounded-lg border border-outline-variant px-2 py-1 text-xs font-semibold disabled:opacity-40"
+              >
+                Sau
+              </button>
+            </div>
+          )}
         </section>
 
         {/* Khung hội thoại */}
@@ -238,6 +370,14 @@ export default function SupportTicketsPage() {
                   <p className="text-xs text-on-surface-variant">
                     {customer?.fullName} · {customer?.email}
                   </p>
+                  <p className="mt-1 text-xs font-semibold text-primary">
+                    {detail.assignedTo
+                      ? `Phụ trách: ${detail.assignedTo.fullName}`
+                      : 'Chưa có nhân viên phụ trách'}
+                  </p>
+                  <div className="mt-2">
+                    <PriorityBadge priority={detail.priority} />
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {isOpen && (
@@ -250,10 +390,14 @@ export default function SupportTicketsPage() {
                       Nhận xử lý
                     </button>
                   )}
-                  {!isResolved && (
+                  {!isResolved && assignedToMe && (
                     <button
                       type="button"
-                      onClick={() => void handleResolve()}
+                      onClick={() => {
+                        setResolutionCode('RESOLVED_INFORMATION')
+                        setResolutionNote('')
+                        setShowResolve(true)
+                      }}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary transition hover:opacity-90"
                     >
                       <span className="material-symbols-outlined text-[16px]">task_alt</span>
@@ -292,8 +436,11 @@ export default function SupportTicketsPage() {
               </div>
 
               {isResolved ? (
-                <div className="border-t border-outline-variant bg-surface px-5 py-4 text-center text-sm text-on-surface-variant">
-                  Yêu cầu đã được đóng.
+                <div className="border-t border-outline-variant bg-surface px-5 py-4 text-sm text-on-surface-variant">
+                  <p className="font-semibold text-on-surface">Yêu cầu đã được giải quyết.</p>
+                  {detail.resolutionNote && (
+                    <p className="mt-1 whitespace-pre-wrap">{detail.resolutionNote}</p>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-end gap-2 border-t border-outline-variant bg-surface px-5 py-4">
@@ -301,6 +448,7 @@ export default function SupportTicketsPage() {
                     className="max-h-32 min-h-11 flex-1 resize-none rounded-xl border border-outline-variant bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary"
                     placeholder="Nhập phản hồi... (Enter để gửi)"
                     value={draft}
+                    disabled={Boolean(detail.assignedToId && !assignedToMe)}
                     onChange={(event) => setDraft(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
@@ -312,7 +460,11 @@ export default function SupportTicketsPage() {
                   <button
                     type="button"
                     onClick={() => void handleSend()}
-                    disabled={isSending || !draft.trim()}
+                    disabled={
+                      isSending
+                      || !draft.trim()
+                      || Boolean(detail.assignedToId && !assignedToMe)
+                    }
                     className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-on-primary disabled:opacity-50"
                     aria-label="Gửi"
                   >
@@ -342,6 +494,70 @@ export default function SupportTicketsPage() {
           </aside>
         )}
       </div>
+
+      {showResolve && detail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowResolve(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="resolve-ticket-title"
+            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id="resolve-ticket-title" className="text-xl font-bold text-on-surface">
+              Kết luận yêu cầu hỗ trợ
+            </h3>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              Chỉ đóng ticket sau khi đã phản hồi khách và ghi rõ kết quả cuối cùng.
+            </p>
+            <label className="mt-5 block text-sm font-semibold text-on-surface">
+              Kết quả xử lý
+              <select
+                value={resolutionCode}
+                onChange={(event) => setResolutionCode(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-outline-variant px-3 py-2.5"
+              >
+                <option value="RESOLVED_INFORMATION">Đã cung cấp thông tin</option>
+                <option value="REFUND_GUIDANCE">Đã hướng dẫn hoàn tiền</option>
+                <option value="TECHNICAL_FIXED">Đã khắc phục lỗi kỹ thuật</option>
+                <option value="PARTNER_FOLLOW_UP">Đã chuyển đối tác xử lý</option>
+                <option value="OTHER">Kết quả khác</option>
+              </select>
+            </label>
+            <label className="mt-4 block text-sm font-semibold text-on-surface">
+              Kết luận chi tiết
+              <textarea
+                value={resolutionNote}
+                onChange={(event) => setResolutionNote(event.target.value)}
+                maxLength={2000}
+                rows={5}
+                placeholder="Nêu việc đã kiểm tra, hướng xử lý và thông tin đã phản hồi cho khách."
+                className="mt-2 w-full resize-none rounded-xl border border-outline-variant px-3 py-2.5"
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowResolve(false)}
+                className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={resolutionNote.trim().length < 10}
+                onClick={() => void handleResolve()}
+                className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50"
+              >
+                Xác nhận giải quyết
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AdminLayout>
   )
 }

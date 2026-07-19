@@ -809,6 +809,7 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  margin-left: auto;
 }
 
 .admin-header__icon-btn {
@@ -2285,20 +2286,23 @@
 }
 
 .financial-status--approved,
-.financial-status--success {
+.financial-status--success,
+.financial-status--paid {
   background: rgba(0, 96, 104, 0.1);
   color: var(--adm-primary-dark);
 }
 
 .financial-status--pending,
-.financial-status--processing {
+.financial-status--processing,
+.financial-status--draft {
   background: rgba(124, 88, 0, 0.12);
   color: #6b4c00;
 }
 
 .financial-status--rejected,
 .financial-status--suspended,
-.financial-status--failed {
+.financial-status--failed,
+.financial-status--cancelled {
   background: rgba(186, 26, 26, 0.1);
   color: var(--adm-error);
 }
