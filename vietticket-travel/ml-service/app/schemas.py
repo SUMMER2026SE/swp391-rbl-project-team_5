@@ -32,7 +32,6 @@ class ForecastRequest(BaseModel):
     avg_ticket_price: float = Field(ge=0, default=0)
     rating: float = Field(ge=0, le=5, default=0)
     num_reviews: int = Field(ge=0, default=0)
-    published_days_ago: int = Field(ge=0, default=0)
     # Lịch sử doanh thu theo ngày, SẮP XẾP TĂNG DẦN theo date.
     # Nên cung cấp tối thiểu ~35 ngày gần nhất để tính đủ lag/rolling features;
     # nếu ít hơn, model vẫn chạy được nhưng độ chính xác sẽ thấp hơn.

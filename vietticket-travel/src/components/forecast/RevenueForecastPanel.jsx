@@ -161,8 +161,8 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
             />
             <StatCard
               label="Phương pháp"
-              value={`${data.methodSummary?.ai || 0} AI · ${data.methodSummary?.baseline || 0} baseline`}
-              note="Baseline được dùng khi dữ liệu thực chưa đủ hoặc AI gián đoạn"
+              value={`${data.methodSummary?.ai || 0} AI thật · ${data.methodSummary?.demoAi || 0} AI demo · ${data.methodSummary?.baseline || 0} baseline`}
+              note="AI demo dùng booking mô phỏng; baseline dùng khi dữ liệu chưa đủ hoặc AI gián đoạn"
             />
           </div>
 
@@ -172,6 +172,17 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
               <span>
                 Có {data.methodSummary.baseline} điểm đang dùng baseline theo thứ trong tuần và
                 xu hướng 28 ngày. Các điểm này không được trình bày như kết quả của model AI.
+              </span>
+            </div>
+          )}
+
+          {(data.methodSummary?.demoAi || 0) > 0 && (
+            <div className="flex items-start gap-2 rounded-lg border border-[#b7d9e8] bg-[#eef8fc] px-4 py-3 text-xs leading-5 text-[#164e63]">
+              <span className="material-symbols-outlined mt-0.5 text-[18px]">science</span>
+              <span>
+                Có {data.methodSummary.demoAi} điểm đang chạy model AI bằng booking mô phỏng
+                để trình diễn pipeline local. Kết quả không phải cam kết doanh thu hoặc bằng chứng
+                độ chính xác trên giao dịch thực.
               </span>
             </div>
           )}

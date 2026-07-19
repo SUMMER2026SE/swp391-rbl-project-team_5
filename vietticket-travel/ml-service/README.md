@@ -41,6 +41,27 @@ Model không được gọi nếu một điểm chưa có ít nhất 14 ngày ph
 và 30 booking hoàn tất. Khi đó backend hiển thị rõ `HISTORICAL_BASELINE`, không
 gắn nhãn kết quả AI.
 
+## Chạy pipeline demo local
+
+Khi database local chưa có đủ giao dịch, tạo booking mô phỏng được đánh dấu rõ:
+
+```bash
+cd backend
+npm run db:seed:forecast-demo
+node scripts/export_booking_history.js
+
+cd ../ml-service
+python -m app.train \
+  --data data/booking_history.csv \
+  --training-source demo_booking_history \
+  --model-version demo-booking-v1
+```
+
+Đặt `ALLOW_DEMO_AI=true` trong `backend/.env`, rồi restart backend và ML service.
+Kết quả được trả bằng phương pháp `AI_DEMO_ENSEMBLE` và giao diện luôn hiển thị
+cảnh báo. Script seed bị chặn ở production, chỉ sở hữu các booking có marker
+`FORECAST_DEMO_V1`, và có thể tạo lại bằng `npm run db:seed:forecast-demo -- --reset`.
+
 ## Retrain bằng dữ liệu thật
 
 Training không được mở thành endpoint HTTP vì tác vụ nặng, dễ bị lạm dụng và có
@@ -72,7 +93,8 @@ python -m app.train \
 Synthetic data không phải bằng chứng về độ chính xác thực tế. Metadata của model
 ghi rõ `training_source`; cần thay bằng dữ liệu thật khi lịch sử đủ dài.
 Backend chỉ gắn nhãn `AI_ENSEMBLE` khi `training_source=real_booking_history`;
-model bootstrap tổng hợp sẽ tự động chuyển sang baseline và hiển thị cảnh báo.
+`demo_booking_history` chỉ được dùng ngoài production khi đã bật cờ và mang nhãn
+`AI_DEMO_ENSEMBLE`; model bootstrap tổng hợp luôn chuyển sang baseline.
 
 ## Thiết kế model
 
@@ -81,6 +103,8 @@ model bootstrap tổng hợp sẽ tự động chuyển sang baseline và hiển
 - Feature lịch: thứ, tháng, cuối tuần, ngày lễ Việt Nam và giai đoạn Tết.
 - Feature động: lag 1/7/14 ngày, rolling mean 7/28 ngày, rolling standard
   deviation 7 ngày.
+- Không dùng tuổi xuất bản của điểm tham quan làm feature vì catalog cũ có thể
+  thiếu `publishedAt`; điều này tránh lệch train-serving và tương quan giả.
 - Chia train/validation theo thời gian, không random split.
 - Khoảng dự báo nới rộng theo horizon.
 - Backend chặn kết quả âm và không cho doanh thu/số vé dự kiến vượt sức chứa.

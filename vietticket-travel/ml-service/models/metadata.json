@@ -1,22 +1,18 @@
 {
-  "model_version": "synthetic-bootstrap-v2",
-  "trained_at": "2026-07-19T07:19:00.504180+00:00",
+  "model_version": "demo-booking-v4",
+  "trained_at": "2026-07-19T07:43:06.676144+00:00",
   "city_freq_map": {
-    "Hà Nội": 0.25,
-    "TP. Hồ Chí Minh": 0.24,
-    "Đà Nẵng": 0.19,
-    "Nha Trang": 0.11,
-    "Đà Lạt": 0.075,
-    "Hội An": 0.07,
-    "Huế": 0.065
+    "Ninh Bình": 0.3333333333333333,
+    "Kiên Giang": 0.3333333333333333,
+    "Bà Rịa - Vũng Tàu": 0.3333333333333333
   },
-  "residual_std": 0.3166055331994179,
+  "residual_std": 0.20737779789907387,
   "metrics": {
-    "mape_observed_days": 24.675312626699064,
-    "wape": 25.803248132519524,
-    "mae": 3978838.915142608,
-    "num_train_samples": 58400,
-    "num_test_samples": 14600,
-    "training_source": "synthetic_bootstrap"
+    "mape_observed_days": 17.516096447706346,
+    "wape": 14.768145859778054,
+    "mae": 328776.69013400865,
+    "num_train_samples": 876,
+    "num_test_samples": 219,
+    "training_source": "demo_booking_history"
   }
 }

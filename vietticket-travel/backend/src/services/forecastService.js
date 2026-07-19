@@ -18,6 +18,10 @@ function positiveInteger(value, fallback, minimum, maximum) {
 
 const ML_SERVICE_URL = String(process.env.ML_SERVICE_URL || 'http://localhost:8000').replace(/\/+$/, '');
 const ML_SERVICE_API_KEY = String(process.env.ML_SERVICE_API_KEY || '').trim();
+const ALLOW_DEMO_AI = process.env.NODE_ENV !== 'production'
+  && ['1', 'true', 'yes'].includes(
+    String(process.env.ALLOW_DEMO_AI || '').trim().toLowerCase(),
+  );
 const ML_REQUEST_TIMEOUT_MS = positiveInteger(
   process.env.ML_SERVICE_TIMEOUT_MS,
   8000,
@@ -36,6 +40,25 @@ const HISTORY_LOOKBACK_DAYS = positiveInteger(
   56,
   730,
 );
+
+function resolveTrainingSourceMode(
+  trainingSource,
+  allowDemoAi = ALLOW_DEMO_AI,
+) {
+  if (trainingSource === 'real_booking_history') {
+    return {
+      method: 'AI_ENSEMBLE',
+      warning: null,
+    };
+  }
+  if (trainingSource === 'demo_booking_history' && allowDemoAi) {
+    return {
+      method: 'AI_DEMO_ENSEMBLE',
+      warning: 'Model AI đang dùng booking mô phỏng để trình diễn pipeline local. Không sử dụng kết quả này làm cam kết doanh thu hoặc bằng chứng độ chính xác thực tế.',
+    };
+  }
+  return null;
+}
 
 function vietnamDateKey(date = new Date()) {
   return new Date(date.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10);
@@ -202,7 +225,6 @@ async function getAttractionForecastFeatures(attractionId) {
       defaultCapacity: true,
       averageRating: true,
       totalReviews: true,
-      publishedAt: true,
       minTicketPrice: true,
       partnerId: true,
       status: true,
@@ -221,13 +243,6 @@ async function getAttractionForecastFeatures(attractionId) {
   const activePrices = attraction.ticketProducts.map((product) => Number(product.sellingPrice));
   const catalogAvgTicketPrice = median(activePrices)
     || finiteMoney(attraction.minTicketPrice);
-  const publishedDaysAgo = attraction.publishedAt
-    ? Math.max(
-        0,
-        Math.floor((Date.now() - new Date(attraction.publishedAt).getTime()) / DAY_MS),
-      )
-    : 0;
-
   return {
     id: attraction.id,
     title: attraction.title,
@@ -238,7 +253,6 @@ async function getAttractionForecastFeatures(attractionId) {
     tier: derivePriceTier(catalogAvgTicketPrice),
     rating: Number(attraction.averageRating || 0),
     numReviews: Number(attraction.totalReviews || 0),
-    publishedDaysAgo,
     isForecastable:
       !attraction.archivedAt
       && attraction.status === 'APPROVED'
@@ -293,7 +307,6 @@ async function callMlServiceForecast(features, history, forecastDays) {
         avg_ticket_price: features.effectiveAvgTicketPrice,
         rating: features.rating,
         num_reviews: features.numReviews,
-        published_days_ago: features.publishedDaysAgo,
         history: history.map((point) => ({
           date: point.date,
           revenue: point.revenue,
@@ -430,6 +443,7 @@ function buildFallbackForecast(history, forecastDays, features, reason) {
   return {
     forecast,
     modelVersion: FALLBACK_MODEL_VERSION,
+    trainingSource: 'historical_baseline',
     usedFallback: true,
     method: 'HISTORICAL_BASELINE',
     warning: reason,
@@ -438,13 +452,18 @@ function buildFallbackForecast(history, forecastDays, features, reason) {
 
 function mapStoredRows(attractionId, rows) {
   const first = rows[0];
+  const trainingSource = String(first.trainingSource || 'unknown');
+  const isDemoModel = trainingSource === 'demo_booking_history';
   return {
     attractionId,
     modelVersion: first.modelVersion,
+    trainingSource,
     generatedAt: first.generatedAt,
     fromCache: true,
     usedFallback: Boolean(first.usedFallback),
-    method: first.usedFallback ? 'HISTORICAL_BASELINE' : 'AI_ENSEMBLE',
+    method: first.usedFallback
+      ? 'HISTORICAL_BASELINE'
+      : isDemoModel ? 'AI_DEMO_ENSEMBLE' : 'AI_ENSEMBLE',
     dataBasis: FORECAST_DATA_BASIS,
     dataQuality: {
       lookbackDays: first.historyDays,
@@ -457,7 +476,9 @@ function mapStoredRows(attractionId, rows) {
     },
     warning: first.usedFallback
       ? 'Dự báo đang dùng baseline lịch sử do dữ liệu chưa đủ hoặc dịch vụ AI chưa sẵn sàng.'
-      : null,
+      : isDemoModel
+        ? 'Model AI này được huấn luyện bằng booking mô phỏng để kiểm thử kỹ thuật, không phải bằng chứng độ chính xác kinh doanh thực tế.'
+        : null,
     forecast: rows.map((row) => ({
       date: row.forecastDate.toISOString().slice(0, 10),
       predictedRevenue: Number(row.predictedRevenue),
@@ -538,6 +559,7 @@ async function persistForecast(
       confidenceLower: point.confidenceLower,
       confidenceUpper: point.confidenceUpper,
       modelVersion: result.modelVersion,
+      trainingSource: result.trainingSource,
       usedFallback: result.usedFallback,
       historyDays: dataQuality.lookbackDays,
       observedDays: dataQuality.observedDays,
@@ -550,6 +572,7 @@ async function persistForecast(
       confidenceLower: point.confidenceLower,
       confidenceUpper: point.confidenceUpper,
       modelVersion: result.modelVersion,
+      trainingSource: result.trainingSource,
       usedFallback: result.usedFallback,
       historyDays: dataQuality.lookbackDays,
       observedDays: dataQuality.observedDays,
@@ -611,7 +634,8 @@ async function getForecastForAttraction(
         history,
         normalizedDays,
       );
-      if (mlResult.training_source !== 'real_booking_history') {
+      const modelMode = resolveTrainingSourceMode(mlResult.training_source);
+      if (!modelMode) {
         result = buildFallbackForecast(
           history,
           normalizedDays,
@@ -627,9 +651,10 @@ async function getForecastForAttraction(
             features,
           ),
           modelVersion: String(mlResult.model_version || 'unknown'),
+          trainingSource: mlResult.training_source,
           usedFallback: false,
-          method: 'AI_ENSEMBLE',
-          warning: mlResult.warning || null,
+          method: modelMode.method,
+          warning: modelMode.warning || mlResult.warning || null,
         };
       }
     } catch (error) {
@@ -651,6 +676,7 @@ async function getForecastForAttraction(
     attractionId,
     attractionTitle: features.title,
     modelVersion: result.modelVersion,
+    trainingSource: result.trainingSource,
     generatedAt,
     fromCache: false,
     usedFallback: result.usedFallback,
@@ -669,6 +695,7 @@ module.exports = {
   getAttractionForecastFeatures,
   getDailyRevenueHistory,
   getForecastForAttraction,
+  resolveTrainingSourceMode,
   summarizeHistory,
   vietnamDateKey,
 };

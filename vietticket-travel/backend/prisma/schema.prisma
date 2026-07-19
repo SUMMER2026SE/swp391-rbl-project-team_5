@@ -957,6 +957,7 @@ model RevenueForecast {
   confidenceUpper  Decimal? @db.Decimal(14, 2) // Cận trên khoảng tin cậy
   actualRevenue    Decimal? @db.Decimal(14, 2) // Doanh thu thuần thực tế sau khi ngày tham quan kết thúc
   modelVersion     String // Phiên bản model hoặc phương pháp fallback
+  trainingSource   String   @default("unknown") // real_booking_history, demo_booking_history hoặc historical_baseline
   usedFallback     Boolean  @default(false)
   historyDays      Int      @default(0)
   observedDays     Int      @default(0)

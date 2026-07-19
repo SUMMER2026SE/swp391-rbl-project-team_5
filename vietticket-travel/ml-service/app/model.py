@@ -160,7 +160,6 @@ def forecast_recursive(
     avg_ticket_price: float,
     rating: float,
     num_reviews: int,
-    published_days_ago: int,
     history: List[dict],  # [{date, revenue, tickets}], sorted ascending
     forecast_days: int,
 ) -> List[ForecastDayResult]:
@@ -177,7 +176,6 @@ def forecast_recursive(
 
     results: List[ForecastDayResult] = []
     working_revenue = list(history_revenue)
-    working_published_days_ago = published_days_ago
 
     for step in range(1, forecast_days + 1):
         target_date = last_date + timedelta(days=step)
@@ -190,7 +188,6 @@ def forecast_recursive(
             avg_ticket_price=avg_ticket_price,
             rating=rating,
             num_reviews=num_reviews,
-            published_days_ago=working_published_days_ago + step,
         )
         X = feat.rows_to_dataframe([row])
         pred_log = model.predict_log(X)[0]

@@ -114,6 +114,7 @@ function summarizeOverview(results, forecastDays) {
     timeline,
     methodSummary: {
       ai: successful.filter((result) => result.method === 'AI_ENSEMBLE').length,
+      demoAi: successful.filter((result) => result.method === 'AI_DEMO_ENSEMBLE').length,
       baseline: successful.filter((result) => result.usedFallback).length,
     },
     dataBasis: forecastService.FORECAST_DATA_BASIS,
@@ -140,6 +141,7 @@ async function forecastAttractions(attractions, forecastDays) {
           city: attraction.city,
           partnerId: attraction.partnerId,
           modelVersion: result.modelVersion,
+          trainingSource: result.trainingSource,
           method: result.method,
           usedFallback: result.usedFallback,
           warning: result.warning || null,

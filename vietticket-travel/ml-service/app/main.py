@@ -102,7 +102,6 @@ def forecast(payload: ForecastRequest, _auth: bool = Depends(require_api_key)):
         avg_ticket_price=payload.avg_ticket_price,
         rating=payload.rating,
         num_reviews=payload.num_reviews,
-        published_days_ago=payload.published_days_ago,
         history=history,
         forecast_days=payload.forecast_days,
     )

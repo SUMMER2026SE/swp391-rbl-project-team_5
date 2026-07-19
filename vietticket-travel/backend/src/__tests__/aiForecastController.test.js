@@ -95,7 +95,7 @@ describe('aiForecastController', () => {
       data: expect.objectContaining({
         totalPredictedRevenue: 1000000,
         successfulAttractions: 1,
-        methodSummary: { ai: 1, baseline: 0 },
+          methodSummary: { ai: 1, demoAi: 0, baseline: 0 },
       }),
     });
   });
@@ -132,7 +132,7 @@ describe('aiForecastController', () => {
       success: true,
       data: expect.objectContaining({
         totalPredictedRevenue: 1500000,
-        methodSummary: { ai: 1, baseline: 1 },
+          methodSummary: { ai: 1, demoAi: 0, baseline: 1 },
         timeline: [{
           date: '2026-07-20',
           predictedRevenue: 1500000,

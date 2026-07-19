@@ -11,7 +11,6 @@ Feature list (per attraction-day):
   - tier_encoded (BUDGET=0..LUXURY=3, thứ tự hạng vé)
   - city_encoded (frequency encoding trên tập train, xem model.py)
   - capacity, avg_ticket_price, rating, num_reviews
-  - published_days_ago (attraction càng mới, biến động doanh thu càng lớn)
   - lag_1, lag_7, lag_14 (doanh thu ngày trước đó / 7 / 14 ngày trước)
   - roll_mean_7, roll_mean_28, roll_std_7 (trung bình/độ lệch trượt)
 
@@ -44,7 +43,6 @@ FEATURE_COLUMNS = [
     "avg_ticket_price",
     "rating",
     "num_reviews",
-    "published_days_ago",
     "lag_1",
     "lag_7",
     "lag_14",
@@ -101,7 +99,6 @@ def static_attraction_features(
     avg_ticket_price: float,
     rating: float,
     num_reviews: int,
-    published_days_ago: int,
 ) -> dict:
     return {
         "tier_encoded": TIER_ORDER.get(tier, 1),
@@ -110,7 +107,6 @@ def static_attraction_features(
         "avg_ticket_price": avg_ticket_price,
         "rating": rating,
         "num_reviews": num_reviews,
-        "published_days_ago": published_days_ago,
     }
 
 
@@ -123,14 +119,13 @@ def build_feature_row(
     avg_ticket_price: float,
     rating: float,
     num_reviews: int,
-    published_days_ago: int,
 ) -> dict:
     row = {}
     row.update(calendar_features(target_date))
     row.update(lag_and_rolling_features(history_revenue))
     row.update(
         static_attraction_features(
-            tier, city_encoded, capacity, avg_ticket_price, rating, num_reviews, published_days_ago
+            tier, city_encoded, capacity, avg_ticket_price, rating, num_reviews
         )
     )
     return row

@@ -42,14 +42,13 @@ def _add_calendar_and_static_features(merged: pd.DataFrame) -> pd.DataFrame:
             avg_ticket_price=r["avg_ticket_price"],
             rating=r["rating"],
             num_reviews=r["num_reviews"],
-            published_days_ago=r["published_days_ago"] + r["day_offset"],
         ),
         axis=1,
     )
     static_df = pd.DataFrame(list(static_rows), index=merged.index)
 
     # static_df recompute (tier_encoded, city_encoded, capacity, avg_ticket_price,
-    # rating, num_reviews, published_days_ago) từ các cột thô cùng tên trong
+    # rating, num_reviews) từ các cột thô cùng tên trong
     # merged - phải drop bản thô trước khi concat để tránh trùng tên cột
     # (pandas sẽ âm thầm bỏ cột trùng khi to_dict("records"), gây lệch feature).
     overlap = [c for c in static_df.columns if c in merged.columns]
@@ -139,7 +138,6 @@ def load_training_csv(path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
         "avg_ticket_price",
         "rating",
         "num_reviews",
-        "published_days_ago",
         "revenue",
         "tickets",
     }
@@ -160,7 +158,6 @@ def load_training_csv(path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
         "avg_ticket_price",
         "rating",
         "num_reviews",
-        "published_days_ago",
     ]
     attractions = raw[attraction_columns].drop_duplicates("attraction_id", keep="first")
     revenue = raw[["attraction_id", "date", "revenue", "tickets"]].copy()
@@ -239,6 +236,15 @@ def main():
     parser = argparse.ArgumentParser(description="Train ensemble revenue forecast model")
     parser.add_argument("--model-dir", default="./models")
     parser.add_argument("--model-version", default="rf_xgb_ensemble_v1")
+    parser.add_argument(
+        "--training-source",
+        choices=["real_booking_history", "demo_booking_history"],
+        default="real_booking_history",
+        help=(
+            "Nguồn của CSV. Dùng demo_booking_history cho dữ liệu seed/mô phỏng; "
+            "không được gắn nhãn dữ liệu demo là booking thật."
+        ),
+    )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--data", help="CSV lịch sử thực do backend export")
     source.add_argument(
@@ -252,7 +258,7 @@ def main():
 
     if args.data:
         attractions, revenue = load_training_csv(args.data)
-        training_source = "real_booking_history"
+        training_source = args.training_source
     else:
         attractions, revenue = generate_synthetic_dataset(
             num_attractions=args.num_attractions,

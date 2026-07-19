@@ -114,7 +114,6 @@ async function main() {
       minTicketPrice: true,
       averageRating: true,
       totalReviews: true,
-      publishedAt: true,
       ticketProducts: {
         where: { status: 'ACTIVE', archivedAt: null },
         select: { sellingPrice: true },
@@ -223,7 +222,6 @@ async function main() {
     'avg_ticket_price',
     'rating',
     'num_reviews',
-    'published_days_ago',
     'revenue',
     'tickets',
   ];
@@ -234,15 +232,6 @@ async function main() {
       attraction.ticketProducts.map((product) => product.sellingPrice),
     ) || amountOf(attraction.minTicketPrice);
     if (catalogPrice <= 0) continue;
-
-    const publishedAtStart = attraction.publishedAt
-      ? Math.max(0, Math.floor(
-        (
-          dateOnly(startKey).getTime()
-          - new Date(attraction.publishedAt).getTime()
-        ) / DAY_MS,
-      ))
-      : 0;
 
     for (let index = 0; index < LOOKBACK_DAYS; index += 1) {
       const date = addDays(startKey, index);
@@ -257,7 +246,6 @@ async function main() {
         Math.round(catalogPrice),
         Number(attraction.averageRating || 0),
         Number(attraction.totalReviews || 0),
-        publishedAtStart,
         Math.round(sample.revenue),
         Number(sample.tickets || 0),
       ];

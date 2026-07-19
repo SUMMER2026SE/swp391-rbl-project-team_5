@@ -95,6 +95,23 @@ describe('forecastService', () => {
     expect(derivePriceTier(900000)).toBe('LUXURY');
   });
 
+  test('chỉ cho phép model demo khi local bật cờ và luôn giữ nhãn riêng', () => {
+    const { resolveTrainingSourceMode } = require('../services/forecastService');
+
+    expect(resolveTrainingSourceMode('real_booking_history', false)).toEqual({
+      method: 'AI_ENSEMBLE',
+      warning: null,
+    });
+    expect(resolveTrainingSourceMode('demo_booking_history', false)).toBeNull();
+    expect(resolveTrainingSourceMode('synthetic_bootstrap', true)).toBeNull();
+    expect(resolveTrainingSourceMode('demo_booking_history', true)).toEqual(
+      expect.objectContaining({
+        method: 'AI_DEMO_ENSEMBLE',
+        warning: expect.stringMatching(/booking mô phỏng/i),
+      }),
+    );
+  });
+
   test('không gọi AI khi dữ liệu thực chưa đủ và công khai phương pháp baseline', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue(activeAttraction());
     mockPrisma.booking.findMany.mockResolvedValue([]);
@@ -178,6 +195,7 @@ describe('forecastService', () => {
       confidenceLower: 1500000,
       confidenceUpper: 2500000,
       modelVersion: 'rf_xgb_real_v2',
+      trainingSource: 'real_booking_history',
       usedFallback: false,
       historyDays: 180,
       observedDays: 60,
