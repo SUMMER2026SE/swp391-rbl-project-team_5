@@ -27,6 +27,9 @@ router.get('/me', partnerController.getMyPartner);
 // Mọi thao tác nghiệp vụ bên dưới chỉ dành cho đối tác đã được duyệt.
 router.use(requireApprovedPartner);
 
+const { partnerForecastRouter } = require('./forecastRoutes');
+router.use(partnerForecastRouter);
+
 // Hồ sơ & tổng quan
 router.put('/settings', partnerController.updateSettings);
 router.get('/dashboard', partnerController.getDashboard);

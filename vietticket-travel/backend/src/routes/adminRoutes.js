@@ -20,7 +20,11 @@ const reviewController = require('../controllers/reviewController');
 
 const router = express.Router();
 
-router.use(protect, restrictTo('ADMIN'));
+router.use(protect);
+router.use(restrictTo('ADMIN'));
+
+// const { adminForecastRouter } = require('./forecastRoutes');
+// router.use(adminForecastRouter);
 
 router.get('/users', getUsers);
 router.get('/dashboard', getDashboard);

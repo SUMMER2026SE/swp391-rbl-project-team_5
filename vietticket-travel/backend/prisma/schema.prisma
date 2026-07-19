@@ -137,6 +137,16 @@ enum PartnerStatus {
   SUSPENDED
 }
 
+// Phân khúc giá của điểm tham quan - dùng làm feature cho AI dự báo doanh thu
+// (thay cho one-hot toàn bộ attractionId, giúp model tổng quát hoá tốt hơn
+// với điểm tham quan mới/ít dữ liệu lịch sử).
+enum AttractionTier {
+  BUDGET // Vé bình dân, giá trung bình thấp
+  STANDARD // Phổ thông
+  PREMIUM // Cao cấp
+  LUXURY // Hạng sang, giá vé rất cao
+}
+
 enum AttractionStatus {
   DRAFT
   PENDING
@@ -290,6 +300,7 @@ model Attraction {
   requiresManualApproval Boolean                     @default(false) // Đơn đặt vé cần đối tác duyệt thủ công
   latitude               Float?
   longitude              Float?
+  tier                   AttractionTier              @default(STANDARD) // Phân khúc giá dùng làm feature cho AI dự báo doanh thu
   status                 AttractionStatus            @default(DRAFT)
   publicationStatus      AttractionPublicationStatus @default(PAUSED)
   rejectionReason        String?
@@ -318,6 +329,7 @@ model Attraction {
 
   dailyStocks      AttractionDailyStock[]
   staffAssignments StaffAttractionAssignment[]
+  revenueForecasts RevenueForecast[]
 
   @@index([city])
   @@index([status])
@@ -763,3 +775,38 @@ model SavedItinerary {
   @@index([userId])
   @@index([createdAt])
 }
+
+// ============================================================
+// AI Revenue Forecasting
+// ------------------------------------------------------------
+// Kết quả dự báo doanh thu theo attraction + ngày, do ml-service
+// (FastAPI, ensemble RandomForest + XGBoost) sinh ra. Node backend
+// gọi ml-service, nhận kết quả rồi lưu (upsert) vào bảng này để:
+//   - Không phải gọi lại ml-service mỗi lần Admin/Partner xem dashboard
+//   - Lưu vết modelVersion để so sánh khi retrain
+//   - Sau khi qua ngày dự báo, actualRevenue được điền vào (job định kỳ)
+//     để tính lại sai số thực tế (MAPE) phục vụ theo dõi chất lượng model
+// Quyền xem: chỉ ADMIN (toàn nền tảng) và PARTNER (chỉ attraction của
+// chính mình) - STAFF không có quyền xem dự báo doanh thu.
+// ============================================================
+model RevenueForecast {
+  id                String   @id @default(uuid())
+  attractionId      String
+  forecastDate      DateTime @db.Date // Ngày được dự báo doanh thu
+  predictedRevenue  Decimal  @db.Decimal(14, 2)
+  predictedBookings Int      @default(0)
+  confidenceLower   Decimal? @db.Decimal(14, 2) // Cận dưới khoảng tin cậy
+  confidenceUpper   Decimal? @db.Decimal(14, 2) // Cận trên khoảng tin cậy
+  actualRevenue     Decimal? @db.Decimal(14, 2) // Điền sau khi qua ngày forecastDate, để tính sai số thực tế
+  modelVersion      String // Định danh phiên bản model đã sinh ra dự báo này (vd "rf_xgb_ensemble_v1")
+  generatedAt       DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+
+  @@unique([attractionId, forecastDate, modelVersion])
+  @@index([attractionId])
+  @@index([forecastDate])
+}
+
