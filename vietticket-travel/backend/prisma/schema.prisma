@@ -374,6 +374,7 @@ model Attraction {
 
   dailyStocks      AttractionDailyStock[]
   staffAssignments StaffAttractionAssignment[]
+  revenueForecasts RevenueForecast[]
 
   @@index([city])
   @@index([status])
@@ -932,4 +933,43 @@ model SavedItinerary {
   @@unique([userId, planId])
   @@index([userId])
   @@index([createdAt])
+}
+
+// ============================================================
+// AI Revenue Forecasting
+// ------------------------------------------------------------
+// Kết quả dự báo doanh thu thuần được ghi nhận theo điểm tham quan + ngày
+// sử dụng dịch vụ. Node backend tổng hợp cùng một định nghĩa doanh thu với
+// báo cáo đối tác, gọi ml-service và lưu kết quả gần nhất để:
+//   - Không phải gọi lại ml-service mỗi lần Admin/Partner xem dashboard
+//   - Công khai phiên bản/phương pháp dự báo và mức độ tin cậy
+//   - Đối chiếu actualRevenue sau ngày sử dụng để theo dõi chất lượng
+// Quyền xem: chỉ ADMIN (toàn nền tảng) và PARTNER (chỉ attraction của
+// chính mình) - STAFF không có quyền xem dự báo doanh thu.
+// ============================================================
+model RevenueForecast {
+  id               String   @id @default(uuid())
+  attractionId     String
+  forecastDate     DateTime @db.Date // Ngày được dự báo doanh thu
+  predictedRevenue Decimal  @db.Decimal(14, 2) // Doanh thu thuần dự kiến trước hoa hồng
+  predictedTickets Int      @default(0)
+  confidenceLower  Decimal? @db.Decimal(14, 2) // Cận dưới khoảng tin cậy
+  confidenceUpper  Decimal? @db.Decimal(14, 2) // Cận trên khoảng tin cậy
+  actualRevenue    Decimal? @db.Decimal(14, 2) // Doanh thu thuần thực tế sau khi ngày tham quan kết thúc
+  modelVersion     String // Phiên bản model hoặc phương pháp fallback
+  trainingSource   String   @default("unknown") // real_booking_history, demo_booking_history hoặc historical_baseline
+  usedFallback     Boolean  @default(false)
+  historyDays      Int      @default(0)
+  observedDays     Int      @default(0)
+  sampleBookings   Int      @default(0)
+  generatedAt      DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+
+  @@unique([attractionId, forecastDate])
+  @@index([attractionId])
+  @@index([forecastDate])
+  @@index([generatedAt])
 }

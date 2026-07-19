@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout'
+import RevenueForecastPanel from '../components/forecast/RevenueForecastPanel'
 import { getReports } from '../services/partnerApi'
 
 const PERIODS = [
@@ -150,6 +151,10 @@ function PartnerReportsPage() {
           </section>
         </div>
       )}
+
+      <div className="mt-6">
+        <RevenueForecastPanel mode="partner" />
+      </div>
     </PartnerLayout>
   )
 }

@@ -247,6 +247,11 @@ const mockPrisma = {
     upsert: jest.fn(),
     updateMany: jest.fn(),
   },
+  revenueForecast: {
+    findMany: jest.fn(),
+    upsert: jest.fn(),
+    update: jest.fn(),
+  },
   $transaction: jest.fn(),
   $queryRaw: jest.fn(),
 };

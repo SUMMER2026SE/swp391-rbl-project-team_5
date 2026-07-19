@@ -1,0 +1,18 @@
+{
+  "model_version": "demo-booking-v4",
+  "trained_at": "2026-07-19T07:43:06.676144+00:00",
+  "city_freq_map": {
+    "Ninh Bình": 0.3333333333333333,
+    "Kiên Giang": 0.3333333333333333,
+    "Bà Rịa - Vũng Tàu": 0.3333333333333333
+  },
+  "residual_std": 0.20737779789907387,
+  "metrics": {
+    "mape_observed_days": 17.516096447706346,
+    "wape": 14.768145859778054,
+    "mae": 328776.69013400865,
+    "num_train_samples": 876,
+    "num_test_samples": 219,
+    "training_source": "demo_booking_history"
+  }
+}

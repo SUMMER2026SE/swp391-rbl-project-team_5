@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout'
+import RevenueForecastPanel from '../../components/forecast/RevenueForecastPanel'
 import { getDashboard } from '../../services/adminApi'
 import '../../styles/admin.css'
 
@@ -264,6 +265,10 @@ export default function AdminDashboard() {
           </section>
         </>
       )}
+
+      <div className="mt-6">
+        <RevenueForecastPanel mode="admin" />
+      </div>
     </AdminLayout>
   )
 }

@@ -17,6 +17,7 @@
     "db:seed": "node prisma/seed.js",
     "db:seed:real": "node prisma/seed-real.js",
     "db:seed:images": "node prisma/seed-images.js",
+    "db:seed:forecast-demo": "node scripts/seed_forecast_demo_history.js",
     "db:enrich": "node prisma/enrich-content.js",
     "create-admin": "node create-admin.js"
   },
