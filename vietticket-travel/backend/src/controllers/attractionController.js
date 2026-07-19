@@ -853,6 +853,25 @@ async function getMapPoints(req, res, next) {
   }
 }
 
+// GET /api/attractions/cities — danh sách thành phố/tỉnh THẬT có điểm đang bán vé,
+// dùng để đổ vào bộ lọc điểm đến (thay danh sách cứng bị sót tỉnh).
+async function getAttractionCities(req, res, next) {
+  try {
+    const rows = await prisma.attraction.findMany({
+      where: publicAttractionWhere(),
+      distinct: ['city'],
+      select: { city: true },
+    });
+    const cities = rows
+      .map((row) => (row.city || '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'vi'));
+    return res.status(200).json({ success: true, data: { cities } });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 // GET /api/attractions/:id — chi tiết điểm tham quan công khai (từ MPhu)
 async function getAttractionDetail(req, res, next) {
   try {
@@ -979,5 +998,6 @@ module.exports = {
   searchAttractions,
   getAttractionDetail,
   getMapPoints,
+  getAttractionCities,
 };
 

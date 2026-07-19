@@ -26,6 +26,11 @@ export function getMapPoints() {
   return apiRequest('/attractions/map-points', { method: 'GET' })
 }
 
+// Danh sách tỉnh/thành THẬT đang có điểm bán vé (đổ vào bộ lọc điểm đến).
+export function getAttractionCities() {
+  return apiRequest('/attractions/cities', { method: 'GET' })
+}
+
 export function getAttractionDetail(id) {
   return apiRequest(`/attractions/${id}`, { method: 'GET' })
 }

@@ -16,6 +16,11 @@ import {
 const fallbackImage =
   'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=1400&q=85'
 
+// Mã đặt chỗ ngắn hiển thị cho khách — đồng bộ với MyTicketsPage / trang quản trị.
+// UUID đầy đủ vẫn được dùng cho QR và tra cứu hệ thống.
+const formatBookingCode = (value) =>
+  String(value || '').replaceAll('-', '').slice(0, 8).toUpperCase() || 'N/A'
+
 const formatDate = (value) => {
   if (!value) return 'Chưa cập nhật'
   const date = new Date(`${value}T00:00:00`)
@@ -381,8 +386,11 @@ function ETicketPage() {
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">
                   Mã đặt chỗ
                 </p>
-                <p className="mt-2 font-mono text-3xl font-bold tracking-widest text-primary">
-                  {booking.id}
+                <p
+                  className="mt-2 font-mono text-3xl font-bold tracking-widest text-primary"
+                  title={booking.id}
+                >
+                  {formatBookingCode(booking.id)}
                 </p>
                 <div className="mt-7 grid gap-4 sm:grid-cols-2">
                   {ticketInstructions.map((instruction) => (

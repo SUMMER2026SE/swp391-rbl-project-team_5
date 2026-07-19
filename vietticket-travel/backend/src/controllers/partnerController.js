@@ -38,6 +38,14 @@ const {
 } = require('../services/financialReportService');
 const { hasAnyRole } = require('../utils/userRoles');
 
+// Ngày theo giờ Việt Nam (GMT+7) dạng YYYY-MM-DD. Cắt trực tiếp toISOString() theo
+// UTC sẽ lệch 1 ngày cho đơn tạo trong khung 00:00–07:00 giờ VN.
+function toVietnamDateString(value) {
+  return new Date(new Date(value).getTime() + 7 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+}
+
 const CURRENT_KYC_CONSENT_VERSION = '2026-07-17-v1';
 const KYC_REVIEW_FIELDS = [
   'businessName',
@@ -477,8 +485,19 @@ async function getDashboard(req, res, next) {
           revenueThisMonth += recognized.netAmount;
           netRevenueThisMonth += recognized.partnerPayableAmount;
           ticketsSoldThisMonth += qty;
-          totalBookingsThisMonth += 1;
         }
+      });
+
+      // "Đặt vé tháng này" là chỉ số SẢN LƯỢNG (khác doanh thu ghi nhận theo ngày
+      // sử dụng ở trên). Đếm số đơn đã thanh toán thành công tạo trong tháng, khớp
+      // với danh sách /partner/bookings mà thẻ này liên kết tới.
+      totalBookingsThisMonth = await prisma.booking.count({
+        where: {
+          reservation: { ticketProduct: { attraction: { partnerId } } },
+          status: { not: 'PENDING_PAYMENT' },
+          payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+          createdAt: { gte: startOfMonth },
+        },
       });
     }
 
@@ -581,7 +600,7 @@ async function getDashboard(req, res, next) {
               email: b.email,
               phone: b.phone || '',
               note: b.note || '',
-              date: b.createdAt.toISOString().slice(0, 10),
+              date: toVietnamDateString(b.createdAt),
               visitDate: b.reservation.date instanceof Date
                 ? b.reservation.date.toISOString().slice(0, 10)
                 : String(b.reservation.date).slice(0, 10),
@@ -934,7 +953,7 @@ async function getPartnerBookings(req, res, next) {
         email: b.email,
         phone: b.phone || '',
         note: b.note || '',
-        date: b.createdAt.toISOString().slice(0, 10),
+        date: toVietnamDateString(b.createdAt),
         visitDate: b.reservation.date instanceof Date
           ? b.reservation.date.toISOString().slice(0, 10)
           : String(b.reservation.date).slice(0, 10),

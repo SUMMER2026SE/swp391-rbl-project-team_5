@@ -148,7 +148,7 @@ export default function BookingManagementPage() {
           <StatCard
             icon="currency_exchange"
             iconClass="bg-error-container/40 text-error"
-            label="Đơn cần hoàn tiền"
+            label="Hoàn tiền bắt buộc"
             value={stats.refundRequired}
           />
         </div>
@@ -191,7 +191,7 @@ export default function BookingManagementPage() {
               }}
               className="h-4 w-4 accent-[var(--md-sys-color-primary,#00474d)]"
             />
-            Chỉ đơn cần hoàn tiền
+            Chỉ đơn hoàn bắt buộc
           </label>
         </div>
 
@@ -264,7 +264,7 @@ export default function BookingManagementPage() {
                                 {statusMeta.label}
                               </span>
                               {b.refundRequired && (
-                                <p className="mt-1 text-[11px] font-bold text-error">Cần hoàn tiền</p>
+                                <p className="mt-1 text-[11px] font-bold text-error">Hoàn bắt buộc</p>
                               )}
                             </td>
                             <td className="px-5 py-3.5 text-right whitespace-nowrap">

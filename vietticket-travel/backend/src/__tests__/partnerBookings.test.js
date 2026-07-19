@@ -832,12 +832,24 @@ describe('getDashboard', () => {
         payments: { some: { status: 'SUCCESS', isDuplicate: false } },
       }),
     );
+    // "Đặt vé tháng này" phải đếm ĐƠN ĐÃ THANH TOÁN tạo trong tháng (chỉ số sản
+    // lượng), không phải đơn đã ghi nhận doanh thu theo ngày sử dụng.
+    expect(mockPrisma.booking.count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { not: 'PENDING_PAYMENT' },
+          payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+          createdAt: expect.objectContaining({ gte: expect.any(Date) }),
+        }),
+      }),
+    );
     expect(next).not.toHaveBeenCalled();
   });
 
   test('✅ Trả về stats = 0 khi partner chưa có attraction', async () => {
     mockPrisma.attraction.findMany.mockResolvedValue([]);
     mockPrisma.ticketProduct.count.mockResolvedValue(0);
+    mockPrisma.booking.count.mockResolvedValue(0); // không có đơn -> "Đặt vé tháng này" = 0
 
     const { req, res } = makeReqRes();
     await getDashboard(req, res, jest.fn());
@@ -860,6 +872,7 @@ describe('getDashboard', () => {
     mockPrisma.ticketProduct.count.mockResolvedValue(2);
     mockPrisma.ticketProduct.findMany.mockResolvedValue([{ id: TICKET_ID }]);
     mockPrisma.reservation.findMany.mockResolvedValue([]); // không có reservation
+    mockPrisma.booking.count.mockResolvedValue(0); // không có đơn -> "Đặt vé tháng này" = 0
 
     const { req, res } = makeReqRes();
     await getDashboard(req, res, jest.fn());

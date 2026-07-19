@@ -8,7 +8,7 @@ import AIItineraryPlanner from '../components/AIItineraryPlanner.jsx'
 import RecentlyViewedAttractions from '../components/RecentlyViewedAttractions.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { footerLinks } from '../data/landingData.js'
-import { getMapPoints, searchAttractions } from '../services/attractionApi.js'
+import { getAttractionCities, getMapPoints, searchAttractions } from '../services/attractionApi.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 import {
   DEFAULT_ATTRACTION_PRICE_RANGE,
@@ -26,17 +26,6 @@ const categoryFilters = [
   { value: 'Nature & Sightseeing', text: 'Thiên nhiên', icon: 'forest' },
   { value: 'Cultural Experience', text: 'Văn hóa & Lịch sử', icon: 'theater_comedy' },
   { value: 'Adventure', text: 'Mạo hiểm', icon: 'sailing' },
-]
-
-const cityOptions = [
-  'Tất cả thành phố',
-  'Đà Nẵng',
-  'Phú Quốc',
-  'Hạ Long',
-  'Nha Trang',
-  'TP. HCM',
-  'Hà Nội',
-  'Sa Pa',
 ]
 
 const starFilters = [
@@ -315,6 +304,20 @@ export default function SearchAttractionsPage() {
   const [mapPoints, setMapPoints] = useState([])
   const [mapLoading, setMapLoading] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [cityList, setCityList] = useState([])
+
+  // Tải danh sách tỉnh/thành THẬT có điểm bán vé để đổ vào bộ lọc điểm đến.
+  useEffect(() => {
+    let active = true
+    getAttractionCities()
+      .then((res) => {
+        if (active && Array.isArray(res?.data?.cities)) setCityList(res.data.cities)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   // Sync URL query params with local state when location.search changes
   useEffect(() => {
@@ -674,11 +677,22 @@ export default function SearchAttractionsPage() {
                     onChange={handleCityChange}
                     value={selectedCity}
                   >
-                    {cityOptions.map((city) => (
-                      <option key={city} value={city}>
-                        {city}
-                      </option>
-                    ))}
+                    {(() => {
+                      const options = [DEFAULT_CITY, ...(cityList.length ? cityList : [])]
+                      // Giữ thành phố đang chọn (vd từ breadcrumb) dù chưa có trong list.
+                      if (
+                        selectedCity
+                        && selectedCity !== DEFAULT_CITY
+                        && !options.includes(selectedCity)
+                      ) {
+                        options.push(selectedCity)
+                      }
+                      return options.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))
+                    })()}
                   </select>
                 </FilterSection>
 
