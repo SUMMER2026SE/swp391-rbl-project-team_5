@@ -39,6 +39,10 @@ const PAYMENT_WINDOW_MS = 10 * 60 * 1000; // 10 phút (khớp vnp_ExpireDate)
 const MAX_PAYMENT_ATTEMPTS = 3;
 const VNPAY_API_TIMEOUT_MS = 15 * 1000;
 
+// vnp_BankCode là tùy chọn. Bỏ trống -> VNPay hiện trang chọn phương thức
+// (đã bao gồm ô quét QR). Truyền 'VNPAYQR' để vào thẳng màn hình quét mã QR.
+const ALLOWED_BANK_CODES = new Set(['VNPAYQR', 'VNBANK', 'INTCARD']);
+
 function httpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -158,6 +162,10 @@ async function createVNPayUrl(req, res, next) {
     const bookingId = String(req.body?.bookingId || req.params?.bookingId || '').trim();
     if (!bookingId) {
       return res.status(400).json({ message: 'bookingId là bắt buộc.' });
+    }
+    const bankCode = String(req.body?.bankCode || '').trim().toUpperCase();
+    if (bankCode && !ALLOWED_BANK_CODES.has(bankCode)) {
+      return res.status(400).json({ message: 'Phương thức thanh toán không hợp lệ.' });
     }
 
     const booking = await prisma.booking.findUnique({
@@ -296,6 +304,10 @@ async function createVNPayUrl(req, res, next) {
       vnp_CreateDate: vnpCreateDate,
       vnp_ExpireDate: vnpExpireDate,
     };
+    // Chỉ gắn khi khách đã chọn sẵn phương thức; bỏ trống để VNPay tự hiện menu.
+    if (bankCode) {
+      params.vnp_BankCode = bankCode;
+    }
 
     const paymentUrl = buildVnpayUrl(params, { vnpUrl, secret });
     return res.json({ success: true, data: { paymentUrl } });

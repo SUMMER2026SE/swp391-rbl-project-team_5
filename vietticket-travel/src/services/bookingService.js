@@ -69,10 +69,12 @@ export const applyVoucher = async (
 }
 
 // Tạo URL thanh toán VNPay thật; trả về paymentUrl để redirect trình duyệt.
-export const createVNPayUrl = async (bookingId) => {
+// bankCode (tùy chọn): 'VNPAYQR' để vào thẳng màn quét QR, bỏ trống để VNPay
+// tự hiện trang chọn phương thức.
+export const createVNPayUrl = async (bookingId, bankCode) => {
   const result = await apiRequest('/payments/create-vnpay-url', {
     method: 'POST',
-    body: { bookingId },
+    body: { bookingId, ...(bankCode ? { bankCode } : {}) },
   })
   return result.data?.paymentUrl
 }
