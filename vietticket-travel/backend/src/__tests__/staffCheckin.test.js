@@ -76,7 +76,8 @@ describe('lookupTicketByQr', () => {
           canCheckIn: true,
           blockReason: null,
           customer: 'Nguyễn Văn A',
-          quantity: 2,
+          quantity: 1,
+          bookingQuantity: 2,
         }),
       }),
     );
@@ -180,6 +181,9 @@ describe('checkInTicket', () => {
         data: expect.objectContaining({ status: 'USED' }),
       }),
     );
+    expect(capturedTx.ticketInstance.count).toHaveBeenCalledWith({
+      where: { bookingId: BOOKING_ID, status: 'VALID' },
+    });
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         success: true,
@@ -291,6 +295,7 @@ describe('listTodayBookings', () => {
     mockPrisma.booking.findMany.mockResolvedValue([
       {
         id: BOOKING_ID,
+        status: 'COMPLETED',
         fullName: 'Nguyễn Văn A',
         phone: '0901234567',
         snapshotAttractionTitle: 'Sun World',
@@ -305,6 +310,7 @@ describe('listTodayBookings', () => {
       },
       {
         id: 'booking-002',
+        status: 'CONFIRMED',
         fullName: 'Trần Thị B',
         phone: null,
         snapshotAttractionTitle: '',
@@ -326,8 +332,16 @@ describe('listTodayBookings', () => {
       expect.objectContaining({
         success: true,
         data: expect.arrayContaining([
-          expect.objectContaining({ bookingId: BOOKING_ID, checkedIn: true }),
-          expect.objectContaining({ bookingId: 'booking-002', checkedIn: false }),
+          expect.objectContaining({
+            bookingId: BOOKING_ID,
+            bookingStatus: 'COMPLETED',
+            checkedIn: true,
+          }),
+          expect.objectContaining({
+            bookingId: 'booking-002',
+            bookingStatus: 'CONFIRMED',
+            checkedIn: false,
+          }),
         ]),
         meta: expect.objectContaining({ total: 2, checkedIn: 1 }),
       }),

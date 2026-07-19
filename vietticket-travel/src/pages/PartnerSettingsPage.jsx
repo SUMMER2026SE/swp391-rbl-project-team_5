@@ -11,16 +11,28 @@ function PartnerSettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState('profile')
 
-  const [profile, setProfile] = useState({ displayName: '', contactEmail: '', phone: '', website: '', description: '' })
+  const [profile, setProfile] = useState({
+    displayName: '',
+    legalBusinessName: '',
+    contactEmail: '',
+    phone: '',
+    website: '',
+    description: '',
+    bankName: '',
+    bankAccountNumber: '',
+  })
   useEffect(() => {
     document.title = 'Cài đặt | VietTicket B2B'
 
     const accountProfile = {
       displayName: user?.fullName || '',
+      legalBusinessName: '',
       contactEmail: user?.email || '',
       phone: '',
       website: '',
       description: '',
+      bankName: '',
+      bankAccountNumber: '',
     }
 
     let cancelled = false
@@ -30,11 +42,14 @@ function PartnerSettingsPage() {
         const p = data.partner || {}
         if (!cancelled) {
           setProfile({
-            displayName: p.displayName || p.businessName || accountProfile.displayName,
+            displayName: p.displayName || accountProfile.displayName,
+            legalBusinessName: p.legalBusinessName || p.businessName || '',
             contactEmail: p.contactEmail || accountProfile.contactEmail,
             phone: p.phone || '',
             website: p.website || '',
             description: p.description || '',
+            bankName: p.bankName || '',
+            bankAccountNumber: p.bankAccountNumber || '',
           })
         }
       } catch (err) {
@@ -53,7 +68,6 @@ function PartnerSettingsPage() {
     try {
       await partnerApi.updatePartnerSettings({
         displayName: profile.displayName,
-        businessName: profile.displayName,
         phone: profile.phone,
         website: profile.website,
         description: profile.description,
@@ -99,9 +113,29 @@ function PartnerSettingsPage() {
           {activeTab === 'profile' && (
             <div className="max-w-2xl">
               <div className="bg-white rounded-xl border border-[#e1e3e4] shadow-sm p-6 flex flex-col gap-5">
+                <div className="rounded-xl border border-[#e1e3e4] bg-[#f7f8f9] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#6f797a]">
+                    Tên doanh nghiệp pháp lý
+                  </p>
+                  <p className="mt-1 font-semibold text-[#191c1d]">
+                    {profile.legalBusinessName || 'Chưa cập nhật'}
+                  </p>
+                  <p className="mt-2 text-xs leading-relaxed text-[#6f797a]">
+                    Tên pháp lý và thông tin nhận tiền thuộc hồ sơ KYC, không thể sửa trực tiếp tại đây.
+                    Nếu doanh nghiệp thay đổi đăng ký kinh doanh hoặc tài khoản nhận tiền, hãy gửi yêu cầu
+                    kèm hồ sơ chứng minh để VietTicket xác minh.
+                  </p>
+                  <Link
+                    to="/support"
+                    className="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-[#00474d]"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">support_agent</span>
+                    Gửi yêu cầu thay đổi hồ sơ
+                  </Link>
+                </div>
                 {[
-                  { key: 'displayName', label: 'Tên hiển thị / Tên đối tác', placeholder: 'VD: Công ty Du lịch ABC' },
-                  { key: 'contactEmail', label: 'Email liên hệ', placeholder: 'contact@company.com', type: 'email' },
+                  { key: 'displayName', label: 'Tên hiển thị trên cổng đối tác', placeholder: 'VD: Du lịch ABC' },
+                  { key: 'contactEmail', label: 'Email đăng nhập đã xác minh', placeholder: 'contact@company.com', type: 'email', readOnly: true },
                   { key: 'phone', label: 'Số điện thoại', placeholder: '0901 234 567', type: 'tel' },
                   { key: 'website', label: 'Website', placeholder: 'https://www.company.com', type: 'url' },
                 ].map((f) => (
@@ -109,11 +143,30 @@ function PartnerSettingsPage() {
                     <label className="block text-sm font-medium text-[#191c1d] mb-1.5">{f.label}</label>
                     <input
                       type={f.type || 'text'} value={profile[f.key]} placeholder={f.placeholder}
+                      readOnly={f.readOnly}
                       onChange={(e) => setProfile((p) => ({ ...p, [f.key]: e.target.value }))}
-                      className="w-full rounded-lg border border-[#bec8ca] focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] px-4 py-3 text-sm outline-none shadow-sm"
+                      className={`w-full rounded-lg border border-[#bec8ca] px-4 py-3 text-sm outline-none shadow-sm ${
+                        f.readOnly
+                          ? 'cursor-not-allowed bg-[#f2f4f5] text-[#6f797a]'
+                          : 'focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]'
+                      }`}
                     />
+                    {f.readOnly && (
+                      <p className="mt-1.5 text-xs text-[#6f797a]">
+                        Thay đổi email cần xác minh lại quyền sở hữu tài khoản qua bộ phận hỗ trợ.
+                      </p>
+                    )}
                   </div>
                 ))}
+                <div className="rounded-xl border border-[#e1e3e4] p-4">
+                  <p className="text-sm font-medium text-[#191c1d]">Thông tin nhận tiền đã xác minh</p>
+                  <p className="mt-1 text-sm text-[#6f797a]">
+                    {profile.bankName || 'Chưa có ngân hàng'} ·{' '}
+                    {profile.bankAccountNumber
+                      ? `•••• ${profile.bankAccountNumber.slice(-4)}`
+                      : 'Chưa có số tài khoản'}
+                  </p>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-[#191c1d] mb-1.5">Mô tả đối tác</label>
                   <textarea

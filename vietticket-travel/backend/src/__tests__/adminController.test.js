@@ -4,10 +4,18 @@ jest.mock('../utils/mailer', () => ({
   sendPartnerReviewEmail: jest.fn(),
   sendAttractionReviewEmail: jest.fn(),
   sendAttractionViolationEmail: jest.fn(),
+  sendAttractionRestoredEmail: jest.fn(),
+  sendPartnerOperationalStatusEmail: jest.fn(),
+  sendStaffInviteEmail: jest.fn().mockResolvedValue(),
 }));
 
 const mockPrisma = require('./helpers/mockPrisma');
-const { changeUserStatus, getAttractions } = require('../controllers/adminController');
+const {
+  changeUserStatus,
+  createPlatformStaff,
+  getAttractions,
+  getAuditLogs,
+} = require('../controllers/adminController');
 
 afterEach(() => jest.clearAllMocks());
 
@@ -32,13 +40,14 @@ describe('changeUserStatus', () => {
     const tx = {
       user: { update: jest.fn().mockResolvedValue(updatedUser) },
       authSession: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     mockPrisma.user.findUnique.mockResolvedValue(targetUser);
     mockPrisma.$transaction.mockImplementation((cb) => cb(tx));
 
     const req = {
       params: { id: targetUser.id },
-      body: { status: 'LOCKED', reason: 'Vi pham', sendEmail: false },
+      body: { status: 'LOCKED', reason: 'Vi pham nghiem trong', sendEmail: false },
       user: { id: 'admin-001', role: 'ADMIN' },
     };
     const res = createRes();
@@ -57,6 +66,13 @@ describe('changeUserStatus', () => {
       where: { userId: targetUser.id, revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'USER_ACCOUNT_LOCKED',
+        actorId: 'admin-001',
+        entityId: targetUser.id,
+      }),
+    }));
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       user: expect.objectContaining({ id: targetUser.id, status: 'LOCKED' }),
@@ -84,6 +100,39 @@ describe('changeUserStatus', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  test('does not allow locking the final active administrator', async () => {
+    const targetAdmin = {
+      id: 'admin-002',
+      email: 'second-admin@example.com',
+      fullName: 'Second Admin',
+      role: 'ADMIN',
+      roleMemberships: [{ role: 'ADMIN' }],
+      status: 'ACTIVE',
+      tokenVersion: 0,
+      profile: null,
+    };
+    const tx = {
+      user: {
+        count: jest.fn().mockResolvedValue(1),
+        update: jest.fn(),
+      },
+      authSession: { updateMany: jest.fn() },
+      auditLog: { create: jest.fn() },
+    };
+    mockPrisma.user.findUnique.mockResolvedValue(targetAdmin);
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+    const next = jest.fn();
+
+    await changeUserStatus({
+      params: { id: targetAdmin.id },
+      body: { status: 'LOCKED', reason: 'Khoa tai khoan quan tri thu nghiem' },
+      user: { id: 'admin-001', role: 'ADMIN' },
+    }, createRes(), next);
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 409 }));
+    expect(tx.user.update).not.toHaveBeenCalled();
   });
 });
 
@@ -145,5 +194,95 @@ describe('getAttractions', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(mockPrisma.attraction.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('platform operations', () => {
+  function createRes() {
+    return { status: jest.fn().mockReturnThis(), json: jest.fn() };
+  }
+
+  test('creates an unassigned platform staff account with an expiring invite and audit log', async () => {
+    const created = {
+      id: 'staff-platform-1',
+      fullName: 'Nguyen Van Ho Tro',
+      email: 'support@vietticket.test',
+      role: 'STAFF',
+      roleMemberships: [{ role: 'STAFF' }],
+      employerPartnerId: null,
+      provider: 'LOCAL',
+      status: 'ACTIVE',
+      isEmailVerified: true,
+      passwordHash: null,
+      profile: { phoneNumber: '0901234567' },
+    };
+    const tx = {
+      user: { create: jest.fn().mockResolvedValue(created) },
+      passwordResetToken: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockResolvedValue({}),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+    const res = createRes();
+
+    await createPlatformStaff({
+      body: {
+        fullName: 'Nguyen Van Ho Tro',
+        email: 'SUPPORT@VIETTICKET.TEST',
+        phoneNumber: '0901234567',
+      },
+      user: { id: 'admin-1' },
+      headers: {},
+    }, res, jest.fn());
+
+    expect(tx.user.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        email: 'support@vietticket.test',
+        role: 'STAFF',
+        employerPartnerId: null,
+        passwordHash: null,
+      }),
+    }));
+    expect(tx.passwordResetToken.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: created.id,
+        token: expect.any(String),
+        expiresAt: expect.any(Date),
+      }),
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        actorId: 'admin-1',
+        action: 'PLATFORM_STAFF_CREATED',
+        entityId: created.id,
+      }),
+    }));
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  test('lists audit logs with server-side pagination and actor search', async () => {
+    mockPrisma.auditLog.findMany.mockResolvedValue([{ id: 'log-1' }]);
+    mockPrisma.auditLog.count.mockResolvedValue(1);
+    mockPrisma.$transaction.mockImplementation((operations) => Promise.all(operations));
+    const res = createRes();
+
+    await getAuditLogs({
+      query: { search: 'admin', entityType: 'user', page: '1', limit: '25' },
+    }, res, jest.fn());
+
+    expect(mockPrisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        entityType: { in: ['USER', 'User'] },
+        OR: expect.any(Array),
+      }),
+      take: 25,
+    }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: [{ id: 'log-1' }],
+      pagination: expect.objectContaining({ total: 1, totalPages: 1 }),
+    }));
   });
 });

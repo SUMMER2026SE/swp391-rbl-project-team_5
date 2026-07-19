@@ -5,6 +5,7 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import { useAuth } from '../context/useAuth.js'
 import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
+import { getTicketTypeLabel } from '../utils/ticketType.js'
 
 function formatVND(n) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n)
@@ -315,7 +316,7 @@ function PartnerDashboardPage() {
                     <div>
                       <span className="text-[#6f797a] text-xs block">Chi tiết vé & Đơn giá</span>
                       <span className="text-[#191c1d]">
-                        {selectedBooking.snapshotTicketType === 'CHILD' ? 'Vé Trẻ em' : 'Vé Người lớn'}
+                        {getTicketTypeLabel(selectedBooking.snapshotTicketType)}
                         {' · '}
                         {formatVND(selectedBooking.snapshotUnitPrice || (selectedBooking.amount / selectedBooking.qty))}
                       </span>

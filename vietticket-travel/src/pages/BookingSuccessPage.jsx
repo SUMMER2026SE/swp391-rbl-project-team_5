@@ -9,6 +9,10 @@ import {
   getItineraryQueueProgress,
   getNextItineraryQueueStep,
 } from '../utils/aiItineraryBookingQueue.js'
+import {
+  canRetryBookingPayment,
+  deriveBookingPaymentOutcome,
+} from '../utils/bookingPaymentOutcome.js'
 
 const formatDate = (value) => {
   if (!value) return 'Chưa cập nhật'
@@ -138,22 +142,42 @@ function BookingSuccessPage() {
   const responseCode =
     searchParams.get('vnp_ResponseCode') || searchParams.get('vnpayResponseCode')
   const bookingId = searchParams.get('bookingId')
-  const [booking, setBooking] = useState(null)
+  const [bookingResult, setBookingResult] = useState({
+    bookingId: '',
+    data: null,
+    error: null,
+  })
   const [aiQueueResult, setAiQueueResult] = useState(null)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState('')
+  const booking =
+    bookingResult.bookingId === bookingId ? bookingResult.data : null
+  const bookingLoadError =
+    bookingResult.bookingId === bookingId ? bookingResult.error : null
+  const bookingLoading =
+    Boolean(bookingId) && bookingResult.bookingId !== bookingId
 
-  // 3 kết cục: success / invalid (không xác minh được chữ ký) / failed (khách hủy, lỗi thẻ...)
-  const outcome = statusParam || (responseCode ? (responseCode === '00' ? 'success' : 'failed') : 'unknown')
+  // Chỉ dữ liệu booking đã xác thực từ API mới có quyền kết luận thanh toán thành công.
+  // Query string của trình duyệt chỉ hỗ trợ diễn giải lỗi cho một booking chưa thanh toán.
+  const outcome = deriveBookingPaymentOutcome({
+    booking,
+    bookingId,
+    callbackStatus: statusParam,
+    isLoading: bookingLoading,
+    loadError: bookingLoadError,
+    responseCode,
+  })
   const isSuccess = outcome === 'success'
   const isInvalid = outcome === 'invalid'
   const isUnknown = outcome === 'unknown'
+  const isVerifying = outcome === 'verifying'
   const isPendingPartner = booking?.status === 'pending_partner'
+  const isRetryAllowed = canRetryBookingPayment(booking)
   const nextAiBookingUrl = aiQueueResult?.nextUrl || ''
   const failureReason = isUnknown
     ? 'Trang này cần thông tin giao dịch từ cổng thanh toán. Vui lòng kiểm tra lại đơn trong mục Vé của tôi.'
     : (VNPAY_ERROR_MESSAGES[responseCode] ||
-        'Giao dịch không thể hoàn tất. Bạn chưa bị trừ tiền cho đơn này.')
+        'Hệ thống chưa ghi nhận giao dịch thanh toán thành công cho đơn này.')
   const nextActionItems = getPostPaymentActions({
     booking,
     bookingId,
@@ -164,7 +188,7 @@ function BookingSuccessPage() {
   })
 
   const handleRetry = async () => {
-    if (!bookingId || retrying) return
+    if (!bookingId || !isRetryAllowed || retrying) return
     setRetrying(true)
     setRetryError('')
     try {
@@ -180,16 +204,22 @@ function BookingSuccessPage() {
   useEffect(() => {
     let active = true
 
-    if (bookingId) {
-      bookingService
-        .getBookingDetails(bookingId)
-        .then((data) => {
-          if (active) setBooking(data)
-        })
-        .catch(() => {
-          if (active) setBooking(null)
-        })
+    if (!bookingId) {
+      return () => {
+        active = false
+      }
     }
+
+    bookingService
+      .getBookingDetails(bookingId)
+      .then((data) => {
+        if (!active) return
+        setBookingResult({ bookingId, data, error: null })
+      })
+      .catch((error) => {
+        if (!active) return
+        setBookingResult({ bookingId, data: null, error })
+      })
 
     return () => {
       active = false
@@ -230,7 +260,7 @@ function BookingSuccessPage() {
                 ? isPendingPartner
                   ? 'bg-tertiary-fixed'
                   : 'bg-primary-container'
-                : isInvalid || isUnknown
+                : isInvalid || isUnknown || isVerifying
                   ? 'bg-amber-100'
                   : 'bg-red-100'
             }`}
@@ -241,7 +271,7 @@ function BookingSuccessPage() {
                   ? isPendingPartner
                     ? 'text-tertiary'
                     : 'text-white'
-                  : isInvalid || isUnknown
+                  : isInvalid || isUnknown || isVerifying
                     ? 'text-amber-600'
                     : 'text-error'
               }`}
@@ -251,22 +281,30 @@ function BookingSuccessPage() {
                 ? isPendingPartner
                   ? 'hourglass_top'
                   : 'check_circle'
-                : isInvalid || isUnknown
-                  ? 'help'
+                : isVerifying
+                  ? 'progress_activity'
+                  : isInvalid || isUnknown
+                    ? 'help'
                   : 'error'}
             </span>
           </div>
 
           <h1
             className={`mt-6 text-3xl font-extrabold md:text-4xl ${
-              isSuccess ? 'text-primary' : isInvalid || isUnknown ? 'text-amber-700' : 'text-error'
+              isSuccess || isVerifying
+                ? 'text-primary'
+                : isInvalid || isUnknown
+                  ? 'text-amber-700'
+                  : 'text-error'
             }`}
           >
             {isSuccess
               ? isPendingPartner
                 ? 'Đang chờ đối tác duyệt'
                 : 'Đặt vé thành công!'
-              : isUnknown
+              : isVerifying
+                ? 'Đang xác minh thanh toán'
+                : isUnknown
                 ? 'Thiếu thông tin thanh toán'
                 : isInvalid
                 ? 'Chưa xác minh được kết quả'
@@ -278,14 +316,16 @@ function BookingSuccessPage() {
               ? isPendingPartner
                 ? 'Thanh toán đã được ghi nhận. VietTicket sẽ phát hành mã QR ngay khi đối tác xác nhận vé.'
                 : 'Thanh toán đã được ghi nhận và vé điện tử của bạn đã sẵn sàng.'
-              : isUnknown
+              : isVerifying
+                ? 'VietTicket đang đối chiếu trạng thái đơn và thanh toán trực tiếp với máy chủ. Vui lòng chờ trong giây lát.'
+                : isUnknown
                 ? 'Không tìm thấy thông tin giao dịch trên đường dẫn hiện tại. Bạn có thể kiểm tra trạng thái đơn trong mục "Vé của tôi".'
                 : isInvalid
                 ? 'Chúng tôi chưa xác minh được kết quả trả về từ cổng thanh toán. Nếu bạn đã bị trừ tiền, trạng thái đơn sẽ được cập nhật tự động trong ít phút — vui lòng kiểm tra mục "Vé của tôi" trước khi thanh toán lại.'
                 : failureReason}
           </p>
 
-          {!isSuccess && !isInvalid && !isUnknown && (
+          {!isSuccess && !isInvalid && !isUnknown && !isVerifying && isRetryAllowed && (
             <p className="mt-2 text-sm text-on-surface-variant">
               Đơn giữ chỗ của bạn vẫn được giữ trong thời gian giữ chỗ. Bạn có thể thử thanh toán
               lại ngay bên dưới, hoặc đổi phương thức thanh toán khác trên VNPay.
@@ -340,7 +380,7 @@ function BookingSuccessPage() {
             </div>
           )}
 
-          <NextActionPanel items={nextActionItems} />
+          {!isVerifying && <NextActionPanel items={nextActionItems} />}
 
           {retryError && (
             <p className="mt-6 rounded-xl bg-red-50 p-3 text-sm font-semibold text-error">
@@ -365,7 +405,18 @@ function BookingSuccessPage() {
                 <span className="material-symbols-outlined text-[19px]" aria-hidden="true">confirmation_number</span>
                 Theo dõi trạng thái vé
               </Link>
-            ) : isInvalid || isUnknown ? (
+            ) : isVerifying ? (
+              <button
+                type="button"
+                className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white opacity-70"
+                disabled
+              >
+                <span className="material-symbols-outlined animate-spin text-[19px]" aria-hidden="true">
+                  progress_activity
+                </span>
+                Đang xác minh
+              </button>
+            ) : isInvalid || isUnknown || !isRetryAllowed ? (
               <Link
                 className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md"
                 to="/my-tickets"
@@ -377,7 +428,7 @@ function BookingSuccessPage() {
               <button
                 type="button"
                 className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-primary px-6 py-3.5 text-sm font-bold text-white shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={retrying || !bookingId}
+                disabled={retrying || !bookingId || !isRetryAllowed}
                 onClick={handleRetry}
               >
                 <span className="material-symbols-outlined text-[19px]" aria-hidden="true">refresh</span>

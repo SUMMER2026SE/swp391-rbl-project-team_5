@@ -11,7 +11,10 @@
 // ============================================================
 
 const prisma = require('../config/prisma');
-const { getTicketAvailability } = require('./availabilityService');
+const {
+  getTicketAvailability,
+  getTicketAvailabilityBatch,
+} = require('./availabilityService');
 const { publicAttractionWhere } = require('./catalogVisibilityService');
 
 const CITY_ALIASES = [
@@ -170,6 +173,9 @@ async function findCatalog({ city, category, limit, includeCategory = true }) {
       openTime: true,
       closeTime: true,
       openDays: true,
+      recommendedVisitMinutes: true,
+      environment: true,
+      isFullDay: true,
       latitude: true,
       longitude: true,
       averageRating: true,
@@ -183,9 +189,17 @@ async function findCatalog({ city, category, limit, includeCategory = true }) {
         select: {
           id: true,
           name: true,
+          description: true,
           type: true,
           sellingPrice: true,
           refundPolicy: true,
+          refundFeeRate: true,
+          refundCutoffHours: true,
+          minAgeYears: true,
+          maxAgeYears: true,
+          minHeightCm: true,
+          maxHeightCm: true,
+          requiresAdult: true,
         },
       },
     },
@@ -200,17 +214,37 @@ async function findCatalog({ city, category, limit, includeCategory = true }) {
  * @returns {Promise<Array<object>>}
  */
 async function getCatalogSummary(filters = {}) {
+  const { catalog } = await getCatalogSummaryWithMeta(filters);
+  return catalog;
+}
+
+async function getCatalogSummaryWithMeta(filters = {}) {
   const { city, category, limit = 60, date } = filters;
 
   let attractions = await findCatalog({ city, category, limit, includeCategory: Boolean(category) });
+  let interestFallbackUsed = false;
   if (category && attractions.length === 0) {
+    interestFallbackUsed = true;
     attractions = await findCatalog({ city, category, limit, includeCategory: false });
   }
 
-  const catalog = attractions.map(toCatalogItem);
-  if (!date) return catalog;
+  let catalog = attractions.map(toCatalogItem);
+  if (date) catalog = await decorateCatalogAvailability(catalog, date);
 
-  return decorateCatalogAvailability(catalog, date);
+  const requestedInterests = expandCategoryTerms(category);
+  const interestRequested = requestedInterests.length > 0;
+  return {
+    catalog,
+    filterMeta: {
+      interestRequested,
+      interestMatched: !interestRequested || !interestFallbackUsed,
+      interestFallbackUsed,
+      requestedInterests,
+      fallbackMessage: interestFallbackUsed
+        ? `Không tìm thấy địa điểm khớp loại hình "${requestedInterests.join(', ')}"; hệ thống đang hiển thị các lựa chọn khác trong khu vực.`
+        : null,
+    },
+  };
 }
 
 function toCatalogItem(a) {
@@ -223,6 +257,9 @@ function toCatalogItem(a) {
     openTime: a.openTime,
     closeTime: a.closeTime,
     openDays: a.openDays,
+    recommendedVisitMinutes: Number(a.recommendedVisitMinutes ?? 150),
+    environment: a.environment || 'MIXED',
+    isFullDay: Boolean(a.isFullDay),
     latitude: a.latitude ?? null,
     longitude: a.longitude ?? null,
     rating: a.averageRating,
@@ -232,9 +269,17 @@ function toCatalogItem(a) {
     tickets: a.ticketProducts.map((t) => ({
       id: t.id,
       name: t.name,
+      description: shorten(t.description, 180),
       type: t.type,
       price: Number(t.sellingPrice),
       refundPolicy: t.refundPolicy,
+      refundFeeRate: Number(t.refundFeeRate ?? 0),
+      refundCutoffHours: Number(t.refundCutoffHours ?? 24),
+      minAgeYears: t.minAgeYears ?? null,
+      maxAgeYears: t.maxAgeYears ?? null,
+      minHeightCm: t.minHeightCm ?? null,
+      maxHeightCm: t.maxHeightCm ?? null,
+      requiresAdult: Boolean(t.requiresAdult),
     })),
   };
 }
@@ -243,12 +288,24 @@ async function decorateCatalogAvailability(catalog, date) {
   const dateKey = dateOnlyKey(date);
   if (!dateKey) return catalog;
 
+  const ticketIds = catalog.flatMap((attraction) =>
+    (attraction.tickets || []).map((ticket) => ticket.id),
+  );
+  let availabilityByTicketId = new Map();
+  try {
+    availabilityByTicketId = await getTicketAvailabilityBatch(prisma, ticketIds, date);
+  } catch (error) {
+    // Giữ fallback từng vé để một lỗi batch tạm thời không làm mất toàn bộ catalog.
+    console.warn('[aiCatalog] Batch availability unavailable:', error.message);
+  }
+
   const decorated = await Promise.all(
     catalog.map(async (attraction) => {
       const tickets = await Promise.all(
         (attraction.tickets || []).map(async (ticket) => {
           try {
-            const availability = await getTicketAvailability(prisma, ticket.id, date);
+            const availability = availabilityByTicketId.get(ticket.id)
+              || await getTicketAvailability(prisma, ticket.id, date);
             const availableSlots = availability.slots.filter(
               (slot) => Number(slot.availableTickets || 0) > 0,
             );
@@ -318,4 +375,5 @@ module.exports = {
   decorateCatalogAvailability,
   inferCatalogFiltersFromText,
   getCatalogSummary,
+  getCatalogSummaryWithMeta,
 };

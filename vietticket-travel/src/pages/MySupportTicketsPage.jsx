@@ -232,9 +232,14 @@ function MySupportTicketsPage() {
               </div>
 
               {isResolved ? (
-                <div className="border-t border-outline-variant/30 bg-surface-container-lowest p-4 text-center text-sm text-on-surface-variant">
-                  Yêu cầu này đã được giải quyết và đóng lại. Vui lòng tạo yêu cầu mới nếu
-                  bạn cần hỗ trợ thêm.
+                <div className="border-t border-outline-variant/30 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
+                  <p className="font-bold text-on-surface">Kết quả xử lý</p>
+                  {detail.resolutionNote && (
+                    <p className="mt-1 whitespace-pre-wrap">{detail.resolutionNote}</p>
+                  )}
+                  <p className="mt-2">
+                    Yêu cầu đã được đóng. Vui lòng tạo yêu cầu mới nếu bạn cần hỗ trợ thêm.
+                  </p>
                 </div>
               ) : (
                 <div className="flex items-end gap-2 border-t border-outline-variant/30 bg-surface-container-lowest p-4">

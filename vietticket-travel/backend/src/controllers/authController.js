@@ -18,9 +18,12 @@ const {
   validatePassword,
 } = require('../utils/validators');
 const { getEffectiveRoles } = require('../utils/userRoles');
+const { getRequestIp } = require('../utils/auditLog');
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY_MINUTES = 30;
+const CURRENT_TERMS_VERSION = '2026-07-17-v1';
+const CURRENT_PRIVACY_VERSION = '2026-07-17-v1';
 const SAFE_FORGOT_PASSWORD_MESSAGE =
   'Nếu email tồn tại trên hệ thống, mã đặt lại mật khẩu đã được tạo.';
 
@@ -43,6 +46,9 @@ function sanitizeUser(user) {
     status: user.status,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
+    termsAcceptedAt: user.termsAcceptedAt || null,
+    termsVersion: user.termsVersion || null,
+    privacyVersion: user.privacyVersion || null,
     profile: user.profile || null,
   };
 }
@@ -92,6 +98,13 @@ async function register(req, res, next) {
       return res.status(400).json({ message: 'Vui lòng nhập email và mật khẩu.' });
     }
 
+    if (req.body.acceptedTerms !== true) {
+      return res.status(400).json({
+        message: 'Bạn phải đồng ý với điều khoản dịch vụ và chính sách bảo mật.',
+        code: 'TERMS_CONSENT_REQUIRED',
+      });
+    }
+
     if (!isValidEmail(email)) {
       return res.status(400).json({ message: 'Email không hợp lệ.' });
     }
@@ -123,6 +136,10 @@ async function register(req, res, next) {
           passwordHash,
           provider: 'LOCAL',
           isEmailVerified: false,
+          termsAcceptedAt: new Date(),
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          consentIpAddress: getRequestIp(req),
           profile: {
             create: {
               phoneNumber,
@@ -343,6 +360,13 @@ async function googleLogin(req, res, next) {
     });
 
     if (!user) {
+      if (req.body.acceptedTerms !== true) {
+        return res.status(400).json({
+          message: 'Bạn phải đồng ý với điều khoản dịch vụ và chính sách bảo mật.',
+          code: 'TERMS_CONSENT_REQUIRED',
+        });
+      }
+
       user = await prisma.user.create({
         data: {
           email: googlePayload.email,
@@ -350,6 +374,10 @@ async function googleLogin(req, res, next) {
           provider: 'GOOGLE',
           isEmailVerified: true,
           passwordHash: null,
+          termsAcceptedAt: new Date(),
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          consentIpAddress: getRequestIp(req),
           profile: {
             create: {
               avatarUrl: googlePayload.avatarUrl,

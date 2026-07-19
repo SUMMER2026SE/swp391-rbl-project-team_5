@@ -10,12 +10,15 @@ const NAV_ITEMS_ADMIN = [
   { to: '/admin',                     icon: 'dashboard',      label: 'Tổng quan',          end: true },
   { to: '/admin/bookings',            icon: 'receipt_long',   label: 'Đặt vé & Thanh toán' },
   { to: '/admin/reports',             icon: 'finance',        label: 'Báo cáo tài chính' },
+  { to: '/admin/settlements',         icon: 'request_quote',  label: 'Đối soát đối tác' },
   { to: '/admin/kyc-approval',        icon: 'verified_user',  label: 'Duyệt hồ sơ KYC' },
   { to: '/admin/attraction-approval', icon: 'location_on',    label: 'Duyệt địa điểm' },
   { to: '/admin/violations',          icon: 'report_problem', label: 'Quản lý vi phạm' },
   { to: '/admin/categories',          icon: 'category',       label: 'Quản lý danh mục' },
+  { to: '/admin/vouchers',            icon: 'confirmation_number', label: 'Quản lý voucher' },
   { to: '/admin/reviews',             icon: 'rate_review',    label: 'Kiểm duyệt Đánh giá' },
   { to: '/admin/users',               icon: 'manage_accounts', label: 'Quản lý người dùng' },
+  { to: '/admin/audit-logs',          icon: 'history',         label: 'Nhật ký kiểm toán' },
 ];
 
 const NAV_ITEMS_CHECKIN_STAFF = [
@@ -25,6 +28,7 @@ const NAV_ITEMS_CHECKIN_STAFF = [
 const NAV_ITEMS_PLATFORM_STAFF = [
   { to: '/staff/tickets', icon: 'support_agent', label: 'Hỗ trợ khách hàng' },
   { to: '/staff/refunds', icon: 'currency_exchange', label: 'Quản lý hoàn tiền' },
+  { to: '/admin/reviews', icon: 'rate_review', label: 'Kiểm duyệt đánh giá' },
 ];
 
 
@@ -38,6 +42,12 @@ export default function AdminSidebar({ isOpen, onClose }) {
     ...(isAdmin || isPartnerStaff ? NAV_ITEMS_CHECKIN_STAFF : []),
     ...(isAdmin || isPlatformStaff ? NAV_ITEMS_PLATFORM_STAFF : []),
   ];
+  const portalTitle = isAdmin ? 'VietTicket Admin' : 'VietTicket Operations';
+  const portalSubtitle = isAdmin
+    ? 'Cổng quản trị'
+    : isPartnerStaff
+      ? 'Vận hành check-in'
+      : 'CSKH nền tảng';
 
   const handleLogout = async () => {
     const ok = window.confirm("Bạn có chắc chắn muốn đăng xuất khỏi cổng quản trị không?");
@@ -52,9 +62,9 @@ export default function AdminSidebar({ isOpen, onClose }) {
       <div className="admin-sidebar__brand" style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <Link to="/" style={{ textDecoration: 'none' }} title="Về trang chủ khách hàng">
-            <h1 style={{ color: '#fff', cursor: 'pointer' }} className="hover:opacity-90 transition-opacity">VietTicket Admin</h1>
+            <h1 style={{ color: '#fff', cursor: 'pointer' }} className="hover:opacity-90 transition-opacity">{portalTitle}</h1>
           </Link>
-          <p style={{ color: 'rgba(255,255,255,0.7)', margin: 0 }}>Cổng quản trị</p>
+          <p style={{ color: 'rgba(255,255,255,0.7)', margin: 0 }}>{portalSubtitle}</p>
         </div>
         {onClose && (
           <button

@@ -53,7 +53,7 @@ function refundPolicyFromClient(clientPolicy) {
   return REFUND_TO_DB[normalized] || 'NON_REFUNDABLE';
 }
 
-const TICKET_TYPES = ['ADULT', 'CHILD', 'FAMILY', 'GROUP'];
+const TICKET_TYPES = ['ADULT', 'CHILD', 'STUDENT', 'FAMILY', 'GROUP'];
 
 // --- Chuyển Decimal của Prisma về Number cho JSON ---
 function decimalToNumber(value) {
@@ -108,12 +108,20 @@ function toAttractionListItem(attraction) {
     ),
     status: attractionStatusToClient(attraction.status, attraction.publicationStatus),
     dbStatus: attraction.status,
+    operationalStatus: attraction.operationalStatus || 'ACTIVE',
+    suspensionReason: attraction.suspensionReason || null,
+    suspendedAt: attraction.suspendedAt || null,
     publicationStatus: attraction.publicationStatus || (
       attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
     ),
     requiresManualApproval: Boolean(
       draft?.requiresManualApproval ?? attraction.requiresManualApproval,
     ),
+    recommendedVisitMinutes: Number(
+      draft?.recommendedVisitMinutes ?? attraction.recommendedVisitMinutes ?? 150,
+    ),
+    environment: draft?.environment ?? attraction.environment ?? 'MIXED',
+    isFullDay: Boolean(draft?.isFullDay ?? attraction.isFullDay),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,
@@ -144,12 +152,20 @@ function toAttractionDetail(attraction) {
       : '',
     status: attractionStatusToClient(attraction.status, attraction.publicationStatus),
     dbStatus: attraction.status,
+    operationalStatus: attraction.operationalStatus || 'ACTIVE',
+    suspensionReason: attraction.suspensionReason || null,
+    suspendedAt: attraction.suspendedAt || null,
     publicationStatus: attraction.publicationStatus || (
       attraction.status === 'APPROVED' ? 'ACTIVE' : 'PAUSED'
     ),
     requiresManualApproval: Boolean(
       draft?.requiresManualApproval ?? attraction.requiresManualApproval,
     ),
+    recommendedVisitMinutes: Number(
+      draft?.recommendedVisitMinutes ?? attraction.recommendedVisitMinutes ?? 150,
+    ),
+    environment: draft?.environment ?? attraction.environment ?? 'MIXED',
+    isFullDay: Boolean(draft?.isFullDay ?? attraction.isFullDay),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,
@@ -179,6 +195,11 @@ function toTicket(ticket) {
       decimalToNumber(ticket.refundFeeRate),
     ),
     refundCutoffHours: Number(ticket.refundCutoffHours ?? 24),
+    minAgeYears: ticket.minAgeYears ?? null,
+    maxAgeYears: ticket.maxAgeYears ?? null,
+    minHeightCm: ticket.minHeightCm ?? null,
+    maxHeightCm: ticket.maxHeightCm ?? null,
+    requiresAdult: Boolean(ticket.requiresAdult),
     status: ticketStatusToClient(ticket.status),
   };
 }

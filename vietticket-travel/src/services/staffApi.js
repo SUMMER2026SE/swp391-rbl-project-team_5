@@ -29,8 +29,11 @@ export function reconcileRefundRequest(refundId) {
 }
 
 // ----- Cấp lại vé -----
-export function reissueTicket(bookingId) {
-  return apiRequest(`/staff/bookings/${bookingId}/reissue`, { method: 'POST' })
+export function reissueTicket(bookingId, reasonCode, reason) {
+  return apiRequest(`/staff/bookings/${bookingId}/reissue`, {
+    method: 'POST',
+    body: { reasonCode, reason },
+  })
 }
 
 // ----- Check-in tại cổng -----

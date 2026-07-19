@@ -1,18 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { searchAttractions } from '../services/attractionApi.js'
-import { featuredDestinations } from '../data/landingData.js'
 import fallbackDestinationImage from '../assets/ninh_binh.webp'
 
 const formatPrice = (value) =>
   value == null ? 'Xem các gói vé' : `Từ ${Number(value).toLocaleString('vi-VN')}đ`
-
-// Đường dẫn của thẻ: địa điểm thật mở trang chi tiết; địa điểm nổi bật dự phòng
-// dẫn sang trang khám phá với từ khóa để vẫn thấy các điểm tham quan nổi bật.
-const getDestinationLink = (destination) =>
-  destination.searchQuery
-    ? `/attractions?search=${encodeURIComponent(destination.searchQuery)}`
-    : `/attractions/${destination.id}`
 
 const handleImageFallback = (event) => {
   const image = event.currentTarget
@@ -43,9 +35,6 @@ function PopularDestinations() {
     }
   }, [])
 
-  // Khi API chưa có địa điểm đã duyệt, hiển thị danh sách nổi bật tuyển chọn.
-  const items = destinations.length > 0 ? destinations : featuredDestinations
-
   return (
     <section className="section section--muted" id="destinations">
       <div className="container">
@@ -56,11 +45,11 @@ function PopularDestinations() {
 
         {loading ? (
           <p className="text-center">Đang tải điểm đến...</p>
-        ) : (
+        ) : destinations.length > 0 ? (
           <div className="destination-grid">
-            {items.map((destination) => (
+            {destinations.map((destination) => (
               <Link
-                to={getDestinationLink(destination)}
+                to={`/attractions/${destination.id}`}
                 className="destination-card block transition hover:-translate-y-1 hover:shadow-lg focus:outline-none"
                 key={destination.id}
               >
@@ -94,6 +83,21 @@ function PopularDestinations() {
                 </div>
               </Link>
             ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[#bec8ca] bg-white p-8 text-center">
+            <span
+              className="material-symbols-outlined text-4xl text-[#006068]"
+              aria-hidden="true"
+            >
+              travel_explore
+            </span>
+            <h3 className="mt-3 text-lg font-bold text-[#00474d]">
+              Chưa có điểm tham quan nổi bật
+            </h3>
+            <p className="mt-1 text-sm text-[#3f484a]">
+              Các địa điểm đã được duyệt sẽ xuất hiện tại đây.
+            </p>
           </div>
         )}
 

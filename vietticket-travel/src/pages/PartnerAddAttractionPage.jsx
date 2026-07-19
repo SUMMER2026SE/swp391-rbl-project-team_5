@@ -42,6 +42,9 @@ function PartnerAddAttractionPage() {
     lng: '',
     category: '',
     requiresManualApproval: true,
+    recommendedVisitMinutes: '150',
+    environment: 'MIXED',
+    isFullDay: false,
   })
   const [categories, setCategories] = useState([])
 
@@ -152,6 +155,17 @@ function PartnerAddAttractionPage() {
       setActiveTab(0)
       return
     }
+    const visitMinutes = Number(form.recommendedVisitMinutes)
+    if (!Number.isInteger(visitMinutes) || visitMinutes < 30 || visitMinutes > 720) {
+      toast.error('Thời lượng tham quan đề xuất phải từ 30 đến 720 phút.')
+      setActiveTab(0)
+      return
+    }
+    if (form.isFullDay && visitMinutes < 360) {
+      toast.error('Trải nghiệm cả ngày cần thời lượng đề xuất ít nhất 360 phút.')
+      setActiveTab(0)
+      return
+    }
     setIsSubmitting(true)
 
     const payload = {
@@ -166,6 +180,9 @@ function PartnerAddAttractionPage() {
       lng: form.lng,
       category: form.category,
       requiresManualApproval: form.requiresManualApproval,
+      recommendedVisitMinutes: visitMinutes,
+      environment: form.environment,
+      isFullDay: form.isFullDay,
     }
 
     try {
@@ -320,6 +337,51 @@ function PartnerAddAttractionPage() {
                 ))}
               </select>
             </FormField>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              <FormField label="Thời lượng tham quan đề xuất" required>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="30"
+                    max="720"
+                    step="15"
+                    value={form.recommendedVisitMinutes}
+                    onChange={(e) => updateForm('recommendedVisitMinutes', e.target.value)}
+                    className="w-full rounded-lg border border-[#bec8ca] bg-white px-4 py-3 pr-16 text-sm text-[#191c1d] outline-none shadow-sm focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                  <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[#6f797a]">
+                    phút
+                  </span>
+                </div>
+              </FormField>
+              <FormField label="Môi trường trải nghiệm" required>
+                <select
+                  value={form.environment}
+                  onChange={(e) => updateForm('environment', e.target.value)}
+                  className="w-full rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm text-[#191c1d] outline-none shadow-sm focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                >
+                  <option value="INDOOR">Chủ yếu trong nhà</option>
+                  <option value="OUTDOOR">Chủ yếu ngoài trời</option>
+                  <option value="MIXED">Kết hợp trong/ngoài trời</option>
+                </select>
+              </FormField>
+            </div>
+
+            <label className="flex items-start gap-3 rounded-xl border border-[#dbe4e8] bg-[#f8fafb] p-4">
+              <input
+                type="checkbox"
+                checked={form.isFullDay}
+                onChange={(e) => updateForm('isFullDay', e.target.checked)}
+                className="mt-1 accent-[#00474d]"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-[#191c1d]">Trải nghiệm cả ngày</span>
+                <span className="mt-1 block text-xs text-[#3f484a]">
+                  Bật cho công viên, khu nghỉ dưỡng hoặc trải nghiệm không nên ghép thêm địa điểm khác trong cùng ngày.
+                </span>
+              </span>
+            </label>
 
             <FormField label="Chính sách xác nhận đặt vé">
               <div className="grid gap-3 md:grid-cols-2">

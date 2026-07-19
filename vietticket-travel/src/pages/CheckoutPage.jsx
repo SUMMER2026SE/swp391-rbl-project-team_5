@@ -30,7 +30,7 @@ const checkoutTrustItems = [
   },
   {
     title: 'Vé điện tử rõ ràng',
-    description: 'Sau khi thanh toán hợp lệ, vé QR sẽ nằm trong mục Vé của tôi.',
+    description: 'Vé QR nằm trong mục Vé của tôi sau khi thanh toán và đơn được xác nhận.',
     icon: 'confirmation_number',
   },
   {
@@ -545,7 +545,8 @@ function CheckoutPage() {
 
               {booking.bookingId && (
                 <p className="text-sm font-bold text-green-700 bg-green-50 p-3 rounded-xl">
-                  Đơn hàng đã được tạo thành công. Vui lòng thanh toán để nhận vé QR.
+                  Đơn hàng đã được tạo thành công. Hãy thanh toán; vé QR được phát
+                  hành sau khi đơn được xác nhận.
                 </p>
               )}
 

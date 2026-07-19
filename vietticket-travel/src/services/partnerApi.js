@@ -46,6 +46,15 @@ export function getReports(period = 'month') {
   return apiRequest(`/partners/reports?period=${encodeURIComponent(period)}`, { method: 'GET' })
 }
 
+export function getPartnerSettlements(params = {}) {
+  const query = new URLSearchParams()
+  if (params.status) query.set('status', params.status)
+  if (params.page) query.set('page', params.page)
+  if (params.limit) query.set('limit', params.limit)
+  const qs = query.toString()
+  return apiRequest(`/partners/settlements${qs ? `?${qs}` : ''}`, { method: 'GET' })
+}
+
 export function getCategories() {
   return apiRequest('/partners/categories', { method: 'GET' })
 }

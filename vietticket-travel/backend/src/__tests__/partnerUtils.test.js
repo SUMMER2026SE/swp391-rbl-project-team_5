@@ -5,6 +5,21 @@ const {
 const { validateKyc, validateTicket } = require('../utils/partnerValidators');
 
 describe('partner mappings and validation', () => {
+  const validKyc = {
+    businessName: 'VietTicket Partner',
+    businessLicenseUrl: 'http://localhost/api/upload/documents/user-1-license.pdf',
+    registrationDate: '2020-01-15',
+    representativeName: 'Nguyen Van A',
+    representativePhone: '0901234567',
+    businessAddress: '1 Nguyen Hue, HCM',
+    bankName: 'Vietcombank',
+    branchName: 'HCM',
+    bankAccountNumber: '0123456789',
+    bankAccountName: 'NGUYEN VAN A',
+    payoutCurrency: 'VND',
+    kycConsentAccepted: true,
+  };
+
   test('inactive attraction trở về DRAFT, không dùng SUSPENDED', () => {
     expect(attractionStatusFromClient('inactive')).toBe('DRAFT');
   });
@@ -30,9 +45,8 @@ describe('partner mappings and validation', () => {
     'KYC accepts a valid %s tax code',
     (taxCode) => {
       expect(validateKyc({
-        businessName: 'VietTicket Partner',
+        ...validKyc,
         taxCode,
-        businessLicenseUrl: 'http://localhost/api/upload/documents/user-1-license.pdf',
       })).toBe('');
     },
   );

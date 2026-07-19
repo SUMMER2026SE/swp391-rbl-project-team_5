@@ -6,7 +6,15 @@ import * as partnerApi from '../services/partnerApi.js'
 
 const ITEMS_PER_PAGE = 10
 
-function StatusBadge({ status, publicationStatus, rejectionReason }) {
+function StatusBadge({
+  status,
+  publicationStatus,
+  operationalStatus,
+  rejectionReason,
+  suspensionReason,
+}) {
+  const isSuspended = operationalStatus === 'SUSPENDED'
+  const reasonText = isSuspended ? suspensionReason : rejectionReason
   let label = 'Tạm dừng'
   let cls = 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'
 
@@ -22,12 +30,12 @@ function StatusBadge({ status, publicationStatus, rejectionReason }) {
   } else if (status === 'REJECTED') {
     label = 'Bị từ chối'
     cls = 'bg-[#ffdad6] text-[#ba1a1a] border-[#ffb4ab]'
-  } else if (status === 'SUSPENDED') {
+  } else if (isSuspended) {
     label = 'Bị đình chỉ'
     cls = 'bg-[#ffdad6] text-[#ba1a1a] border-[#ffb4ab] font-bold'
   }
 
-  if ((status === 'APPROVED' || status === 'active') && publicationStatus === 'PAUSED') {
+  if (!isSuspended && (status === 'APPROVED' || status === 'active') && publicationStatus === 'PAUSED') {
     label = 'Tạm dừng bán'
     cls = 'bg-[#e6e8e9] text-[#3f484a] border-[#bec8ca]'
   }
@@ -35,20 +43,25 @@ function StatusBadge({ status, publicationStatus, rejectionReason }) {
     label = 'Có bản nháp mới'
   }
 
+  if (isSuspended) {
+    label = 'Bị đình chỉ'
+    cls = 'bg-[#ffdad6] text-[#ba1a1a] border-[#ffb4ab] font-bold'
+  }
+
   return (
     <div className="relative group/badge inline-block">
       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${cls}`}>
         {label}
-        {rejectionReason && (
+        {reasonText && (
           <span className="material-symbols-outlined text-[14px] ml-1 text-[#ba1a1a] align-middle cursor-help">info</span>
         )}
       </span>
-      {rejectionReason && (
+      {reasonText && (
         <div className="absolute z-30 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-[#191c1d] text-white text-xs rounded-xl shadow-lg opacity-0 pointer-events-none group-hover/badge:opacity-100 transition-opacity duration-200">
           <p className="font-bold text-[#ffdad6] mb-1">
-            {status === 'SUSPENDED' ? 'Lý do đình chỉ:' : 'Lý do từ chối:'}
+            {isSuspended ? 'Lý do đình chỉ:' : 'Lý do từ chối:'}
           </p>
-          <p className="leading-relaxed font-normal">{rejectionReason}</p>
+          <p className="leading-relaxed font-normal">{reasonText}</p>
           <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#191c1d]" />
         </div>
       )}
@@ -358,7 +371,13 @@ function TableView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, tota
                   <td className="px-6 py-4 text-base text-[#191c1d]">{a.hours}</td>
                   {/* Status */}
                   <td className="px-6 py-4">
-                    <StatusBadge status={a.dbStatus} publicationStatus={a.publicationStatus} rejectionReason={a.rejectionReason} />
+                    <StatusBadge
+                      status={a.dbStatus}
+                      publicationStatus={a.publicationStatus}
+                      operationalStatus={a.operationalStatus}
+                      rejectionReason={a.rejectionReason}
+                      suspensionReason={a.suspensionReason}
+                    />
                   </td>
                   {/* Actions */}
                   <td className="px-6 py-4 text-right">
@@ -413,7 +432,13 @@ function GridView({ rows, onView, onEdit, onDelete, onSubmit, currentPage, total
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <p className="text-sm font-bold text-[#191c1d] leading-tight">{a.name}</p>
-                  <StatusBadge status={a.dbStatus} publicationStatus={a.publicationStatus} rejectionReason={a.rejectionReason} />
+                  <StatusBadge
+                    status={a.dbStatus}
+                    publicationStatus={a.publicationStatus}
+                    operationalStatus={a.operationalStatus}
+                    rejectionReason={a.rejectionReason}
+                    suspensionReason={a.suspensionReason}
+                  />
                 </div>
                 <p className="text-xs text-[#3f484a] mb-1">{a.category}</p>
                 <p className="text-xs text-[#6f797a] flex items-center gap-1">

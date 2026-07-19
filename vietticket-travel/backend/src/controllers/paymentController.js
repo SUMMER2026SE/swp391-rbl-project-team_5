@@ -26,6 +26,10 @@ const { sendRefundRequestReceivedEmail } = require('../utils/mailer');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const { getFrontendUrl } = require('../config/runtimeConfig');
 const {
+  MIN_VNPAY_AMOUNT,
+  parseVndInteger,
+} = require('../utils/money');
+const {
   confirmReservationAndStock,
   createTicketInstances,
 } = require('./bookingController');
@@ -42,14 +46,110 @@ function httpError(statusCode, message) {
 }
 
 function getClientIp(req) {
-  const xff = req.headers['x-forwarded-for'];
-  if (xff) return String(xff).split(',')[0].trim();
-  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
+  // Express only derives req.ip from proxy headers when `trust proxy` is
+  // explicitly configured. Never trust a raw client-supplied X-Forwarded-For.
+  return req.ip || req.socket?.remoteAddress || '127.0.0.1';
 }
 
 // VNPay yêu cầu số tiền nhân 100, dạng số nguyên.
 function amountToVnp(totalAmount) {
   return Math.round(Number(totalAmount) * 100);
+}
+
+const VNP_DATE_PATTERN = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/;
+const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+const LEGACY_TXN_TIMESTAMP_PATTERN = /(\d{13})$/;
+const EARLIEST_SUPPORTED_PAYMENT_MS = Date.UTC(2020, 0, 1);
+
+function parseVnpDate(value) {
+  const match = VNP_DATE_PATTERN.exec(String(value || ''));
+  if (!match) return null;
+  const [, yearRaw, monthRaw, dayRaw, hourRaw, minuteRaw, secondRaw] = match;
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  const day = Number(dayRaw);
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  const second = Number(secondRaw);
+  const parsed = new Date(Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour - 7,
+    minute,
+    second,
+  ));
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  // Date.UTC also normalizes impossible component values. Compare in GMT+7 so
+  // malformed gateway timestamps cannot silently become a different instant.
+  const vietnamTime = new Date(parsed.getTime() + VN_OFFSET_MS);
+  if (
+    vietnamTime.getUTCFullYear() !== year
+    || vietnamTime.getUTCMonth() + 1 !== month
+    || vietnamTime.getUTCDate() !== day
+    || vietnamTime.getUTCHours() !== hour
+    || vietnamTime.getUTCMinutes() !== minute
+    || vietnamTime.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function rawResponseObject(payment) {
+  const raw = payment?.rawResponse;
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+}
+
+function resolveOriginalVnpCreateDate(payment) {
+  const raw = rawResponseObject(payment);
+  const storedCreateDate = String(raw.vnp_CreateDate || '').trim();
+  if (VNP_DATE_PATTERN.test(storedCreateDate) && parseVnpDate(storedCreateDate)) {
+    return storedCreateDate;
+  }
+
+  // Legacy attempts encoded the exact creation epoch in the TxnRef suffix.
+  // Only accept a plausible timestamp and, when available, the expected booking
+  // prefix so an unrelated numeric reference is never guessed as a date.
+  const transactionId = String(payment?.transactionId || '');
+  const timestampMatch = LEGACY_TXN_TIMESTAMP_PATTERN.exec(transactionId);
+  if (!timestampMatch) return '';
+  const bookingPrefix = String(payment?.bookingId || '').replace(/-/g, '');
+  if (bookingPrefix && !transactionId.startsWith(bookingPrefix)) return '';
+  const timestamp = Number(timestampMatch[1]);
+  if (
+    !Number.isSafeInteger(timestamp)
+    || timestamp < EARLIEST_SUPPORTED_PAYMENT_MS
+    || timestamp > Date.now() + 24 * 60 * 60 * 1000
+  ) {
+    return '';
+  }
+  return formatVnpDate(new Date(timestamp));
+}
+
+function mergeVnpayRawResponse(payment, query) {
+  const originalCreateDate = resolveOriginalVnpCreateDate(payment);
+  return {
+    ...rawResponseObject(payment),
+    ...query,
+    ...(originalCreateDate ? { vnp_CreateDate: originalCreateDate } : {}),
+  };
+}
+
+function resolvePaymentDeadline(payment, reservation) {
+  const rawExpiry = parseVnpDate(rawResponseObject(payment).vnp_ExpireDate);
+  const candidates = [
+    payment?.expiresAt,
+    reservation?.paymentDeadline,
+    reservation?.expiresAt,
+    rawExpiry,
+  ]
+    .filter(Boolean)
+    .map((value) => new Date(value))
+    .filter((value) => !Number.isNaN(value.getTime()));
+  if (candidates.length === 0) return null;
+  return new Date(Math.min(...candidates.map((value) => value.getTime())));
 }
 
 // POST /api/payments/create-vnpay-url
@@ -93,8 +193,16 @@ async function createVNPayUrl(req, res, next) {
       });
     }
 
-    if (Number(booking.totalAmount) <= 0) {
-      return res.status(400).json({ message: 'Tổng tiền thanh toán phải lớn hơn 0.' });
+    const paymentAmount = parseVndInteger(booking.totalAmount);
+    if (paymentAmount === null) {
+      return res.status(400).json({
+        message: 'Tổng tiền thanh toán phải là số nguyên VND hợp lệ lớn hơn 0.',
+      });
+    }
+    if (paymentAmount < MIN_VNPAY_AMOUNT) {
+      return res.status(400).json({
+        message: `Số tiền thanh toán VNPay tối thiểu là ${MIN_VNPAY_AMOUNT.toLocaleString('vi-VN')} VND.`,
+      });
     }
 
     if (booking.payments.some((payment) => payment.status === 'SUCCESS' && !payment.isDuplicate)) {
@@ -125,8 +233,13 @@ async function createVNPayUrl(req, res, next) {
     const expiresAt = new Date(
       Math.min(requestedExpiry.getTime(), new Date(paymentDeadline).getTime()),
     );
-    // TxnRef chỉ gồm [a-z0-9] (bỏ dấu '-' của uuid) + timestamp -> duy nhất mỗi lần thử.
-    const txnRef = `${bookingId.replace(/-/g, '')}${now.getTime()}`;
+    const vnpCreateDate = formatVnpDate(now);
+    const vnpExpireDate = formatVnpDate(expiresAt);
+    // TxnRef chỉ gồm [a-z0-9]. Thêm entropy ngẫu nhiên để hai request đồng
+    // thời trong cùng một mili-giây vẫn không thể dùng chung mã giao dịch; giữ
+    // timestamp ở cuối để dữ liệu legacy còn có thể suy ra vnp_CreateDate.
+    const txnRef =
+      `${bookingId.replace(/-/g, '')}${createVnpRequestId().slice(0, 12)}${now.getTime()}`;
 
     // Mỗi lần thử thanh toán là một Payment bất biến. Link cũ vẫn có thể được
     // VNPay callback an toàn, thay vì bị mất dấu khi người dùng bấm thử lại.
@@ -153,11 +266,17 @@ async function createVNPayUrl(req, res, next) {
       await tx.payment.create({
         data: {
           bookingId,
-          amount: booking.totalAmount,
+          amount: paymentAmount,
           paymentGateway: 'VNPAY',
           transactionId: txnRef,
           status: 'PENDING',
           expiresAt,
+          // Persist the merchant-side transaction date. VNPay requires this
+          // exact PAY vnp_CreateDate later for both QueryDR and Refund.
+          rawResponse: {
+            vnp_CreateDate: vnpCreateDate,
+            vnp_ExpireDate: vnpExpireDate,
+          },
         },
       });
     });
@@ -171,11 +290,11 @@ async function createVNPayUrl(req, res, next) {
       vnp_TxnRef: txnRef,
       vnp_OrderInfo: `Thanh toan don hang ${bookingId}`,
       vnp_OrderType: 'other',
-      vnp_Amount: amountToVnp(booking.totalAmount),
+      vnp_Amount: amountToVnp(paymentAmount),
       vnp_ReturnUrl: returnUrl,
       vnp_IpAddr: getClientIp(req),
-      vnp_CreateDate: formatVnpDate(now),
-      vnp_ExpireDate: formatVnpDate(expiresAt),
+      vnp_CreateDate: vnpCreateDate,
+      vnp_ExpireDate: vnpExpireDate,
     };
 
     const paymentUrl = buildVnpayUrl(params, { vnpUrl, secret });
@@ -252,6 +371,36 @@ async function reconcileVnpayPayment(query) {
             bookingStatus: current.status,
           };
         }
+        const paymentState = {
+          ...payment,
+          ...currentPayment,
+          rawResponse: currentPayment?.rawResponse ?? payment.rawResponse,
+        };
+        const callbackReceivedAt = new Date();
+        const capturedAt = parseVnpDate(query.vnp_PayDate);
+        const hasGatewayPayDate = String(query.vnp_PayDate || '').trim().length > 0;
+        // VNPay documents vnp_PayDate as optional in PAY callbacks. When it is
+        // omitted, a signed success received inside the merchant's own signed
+        // payment window is sufficient to fulfil the hold. A malformed value
+        // remains fail-closed; a callback first received after the deadline is
+        // captured and refunded because its actual payment time is unknowable.
+        const effectiveCapturedAt =
+          capturedAt || (!hasGatewayPayDate ? callbackReceivedAt : null);
+        const gatewayRawResponse = {
+          ...mergeVnpayRawResponse(paymentState, query),
+          callbackReceivedAt: callbackReceivedAt.toISOString(),
+          captureTimingSource: capturedAt
+            ? 'VNP_PAY_DATE'
+            : hasGatewayPayDate
+              ? 'INVALID_VNP_PAY_DATE'
+              : 'MERCHANT_RECEIVED_AT',
+        };
+        const paymentDeadline = resolvePaymentDeadline(paymentState, current.reservation);
+        const paidWithinDeadline = Boolean(
+          effectiveCapturedAt
+          && paymentDeadline
+          && effectiveCapturedAt.getTime() <= paymentDeadline.getTime(),
+        );
 
         const successfulPayment = current.payments.find(
           (p) => p.status === 'SUCCESS' && p.id !== payment.id && !p.isDuplicate,
@@ -270,8 +419,8 @@ async function reconcileVnpayPayment(query) {
               where: { id: payment.id },
               data: {
                 status: 'SUCCESS',
-                paidAt: new Date(),
-                rawResponse: query,
+                paidAt: effectiveCapturedAt || callbackReceivedAt,
+                rawResponse: gatewayRawResponse,
                 isDuplicate: true,
                 duplicateOfPaymentId: successfulPayment.id,
               },
@@ -314,7 +463,18 @@ async function reconcileVnpayPayment(query) {
                 amount: payment.amount,
                 status: 'PENDING',
                 reason: 'Khách hàng thanh toán thành công nhiều lần cho cùng một booking.',
-                rawResponse: query,
+                rawResponse: gatewayRawResponse,
+              },
+            });
+            await tx.payment.updateMany({
+              where: {
+                bookingId: current.id,
+                id: { not: payment.id },
+                status: 'PENDING',
+              },
+              data: {
+                status: 'FAILED',
+                failureReason: 'SUPERSEDED_BY_SUCCESSFUL_PAYMENT',
               },
             });
             return {
@@ -329,17 +489,30 @@ async function reconcileVnpayPayment(query) {
             where: { id: payment.id },
             data: {
               status: 'SUCCESS',
-              paidAt: new Date(),
-              rawResponse: query,
+              paidAt: effectiveCapturedAt || callbackReceivedAt,
+              rawResponse: gatewayRawResponse,
+            },
+          });
+          await tx.payment.updateMany({
+            where: {
+              bookingId: current.id,
+              id: { not: payment.id },
+              status: 'PENDING',
+            },
+            data: {
+              status: 'FAILED',
+              failureReason: 'SUPERSEDED_BY_SUCCESSFUL_PAYMENT',
             },
           });
 
-          // Chỉ xác nhận khi đơn còn chờ thanh toán & vé còn giữ chỗ.
+          // Chỉ xác nhận khi giao dịch được ghi nhận trong chính payment window
+          // đã ký với VNPay, đơn còn chờ thanh toán và vé còn giữ chỗ.
           // Guard current.status tránh "hồi sinh" đơn đã CANCELLED.
           if (
             current.status === 'PENDING_PAYMENT'
             && reservation.status === 'HELD'
             && saleEnabled
+            && paidWithinDeadline
           ) {
             await confirmReservationAndStock(tx, reservation);
             if (needsApproval) {
@@ -419,8 +592,9 @@ async function reconcileVnpayPayment(query) {
                   ? {
                       ...item,
                       status: 'SUCCESS',
-                      paidAt: new Date(),
+                      paidAt: effectiveCapturedAt || callbackReceivedAt,
                       paymentGateway: payment.paymentGateway,
+                      rawResponse: gatewayRawResponse,
                     }
                   : item
               )),
@@ -442,7 +616,7 @@ async function reconcileVnpayPayment(query) {
             data: {
               status: 'FAILED',
               failureReason: responseCode || transactionStatus || 'UNKNOWN',
-              rawResponse: query,
+              rawResponse: gatewayRawResponse,
             },
           });
         }
@@ -748,11 +922,11 @@ async function refundViaVnpay({
 
   const raw = payment?.rawResponse || {};
   const vnpTransactionNo = String(raw.vnp_TransactionNo || '');
-  const vnpPayDate = String(raw.vnp_PayDate || '');
-  if (!payment?.transactionId || !vnpTransactionNo || !vnpPayDate) {
+  const originalCreateDate = resolveOriginalVnpCreateDate(payment);
+  if (!payment?.transactionId || !vnpTransactionNo || !originalCreateDate) {
     throw httpError(
       422,
-      'Thiếu thông tin giao dịch gốc để hoàn tiền (TxnRef/TransactionNo/PayDate).',
+      'Thiếu thông tin giao dịch gốc để hoàn tiền (TxnRef/TransactionNo/original vnp_CreateDate).',
     );
   }
   const refundAmount = Number(amount);
@@ -784,7 +958,7 @@ async function refundViaVnpay({
     vnp_TxnRef: payment.transactionId,
     vnp_Amount: amountToVnp(refundAmount),
     vnp_TransactionNo: vnpTransactionNo,
-    vnp_TransactionDate: vnpPayDate,
+    vnp_TransactionDate: originalCreateDate,
     vnp_CreateBy: String(createBy || 'system').replace(/[^a-zA-Z0-9]/g, '').slice(0, 32) || 'system',
     vnp_CreateDate: formatVnpDate(new Date()),
     vnp_IpAddr: ipAddr || '127.0.0.1',
@@ -844,9 +1018,12 @@ async function queryVnpayTransaction({
 
   const raw = payment?.rawResponse || {};
   const transactionNo = String(raw.vnp_TransactionNo || '');
-  const transactionDate = String(raw.vnp_PayDate || '');
+  const transactionDate = resolveOriginalVnpCreateDate(payment);
   if (!payment?.transactionId || !transactionDate) {
-    throw httpError(422, 'Thiếu thông tin giao dịch thanh toán gốc để đối soát VNPay.');
+    throw httpError(
+      422,
+      'Thiếu original vnp_CreateDate của giao dịch thanh toán để đối soát VNPay.',
+    );
   }
 
   const params = {

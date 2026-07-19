@@ -137,6 +137,34 @@ describe('createTicketProduct (public partner flow)', () => {
     const res = createRes();
     await createTicketProduct(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(201);
+    expect(mockPrisma.ticketProduct.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: 'ADULT' }),
+    });
+  });
+
+  test('chuẩn hóa và lưu đúng loại vé sinh viên', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', partnerId: 'partner-001' });
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({ id: 'partner-001' });
+    mockPrisma.ticketProduct.create.mockResolvedValue({ id: 'tkt-student', name: 'Vé sinh viên', status: 'ACTIVE' });
+    const req = {
+      user: { id: 'user-001' },
+      params: { attractionId: 'attr-001' },
+      body: {
+        name: 'Vé sinh viên',
+        type: 'student',
+        description: 'Xuất trình thẻ sinh viên còn hiệu lực.',
+        originalPrice: 100000,
+        sellingPrice: 80000,
+        refundPolicy: 'NON_REFUNDABLE',
+      },
+    };
+    const res = createRes();
+
+    await createTicketProduct(req, res, jest.fn());
+
+    expect(mockPrisma.ticketProduct.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: 'STUDENT' }),
+    });
   });
 
   test('❌ Trả 403 khi không phải chủ sở hữu', async () => {

@@ -4,6 +4,7 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import useSocket from '../context/useSocket.js'
 import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
+import { getTicketTypeLabel } from '../utils/ticketType.js'
 
 // Nhãn + màu trạng thái lấy từ nguồn dùng chung (utils/bookingStatus.js)
 // để khớp với màn hình của khách hàng và admin.
@@ -28,6 +29,12 @@ function PartnerBookingsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage]                 = useState(1)
   const [pagination, setPagination]     = useState({ total: 0, totalPages: 1 })
+  const [stats, setStats]               = useState({
+    total: 0,
+    confirmed: 0,
+    pendingPartner: 0,
+    recognizedRevenue: 0,
+  })
   const [rejectTarget, setRejectTarget] = useState(null) // booking đang chờ nhập lý do từ chối
   const [rejectReason, setRejectReason] = useState('')
   const [cancelTarget, setCancelTarget] = useState(null)
@@ -59,6 +66,12 @@ function PartnerBookingsPage() {
       const list = res.data || []
       setBookings(list)
       setPagination(res.pagination || { total: 0, totalPages: 1 })
+      setStats(res.stats || {
+        total: 0,
+        confirmed: 0,
+        pendingPartner: 0,
+        recognizedRevenue: 0,
+      })
 
       // Cập nhật selectedBooking từ dữ liệu mới nhất nếu đang mở
       setSelectedBooking((prev) => {
@@ -69,6 +82,12 @@ function PartnerBookingsPage() {
     } catch (err) {
       toast.error(err.message || 'Không thể tải danh sách đặt vé.')
       setBookings([])
+      setStats({
+        total: 0,
+        confirmed: 0,
+        pendingPartner: 0,
+        recognizedRevenue: 0,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -157,14 +176,6 @@ function PartnerBookingsPage() {
     }
   }
 
-  // Local stats derived from current page data (full stats would need a separate API)
-  const stats = {
-    total:     pagination.total,
-    confirmed: bookings.filter((b) => b.status === 'confirmed').length,
-    pending:   bookings.filter((b) => b.status === 'pending_partner' || b.status === 'pending').length,
-    revenue:   bookings.filter((b) => b.status === 'confirmed').reduce((s, b) => s + b.amount, 0),
-  }
-
   return (
     <PartnerLayout pageTitle="Bookings">
       <h2 className="text-2xl font-semibold text-[#191c1d] -mt-2 mb-6">Quản lý Đặt vé</h2>
@@ -172,10 +183,10 @@ function PartnerBookingsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Tổng đặt vé',  value: pagination.total, icon: 'receipt_long', color: 'text-[#00474d]', bg: 'bg-[#e0f4f5]' },
+          { label: 'Tổng đặt vé',  value: stats.total, icon: 'receipt_long', color: 'text-[#00474d]', bg: 'bg-[#e0f4f5]' },
           { label: 'Đã xác nhận', value: stats.confirmed,   icon: 'check_circle', color: 'text-[#137333]', bg: 'bg-[#E6F4EA]' },
-          { label: 'Chờ duyệt',   value: stats.pending,     icon: 'pending',      color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]' },
-          { label: 'Doanh thu',   value: formatVND(stats.revenue), icon: 'payments', color: 'text-[#725000]', bg: 'bg-[#ffdea8]' },
+          { label: 'Chờ duyệt',   value: stats.pendingPartner,     icon: 'pending',      color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]' },
+          { label: 'Doanh thu ròng đã ghi nhận', value: formatVND(stats.recognizedRevenue), icon: 'payments', color: 'text-[#725000]', bg: 'bg-[#ffdea8]' },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#e1e3e4] shadow-sm p-4 flex items-center gap-3">
             <div className={`w-10 h-10 rounded-lg ${s.bg} flex items-center justify-center flex-shrink-0`}>
@@ -445,7 +456,7 @@ function PartnerBookingsPage() {
                     <div>
                       <span className="text-[#6f797a] text-xs block">Chi tiết vé & Đơn giá</span>
                       <span className="text-[#191c1d]">
-                        {selectedBooking.snapshotTicketType === 'CHILD' ? 'Vé Trẻ em' : 'Vé Người lớn'}
+                        {getTicketTypeLabel(selectedBooking.snapshotTicketType)}
                         {' · '}
                         {formatVND(selectedBooking.snapshotUnitPrice || (selectedBooking.amount / selectedBooking.qty))}
                       </span>

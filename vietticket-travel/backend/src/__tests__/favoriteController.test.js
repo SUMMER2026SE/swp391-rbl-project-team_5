@@ -43,7 +43,7 @@ describe('listFavorites', () => {
           attraction: {
             publishedAt: { not: null },
             publicationStatus: 'ACTIVE',
-            status: { not: 'SUSPENDED' },
+            operationalStatus: 'ACTIVE',
             archivedAt: null,
             partner: { status: 'APPROVED' },
           },

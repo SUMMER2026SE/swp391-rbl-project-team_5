@@ -165,7 +165,8 @@ describe('Review Routes Integration Tests', () => {
       mockValidSession(mockPrisma, 'admin-01');
       mockPrisma.review.findUnique.mockResolvedValue({
         id: 'rev-01',
-        attractionId: 'attr-01'
+        attractionId: 'attr-01',
+        isHidden: false,
       });
       mockPrisma.review.findMany.mockResolvedValue([]);
       mockPrisma.$transaction.mockImplementation(async (callback) => {
@@ -179,11 +180,20 @@ describe('Review Routes Integration Tests', () => {
       const res = await request(app)
         .patch('/api/reviews/rev-01/moderate')
         .set('Authorization', `Bearer ${token}`)
-        .send({ isHidden: true });
+        .send({
+          isHidden: true,
+          reason: 'Nội dung công khai thông tin cá nhân của khách.',
+        });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.isHidden).toBe(true);
+      expect(mockPrisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'REVIEW_HIDDEN',
+          entityId: 'rev-01',
+        }),
+      }));
     });
 
     test('blocks partner staff from moderating platform reviews', async () => {

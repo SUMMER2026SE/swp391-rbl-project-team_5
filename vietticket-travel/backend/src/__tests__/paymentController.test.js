@@ -41,6 +41,7 @@ const {
   vnpayReturn,
   createVNPayUrl,
   refundViaVnpay,
+  queryVnpayTransaction,
 } = require('../controllers/paymentController');
 
 function makeRes() {
@@ -53,6 +54,10 @@ function makeRes() {
 
 // totalAmount 100000 -> vnp_Amount hợp lệ = 10000000
 const VALID_AMOUNT = '10000000';
+const CALLBACK_PAY_DATE = '20260609120500';
+const CALLBACK_CREATE_DATE = '20260609120000';
+const CALLBACK_EXPIRE_DATE = '20260609121000';
+const CALLBACK_DEADLINE = new Date('2026-06-09T05:10:00.000Z');
 
 function baseQuery(overrides = {}) {
   return {
@@ -60,6 +65,7 @@ function baseQuery(overrides = {}) {
     vnp_ResponseCode: '00',
     vnp_TransactionStatus: '00',
     vnp_Amount: VALID_AMOUNT,
+    vnp_PayDate: CALLBACK_PAY_DATE,
     vnp_SecureHash: 'hash',
     ...overrides,
   };
@@ -72,6 +78,11 @@ function paymentFixture({ requiresManualApproval = false, partnerStatus = 'APPRO
     transactionId: 'txnref123',
     paymentGateway: 'VNPAY',
     amount: 100000,
+    expiresAt: CALLBACK_DEADLINE,
+    rawResponse: {
+      vnp_CreateDate: CALLBACK_CREATE_DATE,
+      vnp_ExpireDate: CALLBACK_EXPIRE_DATE,
+    },
     booking: {
       id: 'booking-1',
       userId: 'user-1',
@@ -82,6 +93,8 @@ function paymentFixture({ requiresManualApproval = false, partnerStatus = 'APPRO
         quantity: 2,
         status: 'HELD',
         date: new Date('2026-06-20T00:00:00.000Z'),
+        expiresAt: CALLBACK_DEADLINE,
+        paymentDeadline: CALLBACK_DEADLINE,
         ticketProduct: {
           id: 'tkt-1',
           attractionId: 'attr-1',
@@ -121,6 +134,11 @@ function setupTx({
           id: p.id || 'pay-1',
           amount: 100000,
           paymentGateway: 'VNPAY',
+          expiresAt: CALLBACK_DEADLINE,
+          rawResponse: {
+            vnp_CreateDate: CALLBACK_CREATE_DATE,
+            vnp_ExpireDate: CALLBACK_EXPIRE_DATE,
+          },
           ...p,
         })),
         reservation: {
@@ -129,6 +147,8 @@ function setupTx({
           quantity: 2,
           date: new Date('2026-06-20T00:00:00.000Z'),
           status: reservationStatus,
+          expiresAt: CALLBACK_DEADLINE,
+          paymentDeadline: CALLBACK_DEADLINE,
           ticketProduct: {
             id: 'tkt-1',
             attractionId: 'attr-1',
@@ -222,7 +242,15 @@ describe('vnpayIpn', () => {
     await vnpayIpn({ query: baseQuery() }, res);
 
     expect(tx.payment.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'SUCCESS' }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'SUCCESS',
+          rawResponse: expect.objectContaining({
+            vnp_CreateDate: CALLBACK_CREATE_DATE,
+            vnp_PayDate: CALLBACK_PAY_DATE,
+          }),
+        }),
+      }),
     );
     expect(confirmReservationAndStock).toHaveBeenCalled();
     expect(tx.booking.update).toHaveBeenCalledWith(
@@ -255,6 +283,125 @@ describe('vnpayIpn', () => {
     );
     expect(queueConfirmedTicketEmail).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({ RspCode: '00', Message: 'Confirm success' });
+  });
+
+  test('thanh toán chuẩn đóng các lượt VNPay còn treo của cùng booking', async () => {
+    verifyVnpaySignature.mockReturnValue(true);
+    prisma.payment.findUnique.mockResolvedValue(paymentFixture());
+    const tx = setupTx({
+      payments: [
+        { id: 'pay-1', status: 'PENDING' },
+        { id: 'pay-newer', status: 'PENDING' },
+      ],
+    });
+    const res = makeRes();
+
+    await vnpayIpn({ query: baseQuery() }, res);
+
+    expect(tx.payment.updateMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking-1',
+        id: { not: 'pay-1' },
+        status: 'PENDING',
+      },
+      data: {
+        status: 'FAILED',
+        failureReason: 'SUPERSEDED_BY_SUCCESSFUL_PAYMENT',
+      },
+    });
+  });
+
+  test('payment thành công sau deadline -> không issue vé và đưa vào hoàn tiền bắt buộc', async () => {
+    verifyVnpaySignature.mockReturnValue(true);
+    prisma.payment.findUnique.mockResolvedValue(paymentFixture());
+    const tx = setupTx();
+    const res = makeRes();
+
+    await vnpayIpn({
+      query: baseQuery({ vnp_PayDate: '20260609121100' }),
+    }, res);
+
+    expect(confirmReservationAndStock).not.toHaveBeenCalled();
+    expect(createTicketInstances).not.toHaveBeenCalled();
+    expect(tx.booking.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'CANCELLED',
+        refundRequired: true,
+        cancellationSource: 'PAYMENT_AFTER_EXPIRY',
+      }),
+    }));
+    expect(tx.refundRequest.upsert).toHaveBeenCalled();
+    expect(tx.refundTransaction.create).toHaveBeenCalled();
+  });
+
+  test('callback đến trễ nhưng signed pay time còn trong deadline -> vẫn xác nhận', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-09T06:00:00.000Z'));
+    try {
+      verifyVnpaySignature.mockReturnValue(true);
+      prisma.payment.findUnique.mockResolvedValue(paymentFixture());
+      const tx = setupTx();
+      const res = makeRes();
+
+      await vnpayIpn({ query: baseQuery() }, res);
+
+      expect(confirmReservationAndStock).toHaveBeenCalledWith(tx, expect.objectContaining({
+        id: 'res-1',
+      }));
+      expect(tx.booking.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { status: 'CONFIRMED' },
+      }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('vnp_PayDate bị lược bỏ nhưng callback signed đến trong deadline -> vẫn xác nhận', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-09T05:05:00.000Z'));
+    try {
+      verifyVnpaySignature.mockReturnValue(true);
+      prisma.payment.findUnique.mockResolvedValue(paymentFixture());
+      const tx = setupTx();
+      const res = makeRes();
+
+      await vnpayIpn({
+        query: baseQuery({ vnp_PayDate: undefined }),
+      }, res);
+
+      expect(confirmReservationAndStock).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ id: 'res-1' }),
+      );
+      expect(tx.payment.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'SUCCESS',
+          paidAt: new Date('2026-06-09T05:05:00.000Z'),
+          rawResponse: expect.objectContaining({
+            captureTimingSource: 'MERCHANT_RECEIVED_AT',
+          }),
+        }),
+      }));
+      expect(tx.booking.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: { status: 'CONFIRMED' },
+      }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('payment success thiếu vnp_PayDate hợp lệ -> fail closed và hoàn tiền', async () => {
+    verifyVnpaySignature.mockReturnValue(true);
+    prisma.payment.findUnique.mockResolvedValue(paymentFixture());
+    const tx = setupTx();
+    const res = makeRes();
+
+    await vnpayIpn({
+      query: baseQuery({ vnp_PayDate: '20260231090000' }),
+    }, res);
+
+    expect(confirmReservationAndStock).not.toHaveBeenCalled();
+    expect(tx.booking.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'CANCELLED', refundRequired: true }),
+    }));
   });
 
   test('thanh toán trùng -> ghi nhận hoàn tiền, không gửi lại email/thông báo vé', async () => {
@@ -503,6 +650,22 @@ describe('createVNPayUrl', () => {
     expect(res.status).toHaveBeenCalledWith(500);
   });
 
+  test.each([
+    [4999, 'tối thiểu'],
+    [100000.5, 'số nguyên VND'],
+  ])('400 khi tổng tiền VNPay không hợp lệ: %p', async (totalAmount, message) => {
+    prisma.booking.findUnique.mockResolvedValue(bookingFixture({ totalAmount }));
+    const res = makeRes();
+
+    await createVNPayUrl(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining(message),
+    }));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test('thành công -> tăng attemptCount, tạo Payment mới, trả paymentUrl', async () => {
     prisma.booking.findUnique.mockResolvedValue(bookingFixture());
     const tx = {
@@ -522,9 +685,19 @@ describe('createVNPayUrl', () => {
     );
     expect(tx.payment.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ transactionId: expect.any(String), status: 'PENDING' }),
+        data: expect.objectContaining({
+          transactionId: expect.any(String),
+          status: 'PENDING',
+          rawResponse: expect.objectContaining({
+            vnp_CreateDate: '20260609120000',
+            vnp_ExpireDate: '20260609120000',
+          }),
+        }),
       }),
     );
+    const transactionId = tx.payment.create.mock.calls[0][0].data.transactionId;
+    expect(transactionId).toContain('0123456789ab');
+    expect(transactionId).toMatch(/\d{13}$/);
     expect(buildVnpayUrl).toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith({
       success: true,
@@ -539,6 +712,7 @@ describe('refundViaVnpay validation', () => {
     transactionId: 'txn-ref-1',
     rawResponse: {
       vnp_TransactionNo: '99999',
+      vnp_CreateDate: '20260610115500',
       vnp_PayDate: '20260610120000',
     },
   };
@@ -593,5 +767,95 @@ describe('refundViaVnpay validation', () => {
       transactionType: '03',
       requestId: 'request-1',
     })).rejects.toMatchObject({ gatewayAttempted: true });
+  });
+
+  test('refund gửi original vnp_CreateDate, không gửi vnp_PayDate', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        vnp_ResponseCode: '00',
+        vnp_TransactionStatus: '00',
+      }),
+    });
+
+    await refundViaVnpay({
+      payment,
+      amount: 90000,
+      transactionType: '03',
+      requestId: 'request-original-date',
+    });
+
+    const request = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(request.vnp_TransactionDate).toBe('20260610115500');
+    expect(request.vnp_TransactionDate).not.toBe(payment.rawResponse.vnp_PayDate);
+  });
+
+  test('QueryDR gửi original vnp_CreateDate', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        vnp_ResponseCode: '00',
+        vnp_TransactionStatus: '00',
+        vnp_Amount: '10000000',
+      }),
+    });
+
+    await queryVnpayTransaction({
+      payment,
+      requestId: 'query-original-date',
+    });
+
+    const request = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(request.vnp_Command).toBe('querydr');
+    expect(request.vnp_TransactionDate).toBe('20260610115500');
+  });
+
+  test('legacy Payment derive create date từ timestamp suffix an toàn', async () => {
+    const legacyTimestamp = new Date('2026-06-09T05:00:00.000Z').getTime();
+    const legacyPayment = {
+      ...payment,
+      bookingId: 'booking-1',
+      transactionId: `booking1${legacyTimestamp}`,
+      rawResponse: {
+        vnp_TransactionNo: '99999',
+        vnp_PayDate: '20260610120000',
+      },
+    };
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        vnp_ResponseCode: '00',
+        vnp_TransactionStatus: '00',
+      }),
+    });
+
+    await refundViaVnpay({
+      payment: legacyPayment,
+      amount: 90000,
+      transactionType: '03',
+      requestId: 'legacy-request',
+    });
+
+    const request = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(request.vnp_TransactionDate).toBe('20260609120000');
+  });
+
+  test('legacy Payment không derive được create date -> fail rõ trước khi gọi gateway', async () => {
+    global.fetch = jest.fn();
+    await expect(refundViaVnpay({
+      payment: {
+        ...payment,
+        rawResponse: {
+          vnp_TransactionNo: '99999',
+          vnp_PayDate: '20260610120000',
+        },
+      },
+      amount: 90000,
+      transactionType: '03',
+    })).rejects.toMatchObject({
+      statusCode: 422,
+      message: expect.stringContaining('original vnp_CreateDate'),
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

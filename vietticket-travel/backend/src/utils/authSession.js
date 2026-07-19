@@ -7,9 +7,7 @@ const generateToken = require('./generateToken');
 const { hashToken } = require('./tokenUtils');
 
 function getRequestIp(req) {
-  const forwardedFor = req.headers?.['x-forwarded-for'];
-  if (forwardedFor) return String(forwardedFor).split(',')[0].trim();
-  return req.socket?.remoteAddress || req.ip || null;
+  return req.ip || req.socket?.remoteAddress || null;
 }
 
 async function createAuthSession(req, user) {

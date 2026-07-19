@@ -12,6 +12,7 @@ const {
 const {
   confirmReservationAndStock,
   createTicketInstances,
+  selectBookingPayment,
 } = require('./bookingController');
 const { releaseInventory } = require('../utils/refundService');
 const {
@@ -20,8 +21,11 @@ const {
 } = require('../utils/activityTime');
 const { expirePendingPartnerBooking } = require('../utils/pendingPartnerWorker');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
-const { writeAuditLog } = require('../utils/auditLog');
-const { isDocumentOwnedByUser } = require('../middleware/uploadMiddleware');
+const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
+const {
+  isDocumentOwnedByUser,
+  removeUnreferencedDocumentsForUser,
+} = require('../middleware/uploadMiddleware');
 const {
   buildTimeline,
   getPeriodStart,
@@ -33,6 +37,23 @@ const {
   recognizedAtOf,
 } = require('../services/financialReportService');
 const { hasAnyRole } = require('../utils/userRoles');
+
+const CURRENT_KYC_CONSENT_VERSION = '2026-07-17-v1';
+const KYC_REVIEW_FIELDS = [
+  'businessName',
+  'businessLicenseUrl',
+  'taxCode',
+  'registrationDate',
+  'representativeName',
+  'representativePhone',
+  'businessAddress',
+  'bankName',
+  'branchName',
+  'bankAccountNumber',
+  'bankAccountName',
+  'swiftCode',
+  'payoutCurrency',
+];
 
 function toNullable(value) {
   if (value === undefined || value === null) return undefined;
@@ -46,8 +67,18 @@ function bookingConflict(message = 'Đơn đặt vé đã được xử lý trư
   return error;
 }
 
+function emptyPartnerBookingStats() {
+  return {
+    total: 0,
+    confirmed: 0,
+    pendingPartner: 0,
+    recognizedRevenue: 0,
+  };
+}
+
 function canSubmitPartnerKyc(user) {
-  return hasAnyRole(user, ['CUSTOMER', 'PARTNER']);
+  return hasAnyRole(user, ['CUSTOMER', 'PARTNER'])
+    && !hasAnyRole(user, ['ADMIN', 'STAFF']);
 }
 
 // Định dạng hồ sơ đối tác trả về cho FE (trang Cài đặt + Pending)
@@ -55,8 +86,15 @@ function toPartnerResponse(partner, user) {
   return {
     id: partner.id,
     businessName: partner.businessName,
+    legalBusinessName: partner.businessName,
     businessLicenseUrl: partner.businessLicenseUrl || '',
     taxCode: partner.taxCode || '',
+    registrationDate: partner.registrationDate
+      ? new Date(partner.registrationDate).toISOString().slice(0, 10)
+      : '',
+    representativeName: partner.representativeName || '',
+    representativePhone: partner.representativePhone || '',
+    businessAddress: partner.businessAddress || '',
     bankName: partner.bankName || '',
     branchName: partner.branchName || '',
     bankAccountNumber: partner.bankAccountNumber || '',
@@ -65,6 +103,9 @@ function toPartnerResponse(partner, user) {
     payoutCurrency: partner.payoutCurrency || 'VND',
     website: partner.website || '',
     description: partner.description || '',
+    kycConsentAccepted: Boolean(partner.kycConsentAccepted),
+    kycConsentVersion: partner.kycConsentVersion || '',
+    kycConsentAcceptedAt: partner.kycConsentAcceptedAt || null,
     status: partner.status, // PENDING | APPROVED | REJECTED | SUSPENDED
     rejectionReason: partner.rejectionReason || '',
     // Thông tin tài khoản dùng cho tab "Thông tin đối tác"
@@ -92,7 +133,7 @@ async function submitKyc(req, res, next) {
     if (validationError) {
       return res.status(400).json({ message: validationError });
     }
-    if (!isDocumentOwnedByUser(req.body.businessLicenseUrl, req.user.id)) {
+    if (!isDocumentOwnedByUser(req.body.businessLicenseUrl, req.user.id, req)) {
       return res.status(400).json({
         message: 'Tài liệu pháp lý phải được tải lên qua hệ thống VietTicket.',
       });
@@ -112,31 +153,60 @@ async function submitKyc(req, res, next) {
       });
     }
 
+    const consentAcceptedAt = new Date();
     const data = {
       userId: req.user.id,
       businessName: req.body.businessName.trim(),
       businessLicenseUrl: toNullable(req.body.businessLicenseUrl) ?? null,
-      taxCode: toNullable(req.body.taxCode) ?? null,
+      taxCode: String(req.body.taxCode).trim(),
+      registrationDate: new Date(`${req.body.registrationDate}T00:00:00.000Z`),
+      representativeName: req.body.representativeName.trim(),
+      representativePhone: req.body.representativePhone.trim(),
+      businessAddress: req.body.businessAddress.trim(),
       bankName: toNullable(req.body.bankName) ?? null,
       branchName: toNullable(req.body.branchName) ?? null,
       bankAccountNumber: toNullable(req.body.bankAccountNumber) ?? null,
       bankAccountName: toNullable(req.body.bankAccountName) ?? null,
       swiftCode: toNullable(req.body.swiftCode) ?? null,
-      payoutCurrency: toNullable(req.body.payoutCurrency) ?? 'VND',
+      payoutCurrency: String(req.body.payoutCurrency || 'VND').trim().toUpperCase(),
+      kycConsentAccepted: true,
+      kycConsentVersion: CURRENT_KYC_CONSENT_VERSION,
+      kycConsentAcceptedAt: consentAcceptedAt,
+      kycConsentIpAddress: getRequestIp(req),
       status: 'PENDING',
     };
 
-    let partner;
-    if (isResubmission) {
-      const updateData = { ...data, status: 'PENDING', rejectionReason: null };
-      delete updateData.userId;
-      partner = await prisma.partnerProfile.update({
-        where: { id: existing.id },
-        data: updateData,
+    const partner = await prisma.$transaction(async (tx) => {
+      let submittedPartner;
+      if (isResubmission) {
+        const updateData = { ...data, status: 'PENDING', rejectionReason: null };
+        delete updateData.userId;
+        submittedPartner = await tx.partnerProfile.update({
+          where: { id: existing.id },
+          data: updateData,
+        });
+      } else {
+        submittedPartner = await tx.partnerProfile.create({ data });
+      }
+
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: isResubmission ? 'PARTNER_KYC_RESUBMITTED' : 'PARTNER_KYC_SUBMITTED',
+        entityType: 'PARTNER',
+        entityId: submittedPartner.id,
+        metadata: {
+          consentVersion: CURRENT_KYC_CONSENT_VERSION,
+          previousStatus: existing?.status || null,
+          documentFilename: new URL(data.businessLicenseUrl).pathname.split('/').pop(),
+        },
       });
-    } else {
-      partner = await prisma.partnerProfile.create({ data });
-    }
+      return submittedPartner;
+    });
+
+    await removeUnreferencedDocumentsForUser(req.user.id, [
+      partner.businessLicenseUrl,
+    ]).catch(() => undefined);
 
     const refreshedUser = await prisma.user.findUnique({
       where: { id: req.user.id },
@@ -196,33 +266,65 @@ async function getMyPartner(req, res, next) {
 // PUT /api/partners/settings — Cập nhật thông tin đối tác (tab Cài đặt)
 async function updateSettings(req, res, next) {
   try {
+    const requestedKycChanges = KYC_REVIEW_FIELDS.filter((field) =>
+      Object.prototype.hasOwnProperty.call(req.body || {}, field));
+    if (requestedKycChanges.length > 0) {
+      return res.status(409).json({
+        message: 'Thông tin pháp lý và nhận tiền chỉ được thay đổi qua quy trình xác minh của VietTicket.',
+        code: 'KYC_CHANGE_REQUIRES_REVIEW',
+        fields: requestedKycChanges,
+      });
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'contactEmail')) {
+      return res.status(409).json({
+        message: 'Email đăng nhập chỉ được thay đổi qua quy trình xác minh email.',
+        code: 'EMAIL_CHANGE_REQUIRES_VERIFICATION',
+      });
+    }
+    const editableFields = new Set(['displayName', 'phone', 'website', 'description']);
+    const unsupportedFields = Object.keys(req.body || {}).filter(
+      (field) => !editableFields.has(field),
+    );
+    if (unsupportedFields.length > 0) {
+      return res.status(400).json({
+        message: 'Yêu cầu chứa trường cài đặt không được hỗ trợ.',
+        code: 'UNSUPPORTED_SETTINGS_FIELDS',
+        fields: unsupportedFields,
+      });
+    }
+
     const partnerUpdate = {};
-    if (req.body.businessName !== undefined) {
-      if (!String(req.body.businessName).trim()) {
-        return res.status(400).json({ message: 'Tên hiển thị không được để trống.' });
+    if (req.body.website !== undefined) {
+      const website = toNullable(req.body.website) ?? null;
+      if (website) {
+        try {
+          const parsedWebsite = new URL(website);
+          if (!['http:', 'https:'].includes(parsedWebsite.protocol) || website.length > 255) {
+            throw new Error('invalid website');
+          }
+        } catch {
+          return res.status(400).json({ message: 'Website phải là địa chỉ HTTP/HTTPS hợp lệ.' });
+        }
       }
-      partnerUpdate.businessName = String(req.body.businessName).trim();
+      partnerUpdate.website = website;
     }
-    if (req.body.website !== undefined) partnerUpdate.website = toNullable(req.body.website) ?? null;
     if (req.body.description !== undefined) {
-      partnerUpdate.description = toNullable(req.body.description) ?? null;
-    }
-    if (req.body.bankName !== undefined) partnerUpdate.bankName = toNullable(req.body.bankName) ?? null;
-    if (req.body.branchName !== undefined) {
-      partnerUpdate.branchName = toNullable(req.body.branchName) ?? null;
-    }
-    if (req.body.bankAccountNumber !== undefined) {
-      partnerUpdate.bankAccountNumber = toNullable(req.body.bankAccountNumber) ?? null;
-    }
-    if (req.body.bankAccountName !== undefined) {
-      partnerUpdate.bankAccountName = toNullable(req.body.bankAccountName) ?? null;
+      const description = toNullable(req.body.description) ?? null;
+      if (description && description.length > 2000) {
+        return res.status(400).json({ message: 'Mô tả đối tác không được vượt quá 2.000 ký tự.' });
+      }
+      partnerUpdate.description = description;
     }
 
     // Cập nhật song song thông tin tài khoản (User + UserProfile)
     const userUpdate = {};
     const profileUpdate = {};
-    if (req.body.displayName !== undefined && String(req.body.displayName).trim()) {
-      userUpdate.fullName = String(req.body.displayName).trim();
+    if (req.body.displayName !== undefined) {
+      const displayName = String(req.body.displayName).trim().replace(/\s+/g, ' ');
+      if (displayName.length < 2 || displayName.length > 100) {
+        return res.status(400).json({ message: 'Tên hiển thị phải từ 2 đến 100 ký tự.' });
+      }
+      userUpdate.fullName = displayName;
     }
     if (req.body.phone !== undefined) {
       const phone = toNullable(req.body.phone) ?? null;
@@ -232,32 +334,62 @@ async function updateSettings(req, res, next) {
       profileUpdate.phoneNumber = phone;
     }
 
-    const partner = await prisma.partnerProfile.update({
-      where: { id: req.partner.id },
-      data: partnerUpdate,
-    });
-
-    let user = await prisma.user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       include: { profile: true, roleMemberships: true },
     });
-
-    if (Object.keys(userUpdate).length > 0 || Object.keys(profileUpdate).length > 0) {
-      user = await prisma.user.update({
-        where: { id: req.user.id },
-        data: {
-          ...userUpdate,
-          profile: {
-            upsert: { create: profileUpdate, update: profileUpdate },
-          },
-        },
-        include: { profile: true, roleMemberships: true },
-      });
+    if (!user) {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản đối tác.' });
     }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const partner = Object.keys(partnerUpdate).length > 0
+        ? await tx.partnerProfile.update({
+          where: { id: req.partner.id },
+          data: partnerUpdate,
+        })
+        : req.partner;
+
+      let updatedUser = user;
+      if (Object.keys(userUpdate).length > 0 || Object.keys(profileUpdate).length > 0) {
+        updatedUser = await tx.user.update({
+          where: { id: req.user.id },
+          data: {
+            ...userUpdate,
+            ...(Object.keys(profileUpdate).length > 0
+              ? {
+                  profile: {
+                    upsert: { create: profileUpdate, update: profileUpdate },
+                  },
+                }
+              : {}),
+          },
+          include: { profile: true, roleMemberships: true },
+        });
+      }
+
+      const changedFields = [
+        ...Object.keys(partnerUpdate),
+        ...Object.keys(userUpdate),
+        ...Object.keys(profileUpdate),
+      ];
+      if (changedFields.length > 0) {
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: 'PARTNER_PROFILE_UPDATED',
+          entityType: 'PARTNER',
+          entityId: req.partner.id,
+          metadata: { changedFields },
+        });
+      }
+
+      return { partner, user: updatedUser };
+    });
 
     return res.json({
       message: 'Cập nhật thông tin đối tác thành công.',
-      partner: toPartnerResponse(partner, user),
+      partner: toPartnerResponse(result.partner, result.user),
     });
   } catch (error) {
     next(error);
@@ -272,7 +404,12 @@ async function getDashboard(req, res, next) {
 
     const attractions = await prisma.attraction.findMany({
       where: { partnerId, archivedAt: null },
-      select: { id: true, status: true, publicationStatus: true },
+      select: {
+        id: true,
+        status: true,
+        publicationStatus: true,
+        operationalStatus: true,
+      },
     });
 
     const attractionIds = attractions.map((a) => a.id);
@@ -400,19 +537,24 @@ async function getDashboard(req, res, next) {
 
           // Đặt vé gần đây (5 mục mới nhất)
           const recentRaw = await prisma.booking.findMany({
-            where: { reservationId: { in: reservationIds } },
+            where: {
+              reservationId: { in: reservationIds },
+              status: { not: 'PENDING_PAYMENT' },
+              payments: {
+                some: { status: 'SUCCESS', isDuplicate: false },
+              },
+            },
             orderBy: { createdAt: 'desc' },
             take: 5,
             include: {
               payments: {
                 orderBy: { createdAt: 'desc' },
-                select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true },
+                select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true, isDuplicate: true },
               },
               refundRequests: { select: { status: true } },
               ticketInstances: {
                 select: {
                   id: true,
-                  qrCodeToken: true,
                   status: true,
                   checkedInAt: true,
                   checkedInBy: { select: { fullName: true } },
@@ -430,7 +572,7 @@ async function getDashboard(req, res, next) {
           });
 
           recentBookings = recentRaw.map((b) => {
-            const latestPayment = b.payments?.[0] || null;
+            const latestPayment = selectBookingPayment(b.payments);
             return {
               id: b.id,
               attraction: b.reservation.ticketProduct.attraction.title,
@@ -470,7 +612,7 @@ async function getDashboard(req, res, next) {
     const stats = {
       totalAttractions: attractions.length,
       activeAttractions: attractions.filter(
-        (a) => a.publicationStatus === 'ACTIVE' && a.status !== 'SUSPENDED',
+        (a) => a.publicationStatus === 'ACTIVE' && a.operationalStatus !== 'SUSPENDED',
       ).length,
       totalTickets,
       totalBookingsThisMonth,
@@ -647,6 +789,7 @@ async function getPartnerBookings(req, res, next) {
       return res.json({
         success: true,
         data: [],
+        stats: emptyPartnerBookingStats(),
         pagination: { page, limit, total: 0, totalPages: 0 },
       });
     }
@@ -660,6 +803,7 @@ async function getPartnerBookings(req, res, next) {
       return res.json({
         success: true,
         data: [],
+        stats: emptyPartnerBookingStats(),
         pagination: { page, limit, total: 0, totalPages: 0 },
       });
     }
@@ -673,6 +817,7 @@ async function getPartnerBookings(req, res, next) {
       return res.json({
         success: true,
         data: [],
+        stats: emptyPartnerBookingStats(),
         pagination: { page, limit, total: 0, totalPages: 0 },
       });
     }
@@ -685,8 +830,14 @@ async function getPartnerBookings(req, res, next) {
       completed: 'COMPLETED',
     };
 
-    const where = {
+    const paidPartnerBookingWhere = {
       reservationId: { in: reservationIds },
+      payments: {
+        some: { status: 'SUCCESS', isDuplicate: false },
+      },
+    };
+    const where = {
+      ...paidPartnerBookingWhere,
       status:
         statusFilter && statusFilter !== 'all' && STATUS_MAP[statusFilter]
           ? STATUS_MAP[statusFilter]
@@ -709,7 +860,7 @@ async function getPartnerBookings(req, res, next) {
       ];
     }
 
-    const [total, bookings] = await Promise.all([
+    const [total, bookings, statusGroups = [], recognizedBookings = []] = await Promise.all([
       prisma.booking.count({ where }),
       prisma.booking.findMany({
         where,
@@ -719,13 +870,12 @@ async function getPartnerBookings(req, res, next) {
         include: {
           payments: {
             orderBy: { createdAt: 'desc' },
-            select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true },
+            select: { paymentGateway: true, status: true, amount: true, createdAt: true, transactionId: true, paidAt: true, isDuplicate: true },
           },
           refundRequests: { select: { status: true } },
           ticketInstances: {
             select: {
               id: true,
-              qrCodeToken: true,
               status: true,
               checkedInAt: true,
               checkedInBy: { select: { fullName: true } },
@@ -741,10 +891,41 @@ async function getPartnerBookings(req, res, next) {
           },
         },
       }),
+      prisma.booking.groupBy({
+        by: ['status'],
+        where: {
+          ...paidPartnerBookingWhere,
+          status: { not: 'PENDING_PAYMENT' },
+        },
+        _count: { _all: true },
+      }),
+      prisma.booking.findMany({
+        where: {
+          ...buildRecognizedBookingPeriodWhere(new Date(0)),
+          reservationId: { in: reservationIds },
+        },
+        select: {
+          status: true,
+          commissionRateSnapshot: true,
+          commissionAmountSnapshot: true,
+          partnerNetAmountSnapshot: true,
+          payments: {
+            where: { status: 'SUCCESS', isDuplicate: false },
+            select: { amount: true },
+          },
+          refundTransactions: {
+            where: { status: 'SUCCESS' },
+            select: {
+              amount: true,
+              refundRequest: { select: { type: true } },
+            },
+          },
+        },
+      }),
     ]);
 
     const data = bookings.map((b) => {
-      const latestPayment = b.payments?.[0] || null;
+      const latestPayment = selectBookingPayment(b.payments);
       return {
         id: b.id,
         attraction: b.reservation.ticketProduct.attraction.title,
@@ -780,9 +961,23 @@ async function getPartnerBookings(req, res, next) {
 
     // (search đã được áp dụng trong query DB ở trên)
 
+    const countsByStatus = Object.fromEntries(
+      statusGroups.map((group) => [group.status, Number(group?._count?._all || 0)]),
+    );
+    const stats = {
+      total: Object.values(countsByStatus).reduce((sum, count) => sum + count, 0),
+      confirmed: countsByStatus.CONFIRMED || 0,
+      pendingPartner: countsByStatus.PENDING_PARTNER || 0,
+      recognizedRevenue: recognizedBookings.reduce(
+        (sum, booking) => sum + recognizedAmountsOf(booking).partnerPayableAmount,
+        0,
+      ),
+    };
+
     return res.json({
       success: true,
       data,
+      stats,
       pagination: {
         page,
         limit,

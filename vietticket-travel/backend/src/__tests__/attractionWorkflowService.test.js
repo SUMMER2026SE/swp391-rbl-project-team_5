@@ -15,6 +15,9 @@ function validSnapshot() {
     city: 'TP. Hồ Chí Minh',
     openTime: '08:00',
     closeTime: '17:00',
+    recommendedVisitMinutes: 180,
+    environment: 'MIXED',
+    isFullDay: false,
     latitude: 10.7,
     longitude: 106.7,
     category: { id: 'category-1', name: 'Vui chơi' },
@@ -84,6 +87,43 @@ test('cờ duyệt thủ công được lưu trong snapshot và merge draft', ()
   expect(snapshot.requiresManualApproval).toBe(false);
   expect(mergeSnapshot(snapshot, { requiresManualApproval: true })).toEqual(
     expect.objectContaining({ requiresManualApproval: true }),
+  );
+});
+
+test('metadata thời lượng và môi trường được lưu trong snapshot và merge draft', () => {
+  const snapshot = buildAttractionSnapshot({
+    recommendedVisitMinutes: 240,
+    environment: 'OUTDOOR',
+    isFullDay: false,
+    ticketProducts: [],
+    timeSlots: [],
+    specialDates: [],
+    images: [],
+    categories: [],
+  });
+  expect(snapshot).toMatchObject({
+    recommendedVisitMinutes: 240,
+    environment: 'OUTDOOR',
+    isFullDay: false,
+  });
+  expect(mergeSnapshot(snapshot, {
+    recommendedVisitMinutes: 420,
+    environment: 'MIXED',
+    isFullDay: true,
+  })).toMatchObject({
+    recommendedVisitMinutes: 420,
+    environment: 'MIXED',
+    isFullDay: true,
+  });
+});
+
+test('không duyệt trải nghiệm cả ngày có thời lượng quá ngắn', () => {
+  const snapshot = validSnapshot();
+  snapshot.isFullDay = true;
+  snapshot.recommendedVisitMinutes = 180;
+
+  expect(validateSubmissionSnapshot(snapshot)).toContain(
+    'trải nghiệm cả ngày phải có thời lượng ít nhất 360 phút',
   );
 });
 

@@ -5,12 +5,18 @@ const { createRandomToken, hashToken, addMinutes } = require('../utils/tokenUtil
 const { isValidEmail, validateFullName, isValidPhoneNumber } = require('../utils/validators');
 const { sendStaffInviteEmail, sendAccountStatusEmail } = require('../utils/mailer');
 const { writeAuditLog } = require('../utils/auditLog');
-const { hasRole } = require('../utils/userRoles');
+const { disconnectUserSockets } = require('../realtime/events');
+const { grantRole, hasRole, revokeRole } = require('../utils/userRoles');
 
 // Lời mời đặt mật khẩu có hạn dài hơn link quên mật khẩu thường (48 giờ) để nhân
 // viên có đủ thời gian kích hoạt tài khoản.
 const INVITE_EXPIRY_MINUTES = 60 * 48;
 const ALLOWED_STAFF_STATUSES = ['ACTIVE', 'LOCKED'];
+const configuredStaffLimit = Number.parseInt(process.env.PARTNER_STAFF_LIMIT, 10);
+const MAX_STAFF_PER_PARTNER =
+  Number.isInteger(configuredStaffLimit) && configuredStaffLimit > 0
+    ? configuredStaffLimit
+    : 50;
 
 function httpError(statusCode, message) {
   const error = new Error(message);
@@ -120,6 +126,22 @@ async function createStaff(req, res, next) {
       return res.status(409).json({
         success: false,
         error: { message: 'Email này đã được sử dụng cho một tài khoản khác.' },
+      });
+    }
+
+    const staffCount = await prisma.user.count({
+      where: {
+        employerPartnerId: req.partner.id,
+        roleMemberships: { some: { role: 'STAFF' } },
+      },
+    });
+    if (staffCount >= MAX_STAFF_PER_PARTNER) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'PARTNER_STAFF_LIMIT_REACHED',
+          message: `Mỗi đối tác được quản lý tối đa ${MAX_STAFF_PER_PARTNER} nhân viên.`,
+        },
       });
     }
 
@@ -244,6 +266,8 @@ async function changeStaffStatus(req, res, next) {
           metadata: { partnerId: req.partner.id },
         });
       });
+
+      if (status === 'LOCKED') disconnectUserSockets(staff.id);
 
       try {
         await sendAccountStatusEmail({ to: staff.email, fullName: staff.fullName, status });
@@ -373,8 +397,19 @@ async function removeStaff(req, res, next) {
       });
       await tx.user.update({
         where: { id: staff.id },
-        data: { status: 'LOCKED', tokenVersion: { increment: 1 } },
+        data: {
+          role: 'CUSTOMER',
+          employerPartnerId: null,
+          // Partner-provisioned staff did not accept the customer terms. Keep
+          // that converted identity locked until an explicit account recovery
+          // or consent flow is completed; never silently unlock a prior lock.
+          status: staff.termsAcceptedAt ? staff.status : 'LOCKED',
+          tokenVersion: { increment: 1 },
+        },
       });
+      await revokeRole(tx, staff.id, 'STAFF');
+      await grantRole(tx, staff.id, 'CUSTOMER');
+      await tx.passwordResetToken.deleteMany({ where: { userId: staff.id } });
       await tx.authSession.updateMany({
         where: { userId: staff.id, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -392,6 +427,7 @@ async function removeStaff(req, res, next) {
       return staff.id;
     });
 
+    disconnectUserSockets(result);
     return res.json({ success: true, data: { staffId: result } });
   } catch (error) {
     if (error.statusCode) {

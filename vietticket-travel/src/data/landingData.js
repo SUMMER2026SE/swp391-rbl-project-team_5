@@ -227,9 +227,9 @@ export const serviceCategories = [
     icon: 'search',
   },
   {
-    title: 'Vé điện tử QR tức thời',
+    title: 'Vé điện tử QR sau xác nhận',
     description:
-      'Nhận vé kỹ thuật số nhanh chóng sau khi thanh toán trực tuyến thành công.',
+      'Nhận vé kỹ thuật số sau khi thanh toán và đơn được hệ thống hoặc đối tác xác nhận.',
     icon: 'qr_code_scanner',
     featured: true,
   },
@@ -264,7 +264,7 @@ export const bookingSteps = [
   {
     title: 'Thanh toán và nhận vé QR',
     description:
-      'Hoàn tất thanh toán trực tuyến và nhận vé điện tử QR ngay lập tức.',
+      'Hoàn tất thanh toán trực tuyến; vé QR được phát hành khi đơn đã được xác nhận.',
     icon: 'account_balance_wallet',
     tone: 'primary',
   },
@@ -278,8 +278,8 @@ export const bookingPreview = {
   title: 'Chuyến đi Bà Nà Hills',
   meta: ['14 tháng 6', '2 người lớn', 'Đang đặt chỗ'],
   tools: ['map', 'photo_camera', 'directions_bus'],
-  progressLabel: 'Vé QR đã được tạo',
-  progressStatus: 'Đã hoàn thành 80%',
+  progressLabel: 'Đang chờ xác nhận để phát hành QR',
+  progressStatus: 'Đang xử lý đặt chỗ',
 }
 
 export const footerLinks = {

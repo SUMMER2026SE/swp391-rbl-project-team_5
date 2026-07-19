@@ -18,6 +18,7 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
     count: jest.fn(),
+    groupBy: jest.fn(),
   },
   attraction: {
     findUnique: jest.fn(),
@@ -27,6 +28,7 @@ const mockPrisma = {
     updateMany: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
+    groupBy: jest.fn(),
   },
   attractionCategory: {
     deleteMany: jest.fn(),
@@ -138,7 +140,12 @@ const mockPrisma = {
   },
   voucher: {
     findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
     updateMany: jest.fn(),
+    count: jest.fn(),
+    groupBy: jest.fn(),
   },
   payment: {
     findUnique: jest.fn(),
@@ -165,7 +172,30 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
   },
+  partnerSettlement: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
+    groupBy: jest.fn(),
+  },
+  partnerSettlementItem: {
+    createMany: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  oAuthAccount: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    upsert: jest.fn(),
+  },
   passwordResetToken: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn(),
+    deleteMany: jest.fn(),
+  },
+  emailVerificationToken: {
     findUnique: jest.fn(),
     create: jest.fn(),
     delete: jest.fn(),
@@ -180,6 +210,7 @@ const mockPrisma = {
   auditLog: {
     create: jest.fn(),
     findMany: jest.fn(),
+    count: jest.fn(),
   },
   ticketInstance: {
     create: jest.fn(),
@@ -195,9 +226,13 @@ const mockPrisma = {
     findUnique: jest.fn(),
     findMany: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
+    groupBy: jest.fn(),
   },
   supportMessage: {
     create: jest.fn(),
+    count: jest.fn(),
   },
   review: {
     findUnique: jest.fn(),
@@ -210,6 +245,7 @@ const mockPrisma = {
   },
   newsletterSubscription: {
     upsert: jest.fn(),
+    updateMany: jest.fn(),
   },
   $transaction: jest.fn(),
   $queryRaw: jest.fn(),

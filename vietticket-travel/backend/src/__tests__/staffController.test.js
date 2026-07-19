@@ -588,6 +588,18 @@ describe('reconcileRefundRequest', () => {
 });
 
 describe('reissueTicket', () => {
+  test('requires a controlled reason code and a meaningful description', async () => {
+    const { req, res, next } = makeReqRes({
+      params: { bookingId: 'booking-1' },
+      body: { reasonCode: 'UNKNOWN', reason: 'mất vé' },
+    });
+
+    await reissueTicket(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   test('expires valid tickets and creates replacement tokens', async () => {
     const oldTicket = {
       id: 'ticket-instance-1',
@@ -616,10 +628,17 @@ describe('reissueTicket', () => {
           status: 'VALID',
         }),
       },
+      auditLog: {
+        create: jest.fn().mockResolvedValue({}),
+      },
     };
     prisma.$transaction.mockImplementation((callback) => callback(tx));
     const { req, res, next } = makeReqRes({
       params: { bookingId: 'booking-1' },
+      body: {
+        reasonCode: 'LOST_BY_CUSTOMER',
+        reason: 'Khách làm mất điện thoại tại cổng.',
+      },
     });
 
     await reissueTicket(req, res, next);
@@ -637,9 +656,60 @@ describe('reissueTicket', () => {
       }),
     });
     expect(sendReissueTicketEmail).toHaveBeenCalled();
+    expect(tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'TICKET_REISSUED',
+        entityId: 'booking-1',
+        metadata: expect.objectContaining({
+          reasonCode: 'LOST_BY_CUSTOMER',
+          ticketCount: 1,
+        }),
+      }),
+    });
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ success: true }),
+      expect.objectContaining({
+        success: true,
+        data: {
+          bookingId: 'booking-1',
+          reissuedCount: 1,
+          emailDelivered: true,
+        },
+      }),
     );
     expect(next).not.toHaveBeenCalled();
+  });
+
+  test('does not reissue tickets from a completed booking', async () => {
+    const tx = {
+      booking: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'booking-1',
+          status: 'COMPLETED',
+          snapshotAttractionId: 'attr-1',
+          user: { fullName: 'Nguyen Van A', email: 'a@example.com' },
+          ticketInstances: [{ id: 'ticket-1', ticketProductId: 'product-1' }],
+        }),
+      },
+      staffAttractionAssignment: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'assign-1' }),
+      },
+      ticketInstance: {
+        updateMany: jest.fn(),
+        create: jest.fn(),
+      },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const { req, res, next } = makeReqRes({
+      params: { bookingId: 'booking-1' },
+      body: {
+        reasonCode: 'LOST_BY_CUSTOMER',
+        reason: 'Khách báo mất vé sau khi đã sử dụng.',
+      },
+    });
+
+    await reissueTicket(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(tx.ticketInstance.updateMany).not.toHaveBeenCalled();
   });
 });

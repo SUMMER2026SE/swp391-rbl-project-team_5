@@ -123,6 +123,7 @@ function PartnerRegisterPage() {
       email: form.email,
       phone: '',
       password: form.password,
+      acceptedTerms: form.acceptedTerms,
     })
     setIsSubmitting(false)
 
@@ -470,19 +471,19 @@ function PartnerRegisterPage() {
                   htmlFor="partner-terms"
                 >
                   Tôi đồng ý với{' '}
-                  <a
+                  <Link
                     className="text-[#00474d] hover:underline font-medium"
-                    href="#"
+                    to="/terms"
                   >
                     Điều khoản dịch vụ
-                  </a>{' '}
+                  </Link>{' '}
                   và{' '}
-                  <a
+                  <Link
                     className="text-[#00474d] hover:underline font-medium"
-                    href="#"
+                    to="/privacy"
                   >
                     Chính sách bảo mật
-                  </a>
+                  </Link>
                   .
                 </label>
               </div>

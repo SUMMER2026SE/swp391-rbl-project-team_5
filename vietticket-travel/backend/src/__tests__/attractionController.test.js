@@ -61,7 +61,7 @@ describe('searchAttractions', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           publishedAt: { not: null },
-          status: { not: 'SUSPENDED' },
+          operationalStatus: 'ACTIVE',
           publicationStatus: 'ACTIVE',
           archivedAt: null,
           partner: { status: 'APPROVED' },

@@ -17,22 +17,30 @@ const {
   findRefundTargetPayment,
   isMandatoryRefundRequest,
 } = require('../services/refundLifecycleService');
-const { writeAuditLog } = require('../utils/auditLog');
+const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
 const { hasRole } = require('../utils/userRoles');
-const { getCheckinTimeBlockReason } = require('../utils/activityTime');
+const {
+  getBookingActivityWindow,
+  getCheckinTimeBlockReason,
+} = require('../utils/activityTime');
 const {
   sendRefundStatusEmail,
   sendReissueTicketEmail,
 } = require('../utils/mailer');
 
 function getClientIp(req) {
-  const xff = req.headers['x-forwarded-for'];
-  if (xff) return String(xff).split(',')[0].trim();
-  return req.socket?.remoteAddress || req.ip || '127.0.0.1';
+  return getRequestIp(req) || '127.0.0.1';
 }
 
 const REFUND_ACTIONS = new Set(['APPROVED', 'REJECTED']);
 const REFUND_STATUSES = new Set(['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED']);
+const REISSUE_REASON_CODES = new Set([
+  'LOST_BY_CUSTOMER',
+  'DAMAGED_QR',
+  'CONTACT_CHANGED',
+  'OPERATIONAL_ERROR',
+  'OTHER',
+]);
 
 function httpError(statusCode, message) {
   const error = new Error(message);
@@ -683,6 +691,21 @@ async function reconcileRefundRequest(req, res, next) {
 async function reissueTicket(req, res, next) {
   try {
     const { bookingId } = req.params;
+    const reasonCode = String(req.body?.reasonCode || '').trim().toUpperCase();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (!REISSUE_REASON_CODES.has(reasonCode)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Vui lòng chọn lý do cấp lại vé hợp lệ.' },
+      });
+    }
+    if (reason.length < 5 || reason.length > 500) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Mô tả cấp lại vé phải từ 5 đến 500 ký tự.' },
+      });
+    }
 
     const result = await prisma.$transaction(
       async (tx) => {
@@ -693,8 +716,17 @@ async function reissueTicket(req, res, next) {
             ticketInstances: { where: { status: 'VALID' } },
             reservation: {
               include: {
+                timeSlot: true,
                 ticketProduct: {
-                  include: { attraction: { select: { id: true } } },
+                  include: {
+                    attraction: {
+                      select: {
+                        id: true,
+                        openTime: true,
+                        closeTime: true,
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -712,17 +744,25 @@ async function reissueTicket(req, res, next) {
           || null;
         await assertStaffAttractionAccess(tx, req.user, attractionId);
 
-        if (!['CONFIRMED', 'COMPLETED'].includes(booking.status)) {
+        if (booking.status !== 'CONFIRMED') {
           throw httpError(409, 'Chỉ có thể cấp lại vé cho đơn đã xác nhận.');
         }
         if (!booking.ticketInstances.length) {
           throw httpError(400, 'Đơn hàng này không có vé điện tử còn hiệu lực.');
         }
 
-        await tx.ticketInstance.updateMany({
+        const { endsAt } = getBookingActivityWindow(booking);
+        if (endsAt && new Date() > endsAt) {
+          throw httpError(409, 'Không thể cấp lại vé sau khi thời gian tham quan đã kết thúc.');
+        }
+
+        const expired = await tx.ticketInstance.updateMany({
           where: { bookingId, status: 'VALID' },
           data: { status: 'EXPIRED' },
         });
+        if (expired.count !== booking.ticketInstances.length) {
+          throw httpError(409, 'Vé vừa được thay đổi bởi một nhân viên khác. Vui lòng tải lại.');
+        }
 
         const newInstances = await Promise.all(
           booking.ticketInstances.map((instance) =>
@@ -737,11 +777,30 @@ async function reissueTicket(req, res, next) {
           ),
         );
 
+        await writeAuditLog({
+          client: tx,
+          req,
+          actorId: req.user.id,
+          action: 'TICKET_REISSUED',
+          entityType: 'Booking',
+          entityId: bookingId,
+          metadata: {
+            bookingId,
+            attractionId,
+            reasonCode,
+            reason,
+            replacedTicketInstanceIds: booking.ticketInstances.map((ticket) => ticket.id),
+            newTicketInstanceIds: newInstances.map((ticket) => ticket.id),
+            ticketCount: newInstances.length,
+          },
+        });
+
         return { booking, newInstances };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
+    let emailDelivered = true;
     try {
       await sendReissueTicketEmail({
         to: result.booking.user.email,
@@ -750,19 +809,28 @@ async function reissueTicket(req, res, next) {
         newTicketCount: result.newInstances.length,
       });
     } catch (emailError) {
+      emailDelivered = false;
       console.error('[staff-reissue] Không thể gửi email:', emailError.message);
     }
 
     return res.json({
       success: true,
-      data: result.newInstances,
+      data: {
+        bookingId,
+        reissuedCount: result.newInstances.length,
+        emailDelivered,
+      },
       message: 'Đã cấp lại vé thành công.',
     });
   } catch (error) {
-    if (error.statusCode) {
-      return res.status(error.statusCode).json({
+    if (error.statusCode || error.code === 'P2034') {
+      return res.status(error.statusCode || 409).json({
         success: false,
-        error: { message: error.message },
+        error: {
+          message: error.code === 'P2034'
+            ? 'Vé vừa được cấp lại bởi một nhân viên khác. Vui lòng tải lại.'
+            : error.message,
+        },
       });
     }
     return next(error);
@@ -794,7 +862,8 @@ function toCheckinTicket(instance) {
       booking.snapshotAttractionTitle
       || reservation.ticketProduct.attraction.title,
     ticketName: booking.snapshotTicketName || reservation.ticketProduct.name,
-    quantity: reservation.quantity,
+    quantity: 1,
+    bookingQuantity: reservation.quantity,
     visitDate: visitDay,
     timeSlot:
       booking.snapshotTimeSlotLabel
@@ -954,11 +1023,11 @@ async function checkInTicket(req, res, next) {
         // Booking nhiều vé chỉ hoàn tất ngay khi tất cả TicketInstance đều đã USED.
         // Nếu còn vé chưa dùng, booking giữ CONFIRMED và completion worker sẽ quyết định
         // COMPLETED/NO_SHOW sau khi ngày tham quan kết thúc.
-        const nonUsedTicketCount = await tx.ticketInstance.count({
-          where: { bookingId: instance.bookingId, status: { not: 'USED' } },
+        const validTicketCount = await tx.ticketInstance.count({
+          where: { bookingId: instance.bookingId, status: 'VALID' },
         });
         let bookingStatus = instance.booking.status;
-        if (nonUsedTicketCount === 0) {
+        if (validTicketCount === 0) {
           const completed = await tx.booking.updateMany({
             where: { id: instance.bookingId, status: 'CONFIRMED' },
             data: { status: 'COMPLETED' },
@@ -1077,6 +1146,7 @@ async function listTodayBookings(req, res, next) {
         checkedIn: usedCount > 0 && validCount === 0,
         usedCount,
         validCount,
+        bookingStatus: b.status,
       };
     });
 
@@ -1161,7 +1231,7 @@ async function replaceStaffAssignments(req, res, next) {
           archivedAt: null,
           publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
-          status: { not: 'SUSPENDED' },
+          operationalStatus: 'ACTIVE',
         },
       });
       if (attractionCount !== attractionIds.length) {

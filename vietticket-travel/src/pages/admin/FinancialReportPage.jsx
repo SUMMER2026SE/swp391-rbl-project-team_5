@@ -150,7 +150,7 @@ export default function FinancialReportPage() {
     { icon: 'account_balance_wallet', label: 'Dòng tiền thuần', value: formatCurrency(summary.netCashAmount) },
     { icon: 'percent', label: 'Hoa hồng đã ghi nhận', value: formatCurrency(summary.commissionRevenueAmount) },
     { icon: 'receipt_long', label: 'Doanh số thuần đã ghi nhận', value: formatCurrency(summary.recognizedNetAmount) },
-    { icon: 'account_balance', label: 'Phải trả đối tác', value: formatCurrency(summary.partnerPayableAmount) },
+    { icon: 'account_balance', label: 'Phát sinh phải trả trong kỳ', value: formatCurrency(summary.partnerPayableAmount) },
     { icon: 'pending_actions', label: `Khoản hoàn đang mở (${summary.openRefundCount || 0})`, value: formatCurrency(summary.openRefundAmount) },
     { icon: 'sync_problem', label: `Cần đối soát (${summary.needsReconciliationCount || 0})`, value: formatCurrency(summary.needsReconciliationAmount) },
   ]
@@ -278,7 +278,7 @@ export default function FinancialReportPage() {
                     <th>Trạng thái</th>
                     <th className="admin-table-cell--right">Doanh số thuần ghi nhận</th>
                     <th className="admin-table-cell--right">Hoa hồng kỳ này</th>
-                    <th className="admin-table-cell--right">Phải trả đối tác</th>
+                    <th className="admin-table-cell--right">Phát sinh phải trả</th>
                     <th className="admin-table-cell--right">Tỷ lệ booking mới</th>
                   </tr>
                 </thead>

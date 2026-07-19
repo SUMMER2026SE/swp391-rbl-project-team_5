@@ -54,4 +54,24 @@ describe('llmClient', () => {
     expect(fetchCalls[0].options.signal.aborted).toBe(true);
     expect(consoleError.mock.calls.flat().join(' ')).toContain('timed out after 25ms');
   });
+
+  test('sends Gemini policy through the native system instruction field', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+      }),
+    });
+
+    const { generateText } = require('../services/llmClient');
+    await expect(generateText('trusted policy', 'customer input')).resolves.toEqual({
+      text: 'ok',
+      provider: 'gemini',
+    });
+
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(body.systemInstruction.parts[0].text).toBe('trusted policy');
+    expect(body.contents[0].parts[0].text).toBe('customer input');
+    expect(body.contents[0].parts[0].text).not.toContain('trusted policy');
+  });
 });
