@@ -1,0 +1,20 @@
+{
+  "model_version": "rf_xgb_ensemble_v1",
+  "trained_at": "2026-07-11T18:09:52.255181",
+  "city_freq_map": {
+    "Hà Nội": 0.25,
+    "TP. Hồ Chí Minh": 0.24,
+    "Đà Nẵng": 0.19,
+    "Nha Trang": 0.11,
+    "Đà Lạt": 0.075,
+    "Hội An": 0.07,
+    "Huế": 0.065
+  },
+  "residual_std": 0.32126911621552845,
+  "metrics": {
+    "mape": 25.287734705384544,
+    "mae": 3918955.978855182,
+    "num_train_samples": 58400,
+    "num_test_samples": 14600
+  }
+}
