@@ -20,7 +20,3 @@ export function getAdminForecastOverview({ days = 7, city, partnerId } = {}) {
   if (partnerId) params.set('partnerId', partnerId)
   return apiRequest(`/forecast/admin/overview?${params.toString()}`, { method: 'GET' })
 }
-
-export function triggerForecastRetrain(payload = {}) {
-  return apiRequest('/forecast/admin/retrain', { method: 'POST', body: payload })
-}

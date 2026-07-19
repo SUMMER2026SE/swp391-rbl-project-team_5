@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
+import { toast } from 'react-toastify'
+import { hasRole } from '../utils/userRoles.js'
 
 const defaultLinks = [
   { label: 'Trang chủ', href: '/' },
@@ -17,7 +19,9 @@ function Header({ links = defaultLinks, activeLink = '' }) {
   const { isAuthenticated, logout, user } = useAuth()
 
   const closeMenu = () => setIsMenuOpen(false)
-  const firstName = user?.fullName?.split(' ')[0] || 'Hồ sơ'
+  const firstName = user?.fullName
+    ? user.fullName.trim().split(' ').pop()
+    : 'Hồ sơ'
   const avatar = user?.avatar || defaultUser.avatar
   const staffPortalPath = user?.employerPartnerId ? '/staff/checkin' : '/staff/tickets'
 
@@ -73,19 +77,24 @@ function Header({ links = defaultLinks, activeLink = '' }) {
         </div>
 
         <div className="header-actions">
-          <button className="icon-button" type="button" aria-label="Đổi ngôn ngữ">
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Đổi ngôn ngữ"
+            onClick={() => toast.info('Tính năng đa ngôn ngữ đang được phát triển!')}
+          >
             <span className="material-symbols-outlined" aria-hidden="true">
               language
             </span>
           </button>
           {isAuthenticated ? (
             <>
-              {user?.role === 'ADMIN' && (
+              {hasRole(user, 'ADMIN') && (
                 <Link className="text-button" to="/admin/users" style={{ marginRight: '4px', color: 'var(--color-primary)', fontWeight: 'bold' }}>
                   Trang quản trị
                 </Link>
               )}
-              {user?.role === 'STAFF' && (
+              {hasRole(user, 'STAFF') && (
                 <Link
                   className="text-button"
                   to={staffPortalPath}
@@ -94,7 +103,7 @@ function Header({ links = defaultLinks, activeLink = '' }) {
                   Cổng nhân viên
                 </Link>
               )}
-              {user?.role === 'PARTNER' && (
+              {hasRole(user, 'PARTNER') && (
                 <Link
                   className="text-button"
                   to="/partner/dashboard"
@@ -155,14 +164,14 @@ function Header({ links = defaultLinks, activeLink = '' }) {
             const isHash = link.href.startsWith('#')
             if (isHash && isHomePage) {
               return (
-                <a href={link.href} key={link.label} onClick={closeMenu}>
+                <a href={link.href} key={link.label} onClick={closeMenu} tabIndex={isMenuOpen ? 0 : -1}>
                   {link.label}
                 </a>
               )
             }
             const toPath = isHash ? `/${link.href}` : link.href
             return (
-              <Link to={toPath} key={link.label} onClick={closeMenu}>
+              <Link to={toPath} key={link.label} onClick={closeMenu} tabIndex={isMenuOpen ? 0 : -1}>
                 {link.label}
               </Link>
             )
@@ -170,37 +179,37 @@ function Header({ links = defaultLinks, activeLink = '' }) {
           <div className="mobile-menu__actions">
             {isAuthenticated ? (
               <>
-                {user?.role === 'ADMIN' && (
-                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: 8 }}>
+                {hasRole(user, 'ADMIN') && (
+                  <Link className="button button--secondary" to="/admin/users" onClick={closeMenu} style={{ marginBottom: 8 }} tabIndex={isMenuOpen ? 0 : -1}>
                     Trang quản trị
                   </Link>
                 )}
-                {user?.role === 'STAFF' && (
-                  <Link className="button button--secondary" to={staffPortalPath} onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                {hasRole(user, 'STAFF') && (
+                  <Link className="button button--secondary" to={staffPortalPath} onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }} tabIndex={isMenuOpen ? 0 : -1}>
                     Cổng nhân viên
                   </Link>
                 )}
-                {user?.role === 'PARTNER' && (
-                  <Link className="button button--secondary" to="/partner/dashboard" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                {hasRole(user, 'PARTNER') && (
+                  <Link className="button button--secondary" to="/partner/dashboard" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }} tabIndex={isMenuOpen ? 0 : -1}>
                     Cổng đối tác
                   </Link>
                 )}
-                <Link className="button button--primary" to="/profile" onClick={closeMenu}>
+                <Link className="button button--primary" to="/profile" onClick={closeMenu} tabIndex={isMenuOpen ? 0 : -1}>
                   Hồ sơ
                 </Link>
-                <button className="text-button" type="button" onClick={handleLogout}>
+                <button className="text-button" type="button" onClick={handleLogout} tabIndex={isMenuOpen ? 0 : -1}>
                   Đăng xuất
                 </button>
               </>
             ) : (
               <>
-                <Link className="button button--secondary" to="/partner/register" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }}>
+                <Link className="button button--secondary" to="/partner/register" onClick={closeMenu} style={{ marginBottom: '8px', display: 'block', width: '100%', textAlign: 'center' }} tabIndex={isMenuOpen ? 0 : -1}>
                   Trở thành đối tác
                 </Link>
-                <Link className="text-button" to="/login" onClick={closeMenu}>
+                <Link className="text-button" to="/login" onClick={closeMenu} tabIndex={isMenuOpen ? 0 : -1}>
                   Đăng nhập
                 </Link>
-                <Link className="button button--primary" to="/register" onClick={closeMenu}>
+                <Link className="button button--primary" to="/register" onClick={closeMenu} tabIndex={isMenuOpen ? 0 : -1}>
                   Đăng ký
                 </Link>
               </>

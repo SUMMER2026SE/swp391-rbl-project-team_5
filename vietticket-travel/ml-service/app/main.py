@@ -6,14 +6,17 @@ FastAPI app cho ml-service (AI Revenue Forecasting).
 Endpoints:
   GET  /health   - kiểm tra model đã load chưa (dùng cho readiness probe)
   POST /forecast - dự báo doanh thu N ngày tới cho 1 attraction
-  POST /train    - (bảo vệ bằng x-ml-api-key) train lại model, mặc định
-                    dùng dữ liệu synthetic để bootstrap
 
 Node backend (forecastService.js) là caller duy nhất trong kiến trúc
 hiện tại - service này KHÔNG public trực tiếp ra internet.
+
+Training không chạy trong HTTP request vì có thể kéo dài nhiều phút và thay
+model đang phục vụ giữa chừng. Quản trị viên export dữ liệu thực rồi chạy
+`python -m app.train --data ...`; model mới chỉ được nạp sau khi service restart.
 """
 
-from datetime import datetime
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
@@ -23,15 +26,6 @@ from .schemas import (
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
-    TrainRequest,
-    TrainResponse,
-)
-from .train import train_and_save
-
-app = FastAPI(
-    title="VietTicket Travel — AI Revenue Forecasting Service",
-    version="1.0.0",
-    description="Ensemble RandomForest + XGBoost cho dự báo doanh thu theo attraction.",
 )
 
 _model: EnsembleForecastModel | None = None
@@ -47,9 +41,18 @@ def _load_model_if_available():
             _model = None
 
 
-@app.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     _load_model_if_available()
+    yield
+
+
+app = FastAPI(
+    title="VietTicket Travel — AI Revenue Forecasting Service",
+    version="1.0.0",
+    description="Ensemble RandomForest + XGBoost cho dự báo doanh thu theo điểm tham quan.",
+    lifespan=lifespan,
+)
 
 
 def require_api_key(x_ml_api_key: str = Header(default="")):
@@ -64,6 +67,11 @@ def health():
         status="ok",
         model_loaded=_model is not None,
         model_version=_model.model_version if _model else None,
+        training_source=(
+            str(_model.metrics.get("training_source", "unknown"))
+            if _model
+            else None
+        ),
         trained_at=_model.trained_at if _model else None,
     )
 
@@ -74,7 +82,7 @@ def forecast(payload: ForecastRequest, _auth: bool = Depends(require_api_key)):
     if _model is None:
         raise HTTPException(
             status_code=503,
-            detail="Model chưa được train. Gọi POST /train trước (hoặc chạy `python -m app.train`).",
+            detail="Model chưa được train. Hãy chạy CLI `python -m app.train` rồi khởi động lại service.",
         )
 
     warning = None
@@ -83,7 +91,7 @@ def forecast(payload: ForecastRequest, _auth: bool = Depends(require_api_key)):
             "Lịch sử doanh thu cung cấp ít hơn 14 ngày — độ chính xác dự báo có thể thấp hơn bình thường."
         )
 
-    history = [{"date": h.date, "revenue": h.revenue, "bookings": h.bookings} for h in payload.history]
+    history = [{"date": h.date, "revenue": h.revenue, "tickets": h.tickets} for h in payload.history]
 
     results = forecast_recursive(
         model=_model,
@@ -102,12 +110,13 @@ def forecast(payload: ForecastRequest, _auth: bool = Depends(require_api_key)):
     return ForecastResponse(
         attraction_id=payload.attraction_id,
         model_version=_model.model_version,
-        generated_at=datetime.utcnow(),
+        training_source=str(_model.metrics.get("training_source", "unknown")),
+        generated_at=datetime.now(timezone.utc),
         forecast=[
             {
                 "date": r.date,
                 "predicted_revenue": r.predicted_revenue,
-                "predicted_bookings": r.predicted_bookings,
+                "predicted_tickets": r.predicted_tickets,
                 "confidence_lower": r.confidence_lower,
                 "confidence_upper": r.confidence_upper,
             }
@@ -115,24 +124,3 @@ def forecast(payload: ForecastRequest, _auth: bool = Depends(require_api_key)):
         ],
         warning=warning,
     )
-
-
-@app.post("/train", response_model=TrainResponse)
-def train(payload: TrainRequest, _auth: bool = Depends(require_api_key)):
-    global _model
-    if not payload.use_synthetic:
-        raise HTTPException(
-            status_code=400,
-            detail="Train với dữ liệu thật chưa hỗ trợ qua HTTP payload (dataset lớn) — "
-            "chạy `python -m app.train` trực tiếp trên máy có quyền truy cập dữ liệu, "
-            "hoặc mở rộng endpoint này để nhận đường dẫn file đã export.",
-        )
-
-    result = train_and_save(
-        model_dir=settings.model_dir,
-        model_version=settings.model_version,
-        num_attractions=payload.num_synthetic_attractions,
-        num_days=payload.synthetic_days,
-    )
-    _load_model_if_available()
-    return TrainResponse(**result)

@@ -20,9 +20,10 @@ const northernCities = ['Hà Nội', 'Hạ Long', 'Quảng Ninh', 'Ninh Bình', 
 const centralCities = ['Đà Nẵng', 'Huế', 'Quảng Nam', 'Hội An', 'Nha Trang', 'Khánh Hòa']
 const southernCities = ['TP. HCM', 'Hồ Chí Minh', 'Phú Quốc', 'Kiên Giang', 'Cần Thơ']
 
-const getAttraction = (favorite) => favorite.attraction || favorite
+const getAttraction = (favorite) => favorite?.attraction || favorite || {}
 
 const getAttractionImage = (attraction) => {
+  if (!attraction) return fallbackImage
   if (attraction.primaryImage) {
     return attraction.primaryImage
   }
@@ -181,16 +182,21 @@ export default function UserFavoritesPage() {
             <FavoritesSkeleton />
           ) : filteredFavorites.length > 0 ? (
             <section className="mb-20 grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              {filteredFavorites.map((item) => {
+              {filteredFavorites.map((item, index) => {
                 const attraction = getAttraction(item)
+                const attractionId = attraction.id ?? item?.attractionId ?? ''
 
                 return (
                   <FavoriteCard
                     attraction={attraction}
-                    isRemoving={removingIds.includes(attraction.id)}
-                    key={item.id || attraction.id}
-                    onBook={() => navigate(`/attractions/${attraction.id}`)}
-                    onRemove={() => handleRemoveFavorite(attraction.id)}
+                    isRemoving={attractionId ? removingIds.includes(attractionId) : false}
+                    key={item?.id || attractionId || `favorite-${index}`}
+                    onBook={() => {
+                      if (attractionId) navigate(`/attractions/${attractionId}`)
+                    }}
+                    onRemove={() => {
+                      if (attractionId) handleRemoveFavorite(attractionId)
+                    }}
                   />
                 )
               })}

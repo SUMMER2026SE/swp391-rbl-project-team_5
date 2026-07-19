@@ -1,8 +1,32 @@
+import { useEffect, useRef, useState } from 'react'
 import { GoogleLogin } from '@react-oauth/google'
 import { toast } from 'react-toastify'
 
 function GoogleButton({ onSuccess, onError }) {
   const hasClientId = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
+  const wrapperRef = useRef(null)
+  const [buttonWidth, setButtonWidth] = useState(320)
+
+  useEffect(() => {
+    if (!hasClientId || !wrapperRef.current) return undefined
+
+    const updateButtonWidth = () => {
+      const width = wrapperRef.current?.getBoundingClientRect().width || 320
+      setButtonWidth(Math.max(240, Math.min(400, Math.floor(width))))
+    }
+
+    updateButtonWidth()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateButtonWidth)
+      return () => window.removeEventListener('resize', updateButtonWidth)
+    }
+
+    const resizeObserver = new ResizeObserver(updateButtonWidth)
+    resizeObserver.observe(wrapperRef.current)
+
+    return () => resizeObserver.disconnect()
+  }, [hasClientId])
 
   const handleFallbackClick = () => {
     if (import.meta.env.DEV) {
@@ -31,12 +55,12 @@ function GoogleButton({ onSuccess, onError }) {
   }
 
   return (
-    <div className="google-login-wrapper">
+    <div className="google-login-wrapper" ref={wrapperRef}>
       <GoogleLogin
         shape="pill"
         size="large"
         text="continue_with"
-        width="100%"
+        width={String(buttonWidth)}
         onError={onError}
         onSuccess={(credentialResponse) => onSuccess?.(credentialResponse)}
       />

@@ -17,6 +17,10 @@ const {
   resolveActiveCategory,
   validateSubmissionSnapshot,
 } = require('../services/attractionWorkflowService');
+const {
+  isAttractionSaleEnabled,
+  publicAttractionWhere,
+} = require('../services/catalogVisibilityService');
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -99,23 +103,49 @@ async function saveDraftImages(attraction, images) {
   return draft.images;
 }
 
-// Gắn 1 category (theo tên) cho điểm tham quan: upsert Category rồi nối
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+// Partners may only select categories governed by the platform. They must
+// never be able to create taxonomy values implicitly from free-form input.
 async function setCategory(tx, attractionId, categoryName) {
   const name = String(categoryName || '').trim();
-  if (!name) return;
+  if (!name) {
+    await tx.attractionCategory.deleteMany({ where: { attractionId } });
+    return;
+  }
 
-  let category = await resolveActiveCategory(tx, name);
+  const category = await resolveActiveCategory(tx, name);
   if (!category) {
-    category = await tx.category.upsert({
-      where: { name },
-      update: {},
-      create: { name },
-    });
+    throw httpError(400, 'Danh mục không tồn tại hoặc đã bị ẩn. Vui lòng chọn lại từ danh sách.');
   }
 
   await tx.attractionCategory.deleteMany({ where: { attractionId } });
   await tx.attractionCategory.create({
     data: { attractionId, categoryId: category.id },
+  });
+}
+
+async function setCategoriesByIds(tx, attractionId, rawCategoryIds) {
+  const categoryIds = [...new Set(
+    rawCategoryIds.map((id) => String(id || '').trim()).filter(Boolean),
+  )];
+  if (categoryIds.length === 0) return;
+
+  const activeCategories = await tx.category.findMany({
+    where: { id: { in: categoryIds }, isActive: true },
+    select: { id: true },
+  });
+  if (activeCategories.length !== categoryIds.length) {
+    throw httpError(400, 'Có danh mục không tồn tại hoặc đã bị ẩn. Vui lòng tải lại danh sách.');
+  }
+
+  await tx.attractionCategory.createMany({
+    data: categoryIds.map((categoryId) => ({ attractionId, categoryId })),
+    skipDuplicates: true,
   });
 }
 
@@ -135,7 +165,7 @@ async function listAttractions(req, res, next) {
 
     const status = String(req.query.status || '').trim().toUpperCase();
     if (status) {
-      if (['DRAFT', 'PENDING', 'APPROVED', 'REJECTED', 'SUSPENDED'].includes(status)) {
+      if (['DRAFT', 'PENDING', 'APPROVED', 'REJECTED'].includes(status)) {
         where.status = status;
       } else if (status === 'ACTIVE') {
         where.publicationStatus = 'ACTIVE';
@@ -198,6 +228,15 @@ function buildAttractionData(body) {
   if (body.requiresManualApproval !== undefined) {
     data.requiresManualApproval = parseBoolean(body.requiresManualApproval);
   }
+  if (body.recommendedVisitMinutes !== undefined) {
+    data.recommendedVisitMinutes = Number(body.recommendedVisitMinutes);
+  }
+  if (body.environment !== undefined) {
+    data.environment = String(body.environment || '').toUpperCase();
+  }
+  if (body.isFullDay !== undefined) {
+    data.isFullDay = parseBoolean(body.isFullDay);
+  }
   if (body.status !== undefined) data.status = attractionStatusFromClient(body.status);
   return data;
 }
@@ -233,13 +272,7 @@ async function createAttraction(req, res, next) {
       if (input.category) {
         await setCategory(tx, attraction.id, input.category);
       } else if (Array.isArray(input.categoryIds) && input.categoryIds.length > 0) {
-        await tx.attractionCategory.createMany({
-          data: [...new Set(input.categoryIds)].map((categoryId) => ({
-            attractionId: attraction.id,
-            categoryId,
-          })),
-          skipDuplicates: true,
-        });
+        await setCategoriesByIds(tx, attraction.id, input.categoryIds);
       }
       if (Array.isArray(input.images) && input.images.length > 0) {
         const images = input.images
@@ -293,21 +326,14 @@ async function updateAttraction(req, res, next) {
     }
 
     const data = buildAttractionData(req.body);
-    const operationalData = {};
-    if (data.requiresManualApproval !== undefined) {
-      operationalData.requiresManualApproval = data.requiresManualApproval;
-      delete data.requiresManualApproval;
-    }
 
     if (hasPublishedVersion(existing)) {
       let cat = null;
       if (req.body.category !== undefined) {
         cat = await resolveActiveCategory(prisma, req.body.category);
         if (!cat && req.body.category) {
-          cat = await prisma.category.upsert({
-            where: { name: req.body.category },
-            update: {},
-            create: { name: req.body.category },
+          return res.status(400).json({
+            message: 'Danh mục không tồn tại hoặc đã bị ẩn. Vui lòng chọn lại từ danh sách.',
           });
         }
       }
@@ -318,7 +344,6 @@ async function updateAttraction(req, res, next) {
       await prisma.attraction.update({
         where: { id: existing.id },
         data: {
-          ...operationalData,
           draftData: merged,
           status: 'DRAFT',
           rejectionReason: null,
@@ -329,7 +354,7 @@ async function updateAttraction(req, res, next) {
       data.rejectionReason = null;
 
       await prisma.$transaction(async (tx) => {
-        await tx.attraction.update({ where: { id: existing.id }, data: { ...data, ...operationalData } });
+        await tx.attraction.update({ where: { id: existing.id }, data });
         if (req.body.category !== undefined) {
           await setCategory(tx, existing.id, req.body.category);
         }
@@ -670,12 +695,7 @@ async function searchAttractions(req, res, next) {
     }
 
     // Chỉ hiển thị địa điểm đang phát hành công khai (ẩn địa điểm đã tạm dừng bán vé).
-    const where = {
-      publishedAt: { not: null },
-      publicationStatus: 'ACTIVE',
-      archivedAt: null,
-      status: { not: 'SUSPENDED' },
-    };
+    const where = publicAttractionWhere();
     const andConditions = [];
 
     if (city) {
@@ -797,14 +817,10 @@ async function searchAttractions(req, res, next) {
 async function getMapPoints(req, res, next) {
   try {
     const items = await prisma.attraction.findMany({
-      where: {
-        publishedAt: { not: null },
-        publicationStatus: 'ACTIVE',
-        archivedAt: null,
-        status: { not: 'SUSPENDED' },
+      where: publicAttractionWhere({
         latitude: { not: null },
         longitude: { not: null },
-      },
+      }),
       select: {
         id: true,
         title: true,
@@ -844,18 +860,16 @@ async function getAttractionDetail(req, res, next) {
     const attraction = await prisma.attraction.findUnique({
       where: { id },
       include: {
+        partner: { select: { status: true } },
         images: true,
         categories: { include: { category: true } },
-        ticketProducts: { where: { status: 'ACTIVE', archivedAt: null } },
+      ticketProducts: { where: { status: 'ACTIVE', archivedAt: null } },
       },
     });
 
     if (
       !attraction
-      || attraction.archivedAt
-      || !attraction.publishedAt
-      || attraction.status === 'SUSPENDED'
-      || attraction.publicationStatus !== 'ACTIVE'
+      || !isAttractionSaleEnabled(attraction)
     ) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Attraction not found' } });
     }
@@ -870,6 +884,12 @@ async function getAttractionDetail(req, res, next) {
       sellingPrice: t.sellingPrice,
       refundPolicy: t.refundPolicy,
       refundFeeRate: t.refundFeeRate,
+      refundCutoffHours: t.refundCutoffHours ?? 24,
+      minAgeYears: t.minAgeYears,
+      maxAgeYears: t.maxAgeYears,
+      minHeightCm: t.minHeightCm,
+      maxHeightCm: t.maxHeightCm,
+      requiresAdult: t.requiresAdult,
     }));
 
     const result = {
@@ -887,6 +907,9 @@ async function getAttractionDetail(req, res, next) {
       totalReviews: attraction.totalReviews,
       createdAt: attraction.createdAt,
       requiresManualApproval: attraction.requiresManualApproval,
+      recommendedVisitMinutes: attraction.recommendedVisitMinutes,
+      environment: attraction.environment,
+      isFullDay: attraction.isFullDay,
     };
 
     return res.status(200).json({ success: true, data: result });
@@ -910,7 +933,7 @@ async function setPublicationStatus(req, res, next) {
       });
     }
 
-    if (attraction.status === 'SUSPENDED') {
+    if (attraction.operationalStatus === 'SUSPENDED') {
       return res.status(403).json({
         success: false,
         error: { code: 'FORBIDDEN', message: 'Điểm tham quan đang bị đình chỉ.' },

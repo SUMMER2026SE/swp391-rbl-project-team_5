@@ -49,7 +49,7 @@ function makeInstance({ ticketStatus = 'VALID', bookingStatus = 'CONFIRMED', vis
       reservation: {
         date: new Date(`${visitDay}T00:00:00.000Z`),
         quantity: 2,
-        timeSlot: { startTime: '08:00', endTime: '10:00' },
+        timeSlot: { startTime: '00:00', endTime: '23:59' },
         ticketProduct: {
           name: 'Vé người lớn',
           attractionId: ATTRACTION_ID,
@@ -76,7 +76,8 @@ describe('lookupTicketByQr', () => {
           canCheckIn: true,
           blockReason: null,
           customer: 'Nguyễn Văn A',
-          quantity: 2,
+          quantity: 1,
+          bookingQuantity: 2,
         }),
       }),
     );
@@ -144,11 +145,15 @@ describe('checkInTicket', () => {
   // makeTx cho checkInTicket — phải có staffAttractionAssignment và auditLog
   // (vì assertStaffAttractionAccess và writeAuditLog chạy trong transaction).
   // Với role ADMIN, assertStaffAttractionAccess return sớm → không cần findFirst.
-  function makeTx(instance, updatedCount = 2) {
+  function makeTx(instance, updatedCount = 1, nonUsedTicketCount = 1) {
     return {
       ticketInstance: {
         findUnique: jest.fn().mockResolvedValue(instance),
         updateMany: jest.fn().mockResolvedValue({ count: updatedCount }),
+        count: jest.fn().mockResolvedValue(nonUsedTicketCount),
+      },
+      booking: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       staffAttractionAssignment: {
         findFirst: jest.fn().mockResolvedValue({ id: 'assign-1' }),
@@ -159,7 +164,7 @@ describe('checkInTicket', () => {
     };
   }
 
-  test('✅ Check-in thành công: mọi vé VALID của đơn → USED', async () => {
+  test('✅ Check-in thành công: chỉ vé được quét → USED', async () => {
     const instance = makeInstance();
     let capturedTx;
     mockPrisma.$transaction.mockImplementation(async (fn) => {
@@ -172,16 +177,41 @@ describe('checkInTicket', () => {
 
     expect(capturedTx.ticketInstance.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ bookingId: instance.bookingId, status: 'VALID' }),
+        where: expect.objectContaining({ id: instance.id, status: 'VALID' }),
         data: expect.objectContaining({ status: 'USED' }),
       }),
     );
+    expect(capturedTx.ticketInstance.count).toHaveBeenCalledWith({
+      where: { bookingId: BOOKING_ID, status: 'VALID' },
+    });
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         success: true,
-        data: expect.objectContaining({ checkedInCount: 2, ticketStatus: 'USED' }),
+        data: expect.objectContaining({ checkedInCount: 1, ticketStatus: 'USED' }),
       }),
     );
+    expect(next).not.toHaveBeenCalled();
+    expect(capturedTx.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('✅ Vé cuối cùng được check-in thì booking chuyển sang COMPLETED', async () => {
+    const instance = makeInstance();
+    let capturedTx;
+    mockPrisma.$transaction.mockImplementation(async (fn) => {
+      capturedTx = makeTx(instance, 1, 0);
+      return fn(capturedTx);
+    });
+
+    const { req, res, next } = makeReqRes({ params: { token: TOKEN } });
+    await checkInTicket(req, res, next);
+
+    expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: BOOKING_ID, status: 'CONFIRMED' },
+      data: { status: 'COMPLETED' },
+    });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ bookingStatus: 'COMPLETED' }),
+    }));
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -265,6 +295,7 @@ describe('listTodayBookings', () => {
     mockPrisma.booking.findMany.mockResolvedValue([
       {
         id: BOOKING_ID,
+        status: 'COMPLETED',
         fullName: 'Nguyễn Văn A',
         phone: '0901234567',
         snapshotAttractionTitle: 'Sun World',
@@ -279,6 +310,7 @@ describe('listTodayBookings', () => {
       },
       {
         id: 'booking-002',
+        status: 'CONFIRMED',
         fullName: 'Trần Thị B',
         phone: null,
         snapshotAttractionTitle: '',
@@ -300,8 +332,16 @@ describe('listTodayBookings', () => {
       expect.objectContaining({
         success: true,
         data: expect.arrayContaining([
-          expect.objectContaining({ bookingId: BOOKING_ID, checkedIn: true }),
-          expect.objectContaining({ bookingId: 'booking-002', checkedIn: false }),
+          expect.objectContaining({
+            bookingId: BOOKING_ID,
+            bookingStatus: 'COMPLETED',
+            checkedIn: true,
+          }),
+          expect.objectContaining({
+            bookingId: 'booking-002',
+            bookingStatus: 'CONFIRMED',
+            checkedIn: false,
+          }),
         ]),
         meta: expect.objectContaining({ total: 2, checkedIn: 1 }),
       }),

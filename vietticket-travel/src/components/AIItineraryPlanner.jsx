@@ -72,6 +72,22 @@ function formatSavedDate(value) {
   }).format(date)
 }
 
+function formatCheckedAt(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+function environmentLabel(value) {
+  if (value === 'INDOOR') return 'Trong nhà'
+  if (value === 'OUTDOOR') return 'Ngoài trời'
+  return 'Kết hợp trong/ngoài trời'
+}
+
 function formatDistanceKm(value) {
   const distance = Number(value)
   if (!Number.isFinite(distance) || distance <= 0) return ''
@@ -108,11 +124,13 @@ function AIItineraryPlanner() {
   const [categories, setCategories] = useState([])
   const [pace, setPace] = useState('normal')
   const [priority, setPriority] = useState('balanced')
-  const [companion, setCompanion] = useState('solo')
+  const [companion, setCompanion] = useState('couple')
   const [budget, setBudget] = useState('')
   const [loading, setLoading] = useState(false)
   const [plan, setPlan] = useState(null)
-  const [savedItineraries, setSavedItineraries] = useState(() => loadSavedItineraries())
+  const [savedItineraries, setSavedItineraries] = useState(() =>
+    loadSavedItineraries(undefined, ownerId),
+  )
   const [savedPlanId, setSavedPlanId] = useState('')
   const [feedbackValue, setFeedbackValue] = useState('')
 
@@ -195,12 +213,17 @@ function AIItineraryPlanner() {
 
     if (!ownerId) {
       Promise.resolve().then(() => {
-        if (active) setSavedItineraries(loadSavedItineraries())
+        if (active) setSavedItineraries(loadSavedItineraries(undefined, ''))
       })
       return undefined
     }
 
-    loadItinerariesFromServer(getSavedAiItineraries, getSavedAiItineraryById)
+    loadItinerariesFromServer(
+      getSavedAiItineraries,
+      getSavedAiItineraryById,
+      undefined,
+      ownerId,
+    )
       .then((merged) => {
         if (active) setSavedItineraries(merged)
       })
@@ -300,14 +323,19 @@ function AIItineraryPlanner() {
 
     try {
       const snapshot = createItinerarySnapshot(plan, currentCriteria)
-      const saved = saveItinerarySnapshot(snapshot)
+      const saved = saveItinerarySnapshot(snapshot, undefined, ownerId)
       if (saved) {
         setSavedPlanId(saved.id)
-        setSavedItineraries(loadSavedItineraries())
+        setSavedItineraries(loadSavedItineraries(undefined, ownerId))
         if (ownerId) {
           const synced = await syncItineraryToServer(saved, saveAiItinerary)
           if (synced) {
-            const merged = await loadItinerariesFromServer(getSavedAiItineraries, getSavedAiItineraryById)
+            const merged = await loadItinerariesFromServer(
+              getSavedAiItineraries,
+              getSavedAiItineraryById,
+              undefined,
+              ownerId,
+            )
             setSavedItineraries(merged)
             toast.success('Đã lưu lịch trình vào tài khoản.')
             return
@@ -337,13 +365,13 @@ function AIItineraryPlanner() {
     }
     setPlan(restoredPlan)
     setSavedPlanId(snapshot.id)
-    setFeedbackValue(getItineraryFeedback(snapshot.id))
+    setFeedbackValue(getItineraryFeedback(snapshot.id, undefined, ownerId))
     setStep(2)
     setIsOpen(true)
-  }, [])
+  }, [ownerId])
 
   const handleRemoveSavedPlan = useCallback(async (planId) => {
-    const next = removeItinerarySnapshot(planId)
+    const next = removeItinerarySnapshot(planId, undefined, ownerId)
     setSavedItineraries(next)
     if (savedPlanId === planId) {
       setSavedPlanId('')
@@ -391,12 +419,12 @@ function AIItineraryPlanner() {
   const handleFeedback = useCallback((value) => {
     if (!plan?.clientPlanId) return
 
-    const saved = saveItineraryFeedback(plan.clientPlanId, value)
+    const saved = saveItineraryFeedback(plan.clientPlanId, value, undefined, ownerId)
     if (saved) {
-      setFeedbackValue(getItineraryFeedback(plan.clientPlanId))
-      toast.success(value === 'up' ? 'Cảm ơn phản hồi của bạn.' : 'Đã ghi nhận góp ý để cải thiện gợi ý.')
+      setFeedbackValue(getItineraryFeedback(plan.clientPlanId, undefined, ownerId))
+      toast.success('Đã lưu phản hồi trên thiết bị này.')
     }
-  }, [plan])
+  }, [ownerId, plan])
 
   const itineraryDays = useMemo(() => {
     if (!plan?.days) {
@@ -417,7 +445,9 @@ function AIItineraryPlanner() {
   const bookableQueueItems = bookingQueue?.items || []
   const visibleSavedItineraries = useMemo(
     () =>
-      savedItineraries.filter((item) => !item.ownerId || !ownerId || item.ownerId === ownerId),
+      savedItineraries.filter((item) =>
+        ownerId ? item.ownerId === ownerId : !item.ownerId,
+      ),
     [ownerId, savedItineraries],
   )
 
@@ -716,6 +746,33 @@ function AIItineraryPlanner() {
                 <div className="rounded-3xl border border-[#cbd5db] bg-[#f8fafb] p-6">
                   <h3 className="text-2xl font-bold text-[#00474d]">{plan.title || `Kế hoạch ${city}`}</h3>
                   <p className="mt-3 text-sm text-[#475569]">{plan.description || plan.summary || ''}</p>
+                  {plan.generationWarning && (
+                    <div
+                      className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900"
+                      role="status"
+                    >
+                      {plan.generationWarning}
+                    </div>
+                  )}
+                  {plan.interestMatch?.interestFallbackUsed && (
+                    <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+                      {plan.interestMatch.fallbackMessage}
+                    </div>
+                  )}
+                  {plan.rankingNotice && (
+                    <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                      {plan.rankingNotice}
+                    </div>
+                  )}
+                  {plan.availabilityChecked && (
+                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs font-semibold text-emerald-900">
+                      Tồn vé và giá được kiểm tra
+                      {formatCheckedAt(plan.availabilityCheckedAt)
+                        ? ` lúc ${formatCheckedAt(plan.availabilityCheckedAt)}`
+                        : ' khi tạo lịch'}
+                      . Hệ thống sẽ kiểm tra lại ở bước giữ chỗ vì dữ liệu có thể thay đổi.
+                    </div>
+                  )}
                   <div className="mt-5 flex flex-wrap gap-2">
                     {bookableQueueItems.length > 0 && (
                       <button
@@ -832,7 +889,9 @@ function AIItineraryPlanner() {
                                       >
                                         route
                                       </span>
-                                      <p className="text-sm font-bold text-[#00474d]">Tuyến di chuyển</p>
+                                      <p className="text-sm font-bold text-[#00474d]">
+                                        Ước tính di chuyển
+                                      </p>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 text-xs font-semibold text-[#475569]">
                                       {routeDistance && (
@@ -891,6 +950,9 @@ function AIItineraryPlanner() {
                                 const fallbackBookingDate =
                                   activity.visitDate || dayItem.visitDate || plan.startDate || startDate
                                 const bookableTicketLines = ticketItems.filter((ticket) => ticket?.ticketId)
+                                const eligibilityNotes = ticketItems
+                                  .map((ticket) => ticket?.eligibility?.note)
+                                  .filter(Boolean)
 
                                 return (
                                   <div
@@ -910,6 +972,27 @@ function AIItineraryPlanner() {
                                           <p className="mt-1 text-xs font-semibold text-[#00629d]">
                                             Vé cả nhóm: {formatCurrency(activity.estimatedCost)}
                                           </p>
+                                        )}
+                                        <p className="mt-1 text-xs text-[#64748b]">
+                                          {Number(activity.recommendedVisitMinutes) > 0
+                                            ? `Thời lượng đề xuất: ${formatTravelMinutes(activity.recommendedVisitMinutes)}`
+                                            : 'Thời lượng tham quan linh hoạt'}
+                                          {activity.environment
+                                            ? ` · ${environmentLabel(activity.environment)}`
+                                            : ''}
+                                          {activity.isFullDay ? ' · Trải nghiệm cả ngày' : ''}
+                                        </p>
+                                        {eligibilityNotes.length > 0 && (
+                                          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                            {eligibilityNotes.map((note, noteIndex) => (
+                                              <p
+                                                className="text-xs font-semibold text-amber-900"
+                                                key={`${note}-${noteIndex}`}
+                                              >
+                                                {note}
+                                              </p>
+                                            ))}
+                                          </div>
                                         )}
                                       </div>
                                       {attractionId && (
@@ -958,12 +1041,16 @@ function AIItineraryPlanner() {
                               })}
                             </div>
                           ) : (
-                            <p className="text-sm text-[#475569]">{dayItem.description || 'Nội dung chi tiết sẽ được AI tạo sau.'}</p>
+                            <p className="text-sm text-[#475569]">
+                              {dayItem.description || 'Hoạt động tham quan theo lịch trình đã đề xuất.'}
+                            </p>
                           )}
 
                           {Array.isArray(dayItem.alternatives) && dayItem.alternatives.length > 0 && (
                             <div className="mt-4 rounded-2xl border border-dashed border-[#cbd5db] bg-white p-4">
-                              <p className="mb-2 text-sm font-semibold text-[#00629d]">🅱️ Kế hoạch B (nếu điểm chính đóng cửa/hết vé)</p>
+                              <p className="mb-2 text-sm font-semibold text-[#00629d]">
+                                Địa điểm tham khảo thêm
+                              </p>
                               <div className="space-y-2">
                                 {dayItem.alternatives.map((alt, altIndex) => (
                                   <div

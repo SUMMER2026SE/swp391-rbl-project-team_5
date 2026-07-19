@@ -27,7 +27,7 @@ async function protect(req, res, next) {
     const [user, session] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       }),
       prisma.authSession.findUnique({
         where: { id: sessionId },

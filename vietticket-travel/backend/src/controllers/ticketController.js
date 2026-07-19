@@ -6,9 +6,9 @@ const {
   refundPolicyFromClient,
   toTicket,
 } = require('../utils/partnerMappers');
-const { validateTicket } = require('../utils/partnerValidators');
+const { isValidTime, validateTicket } = require('../utils/partnerValidators');
 const { findOwnedAttraction } = require('./attractionController');
-const { DEFAULT_REFUND_WITH_FEE_RATE, todayInVietnam } = require('../utils/refundService');
+const { normalizeRefundFeeRate, todayInVietnam } = require('../utils/refundService');
 const {
   getBookableSchedule,
   getProductCapacity,
@@ -21,6 +21,9 @@ const {
   buildAttractionSnapshot,
 } = require('../services/attractionWorkflowService');
 const { writeAuditLog } = require('../utils/auditLog');
+const { isBookingCutoffPassed } = require('../utils/activityTime');
+const { MAX_TICKETS_PER_ORDER } = require('../config/bookingPolicy');
+const { parseVndInteger } = require('../utils/money');
 
 const attractionInclude = {
   images: true,
@@ -29,6 +32,9 @@ const attractionInclude = {
   timeSlots: { where: { ticketProductId: null, isActive: true } },
   specialDates: true,
 };
+
+const HOLD_DURATION_MS = 10 * 60 * 1000;
+const MAX_ACTIVE_HOLDS_PER_USER = 3;
 
 // Tìm vé và xác minh thuộc về đối tác hiện tại (qua điểm tham quan)
 async function findOwnedTicket(ticketId, partnerId) {
@@ -58,14 +64,16 @@ function buildTicketData(body) {
   if (body.status !== undefined) data.status = ticketStatusFromClient(body.status);
   if (body.refundPolicy !== undefined) data.refundPolicy = refundPolicyFromClient(body.refundPolicy);
   if (body.refundFeeRate !== undefined) data.refundFeeRate = Number(body.refundFeeRate);
+  if (body.refundCutoffHours !== undefined) data.refundCutoffHours = Number(body.refundCutoffHours);
+  for (const field of ['minAgeYears', 'maxAgeYears', 'minHeightCm', 'maxHeightCm']) {
+    if (body[field] !== undefined) {
+      data[field] = body[field] === '' || body[field] == null ? null : Number(body[field]);
+    }
+  }
+  if (body.requiresAdult !== undefined) {
+    data.requiresAdult = [true, 1, '1', 'true'].includes(body.requiresAdult);
+  }
   return data;
-}
-
-function normalizeRefundFeeRate(policy, value) {
-  if (policy !== 'REFUND_WITH_FEE') return 0;
-  const rate = Number(value);
-  if (!Number.isFinite(rate) || rate <= 0) return DEFAULT_REFUND_WITH_FEE_RATE;
-  return Math.min(rate, 1);
 }
 
 // GET /api/partners/attractions/:id/tickets
@@ -119,6 +127,7 @@ async function createTicket(req, res, next) {
     if (!data.status) data.status = 'ACTIVE';
     if (!data.refundPolicy) data.refundPolicy = 'NON_REFUNDABLE';
     data.refundFeeRate = normalizeRefundFeeRate(data.refundPolicy, data.refundFeeRate);
+    if (data.refundCutoffHours === undefined) data.refundCutoffHours = 24;
     if (!data.description) data.description = '';
 
     if (hasPublishedVersion(attraction)) {
@@ -135,6 +144,12 @@ async function createTicket(req, res, next) {
         status: data.status,
         refundPolicy: data.refundPolicy,
         refundFeeRate: data.refundFeeRate,
+        refundCutoffHours: data.refundCutoffHours,
+        minAgeYears: data.minAgeYears ?? null,
+        maxAgeYears: data.maxAgeYears ?? null,
+        minHeightCm: data.minHeightCm ?? null,
+        maxHeightCm: data.maxHeightCm ?? null,
+        requiresAdult: Boolean(data.requiresAdult),
       };
       tickets.push(newTicket);
       draft.tickets = tickets;
@@ -262,6 +277,9 @@ async function updateTicket(req, res, next) {
         nextRefundPolicy,
         req.body.refundFeeRate !== undefined ? req.body.refundFeeRate : current.refundFeeRate,
       );
+      const nextRefundCutoffHours = req.body.refundCutoffHours !== undefined
+        ? Number(req.body.refundCutoffHours)
+        : Number(current.refundCutoffHours ?? 24);
 
       const updatedTicket = {
         ...current,
@@ -273,6 +291,22 @@ async function updateTicket(req, res, next) {
         status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
         refundPolicy: nextRefundPolicy,
         refundFeeRate: nextRefundFeeRate,
+        refundCutoffHours: nextRefundCutoffHours,
+        minAgeYears: req.body.minAgeYears !== undefined
+          ? (req.body.minAgeYears === '' || req.body.minAgeYears == null ? null : Number(req.body.minAgeYears))
+          : current.minAgeYears ?? null,
+        maxAgeYears: req.body.maxAgeYears !== undefined
+          ? (req.body.maxAgeYears === '' || req.body.maxAgeYears == null ? null : Number(req.body.maxAgeYears))
+          : current.maxAgeYears ?? null,
+        minHeightCm: req.body.minHeightCm !== undefined
+          ? (req.body.minHeightCm === '' || req.body.minHeightCm == null ? null : Number(req.body.minHeightCm))
+          : current.minHeightCm ?? null,
+        maxHeightCm: req.body.maxHeightCm !== undefined
+          ? (req.body.maxHeightCm === '' || req.body.maxHeightCm == null ? null : Number(req.body.maxHeightCm))
+          : current.maxHeightCm ?? null,
+        requiresAdult: req.body.requiresAdult !== undefined
+          ? [true, 1, '1', 'true'].includes(req.body.requiresAdult)
+          : Boolean(current.requiresAdult),
       };
 
       draft.tickets[ticketIndex] = updatedTicket;
@@ -322,6 +356,12 @@ async function updateTicket(req, res, next) {
         status: existing.status,
         refundPolicy: existing.refundPolicy,
         refundFeeRate: Number(existing.refundFeeRate),
+        refundCutoffHours: Number(existing.refundCutoffHours ?? 24),
+        minAgeYears: existing.minAgeYears,
+        maxAgeYears: existing.maxAgeYears,
+        minHeightCm: existing.minHeightCm,
+        maxHeightCm: existing.maxHeightCm,
+        requiresAdult: Boolean(existing.requiresAdult),
       };
 
       const nextRefundPolicy = req.body.refundPolicy !== undefined
@@ -331,6 +371,9 @@ async function updateTicket(req, res, next) {
         nextRefundPolicy,
         req.body.refundFeeRate !== undefined ? req.body.refundFeeRate : current.refundFeeRate,
       );
+      const nextRefundCutoffHours = req.body.refundCutoffHours !== undefined
+        ? Number(req.body.refundCutoffHours)
+        : Number(current.refundCutoffHours ?? 24);
 
       const updatedTicket = {
         ...current,
@@ -342,6 +385,22 @@ async function updateTicket(req, res, next) {
         status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
         refundPolicy: nextRefundPolicy,
         refundFeeRate: nextRefundFeeRate,
+        refundCutoffHours: nextRefundCutoffHours,
+        minAgeYears: req.body.minAgeYears !== undefined
+          ? (req.body.minAgeYears === '' || req.body.minAgeYears == null ? null : Number(req.body.minAgeYears))
+          : current.minAgeYears ?? null,
+        maxAgeYears: req.body.maxAgeYears !== undefined
+          ? (req.body.maxAgeYears === '' || req.body.maxAgeYears == null ? null : Number(req.body.maxAgeYears))
+          : current.maxAgeYears ?? null,
+        minHeightCm: req.body.minHeightCm !== undefined
+          ? (req.body.minHeightCm === '' || req.body.minHeightCm == null ? null : Number(req.body.minHeightCm))
+          : current.minHeightCm ?? null,
+        maxHeightCm: req.body.maxHeightCm !== undefined
+          ? (req.body.maxHeightCm === '' || req.body.maxHeightCm == null ? null : Number(req.body.maxHeightCm))
+          : current.maxHeightCm ?? null,
+        requiresAdult: req.body.requiresAdult !== undefined
+          ? [true, 1, '1', 'true'].includes(req.body.requiresAdult)
+          : Boolean(current.requiresAdult),
       };
 
       if (idx !== -1) {
@@ -504,6 +563,9 @@ function parseDateString(dateStr) {
   // create Date at UTC midnight
   const d = new Date(dateStr + 'T00:00:00.000Z');
   if (Number.isNaN(d.getTime())) return null;
+  // JavaScript normalizes impossible dates (for example 2026-02-31 -> 2026-03-03).
+  // Round-trip the value so the API never silently books a different calendar day.
+  if (d.toISOString().slice(0, 10) !== dateStr) return null;
   return d;
 }
 
@@ -536,6 +598,13 @@ async function createTicketProduct(req, res, next) {
     if (refundPolicy && !validPolicies.includes(refundPolicy)) {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'refundPolicy is invalid' } });
     }
+    const ticketValidationError = validateTicket(req.body || {}, { partial: false });
+    if (ticketValidationError) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: ticketValidationError },
+      });
+    }
 
     if (hasPublishedVersion(attraction)) {
       const draft = attraction.draftData || buildAttractionSnapshot(attraction);
@@ -549,13 +618,27 @@ async function createTicketProduct(req, res, next) {
       const newTicket = {
         id: ticketId,
         name,
-        type: req.body.type || 'ADULT',
+        type: String(req.body.type || 'ADULT').toUpperCase(),
         description,
         originalPrice: Number(originalPrice),
         sellingPrice: Number(sellingPrice),
         status: 'ACTIVE',
         refundPolicy: normalizedRefundPolicy,
         refundFeeRate: normalizedRefundFeeRate,
+        refundCutoffHours: Number(req.body.refundCutoffHours ?? 24),
+        minAgeYears: req.body.minAgeYears === '' || req.body.minAgeYears == null
+          ? null
+          : Number(req.body.minAgeYears),
+        maxAgeYears: req.body.maxAgeYears === '' || req.body.maxAgeYears == null
+          ? null
+          : Number(req.body.maxAgeYears),
+        minHeightCm: req.body.minHeightCm === '' || req.body.minHeightCm == null
+          ? null
+          : Number(req.body.minHeightCm),
+        maxHeightCm: req.body.maxHeightCm === '' || req.body.maxHeightCm == null
+          ? null
+          : Number(req.body.maxHeightCm),
+        requiresAdult: [true, 1, '1', 'true'].includes(req.body.requiresAdult),
       };
       tickets.push(newTicket);
       draft.tickets = tickets;
@@ -586,11 +669,26 @@ async function createTicketProduct(req, res, next) {
       data: {
         attractionId,
         name,
+        type: String(req.body.type || 'ADULT').toUpperCase(),
         description,
         originalPrice,
         sellingPrice,
         refundPolicy: normalizedRefundPolicy,
         refundFeeRate: normalizedRefundFeeRate,
+        refundCutoffHours: Number(req.body.refundCutoffHours ?? 24),
+        minAgeYears: req.body.minAgeYears === '' || req.body.minAgeYears == null
+          ? null
+          : Number(req.body.minAgeYears),
+        maxAgeYears: req.body.maxAgeYears === '' || req.body.maxAgeYears == null
+          ? null
+          : Number(req.body.maxAgeYears),
+        minHeightCm: req.body.minHeightCm === '' || req.body.minHeightCm == null
+          ? null
+          : Number(req.body.minHeightCm),
+        maxHeightCm: req.body.maxHeightCm === '' || req.body.maxHeightCm == null
+          ? null
+          : Number(req.body.maxHeightCm),
+        requiresAdult: [true, 1, '1', 'true'].includes(req.body.requiresAdult),
         status: 'ACTIVE',
       },
     });
@@ -645,8 +743,24 @@ async function setupTimeSlots(req, res, next) {
 
     // Validate slots
     for (const s of slots) {
-      if (!s.startTime || !s.endTime || !Number.isFinite(Number(s.maxCapacity)) || Number(s.maxCapacity) < 1) {
+      if (!isValidTime(s.startTime) || !isValidTime(s.endTime)) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Khung giờ phải đúng định dạng HH:MM.' } });
+      }
+      if (s.startTime >= s.endTime) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Giờ bắt đầu khung giờ phải trước giờ kết thúc.' } });
+      }
+      if (!Number.isFinite(Number(s.maxCapacity)) || Number(s.maxCapacity) < 1) {
         return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Each slot requires startTime, endTime and positive maxCapacity' } });
+      }
+    }
+
+    const sortedSlots = [...slots].sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+    for (let i = 1; i < sortedSlots.length; i += 1) {
+      if (String(sortedSlots[i].startTime) < String(sortedSlots[i - 1].endTime)) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'Các khung giờ không được chồng lấn nhau.' },
+        });
       }
     }
 
@@ -700,13 +814,13 @@ async function checkAvailability(req, res, next) {
 
     const productAvailable = Math.max(
       0,
-      Number(dailyStock?.capacity ?? getProductCapacity(schedule))
+      getProductCapacity(schedule)
         - Number(dailyStock?.bookedQuantity || 0)
         - Number(dailyStock?.heldQuantity || 0),
     );
     const attractionAvailable = Math.max(
       0,
-      Number(attractionStock?.capacity ?? schedule.dayCapacity)
+      schedule.dayCapacity
         - Number(attractionStock?.bookedQty || 0)
         - Number(attractionStock?.heldQty || 0),
     );
@@ -715,6 +829,11 @@ async function checkAvailability(req, res, next) {
     const results = schedule.slots.length > 0
       ? schedule.slots.map((slot) => {
           const stock = stockBySlot.get(slot.id);
+          const bookingClosed = isBookingCutoffPassed({
+            date,
+            timeSlot: slot,
+            attraction: schedule.attraction,
+          });
           const slotAvailable = Math.max(
             0,
             getSlotCapacity(schedule, slot)
@@ -728,10 +847,11 @@ async function checkAvailability(req, res, next) {
             endTime: slot.endTime,
             maxCapacity: getSlotCapacity(schedule, slot),
             availableTickets: Math.min(
-              slotAvailable,
-              productAvailable,
-              attractionAvailable,
+              bookingClosed ? 0 : slotAvailable,
+              bookingClosed ? 0 : productAvailable,
+              bookingClosed ? 0 : attractionAvailable,
             ),
+            bookingClosed,
           };
         })
       : [{
@@ -741,7 +861,16 @@ async function checkAvailability(req, res, next) {
           endTime: schedule.attraction.closeTime || null,
           label: 'Vé sử dụng trong ngày',
           maxCapacity: Math.min(getProductCapacity(schedule), schedule.dayCapacity),
-          availableTickets: Math.min(productAvailable, attractionAvailable),
+          availableTickets: isBookingCutoffPassed({
+            date,
+            attraction: schedule.attraction,
+          })
+            ? 0
+            : Math.min(productAvailable, attractionAvailable),
+          bookingClosed: isBookingCutoffPassed({
+            date,
+            attraction: schedule.attraction,
+          }),
         }];
 
     return res.status(200).json({
@@ -790,7 +919,19 @@ async function reserveTickets(req, res, next) {
     const { date: dateStr, quantity: qtyRaw, timeSlotId } = req.body || {};
     const quantity = Number(qtyRaw);
     if (!dateStr) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'date is required' } });
-    if (!Number.isInteger(quantity) || quantity < 1) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'quantity must be a positive integer' } });
+    if (
+      !Number.isSafeInteger(quantity)
+      || quantity < 1
+      || quantity > MAX_TICKETS_PER_ORDER
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: `Số lượng vé mỗi đơn phải là số nguyên từ 1 đến ${MAX_TICKETS_PER_ORDER}.`,
+        },
+      });
+    }
 
     const date = parseDateString(dateStr);
     if (!date) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid date format (YYYY-MM-DD)' } });
@@ -812,15 +953,70 @@ async function reserveTickets(req, res, next) {
       });
     }
 
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const holdStartedAt = new Date();
+    const expiresAt = new Date(holdStartedAt.getTime() + HOLD_DURATION_MS);
 
     const result = await runSerializable(async (tx) => {
+      const activeHoldWhere = {
+        userId,
+        status: 'HELD',
+        expiresAt: { gt: holdStartedAt },
+      };
+      const [activeHoldCount, duplicateHold] = await Promise.all([
+        tx.reservation.count({ where: activeHoldWhere }),
+        tx.reservation.findFirst({
+          where: {
+            ...activeHoldWhere,
+            ticketProductId,
+            date,
+            timeSlotId: timeSlotId || null,
+          },
+          select: { id: true, expiresAt: true },
+        }),
+      ]);
+
+      if (duplicateHold) {
+        const err = new Error('Bạn đã có một lượt giữ chỗ còn hiệu lực cho lựa chọn này. Vui lòng tiếp tục thanh toán hoặc chờ lượt giữ chỗ hết hạn.');
+        err.statusCode = 409;
+        throw err;
+      }
+      if (activeHoldCount >= MAX_ACTIVE_HOLDS_PER_USER) {
+        const err = new Error(`Mỗi tài khoản chỉ được có tối đa ${MAX_ACTIVE_HOLDS_PER_USER} lượt giữ chỗ cùng lúc.`);
+        err.statusCode = 429;
+        throw err;
+      }
+
       const schedule = await getBookableSchedule(tx, ticketProductId, date);
       if (schedule.isClosed) {
         const err = new Error('Địa điểm đóng cửa trong ngày đã chọn.');
         err.statusCode = 409;
         throw err;
       }
+      const snapshotUnitPrice = parseVndInteger(schedule.product.sellingPrice);
+      if (snapshotUnitPrice === null) {
+        const err = new Error('Giá bán của gói vé phải là số nguyên VND hợp lệ.');
+        err.statusCode = 409;
+        throw err;
+      }
+      const snapshotRefundPolicy =
+        schedule.product.refundPolicy || 'NON_REFUNDABLE';
+      const snapshotRefundFeeRate = normalizeRefundFeeRate(
+        snapshotRefundPolicy,
+        schedule.product.refundFeeRate,
+      );
+      const rawRefundCutoffHours = Number(schedule.product.refundCutoffHours ?? 24);
+      const snapshotRefundCutoffHours =
+        Number.isSafeInteger(rawRefundCutoffHours)
+        && rawRefundCutoffHours >= 0
+        && rawRefundCutoffHours <= 720
+          ? rawRefundCutoffHours
+          : 24;
+      const rawCommissionRate = Number(
+        schedule.attraction.partner?.commissionRate ?? 0.10,
+      );
+      const snapshotCommissionRate = Number.isFinite(rawCommissionRate)
+        ? Math.min(Math.max(rawCommissionRate, 0), 1)
+        : 0.10;
 
       let selectedSlot = null;
       if (timeSlotId) {
@@ -833,6 +1029,17 @@ async function reserveTickets(req, res, next) {
       } else if (schedule.slots.length > 0) {
         const err = new Error('Vui lòng chọn khung giờ tham quan.');
         err.statusCode = 400;
+        throw err;
+      }
+
+      if (isBookingCutoffPassed({
+        date,
+        timeSlot: selectedSlot,
+        attraction: schedule.attraction,
+        now: holdStartedAt,
+      })) {
+        const err = new Error('Đã quá giờ nhận đặt vé cho khung giờ hoặc ngày tham quan này.');
+        err.statusCode = 409;
         throw err;
       }
 
@@ -849,6 +1056,11 @@ async function reserveTickets(req, res, next) {
             heldQuantity: 0,
           },
         });
+      } else if (daily.capacity !== productCapacity) {
+        daily = await tx.dailyStock.update({
+          where: { id: daily.id },
+          data: { capacity: productCapacity },
+        });
       }
 
       const attractionWhere = {
@@ -864,6 +1076,11 @@ async function reserveTickets(req, res, next) {
             date,
             capacity: schedule.dayCapacity,
           },
+        });
+      } else if (attractionStock.capacity !== schedule.dayCapacity) {
+        attractionStock = await tx.attractionDailyStock.update({
+          where: { id: attractionStock.id },
+          data: { capacity: schedule.dayCapacity },
         });
       }
 
@@ -922,6 +1139,11 @@ async function reserveTickets(req, res, next) {
           status: 'HELD',
           expiresAt,
           paymentDeadline: expiresAt,
+          snapshotUnitPrice,
+          snapshotRefundPolicy,
+          snapshotRefundFeeRate,
+          snapshotRefundCutoffHours,
+          snapshotCommissionRate,
         },
       });
 
@@ -933,6 +1155,7 @@ async function reserveTickets(req, res, next) {
     if (error.statusCode === 404) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: error.message } });
     if (error.statusCode === 400) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: error.message } });
     if (error.statusCode === 409) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: error.message } });
+    if (error.statusCode === 429) return res.status(429).json({ success: false, error: { code: 'HOLD_LIMIT_EXCEEDED', message: error.message } });
     return next(error);
   }
 }
@@ -949,5 +1172,8 @@ module.exports = {
   setupTimeSlots,
   checkAvailability,
   reserveTickets,
+  HOLD_DURATION_MS,
+  MAX_ACTIVE_HOLDS_PER_USER,
+  MAX_TICKETS_PER_ORDER,
 };
 

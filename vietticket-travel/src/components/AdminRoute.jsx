@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/useAuth.js';
+import { hasRole } from '../utils/userRoles.js';
 
 function RouteLoading() {
   return (
@@ -27,7 +28,7 @@ function AdminRoute({ children }) {
     return <RouteLoading />;
   }
 
-  if (!isAuthenticated || user?.role !== 'ADMIN') {
+  if (!isAuthenticated || !hasRole(user, 'ADMIN')) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 

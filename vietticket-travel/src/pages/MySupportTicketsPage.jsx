@@ -15,6 +15,8 @@ const STATUS_META = {
 const formatTime = (value) =>
   new Date(value).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
 
+const isSameId = (left, right) => String(left ?? '') === String(right ?? '')
+
 function StatusBadge({ status }) {
   const meta = STATUS_META[status] || STATUS_META.OPEN
   return (
@@ -41,11 +43,11 @@ function MySupportTicketsPage() {
       const data = await supportApi.getMyTickets()
       setTickets(data)
       setActiveId((current) => {
-        if (requestedTicketId && data.some((ticket) => String(ticket.id) === requestedTicketId)) {
+        if (requestedTicketId && data.some((ticket) => isSameId(ticket.id, requestedTicketId))) {
           return requestedTicketId
         }
-        if (current && data.some((ticket) => ticket.id === current)) return current
-        return data[0]?.id || null
+        if (current && data.some((ticket) => isSameId(ticket.id, current))) return String(current)
+        return data[0]?.id != null ? String(data[0].id) : null
       })
     } catch (error) {
       toast.error(error.message)
@@ -79,18 +81,18 @@ function MySupportTicketsPage() {
   // Lắng nghe tin nhắn + đổi trạng thái real-time.
   useEffect(() => {
     function handleMessage(message) {
-      if (message.ticketId !== activeId) return
+      if (!isSameId(message.ticketId, activeId)) return
       setDetail((current) =>
         current ? { ...current, messages: [...current.messages, message] } : current,
       )
     }
     function handleStatus(payload) {
-      if (payload.ticketId === activeId) {
+      if (isSameId(payload.ticketId, activeId)) {
         setDetail((current) => (current ? { ...current, status: payload.status } : current))
       }
       setTickets((current) =>
         current.map((t) =>
-          t.id === payload.ticketId ? { ...t, status: payload.status } : t,
+          isSameId(t.id, payload.ticketId) ? { ...t, status: payload.status } : t,
         ),
       )
     }
@@ -109,7 +111,7 @@ function MySupportTicketsPage() {
 
   async function handleSend() {
     const text = draft.trim()
-    if (!text || isSending) return
+    if (!text || isSending || !activeId) return
 
     setIsSending(true)
     try {
@@ -128,7 +130,7 @@ function MySupportTicketsPage() {
   return (
     <>
       <Header activeLink="Support" />
-      <div className="mx-auto flex h-[calc(100vh-80px)] max-w-[1440px] bg-surface">
+      <div className="mx-auto flex h-[calc(100dvh-80px)] min-h-[calc(100dvh-80px)] max-w-[1440px] bg-surface">
         {/* Danh sách ticket */}
         <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-outline-variant/30 bg-surface-container-lowest md:w-80">
           <div className="flex items-center justify-between border-b border-outline-variant/30 p-4">
@@ -153,9 +155,9 @@ function MySupportTicketsPage() {
                   <button
                     key={ticket.id}
                     type="button"
-                    onClick={() => setActiveId(ticket.id)}
+                    onClick={() => setActiveId(String(ticket.id))}
                     className={`flex w-full flex-col gap-1 border-b border-outline-variant/20 p-4 text-left transition ${
-                      activeId === ticket.id
+                      isSameId(activeId, ticket.id)
                         ? 'bg-primary/5'
                         : 'hover:bg-surface-container-high'
                     }`}
@@ -230,9 +232,14 @@ function MySupportTicketsPage() {
               </div>
 
               {isResolved ? (
-                <div className="border-t border-outline-variant/30 bg-surface-container-lowest p-4 text-center text-sm text-on-surface-variant">
-                  Yêu cầu này đã được giải quyết và đóng lại. Vui lòng tạo yêu cầu mới nếu
-                  bạn cần hỗ trợ thêm.
+                <div className="border-t border-outline-variant/30 bg-surface-container-lowest p-4 text-sm text-on-surface-variant">
+                  <p className="font-bold text-on-surface">Kết quả xử lý</p>
+                  {detail.resolutionNote && (
+                    <p className="mt-1 whitespace-pre-wrap">{detail.resolutionNote}</p>
+                  )}
+                  <p className="mt-2">
+                    Yêu cầu đã được đóng. Vui lòng tạo yêu cầu mới nếu bạn cần hỗ trợ thêm.
+                  </p>
                 </div>
               ) : (
                 <div className="flex items-end gap-2 border-t border-outline-variant/30 bg-surface-container-lowest p-4">

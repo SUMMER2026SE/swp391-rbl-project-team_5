@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import HeroSearchBox from './HeroSearchBox.jsx'
 
 function HeroSlider({ slides }) {
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0)
@@ -60,6 +61,7 @@ function HeroSlider({ slides }) {
             <div className="slide__copy">
               <h1 className="slide__title">{slide.title}</h1>
               <p className="slide__desc">{slide.description}</p>
+              <HeroSearchBox />
               <div className="slide__actions">
                 <Link to="/attractions" className="button button--primary button--large">
                   {slide.primaryCta}

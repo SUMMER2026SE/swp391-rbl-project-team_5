@@ -7,6 +7,22 @@ import {
   USER_STORAGE_KEY,
   defaultUser,
 } from './authConstants.js'
+import { getUserRoles } from '../utils/userRoles.js'
+
+const ROLE_LABELS = {
+  ADMIN: 'Quản trị viên',
+  STAFF: 'Nhân viên',
+  PARTNER: 'Đối tác',
+  CUSTOMER: 'Khách hàng',
+}
+
+function getRoleLabel(user) {
+  const roles = getUserRoles(user)
+  return ['ADMIN', 'STAFF', 'PARTNER', 'CUSTOMER']
+    .filter((role) => roles.includes(role))
+    .map((role) => ROLE_LABELS[role])
+    .join(' · ')
+}
 
 function readStorage(key, fallback = null) {
   try {
@@ -32,19 +48,11 @@ function normalizeApiUser(apiUser) {
 
   return {
     ...safeUser,
+    roles: getUserRoles(apiUser),
     phone: profile.phoneNumber || '',
     avatar: profile.avatarUrl || defaultUser.avatar,
     emailVerified: Boolean(apiUser.isEmailVerified),
-    roleLabel:
-      apiUser.role === 'CUSTOMER'
-        ? 'Khách hàng'
-        : apiUser.role === 'ADMIN'
-        ? 'Quản trị viên'
-        : apiUser.role === 'PARTNER'
-        ? 'Đối tác'
-        : apiUser.role === 'STAFF'
-        ? 'Nhân viên'
-        : apiUser.role,
+    roleLabel: getRoleLabel(apiUser) || apiUser.role,
     statusLabel: apiUser.status === 'ACTIVE' ? 'Hoạt động' : 'Bị khóa',
     dateOfBirth: profile.dateOfBirth ? profile.dateOfBirth.slice(0, 10) : '',
     gender: profile.gender || '',
@@ -147,11 +155,11 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const loginWithGoogle = async ({ credential } = {}) => {
+  const loginWithGoogle = async ({ credential, acceptedTerms } = {}) => {
     try {
       const data = await apiRequest('/auth/google', {
         method: 'POST',
-        body: { credential },
+        body: { credential, acceptedTerms },
       })
 
       const nextUser = persistSession(data.user)
@@ -171,6 +179,7 @@ export function AuthProvider({ children }) {
           email: payload.email,
           phoneNumber: cleanPhone,
           password: payload.password,
+          acceptedTerms: payload.acceptedTerms,
         },
       })
 
@@ -266,6 +275,17 @@ export function AuthProvider({ children }) {
     }
   }, [clearSession, persistUser])
 
+  const refreshSession = useCallback(async () => {
+    try {
+      const data = await apiRequest('/auth/me', { method: 'GET' })
+      const nextUser = persistSession(data.user)
+      return { ok: true, user: nextUser }
+    } catch (error) {
+      if (error.status === 401) clearSession()
+      return getErrorResult(error)
+    }
+  }, [clearSession, persistSession])
+
   const updateProfile = async (payload) => {
     try {
       const cleanPhone = payload.phone ? payload.phone.replace(/[\s.-]+/g, '') : ''
@@ -351,6 +371,7 @@ export function AuthProvider({ children }) {
     forgotPassword,
     resetPassword,
     getProfile,
+    refreshSession,
     updateProfile,
     uploadAvatar,
     changePassword,

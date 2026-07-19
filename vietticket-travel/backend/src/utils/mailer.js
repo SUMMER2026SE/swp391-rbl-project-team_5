@@ -219,6 +219,46 @@ async function sendPartnerReviewEmail({ to, businessName, action, rejectionReaso
   return { sent: false, reason: 'INVALID_ACTION' };
 }
 
+async function sendPartnerOperationalStatusEmail({ to, businessName, status, reason }) {
+  const frontendUrl = getFrontendUrl();
+  const safeBusiness = escapeHtml(businessName || 'Đối tác');
+
+  if (status === 'SUSPENDED') {
+    const link = `${frontendUrl}/support`;
+    const safeReason = escapeHtml(reason || 'Không có lý do cụ thể.');
+    return sendMail({
+      to,
+      subject: 'Tài khoản đối tác đã bị đình chỉ - VietTicket Travel',
+      text: `Đối tác ${businessName} đã bị đình chỉ. Lý do: ${reason}. Các lượt bán mới đã dừng; vé đã xác nhận vẫn phải được phục vụ.`,
+      fallbackLink: link,
+      html: createEmailTemplate({
+        title: 'Hoạt động đối tác đã bị đình chỉ',
+        preview: `Xin chào ${safeBusiness}, hoạt động bán vé mới và quản lý nội dung đã bị tạm dừng.<br /><br /><strong>Lý do:</strong> ${safeReason}<br /><br />Các vé đã được xác nhận trước đó vẫn phải được phục vụ theo cam kết.`,
+        buttonText: 'Liên hệ hỗ trợ',
+        link,
+      }),
+    });
+  }
+
+  if (status === 'APPROVED') {
+    const link = `${frontendUrl}/partner/dashboard`;
+    return sendMail({
+      to,
+      subject: 'Hoạt động đối tác đã được khôi phục - VietTicket Travel',
+      text: `Đối tác ${businessName} đã được khôi phục. Trạng thái mở hoặc tạm dừng của từng địa điểm vẫn được giữ nguyên.`,
+      fallbackLink: link,
+      html: createEmailTemplate({
+        title: 'Hoạt động đối tác đã được khôi phục',
+        preview: `Xin chào ${safeBusiness}, quyền quản lý đối tác đã được khôi phục. Trạng thái mở hoặc tạm dừng của từng địa điểm vẫn được giữ nguyên để tránh mở bán ngoài ý muốn.`,
+        buttonText: 'Vào trang đối tác',
+        link,
+      }),
+    });
+  }
+
+  return { sent: false, reason: 'INVALID_PARTNER_STATUS' };
+}
+
 async function sendAttractionViolationEmail({ to, partnerName, attractionTitle, reason }) {
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/support`;
@@ -467,6 +507,84 @@ async function sendBookingRejectedEmail({
   });
 }
 
+async function sendPendingApprovalExpiredEmail({
+  to,
+  fullName,
+  bookingId,
+  refundAmount,
+}) {
+  const frontendUrl = getFrontendUrl();
+  const link = `${frontendUrl}/my-tickets`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
+
+  return sendMail({
+    to,
+    subject: `Đơn đặt vé #${shortId} đã quá hạn xác nhận - VietTicket Travel`,
+    text:
+      `Xin chào ${fullName || 'bạn'}, đơn đặt vé ${bookingId} đã tự động hủy vì đối tác không xác nhận trong 24 giờ. `
+      + `Yêu cầu hoàn lại toàn bộ ${formattedAmount} VND đã được tạo và sẽ được xử lý trong 3-5 ngày làm việc.`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Đơn đặt vé đã quá hạn xác nhận',
+      preview:
+        `Xin chào ${safeName}, đơn đặt vé <strong>#${shortId}</strong> đã tự động hủy vì đối tác không xác nhận trong 24 giờ.<br /><br />`
+        + `Yêu cầu hoàn lại toàn bộ <strong>${formattedAmount} VND</strong> đã được tạo và sẽ được xử lý trong 3-5 ngày làm việc.`,
+      buttonText: 'Xem vé của tôi',
+      link,
+    }),
+  });
+}
+
+async function sendAttractionRestoredEmail({ to, partnerName, attractionTitle }) {
+  const frontendUrl = getFrontendUrl();
+  const link = `${frontendUrl}/partner/attractions`;
+  const safePartner = escapeHtml(partnerName || 'Đối tác');
+  const safeAttraction = escapeHtml(attractionTitle || 'địa điểm');
+
+  return sendMail({
+    to,
+    subject: `Địa điểm đã được khôi phục - ${attractionTitle}`,
+    text: `Địa điểm ${attractionTitle} đã được khôi phục ở trạng thái tạm dừng. Hãy kiểm tra thông tin trước khi chủ động mở bán lại.`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Địa điểm đã được khôi phục',
+      preview: `Xin chào ${safePartner}, địa điểm "${safeAttraction}" đã được khôi phục ở trạng thái tạm dừng. Vui lòng kiểm tra lịch, kho vé và nội dung trước khi chủ động mở bán lại.`,
+      buttonText: 'Quản lý địa điểm',
+      link,
+    }),
+  });
+}
+
+async function sendBookingCancelledByPartnerEmail({
+  to,
+  fullName,
+  bookingId,
+  reason,
+  refundAmount,
+}) {
+  const frontendUrl = getFrontendUrl();
+  const link = `${frontendUrl}/my-tickets`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const safeReason = escapeHtml(reason || 'Sự cố vận hành từ đối tác.');
+  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
+
+  return sendMail({
+    to,
+    subject: `Đơn đặt vé #${shortId} đã bị đối tác hủy - VietTicket Travel`,
+    text: `Xin chào ${fullName || 'bạn'}, đơn ${bookingId} đã bị đối tác hủy. Lý do: ${reason}. Khoản hoàn 100% ${formattedAmount} VND đang được xử lý tự động.`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Đối tác đã hủy đơn đặt vé',
+      preview: `Xin chào ${safeName}, đơn <strong>#${shortId}</strong> đã bị đối tác hủy.<br /><br /><strong>Lý do:</strong> ${safeReason}<br /><br />Khoản hoàn 100% <strong>${formattedAmount} VND</strong> đang được xử lý tự động về phương thức thanh toán ban đầu.`,
+      buttonText: 'Theo dõi đơn của tôi',
+      link,
+    }),
+  });
+}
+
 async function sendHoldExpiredEmail({ to, fullName, bookingId, attractionTitle }) {
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/attractions`;
@@ -499,12 +617,16 @@ module.exports = {
   sendPasswordResetEmail,
   sendVerificationEmail,
   sendPartnerReviewEmail,
+  sendPartnerOperationalStatusEmail,
   sendAttractionReviewEmail,
   sendAttractionViolationEmail,
+  sendAttractionRestoredEmail,
   sendTicketConfirmationEmail,
   sendRefundRequestReceivedEmail,
   sendRefundStatusEmail,
   sendReissueTicketEmail,
   sendBookingRejectedEmail,
+  sendBookingCancelledByPartnerEmail,
+  sendPendingApprovalExpiredEmail,
   sendHoldExpiredEmail,
 };

@@ -57,6 +57,7 @@ function validateProductionEnv() {
     'VNP_TMNCODE',
     'VNP_HASHSECRET',
     'VNP_URL',
+    'VNP_API',
     'VNP_RETURNURL',
     'VNP_IPNURL',
     'SMTP_HOST',

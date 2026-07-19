@@ -1,6 +1,6 @@
 {
-  "model_version": "rf_xgb_ensemble_v1",
-  "trained_at": "2026-07-11T18:09:52.255181",
+  "model_version": "synthetic-bootstrap-v2",
+  "trained_at": "2026-07-19T07:19:00.504180+00:00",
   "city_freq_map": {
     "Hà Nội": 0.25,
     "TP. Hồ Chí Minh": 0.24,
@@ -10,11 +10,13 @@
     "Hội An": 0.07,
     "Huế": 0.065
   },
-  "residual_std": 0.32126911621552845,
+  "residual_std": 0.3166055331994179,
   "metrics": {
-    "mape": 25.287734705384544,
-    "mae": 3918955.978855182,
+    "mape_observed_days": 24.675312626699064,
+    "wape": 25.803248132519524,
+    "mae": 3978838.915142608,
     "num_train_samples": 58400,
-    "num_test_samples": 14600
+    "num_test_samples": 14600,
+    "training_source": "synthetic_bootstrap"
   }
 }

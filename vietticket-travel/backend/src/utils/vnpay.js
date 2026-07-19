@@ -76,19 +76,89 @@ const REFUND_SIGN_FIELDS = [
   'vnp_OrderInfo',
 ];
 
-function signRefundData(params, secret) {
-  const data = REFUND_SIGN_FIELDS.map((key) => params[key] ?? '').join('|');
+const QUERY_SIGN_FIELDS = [
+  'vnp_RequestId',
+  'vnp_Version',
+  'vnp_Command',
+  'vnp_TmnCode',
+  'vnp_TxnRef',
+  'vnp_TransactionDate',
+  'vnp_CreateDate',
+  'vnp_IpAddr',
+  'vnp_OrderInfo',
+];
+
+const REFUND_RESPONSE_SIGN_FIELDS = [
+  'vnp_ResponseId',
+  'vnp_Command',
+  'vnp_ResponseCode',
+  'vnp_Message',
+  'vnp_TmnCode',
+  'vnp_TxnRef',
+  'vnp_Amount',
+  'vnp_BankCode',
+  'vnp_PayDate',
+  'vnp_TransactionNo',
+  'vnp_TransactionType',
+  'vnp_TransactionStatus',
+  'vnp_OrderInfo',
+];
+
+const QUERY_RESPONSE_SIGN_FIELDS = [
+  ...REFUND_RESPONSE_SIGN_FIELDS,
+  'vnp_PromotionCode',
+  'vnp_PromotionAmount',
+];
+
+function signPipeData(params, secret, fields) {
+  const data = fields.map((key) => params[key] ?? '').join('|');
   return crypto
     .createHmac('sha512', secret)
     .update(Buffer.from(data, 'utf-8'))
     .digest('hex');
 }
 
+function createVnpRequestId() {
+  return crypto.randomUUID().replaceAll('-', '');
+}
+
+function signRefundData(params, secret) {
+  return signPipeData(params, secret, REFUND_SIGN_FIELDS);
+}
+
+function signQueryData(params, secret) {
+  return signPipeData(params, secret, QUERY_SIGN_FIELDS);
+}
+
+function verifyApiResponseSignature(params, secret, fields) {
+  const secureHash = String(params?.vnp_SecureHash || '').toLowerCase();
+  if (!secureHash) return false;
+  const signed = signPipeData(params, secret, fields);
+  const actual = Buffer.from(secureHash, 'utf-8');
+  const expected = Buffer.from(signed, 'utf-8');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
+function verifyRefundResponseSignature(params, secret) {
+  return verifyApiResponseSignature(params, secret, REFUND_RESPONSE_SIGN_FIELDS);
+}
+
+function verifyQueryResponseSignature(params, secret) {
+  return verifyApiResponseSignature(params, secret, QUERY_RESPONSE_SIGN_FIELDS);
+}
+
 module.exports = {
   sortObject,
   formatVnpDate,
+  createVnpRequestId,
   buildVnpayUrl,
   verifyVnpaySignature,
   signRefundData,
+  signQueryData,
+  verifyRefundResponseSignature,
+  verifyQueryResponseSignature,
   REFUND_SIGN_FIELDS,
+  QUERY_SIGN_FIELDS,
+  REFUND_RESPONSE_SIGN_FIELDS,
+  QUERY_RESPONSE_SIGN_FIELDS,
 };

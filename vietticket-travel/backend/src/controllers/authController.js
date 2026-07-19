@@ -17,9 +17,13 @@ const {
   validateFullName,
   validatePassword,
 } = require('../utils/validators');
+const { getEffectiveRoles } = require('../utils/userRoles');
+const { getRequestIp } = require('../utils/auditLog');
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY_MINUTES = 30;
+const CURRENT_TERMS_VERSION = '2026-07-17-v1';
+const CURRENT_PRIVACY_VERSION = '2026-07-17-v1';
 const SAFE_FORGOT_PASSWORD_MESSAGE =
   'Nếu email tồn tại trên hệ thống, mã đặt lại mật khẩu đã được tạo.';
 
@@ -35,12 +39,16 @@ function sanitizeUser(user) {
     email: user.email,
     fullName: user.fullName,
     role: user.role,
+    roles: getEffectiveRoles(user),
     employerPartnerId: user.employerPartnerId || null,
     provider: user.provider,
     isEmailVerified: user.isEmailVerified,
     status: user.status,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
+    termsAcceptedAt: user.termsAcceptedAt || null,
+    termsVersion: user.termsVersion || null,
+    privacyVersion: user.privacyVersion || null,
     profile: user.profile || null,
   };
 }
@@ -48,7 +56,7 @@ function sanitizeUser(user) {
 async function findUserForResponse(userId) {
   return prisma.user.findUnique({
     where: { id: userId },
-    include: { profile: true },
+    include: { profile: true, roleMemberships: true },
   });
 }
 
@@ -90,6 +98,13 @@ async function register(req, res, next) {
       return res.status(400).json({ message: 'Vui lòng nhập email và mật khẩu.' });
     }
 
+    if (req.body.acceptedTerms !== true) {
+      return res.status(400).json({
+        message: 'Bạn phải đồng ý với điều khoản dịch vụ và chính sách bảo mật.',
+        code: 'TERMS_CONSENT_REQUIRED',
+      });
+    }
+
     if (!isValidEmail(email)) {
       return res.status(400).json({ message: 'Email không hợp lệ.' });
     }
@@ -121,13 +136,18 @@ async function register(req, res, next) {
           passwordHash,
           provider: 'LOCAL',
           isEmailVerified: false,
+          termsAcceptedAt: new Date(),
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          consentIpAddress: getRequestIp(req),
           profile: {
             create: {
               phoneNumber,
             },
           },
+          roleMemberships: { create: { role: 'CUSTOMER' } },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
 
       verificationToken = await createVerificationToken(tx, createdUser.id);
@@ -212,7 +232,7 @@ async function verifyEmail(req, res, next) {
       const user = await tx.user.update({
         where: { id: verificationToken.userId },
         data: { isEmailVerified: true },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
 
       await tx.emailVerificationToken.deleteMany({
@@ -246,7 +266,7 @@ async function login(req, res, next) {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     if (!user || !user.passwordHash) {
@@ -336,10 +356,17 @@ async function googleLogin(req, res, next) {
 
     let user = await prisma.user.findUnique({
       where: { email: googlePayload.email },
-      include: { profile: true },
+      include: { profile: true, roleMemberships: true },
     });
 
     if (!user) {
+      if (req.body.acceptedTerms !== true) {
+        return res.status(400).json({
+          message: 'Bạn phải đồng ý với điều khoản dịch vụ và chính sách bảo mật.',
+          code: 'TERMS_CONSENT_REQUIRED',
+        });
+      }
+
       user = await prisma.user.create({
         data: {
           email: googlePayload.email,
@@ -347,6 +374,10 @@ async function googleLogin(req, res, next) {
           provider: 'GOOGLE',
           isEmailVerified: true,
           passwordHash: null,
+          termsAcceptedAt: new Date(),
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          consentIpAddress: getRequestIp(req),
           profile: {
             create: {
               avatarUrl: googlePayload.avatarUrl,
@@ -358,8 +389,9 @@ async function googleLogin(req, res, next) {
               providerAccountId: googlePayload.providerAccountId,
             },
           },
+          roleMemberships: { create: { role: 'CUSTOMER' } },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
     } else {
       if (user.status !== 'ACTIVE') {
@@ -378,7 +410,7 @@ async function googleLogin(req, res, next) {
             },
           },
         },
-        include: { profile: true },
+        include: { profile: true, roleMemberships: true },
       });
 
       await prisma.oAuthAccount.upsert({

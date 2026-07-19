@@ -11,6 +11,14 @@ const router = express.Router();
 // Public routes
 router.get('/', reviewController.listPublicReviews);
 
+router.get(
+  '/moderation',
+  protect,
+  restrictTo('ADMIN', 'STAFF'),
+  requirePlatformStaff,
+  reviewController.listAdminReviews,
+);
+
 // Protected customer routes
 router.post('/', protect, restrictTo('CUSTOMER'), reviewController.createReview);
 

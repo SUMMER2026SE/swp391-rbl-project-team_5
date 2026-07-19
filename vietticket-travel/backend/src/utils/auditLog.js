@@ -3,9 +3,9 @@
 const prisma = require('../config/prisma');
 
 function getRequestIp(req) {
-  const forwarded = req?.headers?.['x-forwarded-for'];
-  if (forwarded) return String(forwarded).split(',')[0].trim();
-  return req?.socket?.remoteAddress || req?.ip || null;
+  // Express computes req.ip according to the configured trust-proxy topology.
+  // Reading X-Forwarded-For directly would let clients forge audit evidence.
+  return req?.ip || req?.socket?.remoteAddress || null;
 }
 
 async function writeAuditLog({

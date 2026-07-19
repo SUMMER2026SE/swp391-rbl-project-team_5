@@ -2,11 +2,14 @@
 // Chạy: node prisma/seed.js  (sau khi đã migrate / db push)
 require('dotenv').config({ quiet: true });
 
-const bcrypt = require('bcrypt');
 const prisma = require('../src/config/prisma');
+const {
+  ensureSeedPartnerIdentity,
+  ensureSeedPartnerKycDocument,
+} = require('./seedPartnerIdentity');
 
-const PARTNER_EMAIL = 'partner@vietticket.com';
-const PARTNER_PASSWORD = 'Partner@123';
+const PARTNER_EMAIL = String(process.env.SEED_PARTNER_EMAIL || '').trim().toLowerCase();
+const PARTNER_PASSWORD = String(process.env.SEED_PARTNER_PASSWORD || '');
 
 const CATEGORIES = [
   'Theme Park & Resort',
@@ -65,41 +68,53 @@ async function seedVouchers() {
 }
 
 async function seedPartner() {
-  let user = await prisma.user.findUnique({ where: { email: PARTNER_EMAIL } });
-
-  if (!user) {
-    const passwordHash = await bcrypt.hash(PARTNER_PASSWORD, 10);
-    user = await prisma.user.create({
-      data: {
-        email: PARTNER_EMAIL,
-        passwordHash,
-        fullName: 'Nguyễn Văn Lộc',
-        role: 'PARTNER',
-        isEmailVerified: true,
-        status: 'ACTIVE',
-        profile: { create: { phoneNumber: '0901234567' } },
-      },
-    });
-    console.log(`✓ Đã tạo tài khoản đối tác: ${PARTNER_EMAIL} / ${PARTNER_PASSWORD}`);
-  } else {
-    user = await prisma.user.update({
-      where: { id: user.id },
-      data: { role: 'PARTNER', isEmailVerified: true, status: 'ACTIVE' },
-    });
-    console.log(`✓ Tài khoản ${PARTNER_EMAIL} đã tồn tại — đảm bảo role PARTNER.`);
+  if (!PARTNER_EMAIL || PARTNER_PASSWORD.length < 12) {
+    throw new Error(
+      'Cần cấu hình SEED_PARTNER_EMAIL và SEED_PARTNER_PASSWORD (ít nhất 12 ký tự).',
+    );
   }
+  const identity = await ensureSeedPartnerIdentity({
+    client: prisma,
+    email: PARTNER_EMAIL,
+    password: PARTNER_PASSWORD,
+    fullName: 'Nguyễn Văn Lộc',
+    phoneNumber: '0901234567',
+  });
+  const user = identity.user;
+  if (identity.created) {
+    console.log(`✓ Đã tạo tài khoản đối tác: ${PARTNER_EMAIL}`);
+  } else {
+    console.log(`✓ Đã xoay mật khẩu và thu hồi phiên cũ của đối tác: ${PARTNER_EMAIL}.`);
+  }
+  const businessLicenseUrl = await ensureSeedPartnerKycDocument({
+    userId: user.id,
+  });
+
+  const kycData = {
+    businessName: 'Lộc Premium Partner',
+    taxCode: '0312345678',
+    registrationDate: new Date('2020-01-15T00:00:00.000Z'),
+    representativeName: 'Nguyễn Văn Lộc',
+    representativePhone: '0901234567',
+    businessAddress: '123 Đường Demo, TP. Hồ Chí Minh',
+    businessLicenseUrl,
+    bankName: 'Vietcombank',
+    branchName: 'Chi nhánh Demo TP. Hồ Chí Minh',
+    bankAccountNumber: '0123456789',
+    bankAccountName: 'NGUYEN VAN LOC',
+    payoutCurrency: 'VND',
+    kycConsentAccepted: true,
+    kycConsentVersion: '2026-07-17-v1',
+    kycConsentAcceptedAt: new Date(),
+    status: 'APPROVED',
+  };
 
   const partner = await prisma.partnerProfile.upsert({
     where: { userId: user.id },
-    update: { status: 'APPROVED' },
+    update: kycData,
     create: {
       userId: user.id,
-      businessName: 'Lộc Premium Partner',
-      taxCode: '0312345678',
-      bankName: 'Vietcombank',
-      bankAccountNumber: '0123456789',
-      bankAccountName: 'NGUYEN VAN LOC',
-      status: 'APPROVED',
+      ...kycData,
     },
   });
 
@@ -127,6 +142,9 @@ async function seedAttractions(partner) {
       closeTime: '17:00',
       defaultCapacity: 200,
       openDays: '1,1,1,1,1,1,1',
+      recommendedVisitMinutes: 420,
+      environment: 'MIXED',
+      isFullDay: true,
       status: 'APPROVED',
       publicationStatus: 'ACTIVE',
       publishedAt: new Date(),
@@ -156,6 +174,10 @@ async function seedAttractions(partner) {
             sellingPrice: 650000,
             status: 'ACTIVE',
             refundPolicy: 'REFUND_WITH_FEE',
+            refundFeeRate: 0.5,
+            minAgeYears: 3,
+            maxAgeYears: 11,
+            requiresAdult: true,
           },
         ],
       },
@@ -173,6 +195,12 @@ async function seedAttractions(partner) {
 
 async function main() {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Seed dữ liệu mẫu bị cấm trong production.');
+    }
+    if (process.env.ALLOW_DEMO_SEED !== 'true') {
+      throw new Error('Đặt ALLOW_DEMO_SEED=true để xác nhận seed dữ liệu mẫu.');
+    }
     await prisma.$connect();
     console.log('Đang seed dữ liệu Module 2...');
     await seedCategories();
@@ -181,7 +209,7 @@ async function main() {
     await seedAttractions(partner);
 
     console.log('Đang tính toán lại minTicketPrice cho các điểm tham quan...');
-    await prisma.$executeRawUnsafe(`
+    await prisma.$executeRaw`
       UPDATE "Attraction" a
       SET "minTicketPrice" = (
         SELECT MIN(tp."sellingPrice")
@@ -189,12 +217,12 @@ async function main() {
         WHERE tp."attractionId" = a."id"
           AND tp."status" = 'ACTIVE'
           AND tp."archivedAt" IS NULL
-      );
-    `);
+      )
+    `;
 
     console.log('==================================================');
     console.log('SEED THÀNH CÔNG!');
-    console.log(`Đăng nhập đối tác: ${PARTNER_EMAIL} / ${PARTNER_PASSWORD}`);
+    console.log(`Đối tác mẫu: ${PARTNER_EMAIL}`);
     console.log('==================================================');
   } catch (error) {
     console.error('Seed thất bại:', error);

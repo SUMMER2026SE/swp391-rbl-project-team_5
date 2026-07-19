@@ -519,16 +519,16 @@ export default function BookingManagementPage() {
                 </div>
               </div>
 
-              {/* Danh sách QR Vé & Trạng thái Check-in */}
+              {/* Danh sách phiên vé & trạng thái check-in. Không hiển thị QR credential. */}
               <div style={{ gridColumn: 'span 2', marginTop: 8 }}>
                 <h4 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 12px', letterSpacing: '0.05em' }}>
-                  Danh sách mã QR &amp; Kiểm vé
+                  Danh sách phiên vé &amp; Kiểm vé
                 </h4>
                 <div style={{ overflowX: 'auto', border: '1px solid #e1e3e4', borderRadius: 12 }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: '#f5f7f8', borderBottom: '1px solid #e1e3e4' }}>
-                        <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Mã vé (QR Code Token)</th>
+                        <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Mã phiên vé</th>
                         <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Trạng thái</th>
                         <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Thời gian Check-in</th>
                         <th style={{ padding: '10px 16px', fontWeight: 600, color: '#6f797a' }}>Nhân viên duyệt</th>
@@ -545,7 +545,7 @@ export default function BookingManagementPage() {
                         selectedBooking.ticketInstances.map((t) => (
                           <tr key={t.id} style={{ borderBottom: '1px solid #e1e3e4' }}>
                             <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 12, fontWeight: 600, color: 'var(--adm-primary-dark)' }}>
-                              {t.qrCodeToken}
+                              {t.id}
                             </td>
                             <td style={{ padding: '10px 16px' }}>
                               <span style={{

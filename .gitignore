@@ -1,0 +1,5 @@
+*.docx
+scratch/
+outputs/
+__pycache__/
+VietTicket_Software_Design_Specification.md

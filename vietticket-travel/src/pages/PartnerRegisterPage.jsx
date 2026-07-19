@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth } from '../context/useAuth.js'
+import { hasRole } from '../utils/userRoles.js'
 import heroImage from '../assets/halong_bay.webp'
 import * as partnerApi from '../services/partnerApi.js'
 import {
@@ -72,7 +73,7 @@ function PartnerRegisterPage() {
     if (isAuthLoading) return
 
     if (isAuthenticated) {
-      if (user?.role === 'PARTNER') {
+      if (hasRole(user, 'PARTNER')) {
         navigate('/partner/dashboard', { replace: true })
       } else {
         partnerApi
@@ -122,6 +123,7 @@ function PartnerRegisterPage() {
       email: form.email,
       phone: '',
       password: form.password,
+      acceptedTerms: form.acceptedTerms,
     })
     setIsSubmitting(false)
 
@@ -469,19 +471,19 @@ function PartnerRegisterPage() {
                   htmlFor="partner-terms"
                 >
                   Tôi đồng ý với{' '}
-                  <a
+                  <Link
                     className="text-[#00474d] hover:underline font-medium"
-                    href="#"
+                    to="/terms"
                   >
                     Điều khoản dịch vụ
-                  </a>{' '}
+                  </Link>{' '}
                   và{' '}
-                  <a
+                  <Link
                     className="text-[#00474d] hover:underline font-medium"
-                    href="#"
+                    to="/privacy"
                   >
                     Chính sách bảo mật
-                  </a>
+                  </Link>
                   .
                 </label>
               </div>

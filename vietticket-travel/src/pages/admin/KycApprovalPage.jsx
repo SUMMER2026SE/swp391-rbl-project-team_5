@@ -10,20 +10,35 @@ const STATUS_LABEL = {
   rejected: 'REJECTED',
   suspended: 'SUSPENDED',
 };
+const PAGE_SIZE = 10;
 
 function formatDate(value) {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('vi-VN').format(new Date(value));
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : new Intl.DateTimeFormat('vi-VN').format(date);
 }
 
 function mapPartner(partner) {
+  const documentIsValid =
+    partner.documentValidationStatus === 'VALID' && Boolean(partner.businessLicenseUrl);
+  const consentIsValid =
+    partner.kycConsentAccepted === true
+    && Boolean(partner.kycConsentVersion)
+    && Boolean(partner.kycConsentAcceptedAt);
+
   return {
     id: partner.id,
     name: partner.businessName,
-    representative: partner.user?.fullName || '',
+    representative: partner.representativeName || '',
     email: partner.user?.email || '—',
-    phone: partner.user?.profile?.phoneNumber || 'Chưa cập nhật',
+    phone: partner.representativePhone || 'Chưa cập nhật',
+    accountContactName: partner.user?.fullName || '',
+    accountPhone: partner.user?.profile?.phoneNumber || '',
     date: formatDate(partner.createdAt),
+    registrationDate: formatDate(partner.registrationDate),
+    businessAddress: partner.businessAddress || '',
     status: String(partner.status || 'PENDING').toLowerCase(),
     rejectReason: partner.rejectionReason || '',
     businessLicenseUrl: partner.businessLicenseUrl || '',
@@ -36,6 +51,11 @@ function mapPartner(partner) {
     payoutCurrency: partner.payoutCurrency || 'VND',
     website: partner.website || '',
     description: partner.description || '',
+    documentValidationStatus: partner.documentValidationStatus || 'MISSING_OR_UNTRUSTED',
+    kycConsentAccepted: partner.kycConsentAccepted === true,
+    kycConsentVersion: partner.kycConsentVersion || '',
+    kycConsentAcceptedAt: partner.kycConsentAcceptedAt || null,
+    isApprovable: documentIsValid && consentIsValid,
   };
 }
 
@@ -44,6 +64,7 @@ function computeStats(partners) {
     pending: partners.filter((partner) => partner.status === 'pending').length,
     approved: partners.filter((partner) => partner.status === 'approved').length,
     rejected: partners.filter((partner) => partner.status === 'rejected').length,
+    suspended: partners.filter((partner) => partner.status === 'suspended').length,
     total: partners.length,
   };
 }
@@ -54,6 +75,12 @@ export default function KycApprovalPage() {
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
   const [selectedPartner, setSelectedPartner] = useState(null);
+  const [statusTarget, setStatusTarget] = useState(null);
+  const [statusReason, setStatusReason] = useState('');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
+  const [serverStats, setServerStats] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -61,8 +88,24 @@ export default function KycApprovalPage() {
     async function loadPartners() {
       setLoading(true);
       try {
-        const result = await adminApi.listPartners();
-        if (active) setPartners((result.data || []).map(mapPartner));
+        const result = await adminApi.listPartners({
+          status: filterStatus,
+          page,
+          limit: PAGE_SIZE,
+        });
+        if (active) {
+          const nextPagination = result.pagination || {
+            total: (result.data || []).length,
+            totalPages: 1,
+          };
+          if (page > nextPagination.totalPages) {
+            setPage(nextPagination.totalPages);
+            return;
+          }
+          setPartners((result.data || []).map(mapPartner));
+          setPagination(nextPagination);
+          setServerStats(result.stats || null);
+        }
       } catch (error) {
         if (active) toast.error(error.message);
       } finally {
@@ -74,19 +117,13 @@ export default function KycApprovalPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [filterStatus, page, reloadKey]);
 
   async function handleApprove(id) {
     setActionId(id);
     try {
       await adminApi.reviewPartner(id, 'APPROVED');
-      setPartners((current) =>
-        current.map((partner) =>
-          partner.id === id
-            ? { ...partner, status: 'approved', rejectReason: '' }
-            : partner,
-        ),
-      );
+      setReloadKey((value) => value + 1);
       toast.success('Đã phê duyệt hồ sơ thành công!');
     } catch (error) {
       toast.error(error.message);
@@ -108,14 +145,45 @@ export default function KycApprovalPage() {
     setActionId(id);
     try {
       await adminApi.reviewPartner(id, 'REJECTED', rejectionReason);
-      setPartners((current) =>
-        current.map((partner) =>
-          partner.id === id
-            ? { ...partner, status: 'rejected', rejectReason: rejectionReason }
-            : partner,
-        ),
-      );
+      setReloadKey((value) => value + 1);
       toast.error(`Đã từ chối hồ sơ của: ${name}`);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setActionId('');
+    }
+  }
+
+  function openStatusAction(partner) {
+    setStatusTarget(partner);
+    setStatusReason('');
+  }
+
+  function closeStatusAction() {
+    if (actionId) return;
+    setStatusTarget(null);
+    setStatusReason('');
+  }
+
+  async function handleOperationalStatus() {
+    if (!statusTarget) return;
+    const suspending = statusTarget.status === 'approved';
+    const reason = statusReason.trim();
+    if (suspending && !reason) {
+      toast.error('Vui lòng nhập lý do đình chỉ đối tác.');
+      return;
+    }
+
+    const nextStatus = suspending ? 'SUSPENDED' : 'APPROVED';
+    setActionId(statusTarget.id);
+    try {
+      await adminApi.changePartnerStatus(statusTarget.id, nextStatus, reason);
+      setReloadKey((value) => value + 1);
+      toast.success(suspending
+        ? `Đã đình chỉ đối tác: ${statusTarget.name}`
+        : `Đã khôi phục đối tác: ${statusTarget.name}`);
+      setStatusTarget(null);
+      setStatusReason('');
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -125,16 +193,25 @@ export default function KycApprovalPage() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const stats = computeStats(partners);
+  const fallbackStats = computeStats(partners);
+  const byStatus = serverStats?.byStatus || {};
+  const stats = serverStats
+    ? {
+        pending: Number(byStatus.PENDING || 0),
+        approved: Number(byStatus.APPROVED || 0),
+        rejected: Number(byStatus.REJECTED || 0),
+        suspended: Number(byStatus.SUSPENDED || 0),
+        total: Number(serverStats.total || 0),
+      }
+    : fallbackStats;
 
-  const displayed = filterStatus === 'all'
-    ? partners
-    : partners.filter(p => p.status === filterStatus);
+  const displayed = partners;
 
   const STAT_CARDS = [
     { id: 'pending',  icon: 'pending_actions', variant: 'pending',  label: 'Đang chờ duyệt', value: stats.pending },
     { id: 'approved', icon: 'check_circle',    variant: 'approved', label: 'Đã phê duyệt',   value: stats.approved },
     { id: 'rejected', icon: 'cancel',          variant: 'rejected', label: 'Bị từ chối',      value: stats.rejected },
+    { id: 'suspended', icon: 'block',           variant: 'rejected', label: 'Bị đình chỉ',     value: stats.suspended },
     { id: 'total',    icon: 'group',           variant: 'total',    label: 'Tổng đối tác',    value: stats.total },
   ];
 
@@ -145,16 +222,19 @@ export default function KycApprovalPage() {
       {/* Page Header */}
       <div className="admin-page-header">
         <div>
-          <h2 style={{ color: 'var(--adm-primary-dark)' }}>Duyệt hồ sơ Đối tác (KYC)</h2>
-          <p>Danh sách các đối tác mới đăng ký đang chờ xác thực thông tin pháp lý.</p>
+          <h2 style={{ color: 'var(--adm-primary-dark)' }}>Hồ sơ và trạng thái đối tác</h2>
+          <p>Xét duyệt KYC và quản lý trạng thái vận hành của từng đối tác.</p>
         </div>
 
         {/* Filter by status */}
         <div style={{ display: 'flex', gap: 8 }}>
-          {['all', 'pending', 'approved', 'rejected'].map(s => (
+          {['all', 'pending', 'approved', 'rejected', 'suspended'].map(s => (
             <button
               key={s}
-              onClick={() => setFilterStatus(s)}
+              onClick={() => {
+                setFilterStatus(s);
+                setPage(1);
+              }}
               style={{
                 padding: '8px 16px',
                 borderRadius: 8,
@@ -199,7 +279,7 @@ export default function KycApprovalPage() {
                 <th>Thông Tin Liên Hệ</th>
                 <th>Ngày Đăng Ký</th>
                 <th>Trạng Thái</th>
-                <th>Lý Do Từ Chối</th>
+                <th>Lý Do Từ Chối / Đình Chỉ</th>
                 <th style={{ textAlign: 'right' }}>Thao Tác</th>
               </tr>
             </thead>
@@ -284,15 +364,20 @@ export default function KycApprovalPage() {
                     </span>
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--adm-error)', maxWidth: 200, wordBreak: 'break-word' }}>
-                    {partner.status === 'rejected' ? partner.rejectReason : '—'}
+                    {['rejected', 'suspended'].includes(partner.status) ? partner.rejectReason : '—'}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {partner.status === 'pending' ? (
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
                         <button
                           className="btn-approve"
-                          disabled={actionId === partner.id}
+                          disabled={actionId === partner.id || !partner.isApprovable}
                           onClick={() => handleApprove(partner.id)}
+                          title={
+                            partner.isApprovable
+                              ? 'Phê duyệt hồ sơ'
+                              : 'Hồ sơ thiếu tài liệu hợp lệ hoặc bằng chứng đồng ý KYC'
+                          }
                         >
                           {actionId === partner.id ? 'Đang xử lý...' : 'Phê duyệt'}
                         </button>
@@ -304,6 +389,17 @@ export default function KycApprovalPage() {
                           Từ chối
                         </button>
                       </div>
+                    ) : ['approved', 'suspended'].includes(partner.status) ? (
+                      <button
+                        className={partner.status === 'approved' ? 'btn-warn' : 'btn-approve'}
+                        disabled={actionId === partner.id}
+                        onClick={() => openStatusAction(partner)}
+                      >
+                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                          {partner.status === 'approved' ? 'block' : 'restart_alt'}
+                        </span>
+                        {partner.status === 'approved' ? 'Đình chỉ' : 'Khôi phục'}
+                      </button>
                     ) : (
                       <span className={`badge badge--${partner.status}`}>
                         {STATUS_LABEL[partner.status] || partner.status.toUpperCase()}
@@ -318,14 +414,24 @@ export default function KycApprovalPage() {
 
         <div className="admin-pagination">
           <p className="admin-pagination__info">
-            Hiển thị <strong>{displayed.length}</strong> / <strong>{partners.length}</strong> hồ sơ
+            Hiển thị <strong>{displayed.length}</strong> / <strong>{pagination.total}</strong> hồ sơ
           </p>
           <div className="admin-pagination__controls">
-            <button className="admin-pagination__btn" disabled>
+            <button
+              className="admin-pagination__btn"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_left</span>
             </button>
-            <button className="admin-pagination__btn active">1</button>
-            <button className="admin-pagination__btn" disabled>
+            <button className="admin-pagination__btn active" disabled>
+              {page}/{pagination.totalPages}
+            </button>
+            <button
+              className="admin-pagination__btn"
+              disabled={page >= pagination.totalPages || loading}
+              onClick={() => setPage((value) => Math.min(pagination.totalPages, value + 1))}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_right</span>
             </button>
           </div>
@@ -467,6 +573,14 @@ export default function KycApprovalPage() {
                 <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Số điện thoại</p>
                 <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.phone}</p>
               </div>
+              <div>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Ngày đăng ký kinh doanh</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.registrationDate}</p>
+              </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Địa chỉ trụ sở</p>
+                <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.businessAddress || '—'}</p>
+              </div>
               <div style={{ gridColumn: 'span 2' }}>
                 <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Email liên hệ</p>
                 <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>{selectedPartner.email}</p>
@@ -535,6 +649,28 @@ export default function KycApprovalPage() {
                   <span style={{ color: 'var(--adm-error)', fontWeight: 500 }}>Chưa cập nhật giấy phép</span>
                 )}
               </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 8px' }}>Bằng chứng đồng ý KYC</p>
+                {selectedPartner.kycConsentAccepted && selectedPartner.kycConsentAcceptedAt ? (
+                  <div
+                    style={{
+                      borderRadius: 8,
+                      background: 'rgba(16,185,129,0.08)',
+                      color: '#137333',
+                      padding: '10px 12px',
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Đã đồng ý phiên bản {selectedPartner.kycConsentVersion || '—'} lúc{' '}
+                    {formatDate(selectedPartner.kycConsentAcceptedAt)}
+                  </div>
+                ) : (
+                  <span style={{ color: 'var(--adm-error)', fontWeight: 600 }}>
+                    Thiếu bằng chứng đồng ý KYC
+                  </span>
+                )}
+              </div>
             </div>
 
             <div style={{ marginTop: 32, display: 'flex', justifyContent: 'flex-end', gap: 12, borderTop: '1px solid #e1e3e4', paddingTop: 16 }}>
@@ -578,13 +714,20 @@ export default function KycApprovalPage() {
                       handleApprove(selectedPartner.id);
                       setSelectedPartner(null);
                     }}
+                    disabled={!selectedPartner.isApprovable || actionId === selectedPartner.id}
+                    title={
+                      selectedPartner.isApprovable
+                        ? 'Phê duyệt hồ sơ'
+                        : 'Hồ sơ thiếu tài liệu hợp lệ hoặc bằng chứng đồng ý KYC'
+                    }
                     style={{
                       padding: '10px 20px',
                       borderRadius: 8,
                       border: 'none',
                       background: 'var(--adm-primary-dark)',
                       color: '#fff',
-                      cursor: 'pointer',
+                      cursor: selectedPartner.isApprovable ? 'pointer' : 'not-allowed',
+                      opacity: selectedPartner.isApprovable ? 1 : 0.55,
                       fontSize: 14,
                       fontWeight: 600,
                     }}
@@ -593,6 +736,69 @@ export default function KycApprovalPage() {
                   </button>
                 </>
               )}
+              {['approved', 'suspended'].includes(selectedPartner.status) && (
+                <button
+                  className={selectedPartner.status === 'approved' ? 'btn-warn' : 'btn-approve'}
+                  disabled={actionId === selectedPartner.id}
+                  onClick={() => {
+                    openStatusAction(selectedPartner);
+                    setSelectedPartner(null);
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 18 }}>
+                    {selectedPartner.status === 'approved' ? 'block' : 'restart_alt'}
+                  </span>
+                  {selectedPartner.status === 'approved' ? 'Đình chỉ đối tác' : 'Khôi phục đối tác'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {statusTarget && (
+        <div className="admin-modal-overlay" onClick={closeStatusAction}>
+          <div className="admin-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-modal__icon admin-modal__icon--warn">
+              <span className="material-symbols-outlined" style={{ fontSize: 28 }}>
+                {statusTarget.status === 'approved' ? 'block' : 'restart_alt'}
+              </span>
+            </div>
+            <h3 className="admin-modal__title">
+              {statusTarget.status === 'approved' ? 'Đình chỉ đối tác' : 'Khôi phục đối tác'}
+            </h3>
+            <p className="admin-modal__body">
+              {statusTarget.status === 'approved'
+                ? <>Mọi lượt bán mới và quyền quản lý của <strong>{statusTarget.name}</strong> sẽ bị dừng. Vé đã xác nhận vẫn phải được phục vụ.</>
+                : <>Quyền quản lý của <strong>{statusTarget.name}</strong> sẽ được khôi phục. Trạng thái mở bán từng địa điểm không bị thay đổi.</>}
+            </p>
+
+            {statusTarget.status === 'approved' && (
+              <label className="admin-field">
+                <span>Lý do đình chỉ</span>
+                <textarea
+                  value={statusReason}
+                  onChange={(event) => setStatusReason(event.target.value)}
+                  placeholder="Nhập lý do vi phạm hoặc quyết định vận hành..."
+                  maxLength={1000}
+                  disabled={Boolean(actionId)}
+                />
+              </label>
+            )}
+
+            <div className="admin-modal__actions">
+              <button className="admin-modal__cancel" disabled={Boolean(actionId)} onClick={closeStatusAction}>
+                Hủy bỏ
+              </button>
+              <button
+                className="admin-modal__confirm"
+                disabled={Boolean(actionId) || (statusTarget.status === 'approved' && !statusReason.trim())}
+                onClick={handleOperationalStatus}
+              >
+                {actionId
+                  ? 'Đang xử lý...'
+                  : statusTarget.status === 'approved' ? 'Xác nhận đình chỉ' : 'Xác nhận khôi phục'}
+              </button>
             </div>
           </div>
         </div>

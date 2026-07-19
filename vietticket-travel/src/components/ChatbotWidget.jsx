@@ -15,6 +15,8 @@ const BOLD_TEXT_SPLIT_RE = /(\*\*[^*]+\*\*)/g
 const LEGACY_CHAT_HISTORY_KEY = 'vietticket_chat_history'
 const CHAT_HISTORY_KEY_PREFIX = 'vietticket_chat_history'
 const MAX_CHAT_INPUT_LENGTH = 1200
+const MAX_STORED_CHAT_MESSAGES = 20
+const CHAT_HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 function renderPlainText(part, keyPrefix) {
   return String(part || '')
@@ -59,6 +61,19 @@ function getWelcomeMessages() {
   return [{ id: 'welcome', sender: 'bot', text: WELCOME_MESSAGE }]
 }
 
+function normalizeStoredMessages(messages) {
+  if (!Array.isArray(messages)) return []
+  return messages
+    .filter(
+      (message) =>
+        message
+        && ['user', 'bot'].includes(message.sender)
+        && typeof message.text === 'string'
+        && !message.loading,
+    )
+    .slice(-MAX_STORED_CHAT_MESSAGES)
+}
+
 function getChatStorageKey(user) {
   const userId = user?.id || user?.userId
   return userId ? `${CHAT_HISTORY_KEY_PREFIX}_${userId}` : `${CHAT_HISTORY_KEY_PREFIX}_guest`
@@ -76,8 +91,17 @@ function readMessagesFromStorage(storageKey, { allowLegacy = false } = {}) {
       if (!saved) continue
 
       const parsed = JSON.parse(saved)
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed
+      if (Array.isArray(parsed)) {
+        const legacyMessages = normalizeStoredMessages(parsed)
+        if (legacyMessages.length > 0) return legacyMessages
+      }
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.messages)) {
+        if (Number(parsed.expiresAt) <= Date.now()) {
+          localStorage.removeItem(key)
+          continue
+        }
+        const storedMessages = normalizeStoredMessages(parsed.messages)
+        if (storedMessages.length > 0) return storedMessages
       }
     }
   } catch (error) {
@@ -100,7 +124,14 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
   useEffect(() => {
     if (messages.length > 0) {
       try {
-        localStorage.setItem(storageKey, JSON.stringify(messages))
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            version: 2,
+            expiresAt: Date.now() + CHAT_HISTORY_TTL_MS,
+            messages: normalizeStoredMessages(messages),
+          }),
+        )
       } catch (error) {
         console.error('Failed to save chat history:', error)
       }
@@ -157,7 +188,9 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
       loading: true,
     }
 
-    setMessages((current) => [...current, userMessage, loadingMessage])
+    setMessages((current) =>
+      [...current, userMessage, loadingMessage].slice(-(MAX_STORED_CHAT_MESSAGES + 1)),
+    )
     setInputValue('')
     setLoading(true)
 
@@ -169,7 +202,8 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
       setMessages((current) =>
         current
           .filter((message) => message.id !== loadingMessage.id)
-          .concat({ id: `bot-${Date.now()}`, sender: 'bot', text: reply }),
+          .concat({ id: `bot-${Date.now()}`, sender: 'bot', text: reply })
+          .slice(-MAX_STORED_CHAT_MESSAGES),
       )
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== loadingMessage.id))
@@ -182,7 +216,7 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
   }, [history, inputValue, loading])
 
   const handleKeyDown = (event) => {
-    if (event.key === 'Enter') {
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       handleSend()
     }
@@ -264,6 +298,7 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
             <div className="flex gap-2">
               <input
                 ref={inputRef}
+                aria-describedby="chatbot-privacy-note"
                 className="min-w-0 flex-1 rounded-2xl border border-[#cbd5db] bg-white px-4 py-3 text-sm text-[#1f2933] outline-none transition focus:border-[#00474d] focus:ring-2 focus:ring-[#00474d]/20"
                 maxLength={MAX_CHAT_INPUT_LENGTH}
                 placeholder="Nhập tin nhắn..."
@@ -281,6 +316,10 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
                 Gửi
               </button>
             </div>
+            <p id="chatbot-privacy-note" className="mt-2 text-[11px] leading-4 text-[#64748b]">
+              Không nhập mật khẩu, số thẻ, mã QR hoặc ảnh giấy tờ. Hệ thống tự che một số dữ liệu
+              nhạy cảm trước khi gửi yêu cầu tới nhà cung cấp AI.
+            </p>
           </div>
         </div>
       )}

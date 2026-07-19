@@ -229,6 +229,48 @@ describe('updateAttraction', () => {
     expect(mockPrisma.attraction.update.mock.calls[0][0].data.title).toBeUndefined();
   });
 
+  test('✅ Đổi cơ chế duyệt của địa điểm public chỉ ghi vào draft chờ Admin duyệt', async () => {
+    const live = {
+      id: 'attr-live',
+      partnerId: 'partner-001',
+      title: 'Tên đang bán',
+      description: 'Mô tả đang bán',
+      address: 'Địa chỉ cũ',
+      city: 'TP. HCM',
+      status: 'APPROVED',
+      publicationStatus: 'ACTIVE',
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+      requiresManualApproval: false,
+      images: [],
+      categories: [],
+      ticketProducts: [],
+      timeSlots: [],
+      specialDates: [],
+    };
+    mockPrisma.attraction.findUnique
+      .mockResolvedValueOnce(live)
+      .mockResolvedValueOnce({
+        ...live,
+        status: 'DRAFT',
+        draftData: { requiresManualApproval: true },
+      });
+    mockPrisma.attraction.update.mockResolvedValue({});
+
+    await updateAttraction(
+      {
+        partner: PARTNER,
+        params: { id: 'attr-live' },
+        body: { requiresManualApproval: true },
+      },
+      createRes(),
+      jest.fn(),
+    );
+
+    const updateData = mockPrisma.attraction.update.mock.calls[0][0].data;
+    expect(updateData.requiresManualApproval).toBeUndefined();
+    expect(updateData.draftData.requiresManualApproval).toBe(true);
+  });
+
   test('❌ Khóa chỉnh sửa khi phiên bản đang PENDING', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue({
       id: 'attr-001',

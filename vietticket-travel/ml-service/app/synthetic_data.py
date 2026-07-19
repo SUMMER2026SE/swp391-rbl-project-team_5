@@ -116,7 +116,7 @@ def generate_daily_revenue(
             noise = rng.lognormal(mean=0.0, sigma=noise_sigma)
 
             revenue = max(0.0, expected * noise)
-            bookings = max(0, int(round(revenue / max(attraction["avg_ticket_price"], 1.0))))
+            tickets = max(0, int(round(revenue / max(attraction["avg_ticket_price"], 1.0))))
 
             rev_history.append(revenue)
             records.append(
@@ -124,7 +124,7 @@ def generate_daily_revenue(
                     "attraction_id": attraction["attraction_id"],
                     "date": d,
                     "revenue": round(revenue, 2),
-                    "bookings": bookings,
+                    "tickets": tickets,
                 }
             )
 

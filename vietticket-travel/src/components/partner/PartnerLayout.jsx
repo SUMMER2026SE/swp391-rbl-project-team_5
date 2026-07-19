@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/partner/staff', icon: 'groups', label: 'Nhân viên' },
   { to: '/partner/reviews', icon: 'rate_review', label: 'Đánh giá' },
   { to: '/partner/reports', icon: 'assessment', label: 'Báo cáo' },
+  { to: '/partner/settlements', icon: 'account_balance_wallet', label: 'Đối soát & chi trả' },
   { to: '/partner/settings', icon: 'settings', label: 'Cài đặt' },
 ]
 

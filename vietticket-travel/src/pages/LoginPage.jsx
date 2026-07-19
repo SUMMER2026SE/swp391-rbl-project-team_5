@@ -8,48 +8,8 @@ import GoogleButton from '../components/auth/GoogleButton.jsx'
 import PasswordInput from '../components/auth/PasswordInput.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { validateEmail, validatePassword } from '../utils/formValidators.js'
+import { getSafeLoginRedirect } from '../utils/roleNavigation.js'
 import loginVisual from '../assets/sapa.webp'
-
-function getSafeRedirect(loggedInUser, redirectFrom) {
-  const staffHome = loggedInUser?.employerPartnerId ? '/staff/checkin' : '/staff/tickets'
-  const defaultForRole =
-    loggedInUser?.role === 'ADMIN'
-      ? '/admin'
-      : loggedInUser?.role === 'STAFF'
-        ? staffHome
-        : loggedInUser?.role === 'PARTNER'
-          ? '/partner/dashboard'
-          : '/'
-
-  if (!redirectFrom) return defaultForRole
-
-  const targetPath = redirectFrom.pathname || '/'
-
-  // Validate role permissions for the redirect path
-  if (targetPath.startsWith('/admin') && loggedInUser?.role !== 'ADMIN') {
-    return defaultForRole
-  }
-  if (targetPath.startsWith('/staff') && !['STAFF', 'ADMIN'].includes(loggedInUser?.role)) {
-    return defaultForRole
-  }
-  if (
-    loggedInUser?.role === 'STAFF' &&
-    loggedInUser?.employerPartnerId &&
-    (targetPath.startsWith('/staff/tickets') || targetPath.startsWith('/staff/refunds'))
-  ) {
-    return defaultForRole
-  }
-  if (targetPath.startsWith('/partner') && loggedInUser?.role !== 'PARTNER') {
-    return defaultForRole
-  }
-
-  // Prevent redirecting to login/register pages if already authenticated
-  if (targetPath === '/login' || targetPath === '/register') {
-    return defaultForRole
-  }
-
-  return `${targetPath}${redirectFrom.search || ''}${redirectFrom.hash || ''}`
-}
 
 function LoginPage() {
   const navigate = useNavigate()
@@ -57,7 +17,7 @@ function LoginPage() {
   const { isAuthenticated, isAuthLoading, login, loginWithGoogle, user } = useAuth()
   const redirectFrom = location.state?.from
   const safeRedirectTo = useMemo(() => {
-    return getSafeRedirect(user, redirectFrom)
+    return getSafeLoginRedirect(user, redirectFrom)
   }, [user, redirectFrom])
 
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -130,7 +90,7 @@ function LoginPage() {
     }
 
     toast.success(result.message || 'Đăng nhập thành công.')
-    const dest = getSafeRedirect(result.user, redirectFrom)
+    const dest = getSafeLoginRedirect(result.user, redirectFrom)
     navigate(dest, { replace: Boolean(redirectFrom) })
   }
 
@@ -145,7 +105,7 @@ function LoginPage() {
     }
 
     toast.success(result.message || 'Đăng nhập Google thành công.')
-    const dest = getSafeRedirect(result.user, redirectFrom)
+    const dest = getSafeLoginRedirect(result.user, redirectFrom)
     navigate(dest, { replace: Boolean(redirectFrom) })
   }
 

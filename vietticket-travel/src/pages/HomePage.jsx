@@ -6,8 +6,10 @@ import HeroSlider from '../components/HeroSlider.jsx'
 import Newsletter from '../components/Newsletter.jsx'
 import PartnerCTASection from '../components/PartnerCTASection.jsx'
 import PopularDestinations from '../components/PopularDestinations.jsx'
+import RecentlyViewedAttractions from '../components/RecentlyViewedAttractions.jsx'
 import ServiceCategories from '../components/ServiceCategories.jsx'
 import Testimonials from '../components/Testimonials.jsx'
+import TravelIntentSection from '../components/TravelIntentSection.jsx'
 import AIRecommendSection from '../components/AIRecommendSection.jsx'
 import Seo from '../components/Seo.jsx'
 import {
@@ -31,6 +33,8 @@ function HomePage() {
       <HeroSlider slides={sliderSlides} />
       <main>
         <HeroSection content={heroContent} />
+        <TravelIntentSection />
+        <RecentlyViewedAttractions />
         <ServiceCategories categories={serviceCategories} />
         <PopularDestinations />
         <AIRecommendSection />

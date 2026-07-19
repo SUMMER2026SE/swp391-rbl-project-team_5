@@ -102,8 +102,16 @@ function RegisterPage() {
   }
 
   const handleGoogleSignup = async (credentialResponse) => {
+    if (!form.acceptedTerms) {
+      setTouched((current) => ({ ...current, acceptedTerms: true }))
+      toast.error('Vui lòng đồng ý Điều khoản dịch vụ và Chính sách bảo mật.')
+      return
+    }
     setIsSubmitting(true)
-    const result = await loginWithGoogle({ credential: credentialResponse.credential })
+    const result = await loginWithGoogle({
+      credential: credentialResponse.credential,
+      acceptedTerms: true,
+    })
     setIsSubmitting(false)
 
     if (!result.ok) {
@@ -118,7 +126,7 @@ function RegisterPage() {
   return (
     <AuthLayout
       visualTitle="Bắt đầu hành trình khám phá Việt Nam ngay hôm nay."
-      visualDescription="Tạo tài khoản để lưu điểm đến, đặt vé tham quan và nhận vé điện tử QR tức thì."
+      visualDescription="Tạo tài khoản để lưu điểm đến, đặt vé tham quan và nhận vé điện tử QR sau khi đơn được xác nhận."
       visualImage={registerVisual}
       visualAlt="Phố cổ Hội An lúc hoàng hôn với đèn lồng và dòng sông phản chiếu"
     >
@@ -200,7 +208,10 @@ function RegisterPage() {
               onChange={(event) => updateField('acceptedTerms', event.target.checked)}
               required
             />
-            Tôi đồng ý với điều khoản và chính sách bảo mật của VietTicket Travel.
+            <span>
+              Tôi đồng ý với <Link to="/terms">Điều khoản dịch vụ</Link> và{' '}
+              <Link to="/privacy">Chính sách bảo mật</Link> của VietTicket Travel.
+            </span>
           </label>
           {touched.acceptedTerms && errors.acceptedTerms ? (
             <p className="auth-field-error">{errors.acceptedTerms}</p>

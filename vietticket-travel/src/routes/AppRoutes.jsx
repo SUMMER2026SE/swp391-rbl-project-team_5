@@ -24,6 +24,7 @@ const PartnerKycPage = lazy(() => import('../pages/PartnerKycPage.jsx'))
 const PartnerPendingPage = lazy(() => import('../pages/PartnerPendingPage.jsx'))
 const PartnerRegisterPage = lazy(() => import('../pages/PartnerRegisterPage.jsx'))
 const PartnerReportsPage = lazy(() => import('../pages/PartnerReportsPage.jsx'))
+const PartnerSettlementsPage = lazy(() => import('../pages/PartnerSettlementsPage.jsx'))
 const PartnerSchedulePage = lazy(() => import('../pages/PartnerSchedulePage.jsx'))
 const PartnerSettingsPage = lazy(() => import('../pages/PartnerSettingsPage.jsx'))
 const PartnerTicketFormPage = lazy(() => import('../pages/PartnerTicketFormPage.jsx'))
@@ -41,7 +42,11 @@ const KycApprovalPage = lazy(() => import('../pages/admin/KycApprovalPage.jsx'))
 const AttractionApprovalPage = lazy(() => import('../pages/admin/AttractionApprovalPage.jsx'))
 const ViolationManagementPage = lazy(() => import('../pages/admin/ViolationManagementPage.jsx'))
 const CategoryManagementPage = lazy(() => import('../pages/admin/CategoryManagementPage.jsx'))
+const VoucherManagementPage = lazy(() => import('../pages/admin/VoucherManagementPage.jsx'))
 const BookingManagementPage = lazy(() => import('../pages/admin/BookingManagementPage.jsx'))
+const FinancialReportPage = lazy(() => import('../pages/admin/FinancialReportPage.jsx'))
+const AuditLogPage = lazy(() => import('../pages/admin/AuditLogPage.jsx'))
+const SettlementManagementPage = lazy(() => import('../pages/admin/SettlementManagementPage.jsx'))
 const CheckinPage = lazy(() => import('../pages/staff/CheckinPage.jsx'))
 const RefundManagementPage = lazy(() => import('../pages/staff/RefundManagementPage.jsx'))
 const SupportTicketsPage = lazy(() => import('../pages/staff/SupportTicketsPage.jsx'))
@@ -239,6 +244,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/reports"
+        element={
+          <AdminRoute>
+            <FinancialReportPage />
+          </AdminRoute>
+        }
+      />
+      <Route
         path="/admin/kyc-approval"
         element={
           <AdminRoute>
@@ -271,11 +284,43 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/partner/settlements"
+        element={
+          <ProtectedRoute allowedRoles={['PARTNER']}>
+            <PartnerSettlementsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/vouchers"
+        element={
+          <AdminRoute>
+            <VoucherManagementPage />
+          </AdminRoute>
+        }
+      />
+      <Route
         path="/admin/users"
         element={
           <AdminRoute>
             <AdminUserManagementPage />
           </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/audit-logs"
+        element={
+          <ProtectedRoute roles={['ADMIN']}>
+            <AuditLogPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/settlements"
+        element={
+          <ProtectedRoute roles={['ADMIN']}>
+            <SettlementManagementPage />
+          </ProtectedRoute>
         }
       />
       <Route
@@ -365,9 +410,9 @@ function AppRoutes() {
       <Route
         path="/admin/reviews"
         element={
-          <AdminRoute>
+          <ProtectedRoute allowedRoles={['ADMIN', 'STAFF']} requirePlatformStaff>
             <ReviewModerationPage />
-          </AdminRoute>
+          </ProtectedRoute>
         }
       />
       <Route path="*" element={<NotFoundPage />} />

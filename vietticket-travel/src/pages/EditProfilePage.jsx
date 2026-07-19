@@ -13,6 +13,14 @@ import {
 
 const today = new Date().toISOString().split('T')[0]
 
+function normalizeGenderValue(value) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (['male', 'nam'].includes(normalized)) return 'male'
+  if (['female', 'nữ', 'nu'].includes(normalized)) return 'female'
+  if (['other', 'khác', 'khac'].includes(normalized)) return 'other'
+  return ''
+}
+
 function getFormFromUser(user) {
   return {
     fullName: user.fullName || '',
@@ -20,7 +28,7 @@ function getFormFromUser(user) {
     phone: user.phone || '',
     avatar: user.avatar || defaultUser.avatar,
     dateOfBirth: user.dateOfBirth || '',
-    gender: user.gender || '',
+    gender: normalizeGenderValue(user.gender),
     address: user.address || '',
   }
 }
@@ -48,6 +56,14 @@ function EditProfilePage() {
   useEffect(() => {
     document.title = 'Chỉnh sửa hồ sơ | VietTicket Travel'
   }, [])
+
+  useEffect(() => {
+    if (!user || Object.keys(touched).length > 0) return undefined
+    const timer = window.setTimeout(() => {
+      setForm(getFormFromUser(user))
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [touched, user])
 
   const updateField = (field, value) => {
     setTouched((current) => ({ ...current, [field]: true }))
@@ -200,9 +216,9 @@ function EditProfilePage() {
                   onChange={(event) => updateField('gender', event.target.value)}
                 >
                   <option value="">Chưa chọn</option>
-                  <option value="nam">Nam</option>
-                  <option value="nữ">Nữ</option>
-                  <option value="khác">Khác</option>
+                  <option value="male">Nam</option>
+                  <option value="female">Nữ</option>
+                  <option value="other">Khác</option>
                 </select>
               </div>
             </div>

@@ -25,7 +25,7 @@ const { jsonrepair } = require('jsonrepair');
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const PRIMARY_PROVIDER = (process.env.AI_PRIMARY_PROVIDER || 'gemini').toLowerCase();
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const DEFAULT_LLM_TIMEOUT_MS = 20000;
 const LLM_TIMEOUT_MS = resolveTimeoutMs(
@@ -102,10 +102,13 @@ async function callGemini(systemPrompt, userPrompt, options = {}) {
   if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY chưa được cấu hình');
 
   const body = {
+    systemInstruction: {
+      parts: [{ text: systemPrompt }],
+    },
     contents: [
       {
         role: 'user',
-        parts: [{ text: `${systemPrompt}\n\n---\n\n${userPrompt}` }],
+        parts: [{ text: userPrompt }],
       },
     ],
     generationConfig: {

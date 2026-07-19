@@ -3,6 +3,7 @@
 const prisma = require('../config/prisma');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { isReviewEligible } = require('../utils/reviewEligibility');
+const { writeAuditLog } = require('../utils/auditLog');
 
 // Helper function to recalculate average rating and total reviews for an attraction
 async function recalculateAttractionRating(tx, attractionId) {
@@ -153,7 +154,7 @@ async function createReview(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé của bạn.' });
     }
 
-    // Cho phép review khi: COMPLETED, hoặc CONFIRMED + đã check-in ít nhất 1 vé + đã qua giờ tham quan.
+    // SRS quy định chỉ booking COMPLETED mới được đánh giá.
     const eligibility = isReviewEligible(booking);
     if (!eligibility.allowed) {
       return res.status(400).json({ message: eligibility.reason });
@@ -263,9 +264,13 @@ async function moderateReview(req, res, next) {
 
     const { reviewId } = req.params;
     const { isHidden } = req.body;
+    const reason = String(req.body?.reason || '').trim();
 
-    if (isHidden === undefined) {
-      return res.status(400).json({ message: 'Thiếu trạng thái isHidden.' });
+    if (typeof isHidden !== 'boolean') {
+      return res.status(400).json({ message: 'Trạng thái isHidden phải là boolean.' });
+    }
+    if (reason.length < 10 || reason.length > 500) {
+      return res.status(400).json({ message: 'Lý do kiểm duyệt phải từ 10 đến 500 ký tự.' });
     }
 
     const review = await prisma.review.findUnique({
@@ -280,11 +285,26 @@ async function moderateReview(req, res, next) {
       const mod = await tx.review.update({
         where: { id: reviewId },
         data: {
-          isHidden: Boolean(isHidden),
+          isHidden,
+          moderationReason: reason,
+          moderatedAt: new Date(),
+          moderatedById: req.user.id,
         },
       });
 
       await recalculateAttractionRating(tx, review.attractionId);
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: isHidden ? 'REVIEW_HIDDEN' : 'REVIEW_RESTORED',
+        entityType: 'Review',
+        entityId: reviewId,
+        metadata: {
+          reason,
+          attractionId: review.attractionId,
+          previousHiddenStatus: review.isHidden,
+        },
+      });
       return mod;
     });
 
@@ -408,43 +428,101 @@ async function getPartnerReviewStats(req, res, next) {
 // 7. GET /api/admin/reviews
 async function listAdminReviews(req, res, next) {
   try {
-    const reviews = await prisma.review.findMany({
-      include: {
-        attraction: {
-          select: {
-            title: true,
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 10));
+    const search = String(req.query.search || '').trim().slice(0, 200);
+    const rawRating = String(req.query.rating || '').trim();
+    const rating = Number.parseInt(rawRating, 10);
+
+    if (rawRating && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Rating must be an integer from 1 to 5' },
+      });
+    }
+
+    const where = {};
+    if (rawRating) where.rating = rating;
+    if (search) {
+      where.OR = [
+        { comment: { contains: search, mode: 'insensitive' } },
+        { user: { fullName: { contains: search, mode: 'insensitive' } } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        { attraction: { title: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [totalResult, statusGroupsResult, reviews] = await Promise.all([
+      prisma.review.count({ where }),
+      prisma.review.groupBy({
+        by: ['isHidden'],
+        _count: { _all: true },
+      }),
+      prisma.review.findMany({
+        where,
+        include: {
+          attraction: {
+            select: {
+              title: true,
+            },
+          },
+          user: {
+            select: {
+              fullName: true,
+              email: true,
+            },
           },
         },
-        user: {
-          select: {
-            fullName: true,
-            email: true,
-          },
+        orderBy: {
+          createdAt: 'desc',
         },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    const safeReviews = Array.isArray(reviews) ? reviews : [];
+    const total = Number.isFinite(totalResult) ? totalResult : safeReviews.length;
+    const statusGroups = Array.isArray(statusGroupsResult) ? statusGroupsResult : [];
+    const visible = statusGroups
+      .filter((group) => !group.isHidden)
+      .reduce((sum, group) => sum + Number(group?._count?._all || 0), 0);
+    const hidden = statusGroups
+      .filter((group) => group.isHidden)
+      .reduce((sum, group) => sum + Number(group?._count?._all || 0), 0);
 
     return res.json({
       success: true,
-      data: reviews.map((r) => ({
+      data: safeReviews.map((r) => ({
         id: r.id,
         rating: r.rating,
         comment: r.comment,
         replyComment: r.replyComment,
         repliedAt: r.repliedAt,
         isHidden: r.isHidden,
+        moderationReason: r.moderationReason,
+        moderatedAt: r.moderatedAt,
+        moderatedById: r.moderatedById,
         createdAt: r.createdAt,
         user: {
-          fullName: r.user.fullName,
-          email: r.user.email,
+          fullName: r.user?.fullName || '',
+          email: r.user?.email || '',
         },
         attraction: {
-          title: r.attraction.title,
+          title: r.attraction?.title || '',
         },
       })),
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      stats: {
+        total: visible + hidden,
+        visible,
+        hidden,
+      },
     });
   } catch (error) {
     return next(error);

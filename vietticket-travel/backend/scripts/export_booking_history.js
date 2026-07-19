@@ -1,115 +1,280 @@
 'use strict';
 
-// ============================================================
-// export_booking_history.js
-// ------------------------------------------------------------
-// Xuất doanh thu thực tế theo (attractionId, ngày) ra CSV để train.py train
-// lại model bằng dữ liệu THẬT thay vì synthetic. Chạy từ root project:
-//
-//   node backend/scripts/export_booking_history.js
-//
-// Output: ml-service/data/booking_history.csv (cùng schema cột với
-// data_gen.py để train.py dùng chung 1 pipeline feature engineering)
-//
-// LƯU Ý: chỉ nên chạy khi đã có đủ lịch sử thật (khuyến nghị > 90 ngày/
-// attraction, càng nhiều attraction có dữ liệu càng tốt). Nếu dữ liệu còn
-// quá ít, tiếp tục dùng model train từ synthetic data cho tới khi đủ.
-// ============================================================
+/**
+ * Export dataset thực cho ml-service:
+ *   node backend/scripts/export_booking_history.js
+ *
+ * Output: ml-service/data/booking_history.csv
+ *
+ * Dữ liệu dùng cùng định nghĩa với forecastService:
+ * - doanh thu vé thuần theo ngày sử dụng dịch vụ;
+ * - COMPLETED/NO_SHOW + payment SUCCESS không trùng;
+ * - trừ refund SUCCESS không thuộc hoàn payment trùng;
+ * - zero-fill ngày không có doanh thu, bỏ ngày hiện tại chưa chốt.
+ */
 
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../src/config/prisma');
 
-const CONFIRMED_STATUSES = ['CONFIRMED', 'COMPLETED'];
-const OUTPUT_PATH = path.join(__dirname, '..', '..', 'ml-service', 'data', 'booking_history.csv');
+const DAY_MS = 24 * 60 * 60 * 1000;
+const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
+const LOOKBACK_DAYS = 365;
+const MIN_OBSERVED_DAYS = 14;
+const MIN_COMPLETED_BOOKINGS = 30;
+const OUTPUT_PATH = path.join(
+  __dirname,
+  '..',
+  '..',
+  'ml-service',
+  'data',
+  'booking_history.csv',
+);
 
-function isHoliday(date) {
-  const mmdd = date.toISOString().slice(5, 10);
-  return ['01-01', '04-30', '05-01', '09-02'].includes(mmdd);
+function vietnamDateKey(date = new Date()) {
+  return new Date(date.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function addDays(dateKey, days) {
+  return new Date(
+    new Date(`${dateKey}T00:00:00.000Z`).getTime() + days * DAY_MS,
+  ).toISOString().slice(0, 10);
+}
+
+function dateOnly(dateKey) {
+  return new Date(`${dateKey}T00:00:00.000Z`);
+}
+
+function amountOf(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+function median(values) {
+  const sorted = values
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((left, right) => left - right);
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
+function derivePriceTier(avgTicketPrice) {
+  if (avgTicketPrice < 150000) return 'BUDGET';
+  if (avgTicketPrice < 350000) return 'STANDARD';
+  if (avgTicketPrice < 700000) return 'PREMIUM';
+  return 'LUXURY';
+}
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function recognizedRevenue(booking) {
+  const captured = booking.payments.reduce(
+    (sum, payment) => sum + amountOf(payment.amount),
+    0,
+  );
+  const refunded = booking.refundTransactions.reduce(
+    (sum, transaction) => (
+      transaction.refundRequest?.type === 'DUPLICATE_PAYMENT'
+        ? sum
+        : sum + amountOf(transaction.amount)
+    ),
+    0,
+  );
+  return Math.max(0, Math.round(captured - refunded));
 }
 
 async function main() {
+  const endKey = addDays(vietnamDateKey(), -1);
+  const startKey = addDays(endKey, -(LOOKBACK_DAYS - 1));
+  const dateRange = {
+    gte: dateOnly(startKey),
+    lte: dateOnly(endKey),
+  };
+
   const attractions = await prisma.attraction.findMany({
-    where: { archivedAt: null },
+    where: {
+      status: 'APPROVED',
+      publicationStatus: 'ACTIVE',
+      operationalStatus: 'ACTIVE',
+      archivedAt: null,
+      partner: { status: 'APPROVED' },
+      ticketProducts: { some: { status: 'ACTIVE', archivedAt: null } },
+    },
     select: {
       id: true,
       city: true,
-      tier: true,
       defaultCapacity: true,
       minTicketPrice: true,
       averageRating: true,
       totalReviews: true,
+      publishedAt: true,
+      ticketProducts: {
+        where: { status: 'ACTIVE', archivedAt: null },
+        select: { sellingPrice: true },
+      },
     },
   });
 
   if (attractions.length === 0) {
-    console.log('Chưa có attraction nào — dừng export.');
+    console.log('Chưa có điểm tham quan đang mở bán để export.');
     return;
   }
 
+  const attractionIds = attractions.map((attraction) => attraction.id);
   const bookings = await prisma.booking.findMany({
     where: {
-      status: { in: CONFIRMED_STATUSES },
-      snapshotAttractionId: { not: null },
-      snapshotVisitDate: { not: null },
+      status: { in: ['COMPLETED', 'NO_SHOW'] },
+      payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+      OR: [
+        {
+          snapshotAttractionId: { in: attractionIds },
+          snapshotVisitDate: dateRange,
+        },
+        {
+          snapshotAttractionId: { in: attractionIds },
+          snapshotVisitDate: null,
+          reservation: { date: dateRange },
+        },
+        {
+          snapshotAttractionId: null,
+          reservation: {
+            date: dateRange,
+            ticketProduct: { attractionId: { in: attractionIds } },
+          },
+        },
+      ],
     },
-    select: { snapshotAttractionId: true, snapshotVisitDate: true, totalAmount: true },
+    select: {
+      snapshotAttractionId: true,
+      snapshotVisitDate: true,
+      payments: {
+        where: { status: 'SUCCESS', isDuplicate: false },
+        select: { amount: true },
+      },
+      refundTransactions: {
+        where: { status: 'SUCCESS' },
+        select: {
+          amount: true,
+          refundRequest: { select: { type: true } },
+        },
+      },
+      reservation: {
+        select: {
+          date: true,
+          quantity: true,
+          ticketProduct: { select: { attractionId: true } },
+        },
+      },
+    },
   });
 
-  // Gom theo (attractionId, ngày)
-  const byKey = new Map(); // key = attractionId|YYYY-MM-DD -> { revenue, bookings }
-  for (const b of bookings) {
-    const dateStr = b.snapshotVisitDate.toISOString().slice(0, 10);
-    const key = `${b.snapshotAttractionId}|${dateStr}`;
-    const prev = byKey.get(key) || { revenue: 0, bookings: 0 };
-    prev.revenue += Number(b.totalAmount);
-    prev.bookings += 1;
-    byKey.set(key, prev);
+  const byAttractionDate = new Map();
+  const sampleQuality = new Map();
+  for (const booking of bookings) {
+    const attractionId = booking.snapshotAttractionId
+      || booking.reservation?.ticketProduct?.attractionId;
+    const visitDate = booking.snapshotVisitDate || booking.reservation?.date;
+    if (!attractionId || !visitDate) continue;
+
+    const date = visitDate.toISOString().slice(0, 10);
+    const revenue = recognizedRevenue(booking);
+    if (revenue <= 0) continue;
+
+    const key = `${attractionId}|${date}`;
+    const current = byAttractionDate.get(key) || {
+      revenue: 0,
+      tickets: 0,
+      bookings: 0,
+    };
+    current.revenue += revenue;
+    current.tickets += Math.max(0, Number(booking.reservation?.quantity || 0));
+    current.bookings += 1;
+    byAttractionDate.set(key, current);
+
+    const quality = sampleQuality.get(attractionId) || {
+      observedDates: new Set(),
+      bookings: 0,
+    };
+    quality.observedDates.add(date);
+    quality.bookings += 1;
+    sampleQuality.set(attractionId, quality);
   }
 
-  const attractionById = new Map(attractions.map((a) => [a.id, a]));
+  const eligibleAttractions = attractions.filter((attraction) => {
+    const quality = sampleQuality.get(attraction.id);
+    return quality
+      && quality.observedDates.size >= MIN_OBSERVED_DAYS
+      && quality.bookings >= MIN_COMPLETED_BOOKINGS;
+  });
 
   const header = [
-    'attractionId', 'date', 'city', 'tier', 'default_capacity', 'min_ticket_price',
-    'avg_rating', 'review_count', 'day_of_week', 'is_weekend', 'is_holiday',
-    'day_of_year', 'month', 'bookings', 'revenue',
+    'attraction_id',
+    'date',
+    'tier',
+    'city',
+    'capacity',
+    'avg_ticket_price',
+    'rating',
+    'num_reviews',
+    'published_days_ago',
+    'revenue',
+    'tickets',
   ];
-  const lines = [header.join(',')];
+  const lines = [header.map(csvCell).join(',')];
 
-  for (const [key, agg] of byKey.entries()) {
-    const [attractionId, dateStr] = key.split('|');
-    const attraction = attractionById.get(attractionId);
-    if (!attraction) continue; // attraction đã bị archive/xóa
+  for (const attraction of eligibleAttractions) {
+    const catalogPrice = median(
+      attraction.ticketProducts.map((product) => product.sellingPrice),
+    ) || amountOf(attraction.minTicketPrice);
+    if (catalogPrice <= 0) continue;
 
-    const date = new Date(dateStr);
-    const row = [
-      attractionId,
-      dateStr,
-      attraction.city || 'other',
-      attraction.tier || 'STANDARD',
-      attraction.defaultCapacity,
-      attraction.minTicketPrice ? Number(attraction.minTicketPrice) : 0,
-      attraction.averageRating || 0,
-      attraction.totalReviews || 0,
-      date.getUTCDay(),
-      date.getUTCDay() >= 5 ? 1 : 0,
-      isHoliday(date) ? 1 : 0,
-      Math.ceil((date - new Date(Date.UTC(date.getUTCFullYear(), 0, 0))) / 86400000),
-      date.getUTCMonth() + 1,
-      agg.bookings,
-      Math.round(agg.revenue),
-    ];
-    lines.push(row.join(','));
+    const publishedAtStart = attraction.publishedAt
+      ? Math.max(0, Math.floor(
+        (
+          dateOnly(startKey).getTime()
+          - new Date(attraction.publishedAt).getTime()
+        ) / DAY_MS,
+      ))
+      : 0;
+
+    for (let index = 0; index < LOOKBACK_DAYS; index += 1) {
+      const date = addDays(startKey, index);
+      const sample = byAttractionDate.get(`${attraction.id}|${date}`)
+        || { revenue: 0, tickets: 0 };
+      const row = [
+        attraction.id,
+        date,
+        derivePriceTier(catalogPrice),
+        attraction.city || 'Khác',
+        Math.max(1, Number(attraction.defaultCapacity || 1)),
+        Math.round(catalogPrice),
+        Number(attraction.averageRating || 0),
+        Number(attraction.totalReviews || 0),
+        publishedAtStart,
+        Math.round(sample.revenue),
+        Number(sample.tickets || 0),
+      ];
+      lines.push(row.map(csvCell).join(','));
+    }
   }
 
   fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
-  fs.writeFileSync(OUTPUT_PATH, lines.join('\n'), 'utf-8');
+  fs.writeFileSync(OUTPUT_PATH, lines.join('\n'), 'utf8');
 
-  console.log(`Đã xuất ${lines.length - 1} dòng (attraction x ngày có booking) -> ${OUTPUT_PATH}`);
-  if (lines.length - 1 < 500) {
-    console.log('[LƯU Ý] Dữ liệu còn khá ít (< 500 dòng). Cân nhắc trộn thêm với '
-      + 'synthetic data (data_gen.py) hoặc đợi thêm booking thật trước khi retrain '
-      + 'để tránh model overfit vào một số ít attraction có nhiều đơn.');
+  console.log(
+    `Đã export ${lines.length - 1} dòng từ ${eligibleAttractions.length} điểm -> ${OUTPUT_PATH}`,
+  );
+  if (eligibleAttractions.length < 3) {
+    console.warn(
+      'Chưa đủ 3 điểm đạt ngưỡng dữ liệu; CLI training sẽ từ chối để tránh model overfit.',
+    );
   }
 }
 

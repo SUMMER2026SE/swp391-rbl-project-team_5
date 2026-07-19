@@ -15,7 +15,7 @@ train/serving dùng chung 1 pipeline (tránh lệch train-serving).
 import json
 import os
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 import joblib
@@ -57,7 +57,7 @@ class EnsembleForecastModel:
         self.city_freq_map = city_freq_map or {}
         self.residual_std = residual_std
         self.model_version = model_version
-        self.trained_at = trained_at or datetime.utcnow()
+        self.trained_at = trained_at or datetime.now(timezone.utc)
         self.metrics = metrics or {}
 
     # ---------- Training helpers ----------
@@ -146,7 +146,7 @@ class EnsembleForecastModel:
 class ForecastDayResult:
     date: date
     predicted_revenue: float
-    predicted_bookings: int
+    predicted_tickets: int
     confidence_lower: float
     confidence_upper: float
 
@@ -161,7 +161,7 @@ def forecast_recursive(
     rating: float,
     num_reviews: int,
     published_days_ago: int,
-    history: List[dict],  # [{date, revenue, bookings}], sorted ascending
+    history: List[dict],  # [{date, revenue, tickets}], sorted ascending
     forecast_days: int,
 ) -> List[ForecastDayResult]:
     """Dự báo N ngày tới theo kiểu recursive: dự đoán ngày t+1, thêm kết quả
@@ -204,13 +204,13 @@ def forecast_recursive(
         confidence_lower = float(np.clip(np.expm1(lower_log), 0, None))
         confidence_upper = float(np.clip(np.expm1(upper_log), 0, None))
 
-        predicted_bookings = int(round(pred_revenue / avg_ticket_price)) if avg_ticket_price > 0 else 0
+        predicted_tickets = int(round(pred_revenue / avg_ticket_price)) if avg_ticket_price > 0 else 0
 
         results.append(
             ForecastDayResult(
                 date=target_date,
                 predicted_revenue=round(pred_revenue, 2),
-                predicted_bookings=predicted_bookings,
+                predicted_tickets=predicted_tickets,
                 confidence_lower=round(confidence_lower, 2),
                 confidence_upper=round(confidence_upper, 2),
             )

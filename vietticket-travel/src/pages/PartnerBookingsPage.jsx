@@ -4,6 +4,7 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import useSocket from '../context/useSocket.js'
 import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
+import { getTicketTypeLabel } from '../utils/ticketType.js'
 
 // Nhãn + màu trạng thái lấy từ nguồn dùng chung (utils/bookingStatus.js)
 // để khớp với màn hình của khách hàng và admin.
@@ -28,8 +29,16 @@ function PartnerBookingsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage]                 = useState(1)
   const [pagination, setPagination]     = useState({ total: 0, totalPages: 1 })
+  const [stats, setStats]               = useState({
+    total: 0,
+    confirmed: 0,
+    pendingPartner: 0,
+    recognizedRevenue: 0,
+  })
   const [rejectTarget, setRejectTarget] = useState(null) // booking đang chờ nhập lý do từ chối
   const [rejectReason, setRejectReason] = useState('')
+  const [cancelTarget, setCancelTarget] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
   const [selectedBooking, setSelectedBooking] = useState(null)
 
   useEffect(() => {
@@ -57,6 +66,12 @@ function PartnerBookingsPage() {
       const list = res.data || []
       setBookings(list)
       setPagination(res.pagination || { total: 0, totalPages: 1 })
+      setStats(res.stats || {
+        total: 0,
+        confirmed: 0,
+        pendingPartner: 0,
+        recognizedRevenue: 0,
+      })
 
       // Cập nhật selectedBooking từ dữ liệu mới nhất nếu đang mở
       setSelectedBooking((prev) => {
@@ -67,6 +82,12 @@ function PartnerBookingsPage() {
     } catch (err) {
       toast.error(err.message || 'Không thể tải danh sách đặt vé.')
       setBookings([])
+      setStats({
+        total: 0,
+        confirmed: 0,
+        pendingPartner: 0,
+        recognizedRevenue: 0,
+      })
     } finally {
       setIsLoading(false)
     }
@@ -131,12 +152,28 @@ function PartnerBookingsPage() {
     }
   }
 
-  // Local stats derived from current page data (full stats would need a separate API)
-  const stats = {
-    total:     pagination.total,
-    confirmed: bookings.filter((b) => b.status === 'confirmed').length,
-    pending:   bookings.filter((b) => b.status === 'pending_partner' || b.status === 'pending').length,
-    revenue:   bookings.filter((b) => b.status === 'confirmed').reduce((s, b) => s + b.amount, 0),
+  const handleConfirmedCancellation = async () => {
+    if (!cancelTarget) return
+    const reason = cancelReason.trim()
+    if (reason.length < 5) {
+      toast.warning('Vui lòng nhập lý do hủy (tối thiểu 5 ký tự).')
+      return
+    }
+    setActionLoading(cancelTarget.id)
+    try {
+      await partnerApi.cancelConfirmedBooking(cancelTarget.id, reason)
+      toast.success('Đã hủy đơn. Khoản hoàn 100% đang được xử lý tự động.')
+      setSelectedBooking((prev) =>
+        prev && prev.id === cancelTarget.id ? { ...prev, status: 'cancelled', refundRequired: true } : prev,
+      )
+      setCancelTarget(null)
+      setCancelReason('')
+      void fetchBookings()
+    } catch (err) {
+      toast.error(err.message || 'Không thể hủy đơn đã xác nhận.')
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   return (
@@ -146,10 +183,10 @@ function PartnerBookingsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Tổng đặt vé',  value: pagination.total, icon: 'receipt_long', color: 'text-[#00474d]', bg: 'bg-[#e0f4f5]' },
+          { label: 'Tổng đặt vé',  value: stats.total, icon: 'receipt_long', color: 'text-[#00474d]', bg: 'bg-[#e0f4f5]' },
           { label: 'Đã xác nhận', value: stats.confirmed,   icon: 'check_circle', color: 'text-[#137333]', bg: 'bg-[#E6F4EA]' },
-          { label: 'Chờ duyệt',   value: stats.pending,     icon: 'pending',      color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]' },
-          { label: 'Doanh thu',   value: formatVND(stats.revenue), icon: 'payments', color: 'text-[#725000]', bg: 'bg-[#ffdea8]' },
+          { label: 'Chờ duyệt',   value: stats.pendingPartner,     icon: 'pending',      color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]' },
+          { label: 'Doanh thu ròng đã ghi nhận', value: formatVND(stats.recognizedRevenue), icon: 'payments', color: 'text-[#725000]', bg: 'bg-[#ffdea8]' },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-[#e1e3e4] shadow-sm p-4 flex items-center gap-3">
             <div className={`w-10 h-10 rounded-lg ${s.bg} flex items-center justify-center flex-shrink-0`}>
@@ -259,6 +296,18 @@ function PartnerBookingsPage() {
                                   {isActing ? '…' : 'Từ chối'}
                                 </button>
                               </>
+                            )}
+                            {b.status === 'confirmed' && (
+                              <button
+                                onClick={() => {
+                                  setCancelTarget(b)
+                                  setCancelReason('')
+                                }}
+                                disabled={isActing}
+                                className="px-3 py-1.5 border border-[#ba1a1a] text-[#ba1a1a] text-xs font-semibold rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
+                              >
+                                Hủy đơn
+                              </button>
                             )}
                           </div>
                         </td>
@@ -407,7 +456,7 @@ function PartnerBookingsPage() {
                     <div>
                       <span className="text-[#6f797a] text-xs block">Chi tiết vé & Đơn giá</span>
                       <span className="text-[#191c1d]">
-                        {selectedBooking.snapshotTicketType === 'CHILD' ? 'Vé Trẻ em' : 'Vé Người lớn'}
+                        {getTicketTypeLabel(selectedBooking.snapshotTicketType)}
                         {' · '}
                         {formatVND(selectedBooking.snapshotUnitPrice || (selectedBooking.amount / selectedBooking.qty))}
                       </span>
@@ -547,6 +596,18 @@ function PartnerBookingsPage() {
                   </button>
                 </div>
               )}
+              {selectedBooking.status === 'confirmed' && (
+                <button
+                  onClick={() => {
+                    setCancelTarget(selectedBooking)
+                    setCancelReason('')
+                  }}
+                  disabled={actionLoading === selectedBooking.id}
+                  className="px-4 py-2 border border-[#ba1a1a] text-[#ba1a1a] text-sm font-semibold rounded-lg hover:bg-[#ffdad6] transition-colors disabled:opacity-50"
+                >
+                  Hủy đơn đã xác nhận
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -590,6 +651,48 @@ function PartnerBookingsPage() {
                 className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-sm font-semibold text-white hover:bg-[#93000a] transition-colors disabled:opacity-50"
               >
                 {actionLoading === rejectTarget.id ? 'Đang xử lý…' : 'Xác nhận từ chối'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cancelTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl animate-fadeIn">
+            <h3 className="text-lg font-bold text-[#191c1d]">Hủy đơn đã xác nhận</h3>
+            <p className="mt-1 text-sm text-[#3f484a]">
+              Đơn <span className="font-mono font-semibold text-[#00629d]">{cancelTarget.id.slice(0, 8).toUpperCase()}</span> của khách{' '}
+              <span className="font-semibold">{cancelTarget.customer}</span>.
+            </p>
+            <p className="mt-2 rounded-lg bg-[#ffdad6]/50 px-3 py-2 text-xs text-[#93000a]">
+              Chỉ hủy khi điểm tham quan không thể cung cấp dịch vụ. Hệ thống sẽ vô hiệu hóa toàn bộ QR,
+              hoàn kho và xử lý hoàn 100% về phương thức thanh toán ban đầu.
+            </p>
+            <textarea
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+              rows={3}
+              placeholder="Ví dụ: Điểm tham quan đóng cửa đột xuất do thời tiết…"
+              className="mt-3 w-full rounded-lg border border-[#bec8ca] px-3 py-2 text-sm outline-none focus:border-[#00474d]"
+            />
+            <p className="mt-1 text-xs text-[#6f797a]">Tối thiểu 5 ký tự.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setCancelTarget(null)
+                  setCancelReason('')
+                }}
+                disabled={actionLoading === cancelTarget.id}
+                className="px-4 py-2 rounded-lg border border-[#bec8ca] text-sm text-[#3f484a] hover:bg-[#f2f4f5] transition-colors disabled:opacity-50"
+              >
+                Đóng
+              </button>
+              <button
+                onClick={handleConfirmedCancellation}
+                disabled={actionLoading === cancelTarget.id || cancelReason.trim().length < 5}
+                className="px-4 py-2 rounded-lg bg-[#ba1a1a] text-sm font-semibold text-white hover:bg-[#93000a] transition-colors disabled:opacity-50"
+              >
+                {actionLoading === cancelTarget.id ? 'Đang xử lý…' : 'Xác nhận hủy và hoàn tiền'}
               </button>
             </div>
           </div>

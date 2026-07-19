@@ -8,6 +8,7 @@ const mockPrisma = require('./helpers/mockPrisma');
 const { generateJSON, generateText } = require('../services/llmClient');
 const {
   getCatalogSummary,
+  getCatalogSummaryWithMeta,
   inferCatalogFiltersFromText,
 } = require('../services/aiCatalogService');
 const {
@@ -71,6 +72,7 @@ function makeBookableProduct(ticketId, attractionId, capacity = 100, timeSlots =
       publicationStatus: 'ACTIVE',
       status: 'ACTIVE',
       archivedAt: null,
+      partner: { status: 'APPROVED' },
       defaultCapacity: capacity,
       openDays: null,
       openTime: '08:00',
@@ -106,7 +108,8 @@ describe('AI catalog', () => {
           publishedAt: { not: null },
           publicationStatus: 'ACTIVE',
           archivedAt: null,
-          status: { not: 'SUSPENDED' },
+          operationalStatus: 'ACTIVE',
+          partner: { status: 'APPROVED' },
           ticketProducts: { some: { status: 'ACTIVE', archivedAt: null } },
         }),
         take: 3,
@@ -148,6 +151,26 @@ describe('AI catalog', () => {
     expect(mockPrisma.attraction.findMany.mock.calls[1][0].where.categories).toBeUndefined();
   });
 
+  test('reports an explicit interest fallback instead of silently changing criteria', async () => {
+    mockPrisma.attraction.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([makeAttraction('a1', 100000)]);
+
+    const result = await getCatalogSummaryWithMeta({
+      city: 'Da Nang',
+      category: 'Museum',
+      limit: 3,
+    });
+
+    expect(result.catalog).toHaveLength(1);
+    expect(result.filterMeta).toMatchObject({
+      interestRequested: true,
+      interestMatched: false,
+      interestFallbackUsed: true,
+    });
+    expect(result.filterMeta.fallbackMessage).toContain('Museum');
+  });
+
   test('filters tickets that are sold out on the selected visit date', async () => {
     const visitDate = new Date('2099-01-10T00:00:00.000Z');
     mockPrisma.attraction.findMany.mockResolvedValue([
@@ -162,7 +185,7 @@ describe('AI catalog', () => {
     mockPrisma.dailyStock.findUnique.mockImplementation(({ where }) => {
       const ticketId = where.ticketProductId_date.ticketProductId;
       if (ticketId === 'ticket-a2') {
-        return Promise.resolve({ capacity: 0, bookedQuantity: 0, heldQuantity: 0 });
+        return Promise.resolve({ capacity: 100, bookedQuantity: 100, heldQuantity: 0 });
       }
       return Promise.resolve(null);
     });
@@ -173,10 +196,32 @@ describe('AI catalog', () => {
     expect(catalog.map((item) => item.id)).toEqual(['a1']);
     expect(catalog[0].tickets[0].availability.availableTickets).toBeGreaterThan(0);
   });
+
+  test('loads ticket and stock availability in batches for a catalog date', async () => {
+    const attraction = makeAttraction('a1', 100000);
+    mockPrisma.attraction.findMany.mockResolvedValue([attraction]);
+    mockPrisma.ticketProduct.findMany.mockResolvedValueOnce([
+      makeBookableProduct('ticket-a1', 'a1'),
+    ]);
+    mockPrisma.dailyStock.findMany.mockResolvedValueOnce([]);
+    mockPrisma.attractionDailyStock.findMany.mockResolvedValueOnce([]);
+
+    const catalog = await getCatalogSummary({
+      city: 'Da Nang',
+      limit: 5,
+      date: new Date('2099-01-10T00:00:00.000Z'),
+    });
+
+    expect(catalog).toHaveLength(1);
+    expect(mockPrisma.ticketProduct.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.dailyStock.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.attractionDailyStock.findMany).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.ticketProduct.findUnique).not.toHaveBeenCalled();
+  });
 });
 
 describe('recommendAttractions', () => {
-  test('keeps selected ticket packages within the total customer budget', async () => {
+  test('returns independent alternatives whose individual package stays within budget', async () => {
     mockPrisma.attraction.findMany.mockResolvedValue([
       makeAttraction('a1', 400000, 5),
       makeAttraction('a2', 400000, 4.9),
@@ -190,11 +235,12 @@ describe('recommendAttractions', () => {
       interests: 'Nature',
     });
 
-    const total = result.data.combos.reduce((sum, combo) => sum + combo.totalPrice, 0);
-    expect(total).toBeLessThanOrEqual(500000);
+    expect(result.data.combos.every((combo) => combo.totalPrice <= 500000)).toBe(true);
     expect(result.data.ticketPackages).toEqual(result.data.combos);
-    expect(result.data.combos).toHaveLength(1);
-    expect(result.data.recommendedAttractions).toHaveLength(1);
+    expect(result.data.combos).toHaveLength(3);
+    expect(result.data.recommendedAttractions).toHaveLength(3);
+    expect(result.data.recommendationMode).toBe('INDEPENDENT_ALTERNATIVES');
+    expect(result.data.overallSummary).toContain('lựa chọn độc lập');
     expect(result.provider).toBe('rule-based');
   });
 
@@ -217,6 +263,48 @@ describe('recommendAttractions', () => {
     expect(combo.items).toHaveLength(2);
     const childLine = combo.items.find((item) => item.unitPrice === 50000);
     expect(childLine.quantity).toBe(2);
+    expect(childLine.eligibility.status).toBe('NEEDS_CONFIRMATION');
+  });
+
+  test('labels adult-price fallback when no eligible child ticket exists', async () => {
+    mockPrisma.attraction.findMany.mockResolvedValue([
+      makeAttraction('a1', 100000),
+    ]);
+
+    const result = await recommendAttractions({
+      budget: 1000000,
+      adults: 2,
+      children: 1,
+      city: 'Da Nang',
+    });
+
+    const ticketLine = result.data.ticketPackages[0].items[0];
+    expect(ticketLine.quantity).toBe(3);
+    expect(ticketLine.eligibility).toMatchObject({
+      status: 'CHILD_PRICED_AS_ADULT',
+    });
+    expect(ticketLine.eligibility.note).toContain('tạm tính theo giá vé người lớn');
+  });
+
+  test('does not present a zero rating as quality evidence', async () => {
+    const unrated = makeAttraction('a1', 100000, 0);
+    unrated.totalReviews = 0;
+    mockPrisma.attraction.findMany.mockResolvedValue([unrated]);
+
+    const result = await recommendAttractions({
+      budget: 500000,
+      people: 1,
+      city: 'Da Nang',
+      priority: 'rating',
+    });
+
+    expect(result.data.recommendedAttractions[0]).toMatchObject({
+      rating: null,
+      totalReviews: 0,
+    });
+    expect(result.data.recommendedAttractions[0].reason).toContain('Chưa đủ đánh giá');
+    expect(result.data.recommendedAttractions[0].reason).not.toContain('0/5');
+    expect(result.data.rankingNotice).toMatch(/chưa có đủ đánh giá/i);
   });
 
   test('only recommends attractions with enough available tickets on visitDate', async () => {
@@ -232,7 +320,7 @@ describe('recommendAttractions', () => {
     mockPrisma.dailyStock.findUnique.mockImplementation(({ where }) => {
       const ticketId = where.ticketProductId_date.ticketProductId;
       if (ticketId === 'ticket-a2') {
-        return Promise.resolve({ capacity: 1, bookedQuantity: 0, heldQuantity: 0 });
+        return Promise.resolve({ capacity: 100, bookedQuantity: 99, heldQuantity: 0 });
       }
       return Promise.resolve(null);
     });
@@ -246,6 +334,7 @@ describe('recommendAttractions', () => {
     });
 
     expect(result.data.availabilityChecked).toBe(true);
+    expect(result.data.availabilityCheckedAt).toEqual(expect.any(String));
     expect(result.data.recommendedAttractions.map((item) => item.attractionId)).toEqual(['a1']);
   });
 
@@ -275,6 +364,59 @@ describe('recommendAttractions', () => {
     });
 
     expect(result.data.recommendedAttractions).toHaveLength(0);
+    expect(result.data.ticketPackages).toHaveLength(0);
+  });
+
+  test('requires adult and child tickets to share a usable visit window', async () => {
+    const adultSlot = {
+      id: 'adult-morning',
+      startTime: '08:00',
+      endTime: '10:00',
+      maxCapacity: 20,
+    };
+    const childSlot = {
+      id: 'child-afternoon',
+      startTime: '14:00',
+      endTime: '17:00',
+      maxCapacity: 20,
+    };
+    mockPrisma.attraction.findMany.mockResolvedValue([
+      makeAttractionWithChildTicket('a1', 100000, 50000, 5),
+    ]);
+    mockPrisma.ticketProduct.findUnique.mockImplementation(({ where }) => {
+      const product = makeBookableProduct(where.id, 'a1', 100);
+      product.timeSlots = [
+        where.id.endsWith('-child') ? childSlot : adultSlot,
+      ];
+      return Promise.resolve(product);
+    });
+    mockPrisma.dailyStock.findUnique.mockResolvedValue(null);
+    mockPrisma.attractionDailyStock.findUnique.mockResolvedValue(null);
+    mockPrisma.timeSlotStock.findMany.mockResolvedValue([]);
+
+    const result = await recommendAttractions({
+      budget: 1000000,
+      adults: 2,
+      children: 1,
+      city: 'Da Nang',
+      visitDate: '2099-01-10',
+    });
+
+    expect(result.data.ticketPackages).toHaveLength(0);
+  });
+
+  test('never prices an adult by falling back to a child-only ticket', async () => {
+    const childOnly = makeAttraction('a1', 50000, 5);
+    childOnly.ticketProducts[0].type = 'CHILD';
+    mockPrisma.attraction.findMany.mockResolvedValue([childOnly]);
+
+    const result = await recommendAttractions({
+      budget: 500000,
+      adults: 1,
+      children: 0,
+      city: 'Da Nang',
+    });
+
     expect(result.data.ticketPackages).toHaveLength(0);
   });
 
@@ -343,7 +485,9 @@ describe('generateItinerary', () => {
     const packed = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'packed' });
 
     expect(relaxed.data.days[0].activities).toHaveLength(2);
-    expect(packed.data.days[0].activities).toHaveLength(4);
+    // Thiếu tọa độ phải giữ bộ đệm di chuyển bảo thủ; nhịp packed vẫn nhiều
+    // hơn relaxed nhưng không được ép đủ 4 điểm bằng một lịch thiếu khả thi.
+    expect(packed.data.days[0].activities).toHaveLength(3);
   });
 
   test('does not place attractions in an evening slot when they close earlier', async () => {
@@ -357,6 +501,36 @@ describe('generateItinerary', () => {
     const activities = result.data.days[0].activities;
     expect(activities.length).toBeLessThanOrEqual(3); // khung Tối bị bỏ trống
     expect(activities.every((a) => a.timeSlot !== 'Tối')).toBe(true);
+  });
+
+  test('uses configured visit duration and does not add another stop after a full-day experience', async () => {
+    const fullDay = makeAttraction('full-day', 100000, 5);
+    fullDay.closeTime = '18:00';
+    fullDay.recommendedVisitMinutes = 420;
+    fullDay.isFullDay = true;
+    fullDay.environment = 'OUTDOOR';
+    const shortVisit = makeAttraction('short', 50000, 4.9);
+    shortVisit.closeTime = '22:00';
+    shortVisit.recommendedVisitMinutes = 90;
+    mockPrisma.attraction.findMany.mockResolvedValue([fullDay, shortVisit]);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const result = await generateItinerary({
+      city: 'Da Nang',
+      days: 1,
+      people: 1,
+      pace: 'packed',
+    });
+
+    expect(result.data.days[0].activities).toHaveLength(1);
+    expect(result.data.days[0].activities[0]).toMatchObject({
+      attractionId: 'full-day',
+      suggestedTime: '08:00 - 15:00',
+      recommendedVisitMinutes: 420,
+      environment: 'OUTDOOR',
+      isFullDay: true,
+    });
+    expect(result.data.generationWarning).toContain('chưa đạt nhịp 3-4 điểm/ngày');
   });
 
   test('provides backup alternatives per day from leftover attractions', async () => {
@@ -384,8 +558,8 @@ describe('generateItinerary', () => {
     const result = await generateItinerary({ city: 'Da Nang', days: 1, people: 1, pace: 'packed' });
 
     const order = result.data.days[0].activities.map((a) => a.attractionId);
-    // điểm đầu a0 -> gần nhất a1 -> rồi mới a2
-    expect(order).toEqual(['a0', 'a1', 'a2']);
+    // Điểm đầu a0 -> chọn a1 gần nhất; a2 quá xa nên không bị nhồi cùng ngày.
+    expect(order).toEqual(['a0', 'a1']);
   });
 
   test('returns coordinates and route estimates for itinerary days', async () => {
@@ -441,7 +615,7 @@ describe('generateItinerary', () => {
     mockPrisma.dailyStock.findUnique.mockImplementation(({ where }) => {
       const ticketId = where.ticketProductId_date.ticketProductId;
       if (ticketId === 'ticket-a2') {
-        return Promise.resolve({ capacity: 1, bookedQuantity: 0, heldQuantity: 0 });
+        return Promise.resolve({ capacity: 100, bookedQuantity: 99, heldQuantity: 0 });
       }
       return Promise.resolve(null);
     });
@@ -488,7 +662,9 @@ describe('generateItinerary', () => {
     });
 
     expect(result.data.availabilityChecked).toBe(true);
-    expect(result.data.days).toHaveLength(0);
+    expect(result.data.days).toHaveLength(1);
+    expect(result.data.days[0].activities).toHaveLength(0);
+    expect(result.data.days[0].theme).toContain('lịch tự do');
     expect(result.data.generationWarning).toBeTruthy();
   });
 
@@ -517,6 +693,60 @@ describe('generateItinerary', () => {
     expect(result.provider).toBe('mock-llm');
     expect(result.data.title).toBe('Da Nang nhe nhang');
     expect(result.data.tips).toEqual(['Mang nuoc', 'Di som']);
+  });
+
+  test('does not combine attractions with an impractical same-day transfer', async () => {
+    const nearCenter = makeAttractionAt('a0', 50000, 21.0285, 105.8542, 5, '22:00');
+    const farFromCenter = makeAttractionAt('a1', 50000, 21.31, 105.36, 4.9, '22:00');
+    mockPrisma.attraction.findMany.mockResolvedValue([nearCenter, farFromCenter]);
+    mockPrisma.ticketProduct.findUnique.mockImplementation(({ where }) =>
+      Promise.resolve(makeBookableProduct(where.id, where.id.replace('ticket-', ''), 100)),
+    );
+    mockPrisma.dailyStock.findUnique.mockResolvedValue(null);
+    mockPrisma.attractionDailyStock.findUnique.mockResolvedValue(null);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const result = await generateItinerary({
+      city: 'Ha Noi',
+      days: 1,
+      people: 1,
+      pace: 'normal',
+      startDate: '2099-01-10',
+    });
+
+    const activities = result.data.days[0].activities;
+    expect(activities).toHaveLength(1);
+    expect(activities[0].suggestedTime).toBe('08:00 - 10:30');
+  });
+
+  test('keeps closed days as free days and continues scheduling later dates', async () => {
+    mockPrisma.attraction.findMany.mockResolvedValue([
+      makeAttraction('a1', 50000, 5),
+    ]);
+    let availabilityCall = 0;
+    mockPrisma.ticketProduct.findUnique.mockImplementation(({ where }) => {
+      availabilityCall += 1;
+      const product = makeBookableProduct(where.id, 'a1', 100);
+      product.attraction.specialDates = availabilityCall === 1
+        ? [{ closed: true, capacity: 100 }]
+        : [];
+      return Promise.resolve(product);
+    });
+    mockPrisma.dailyStock.findUnique.mockResolvedValue(null);
+    mockPrisma.attractionDailyStock.findUnique.mockResolvedValue(null);
+    generateJSON.mockRejectedValue(new Error('LLM unavailable'));
+
+    const result = await generateItinerary({
+      city: 'Da Nang',
+      days: 2,
+      people: 1,
+      startDate: '2099-01-10',
+    });
+
+    expect(result.data.days).toHaveLength(2);
+    expect(result.data.days[0].activities).toHaveLength(0);
+    expect(result.data.days[1].activities).toHaveLength(1);
+    expect(result.data.days[1].visitDate).toBe('2099-01-11');
   });
 });
 
@@ -592,6 +822,44 @@ describe('chatWithUser', () => {
     expect(userPrompt).not.toContain('booking-1');
     expect(userPrompt).not.toContain('support-1');
     expect(userPrompt).not.toContain('qrCodeToken');
+  });
+
+  test('redacts common sensitive data before sending chat content to an LLM provider', async () => {
+    generateText.mockResolvedValue({ text: 'ok', provider: 'mock' });
+
+    await chatWithUser(
+      'Hỗ trợ tôi qua guest@example.com, 0901234567, thẻ 4111 1111 1111 1111, mật khẩu: Secret123!',
+      [
+        {
+          role: 'user',
+          content: 'Mã vé VIETTICKET:very-secret-ticket-token và Bearer abc.def.ghi',
+        },
+      ],
+    );
+
+    const userPrompt = generateText.mock.calls[0][1];
+    expect(userPrompt).toContain('[EMAIL_DA_AN]');
+    expect(userPrompt).toContain('[SO_DIEN_THOAI_DA_AN]');
+    expect(userPrompt).toContain('[THE_THANH_TOAN_DA_AN]');
+    expect(userPrompt).toContain('[THONG_TIN_NHAY_CAM_DA_AN]');
+    expect(userPrompt).toContain('[TOKEN_DA_AN]');
+    expect(userPrompt).not.toContain('guest@example.com');
+    expect(userPrompt).not.toContain('0901234567');
+    expect(userPrompt).not.toContain('4111 1111 1111 1111');
+    expect(userPrompt).not.toContain('Secret123!');
+    expect(userPrompt).not.toContain('very-secret-ticket-token');
+  });
+
+  test('does not attach purchase history for a generic policy question', async () => {
+    generateText.mockResolvedValue({ text: 'ok', provider: 'mock' });
+
+    await chatWithUser('Chính sách thanh toán và hoàn tiền hoạt động thế nào?', [], {
+      userId: 'user-1',
+    });
+
+    expect(mockPrisma.booking.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.supportTicket.findMany).not.toHaveBeenCalled();
+    expect(generateText.mock.calls[0][1]).not.toContain('DU LIEU CA NHAN CUA KHACH');
   });
 
   test('returns a friendly fallback instead of failing when providers are not configured', async () => {

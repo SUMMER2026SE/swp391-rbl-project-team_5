@@ -32,8 +32,24 @@ describe('helpers cơ bản', () => {
 
 describe('validateKyc', () => {
   const license = 'http://localhost/api/upload/documents/user-1-license.pdf';
-  test('✅ Hợp lệ khi có tên doanh nghiệp và giấy phép', () => {
-    expect(validateKyc({ businessName: 'Cty A', businessLicenseUrl: license })).toBe('');
+  const validKyc = {
+    businessName: 'Cty A',
+    businessLicenseUrl: license,
+    taxCode: '0102030405',
+    registrationDate: '2020-01-15',
+    representativeName: 'Nguyen Van A',
+    representativePhone: '0901234567',
+    businessAddress: '1 Nguyen Hue, HCM',
+    bankName: 'Vietcombank',
+    branchName: 'HCM',
+    bankAccountNumber: '0123456789',
+    bankAccountName: 'NGUYEN VAN A',
+    payoutCurrency: 'VND',
+    kycConsentAccepted: true,
+  };
+
+  test('✅ Hợp lệ khi có tên doanh nghiệp, mã số thuế và giấy phép', () => {
+    expect(validateKyc(validKyc)).toBe('');
   });
   test('❌ Thiếu businessName', () => {
     expect(validateKyc({})).not.toBe('');
@@ -44,12 +60,22 @@ describe('validateKyc', () => {
   test('❌ taxCode sai định dạng', () => {
     expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, taxCode: '123' })).not.toBe('');
   });
+  test('❌ taxCode là thông tin bắt buộc', () => {
+    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license })).toBe('Vui lòng nhập mã số thuế.');
+  });
   test('✅ taxCode 10 hoặc 13 chữ số', () => {
-    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, taxCode: '0102030405' })).toBe('');
-    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, taxCode: '0102030405123' })).toBe('');
+    expect(validateKyc({ ...validKyc, taxCode: '0102030405' })).toBe('');
+    expect(validateKyc({ ...validKyc, taxCode: '0102030405123' })).toBe('');
   });
   test('❌ bankAccountNumber sai định dạng', () => {
-    expect(validateKyc({ businessName: 'A', businessLicenseUrl: license, bankAccountNumber: '12a' })).not.toBe('');
+    expect(validateKyc({ ...validKyc, bankAccountNumber: '12a' })).not.toBe('');
+  });
+  test('rejects a missing legal representative or explicit KYC consent', () => {
+    expect(validateKyc({ ...validKyc, representativeName: '' })).not.toBe('');
+    expect(validateKyc({ ...validKyc, kycConsentAccepted: false })).not.toBe('');
+  });
+  test('rejects a future registration date', () => {
+    expect(validateKyc({ ...validKyc, registrationDate: '2999-01-01' })).not.toBe('');
   });
 });
 
@@ -74,6 +100,21 @@ describe('validateAttraction', () => {
   test('✅ partial: chỉ validate field có mặt', () => {
     expect(validateAttraction({ name: 'X' }, { partial: true })).toBe('');
   });
+  test('validates professional visit metadata', () => {
+    expect(validateAttraction({
+      ...valid,
+      recommendedVisitMinutes: 240,
+      environment: 'OUTDOOR',
+      isFullDay: false,
+    })).toBe('');
+    expect(validateAttraction({ ...valid, recommendedVisitMinutes: 10 })).not.toBe('');
+    expect(validateAttraction({ ...valid, environment: 'UNKNOWN' })).not.toBe('');
+    expect(validateAttraction({
+      ...valid,
+      recommendedVisitMinutes: 150,
+      isFullDay: true,
+    }, { partial: false })).toContain('ít nhất 360 phút');
+  });
 });
 
 describe('validateTicket', () => {
@@ -91,6 +132,10 @@ describe('validateTicket', () => {
   test('❌ sellingPrice > originalPrice', () => {
     expect(validateTicket({ name: 'Vé', originalPrice: 100, sellingPrice: 200 })).not.toBe('');
   });
+  test('rejects fractional or non-finite VND prices', () => {
+    expect(validateTicket({ ...valid, sellingPrice: 120000.5 })).not.toBe('');
+    expect(validateTicket({ ...valid, sellingPrice: Number.POSITIVE_INFINITY })).not.toBe('');
+  });
   test('❌ type không hợp lệ', () => {
     expect(validateTicket({ ...valid, type: 'VIP' })).not.toBe('');
   });
@@ -100,5 +145,22 @@ describe('validateTicket', () => {
   });
   test('❌ refundPolicy sai', () => {
     expect(validateTicket({ refundPolicy: 'XXX' }, { partial: true })).not.toBe('');
+  });
+  test('requires structured age or height rules for child tickets', () => {
+    expect(validateTicket({ ...valid, type: 'CHILD' }, { partial: false })).toContain('tuổi hoặc chiều cao');
+    expect(validateTicket({
+      ...valid,
+      type: 'CHILD',
+      minAgeYears: 3,
+      maxAgeYears: 11,
+      maxHeightCm: 140,
+      requiresAdult: true,
+    }, { partial: false })).toBe('');
+    expect(validateTicket({
+      ...valid,
+      type: 'CHILD',
+      minAgeYears: 12,
+      maxAgeYears: 3,
+    }, { partial: false })).not.toBe('');
   });
 });

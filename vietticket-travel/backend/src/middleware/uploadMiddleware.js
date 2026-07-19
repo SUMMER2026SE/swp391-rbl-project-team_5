@@ -144,16 +144,119 @@ function getPrivateDocumentPath(filename) {
   return resolved;
 }
 
-function isDocumentOwnedByUser(url, userId) {
+function getTrustedDocumentOrigin(req) {
+  const configuredBaseUrl = String(process.env.BACKEND_URL || '').trim();
+  if (configuredBaseUrl) {
+    try {
+      return new URL(configuredBaseUrl).origin;
+    } catch {
+      return '';
+    }
+  }
+
+  const host = req?.get?.('host');
+  const protocol = req?.protocol;
+  if (!host || !protocol) return '';
+
   try {
-    const pathname = new URL(url).pathname;
-    const filename = path.basename(pathname);
-    return pathname.startsWith('/api/upload/documents/')
-      && filename.startsWith(`${userId}-`);
+    return new URL(`${protocol}://${host}`).origin;
+  } catch {
+    return '';
+  }
+}
+
+function getDocumentFilenameFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.search || parsed.hash || parsed.username || parsed.password) return '';
+    const prefix = '/api/upload/documents/';
+    if (!parsed.pathname.startsWith(prefix)) return '';
+    const filename = parsed.pathname.slice(prefix.length);
+    if (!filename || filename.includes('/') || path.basename(filename) !== filename) return '';
+    return filename;
+  } catch {
+    return '';
+  }
+}
+
+function isDocumentOwnedByUser(url, userId, req) {
+  const trustedOrigin = getTrustedDocumentOrigin(req);
+  if (!trustedOrigin) return false;
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.origin !== trustedOrigin) return false;
+
+  const filename = getDocumentFilenameFromUrl(url);
+  if (!filename.startsWith(`${userId}-`)) return false;
+
+  const documentPath = getPrivateDocumentPath(filename);
+  if (!documentPath) return false;
+  try {
+    return fs.statSync(documentPath).isFile();
   } catch {
     return false;
   }
 }
+
+function createUserUploadQuota(directory, { maxFiles, maxBytes }) {
+  return async (req, res, next) => {
+    try {
+      const prefix = `${req.user.id}-`;
+      const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+      const ownedFiles = entries.filter(
+        (entry) => entry.isFile() && entry.name.startsWith(prefix),
+      );
+      const stats = await Promise.all(
+        ownedFiles.map((entry) => fs.promises.stat(path.join(directory, entry.name))),
+      );
+      const totalBytes = stats.reduce((sum, stat) => sum + stat.size, 0);
+
+      if (ownedFiles.length >= maxFiles || totalBytes >= maxBytes) {
+        return res.status(429).json({
+          success: false,
+          error: {
+            code: 'UPLOAD_QUOTA_EXCEEDED',
+            message: 'Bạn đã đạt giới hạn lưu trữ tệp. Vui lòng dùng lại hoặc xóa tệp cũ.',
+          },
+        });
+      }
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+async function removeUnreferencedDocumentsForUser(userId, retainedUrls = []) {
+  const retainedNames = new Set(
+    retainedUrls.map(getDocumentFilenameFromUrl).filter(Boolean),
+  );
+  const entries = await fs.promises.readdir(privateDocumentDir, { withFileTypes: true });
+  const prefix = `${userId}-`;
+  const orphanPaths = entries
+    .filter(
+      (entry) => entry.isFile()
+        && entry.name.startsWith(prefix)
+        && !retainedNames.has(entry.name),
+    )
+    .map((entry) => path.join(privateDocumentDir, entry.name));
+
+  await Promise.all(orphanPaths.map((filePath) => fs.promises.unlink(filePath).catch(() => undefined)));
+}
+
+const enforcePublicUploadQuota = createUserUploadQuota(publicUploadDir, {
+  maxFiles: 500,
+  maxBytes: 1024 * 1024 * 1024,
+});
+const enforceDocumentUploadQuota = createUserUploadQuota(privateDocumentDir, {
+  maxFiles: 5,
+  maxBytes: 25 * 1024 * 1024,
+});
 
 module.exports = {
   uploadAvatar,
@@ -163,5 +266,10 @@ module.exports = {
   buildUploadUrl,
   buildDocumentUrl,
   getPrivateDocumentPath,
+  getTrustedDocumentOrigin,
+  getDocumentFilenameFromUrl,
   isDocumentOwnedByUser,
+  enforcePublicUploadQuota,
+  enforceDocumentUploadQuota,
+  removeUnreferencedDocumentsForUser,
 };

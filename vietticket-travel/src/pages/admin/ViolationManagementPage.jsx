@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import AdminLayout from '../../layouts/AdminLayout';
 import * as adminApi from '../../services/adminApi.js';
@@ -7,8 +7,14 @@ import '../../styles/admin.css';
 const FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=400&q=80';
 
-const ALL_STATUSES = ['all', 'active', 'hidden'];
-const STATUS_LABEL = { all: 'Tất cả', active: 'Đang hoạt động', hidden: 'Đã ẩn' };
+const ALL_STATUSES = ['all', 'active', 'paused', 'hidden'];
+const PAGE_SIZE = 10;
+const STATUS_LABEL = {
+  all: 'Tất cả',
+  active: 'Đang hoạt động',
+  paused: 'Đang tạm dừng',
+  hidden: 'Bị đình chỉ',
+};
 
 function formatReviews(value) {
   const count = Number(value) || 0;
@@ -24,7 +30,9 @@ function mapLocation(attraction) {
     category: attraction.category?.name || 'Chưa phân loại',
     rating: Number(attraction.averageRating || 0),
     reviews: formatReviews(attraction.totalReviews),
-    status: attraction.status === 'SUSPENDED' ? 'hidden' : 'active',
+    status: attraction.operationalStatus === 'SUSPENDED'
+      ? 'hidden'
+      : attraction.publicationStatus === 'ACTIVE' ? 'active' : 'paused',
     image: attraction.primaryImage || FALLBACK_IMAGE,
   };
 }
@@ -38,7 +46,7 @@ function ConfirmModal({
   onReasonChange,
 }) {
   if (!target) return null;
-  const hiding = target.status === 'active';
+  const hiding = target.status !== 'hidden';
 
   return (
     <div className="admin-modal-overlay" onClick={loading ? undefined : onClose}>
@@ -54,7 +62,7 @@ function ConfirmModal({
           <strong>{target.name}</strong> không?{' '}
           {hiding
             ? 'Địa điểm sẽ không còn xuất hiện trên nền tảng người dùng.'
-            : 'Địa điểm sẽ được hiển thị trở lại trên nền tảng.'}
+            : 'Địa điểm sẽ về trạng thái tạm dừng; đối tác phải kiểm tra và chủ động mở bán lại.'}
         </p>
 
         {hiding && (
@@ -92,9 +100,11 @@ export default function ViolationManagementPage() {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
-  const [filterPartner, setFilterPartner] = useState('Tất cả đối tác');
-  const [filterCategory, setFilterCategory] = useState('Tất cả danh mục');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
+  const [serverStats, setServerStats] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -102,11 +112,27 @@ export default function ViolationManagementPage() {
     async function loadLocations() {
       setLoading(true);
       try {
-        const result = await adminApi.listAttractions();
-        const manageable = (result.data || [])
-          .filter((item) => ['APPROVED', 'SUSPENDED'].includes(item.status))
-          .map(mapLocation);
-        if (active) setLocations(manageable);
+        const params = { page, limit: PAGE_SIZE, published: true };
+        if (filterStatus === 'hidden') {
+          params.operationalStatus = 'SUSPENDED';
+        } else if (filterStatus === 'active' || filterStatus === 'paused') {
+          params.operationalStatus = 'ACTIVE';
+          params.publicationStatus = filterStatus === 'active' ? 'ACTIVE' : 'PAUSED';
+        }
+        const result = await adminApi.listAttractions(params);
+        if (active) {
+          const nextPagination = result.pagination || {
+            total: (result.data || []).length,
+            totalPages: 1,
+          };
+          if (page > nextPagination.totalPages) {
+            setPage(nextPagination.totalPages);
+            return;
+          }
+          setLocations((result.data || []).map(mapLocation));
+          setPagination(nextPagination);
+          setServerStats(result.stats || null);
+        }
       } catch (error) {
         if (active) toast.error(error.message);
       } finally {
@@ -118,16 +144,7 @@ export default function ViolationManagementPage() {
     return () => {
       active = false;
     };
-  }, []);
-
-  const partnerOptions = useMemo(
-    () => ['Tất cả đối tác', ...new Set(locations.map((item) => item.partner))],
-    [locations],
-  );
-  const categoryOptions = useMemo(
-    () => ['Tất cả danh mục', ...new Set(locations.map((item) => item.category))],
-    [locations],
-  );
+  }, [filterStatus, page, reloadKey]);
 
   function handleToggle(location) {
     setConfirmTarget(location);
@@ -143,7 +160,7 @@ export default function ViolationManagementPage() {
   async function confirmToggle() {
     if (!confirmTarget) return;
 
-    const hiding = confirmTarget.status === 'active';
+    const hiding = confirmTarget.status !== 'hidden';
     const trimmedReason = reason.trim();
     if (hiding && !trimmedReason) {
       toast.error('Vui lòng nhập lý do tạm ẩn.');
@@ -155,20 +172,14 @@ export default function ViolationManagementPage() {
       if (hiding) {
         await adminApi.hideAttraction(confirmTarget.id, trimmedReason);
       } else {
-        await adminApi.reviewAttraction(confirmTarget.id, 'APPROVED');
+        await adminApi.restoreAttraction(confirmTarget.id);
       }
 
-      setLocations((current) =>
-        current.map((item) =>
-          item.id === confirmTarget.id
-            ? { ...item, status: hiding ? 'hidden' : 'active' }
-            : item,
-        ),
-      );
+      setReloadKey((value) => value + 1);
       toast.success(
         hiding
           ? `Đã tạm ẩn địa điểm: ${confirmTarget.name}`
-          : `Đã khôi phục địa điểm: ${confirmTarget.name}`,
+          : `Đã khôi phục và giữ tạm dừng địa điểm: ${confirmTarget.name}`,
       );
       setConfirmTarget(null);
       setReason('');
@@ -179,16 +190,8 @@ export default function ViolationManagementPage() {
     }
   }
 
-  const displayed = locations.filter((location) => {
-    const matchPartner =
-      filterPartner === 'Tất cả đối tác' || location.partner === filterPartner;
-    const matchCategory =
-      filterCategory === 'Tất cả danh mục' || location.category === filterCategory;
-    const matchStatus = filterStatus === 'all' || location.status === filterStatus;
-    return matchPartner && matchCategory && matchStatus;
-  });
-
-  const activeCount = locations.filter((location) => location.status === 'active').length;
+  const displayed = locations;
+  const activeCount = Number(serverStats?.operational?.active || 0);
 
   return (
     <AdminLayout searchPlaceholder="Tìm kiếm địa điểm, đối tác...">
@@ -216,34 +219,15 @@ export default function ViolationManagementPage() {
       </div>
 
       <div className="admin-filter-bar">
-        <div className="admin-filter-group">
-          <label htmlFor="vioPartner">Đối tác</label>
-          <select
-            id="vioPartner"
-            value={filterPartner}
-            onChange={(event) => setFilterPartner(event.target.value)}
-          >
-            {partnerOptions.map((partner) => <option key={partner}>{partner}</option>)}
-          </select>
-        </div>
-
-        <div className="admin-filter-group">
-          <label htmlFor="vioCat">Danh mục</label>
-          <select
-            id="vioCat"
-            value={filterCategory}
-            onChange={(event) => setFilterCategory(event.target.value)}
-          >
-            {categoryOptions.map((category) => <option key={category}>{category}</option>)}
-          </select>
-        </div>
-
         <div className="admin-filter-group" style={{ minWidth: 160 }}>
           <label htmlFor="vioStatus">Trạng thái</label>
           <select
             id="vioStatus"
             value={filterStatus}
-            onChange={(event) => setFilterStatus(event.target.value)}
+            onChange={(event) => {
+              setFilterStatus(event.target.value);
+              setPage(1);
+            }}
           >
             {ALL_STATUSES.map((status) => (
               <option key={status} value={status}>{STATUS_LABEL[status]}</option>
@@ -253,9 +237,8 @@ export default function ViolationManagementPage() {
 
         <button
           onClick={() => {
-            setFilterPartner('Tất cả đối tác');
-            setFilterCategory('Tất cả danh mục');
             setFilterStatus('all');
+            setPage(1);
           }}
           style={{
             height: 46,
@@ -346,6 +329,11 @@ export default function ViolationManagementPage() {
                         <span className="badge__dot" style={{ background: 'var(--adm-primary-dark)' }} />
                         Hoạt động
                       </span>
+                    ) : location.status === 'paused' ? (
+                      <span className="badge badge--pending">
+                        <span className="badge__dot" />
+                        Tạm dừng
+                      </span>
                     ) : (
                       <span className="badge badge--hidden">
                         <span className="badge__dot" style={{ background: 'var(--adm-outline)' }} />
@@ -354,7 +342,7 @@ export default function ViolationManagementPage() {
                     )}
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    {location.status === 'active' ? (
+                    {location.status !== 'hidden' ? (
                       <button
                         className="btn-warn"
                         disabled={actionId === location.id}
@@ -394,14 +382,24 @@ export default function ViolationManagementPage() {
 
         <div className="admin-pagination">
           <p className="admin-pagination__info">
-            Hiển thị <strong>{displayed.length}</strong> / <strong>{locations.length}</strong> địa điểm
+            Hiển thị <strong>{displayed.length}</strong> / <strong>{pagination.total}</strong> địa điểm
           </p>
           <div className="admin-pagination__controls">
-            <button className="admin-pagination__btn" disabled>
+            <button
+              className="admin-pagination__btn"
+              disabled={page <= 1 || loading}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_left</span>
             </button>
-            <button className="admin-pagination__btn active">1</button>
-            <button className="admin-pagination__btn" disabled>
+            <button className="admin-pagination__btn active" disabled>
+              {page}/{pagination.totalPages}
+            </button>
+            <button
+              className="admin-pagination__btn"
+              disabled={page >= pagination.totalPages || loading}
+              onClick={() => setPage((value) => Math.min(pagination.totalPages, value + 1))}
+            >
               <span className="material-symbols-outlined" style={{ fontSize: 18 }}>chevron_right</span>
             </button>
           </div>

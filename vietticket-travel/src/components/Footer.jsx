@@ -6,9 +6,13 @@ function Footer({ links = footerLinks }) {
     <footer className="site-footer" id="support">
       <div className="container footer-grid">
         <div className="footer-brand">
-          <a className="brand brand--light" href="#top">
+          <Link
+            className="brand brand--light"
+            to="/"
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          >
             VietTicket Travel
-          </a>
+          </Link>
           <p>
             Đặt vé đến các điểm tham quan tốt nhất tại Việt Nam với trải nghiệm
             đơn giản, an toàn và thân thiện với khách du lịch.

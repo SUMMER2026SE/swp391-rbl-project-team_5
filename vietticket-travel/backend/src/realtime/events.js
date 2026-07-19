@@ -18,6 +18,32 @@ function setSocketServer(io) {
   socketServer = io || null;
 }
 
+function disconnectMatchingSockets(predicate) {
+  if (!socketServer) return 0;
+  let disconnected = 0;
+  for (const socket of socketServer.sockets.sockets.values()) {
+    if (!predicate(socket.user || {})) continue;
+    socket.emit('AUTHORIZATION_REVOKED', {
+      message: 'Quyền truy cập của tài khoản vừa thay đổi. Vui lòng đăng nhập lại.',
+    });
+    socket.disconnect(true);
+    disconnected += 1;
+  }
+  return disconnected;
+}
+
+function disconnectUserSockets(userId) {
+  if (!userId) return 0;
+  return disconnectMatchingSockets((user) => user.id === userId);
+}
+
+function disconnectPartnerSockets(partnerId) {
+  if (!partnerId) return 0;
+  return disconnectMatchingSockets(
+    (user) => user.partnerProfileId === partnerId || user.employerPartnerId === partnerId,
+  );
+}
+
 function toNumber(value) {
   return value == null ? 0 : Number(value.toString());
 }
@@ -94,6 +120,8 @@ function queueNewBookingNotification(bookingId) {
 }
 
 module.exports = {
+  disconnectPartnerSockets,
+  disconnectUserSockets,
   emitBookingStatusUpdated,
   emitNewBooking,
   emitSupportMessage,

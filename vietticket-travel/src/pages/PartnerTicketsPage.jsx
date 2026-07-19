@@ -4,8 +4,8 @@ import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
-const TYPE_LABEL = { ADULT: 'Người lớn', CHILD: 'Trẻ em', FAMILY: 'Gia đình', GROUP: 'Nhóm' }
-const TYPE_COLOR = { ADULT: 'bg-[#cfe5ff] text-[#003558]', CHILD: 'bg-[#ffdea8] text-[#271900]', FAMILY: 'bg-[#E6F4EA] text-[#137333]', GROUP: 'bg-[#ffdad6] text-[#93000a]' }
+const TYPE_LABEL = { ADULT: 'Người lớn', CHILD: 'Trẻ em', STUDENT: 'Học sinh / sinh viên', FAMILY: 'Gia đình', GROUP: 'Nhóm' }
+const TYPE_COLOR = { ADULT: 'bg-[#cfe5ff] text-[#003558]', CHILD: 'bg-[#ffdea8] text-[#271900]', STUDENT: 'bg-[#eaddff] text-[#4f378b]', FAMILY: 'bg-[#E6F4EA] text-[#137333]', GROUP: 'bg-[#ffdad6] text-[#93000a]' }
 const REFUND_LABEL = { NONE: 'Không hoàn', PARTIAL: 'Hoàn 1 phần', FULL: 'Hoàn toàn bộ' }
 const REFUND_COLOR = { NONE: 'text-[#ba1a1a]', PARTIAL: 'text-[#725000]', FULL: 'text-[#137333]' }
 

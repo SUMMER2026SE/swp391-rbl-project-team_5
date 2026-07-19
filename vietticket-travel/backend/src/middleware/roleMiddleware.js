@@ -1,6 +1,8 @@
+const { hasAnyRole, hasRole } = require('../utils/userRoles');
+
 function restrictTo(...roles) {
   return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    if (!req.user || !hasAnyRole(req.user, roles)) {
       return res.status(403).json({
         message: 'Bạn không có quyền thực hiện hành động này.',
       });
@@ -11,7 +13,7 @@ function restrictTo(...roles) {
 }
 
 function isPlatformStaff(user) {
-  return user?.role === 'ADMIN' || (user?.role === 'STAFF' && !user.employerPartnerId);
+  return hasRole(user, 'ADMIN') || (hasRole(user, 'STAFF') && !user?.employerPartnerId);
 }
 
 function requirePlatformStaff(req, res, next) {

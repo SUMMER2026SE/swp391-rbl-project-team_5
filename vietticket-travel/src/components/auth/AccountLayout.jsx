@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { defaultUser } from '../../context/authConstants.js'
 import { useAuth } from '../../context/useAuth.js'
+import { hasRole } from '../../utils/userRoles.js'
 
 const navItems = [
   { label: 'Hồ sơ của tôi', icon: 'person', to: '/profile', active: 'profile' },
@@ -21,13 +22,6 @@ const navItems = [
     icon: 'support_agent',
     to: '/my-support',
     active: 'support',
-  },
-  {
-    label: 'Phương thức thanh toán',
-    icon: 'credit_card',
-    to: null,
-    active: 'payment',
-    comingSoon: true,
   },
   {
     label: 'Đổi mật khẩu',
@@ -62,17 +56,17 @@ function AccountLayout({ active = 'profile', children }) {
             VietTicket Travel
           </Link>
           <div className="account-header__actions">
-            {currentUser?.role === 'ADMIN' && (
+            {hasRole(currentUser, 'ADMIN') && (
               <Link className="text-button" to="/admin">
                 Trang quản trị
               </Link>
             )}
-            {currentUser?.role === 'STAFF' && !currentUser?.employerPartnerId && (
+            {hasRole(currentUser, 'STAFF') && !currentUser?.employerPartnerId && (
               <Link className="text-button" to="/staff/tickets">
                 Cổng nhân viên
               </Link>
             )}
-            {currentUser?.role === 'PARTNER' && (
+            {hasRole(currentUser, 'PARTNER') && (
               <Link className="text-button" to="/partner/dashboard">
                 Cổng đối tác
               </Link>
@@ -109,7 +103,7 @@ function AccountLayout({ active = 'profile', children }) {
           </div>
 
           <nav className="account-nav">
-            {currentUser?.role === 'ADMIN' && (
+            {hasRole(currentUser, 'ADMIN') && (
               <Link to="/admin">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   admin_panel_settings
@@ -117,7 +111,7 @@ function AccountLayout({ active = 'profile', children }) {
                 Trang quản trị
               </Link>
             )}
-            {currentUser?.role === 'STAFF' && !currentUser?.employerPartnerId && (
+            {hasRole(currentUser, 'STAFF') && !currentUser?.employerPartnerId && (
               <Link to="/staff/tickets">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   support_agent
@@ -125,7 +119,7 @@ function AccountLayout({ active = 'profile', children }) {
                 Cổng nhân viên
               </Link>
             )}
-            {currentUser?.role === 'PARTNER' && (
+            {hasRole(currentUser, 'PARTNER') && (
               <Link to="/partner/dashboard">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   dashboard
@@ -133,33 +127,18 @@ function AccountLayout({ active = 'profile', children }) {
                 Cổng đối tác
               </Link>
             )}
-            {visibleNavItems.map((item) =>
-              item.comingSoon ? (
-                <span
-                  className="account-nav-item--disabled"
-                  key={item.label}
-                  title="Tính năng đang phát triển"
-                  aria-disabled="true"
-                >
+            {visibleNavItems.map((item) => (
+              <Link
+                className={item.active === active ? 'active' : ''}
+                key={item.label}
+                to={item.to}
+              >
                   <span className="material-symbols-outlined" aria-hidden="true">
                     {item.icon}
                   </span>
                   {item.label}
-                  <span className="account-nav-badge">Sắp ra mắt</span>
-                </span>
-              ) : (
-                <Link
-                  className={item.active === active ? 'active' : ''}
-                  key={item.label}
-                  to={item.to}
-                >
-                  <span className="material-symbols-outlined" aria-hidden="true">
-                    {item.icon}
-                  </span>
-                  {item.label}
-                </Link>
-              ),
-            )}
+              </Link>
+            ))}
             <button type="button" onClick={handleLogout}>
               <span className="material-symbols-outlined" aria-hidden="true">
                 logout

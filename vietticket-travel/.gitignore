@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.venv/
+ml-service/data/
 *.local
 .env
 .env.*

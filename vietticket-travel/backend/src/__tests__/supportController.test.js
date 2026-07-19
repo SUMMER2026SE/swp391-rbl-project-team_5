@@ -135,7 +135,8 @@ describe('sendMessage', () => {
     prisma.supportMessage.create.mockReturnValue(
       Promise.resolve({ id: 'msg-1', ticketId: 'tk-1', senderId: 'staff-1', message: 'Chao ban' }),
     );
-    prisma.supportTicket.update.mockReturnValue(Promise.resolve({ id: 'tk-1', status: 'IN_PROGRESS' }));
+    prisma.supportTicket.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.create.mockResolvedValue({});
     prisma.$transaction.mockImplementation((arg) =>
       Array.isArray(arg) ? Promise.all(arg) : arg(prisma),
     );
@@ -148,10 +149,23 @@ describe('sendMessage', () => {
 
     await sendMessage(req, res, next);
 
-    expect(prisma.supportTicket.update).toHaveBeenCalledWith({
-      where: { id: 'tk-1' },
-      data: { status: 'IN_PROGRESS' },
-    });
+    expect(prisma.supportTicket.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: 'tk-1',
+        OR: [
+          { assignedToId: null },
+          { assignedToId: 'staff-1' },
+        ],
+      }),
+      data: expect.objectContaining({
+        status: 'IN_PROGRESS',
+        assignedToId: 'staff-1',
+        firstRespondedAt: expect.any(Date),
+      }),
+    }));
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ action: 'SUPPORT_TICKET_CLAIMED' }),
+    }));
     expect(res.status).toHaveBeenCalledWith(201);
     expect(next).not.toHaveBeenCalled();
   });
@@ -168,6 +182,29 @@ describe('updateTicketStatus', () => {
     await updateTicketStatus(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(400);
+    expect(prisma.supportTicket.update).not.toHaveBeenCalled();
+  });
+
+  test('does not resolve an unassigned ticket without a staff reply and conclusion', async () => {
+    prisma.supportTicket.findUnique.mockResolvedValue({
+      id: 'tk-1',
+      userId: 'cust-1',
+      status: 'OPEN',
+      assignedToId: null,
+    });
+    const { req, res, next } = makeReqRes({
+      user: { id: 'staff-1', role: 'STAFF' },
+      params: { ticketId: 'tk-1' },
+      body: {
+        status: 'RESOLVED',
+        resolutionCode: 'RESOLVED_INFORMATION',
+        resolutionNote: 'Đã cung cấp đầy đủ thông tin cho khách.',
+      },
+    });
+
+    await updateTicketStatus(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
     expect(prisma.supportTicket.update).not.toHaveBeenCalled();
   });
 });

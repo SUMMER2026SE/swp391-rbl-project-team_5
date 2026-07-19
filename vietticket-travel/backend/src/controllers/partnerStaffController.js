@@ -5,11 +5,18 @@ const { createRandomToken, hashToken, addMinutes } = require('../utils/tokenUtil
 const { isValidEmail, validateFullName, isValidPhoneNumber } = require('../utils/validators');
 const { sendStaffInviteEmail, sendAccountStatusEmail } = require('../utils/mailer');
 const { writeAuditLog } = require('../utils/auditLog');
+const { disconnectUserSockets } = require('../realtime/events');
+const { grantRole, hasRole, revokeRole } = require('../utils/userRoles');
 
 // Lời mời đặt mật khẩu có hạn dài hơn link quên mật khẩu thường (48 giờ) để nhân
 // viên có đủ thời gian kích hoạt tài khoản.
 const INVITE_EXPIRY_MINUTES = 60 * 48;
 const ALLOWED_STAFF_STATUSES = ['ACTIVE', 'LOCKED'];
+const configuredStaffLimit = Number.parseInt(process.env.PARTNER_STAFF_LIMIT, 10);
+const MAX_STAFF_PER_PARTNER =
+  Number.isInteger(configuredStaffLimit) && configuredStaffLimit > 0
+    ? configuredStaffLimit
+    : 50;
 
 function httpError(statusCode, message) {
   const error = new Error(message);
@@ -43,6 +50,7 @@ function toStaffResponse(staff) {
 
 const staffResponseInclude = {
   profile: { select: { phoneNumber: true } },
+  roleMemberships: { select: { role: true } },
   staffAssignments: {
     where: { revokedAt: null },
     include: { attraction: { select: { id: true, title: true, city: true } } },
@@ -53,9 +61,12 @@ const staffResponseInclude = {
 async function findOwnedStaff(client, partnerId, staffId, include = staffResponseInclude) {
   const staff = await client.user.findUnique({
     where: { id: staffId },
-    include,
+    include: {
+      ...include,
+      roleMemberships: { select: { role: true } },
+    },
   });
-  if (!staff || staff.role !== 'STAFF' || staff.employerPartnerId !== partnerId) {
+  if (!staff || !hasRole(staff, 'STAFF') || staff.employerPartnerId !== partnerId) {
     return null;
   }
   return staff;
@@ -79,7 +90,10 @@ async function createInviteToken(tx, userId) {
 async function listStaff(req, res, next) {
   try {
     const staff = await prisma.user.findMany({
-      where: { role: 'STAFF', employerPartnerId: req.partner.id },
+      where: {
+        roleMemberships: { some: { role: 'STAFF' } },
+        employerPartnerId: req.partner.id,
+      },
       orderBy: { createdAt: 'asc' },
       include: staffResponseInclude,
     });
@@ -115,6 +129,22 @@ async function createStaff(req, res, next) {
       });
     }
 
+    const staffCount = await prisma.user.count({
+      where: {
+        employerPartnerId: req.partner.id,
+        roleMemberships: { some: { role: 'STAFF' } },
+      },
+    });
+    if (staffCount >= MAX_STAFF_PER_PARTNER) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'PARTNER_STAFF_LIMIT_REACHED',
+          message: `Mỗi đối tác được quản lý tối đa ${MAX_STAFF_PER_PARTNER} nhân viên.`,
+        },
+      });
+    }
+
     let inviteToken = '';
     const staff = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
@@ -129,6 +159,7 @@ async function createStaff(req, res, next) {
           passwordHash: null,
           employerPartnerId: req.partner.id,
           profile: { create: { phoneNumber } },
+          roleMemberships: { create: { role: 'STAFF' } },
         },
         include: staffResponseInclude,
       });
@@ -235,6 +266,8 @@ async function changeStaffStatus(req, res, next) {
           metadata: { partnerId: req.partner.id },
         });
       });
+
+      if (status === 'LOCKED') disconnectUserSockets(staff.id);
 
       try {
         await sendAccountStatusEmail({ to: staff.email, fullName: staff.fullName, status });
@@ -364,8 +397,19 @@ async function removeStaff(req, res, next) {
       });
       await tx.user.update({
         where: { id: staff.id },
-        data: { status: 'LOCKED', tokenVersion: { increment: 1 } },
+        data: {
+          role: 'CUSTOMER',
+          employerPartnerId: null,
+          // Partner-provisioned staff did not accept the customer terms. Keep
+          // that converted identity locked until an explicit account recovery
+          // or consent flow is completed; never silently unlock a prior lock.
+          status: staff.termsAcceptedAt ? staff.status : 'LOCKED',
+          tokenVersion: { increment: 1 },
+        },
       });
+      await revokeRole(tx, staff.id, 'STAFF');
+      await grantRole(tx, staff.id, 'CUSTOMER');
+      await tx.passwordResetToken.deleteMany({ where: { userId: staff.id } });
       await tx.authSession.updateMany({
         where: { userId: staff.id, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -383,6 +427,7 @@ async function removeStaff(req, res, next) {
       return staff.id;
     });
 
+    disconnectUserSockets(result);
     return res.json({ success: true, data: { staffId: result } });
   } catch (error) {
     if (error.statusCode) {

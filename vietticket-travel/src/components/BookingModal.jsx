@@ -6,6 +6,7 @@ import { useAuth } from '../context/useAuth.js'
 import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
 import { markItineraryQueueItemReserved } from '../utils/aiItineraryBookingQueue.js'
 import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
+import { getTicketEligibilityLabel } from '../utils/ticketType.js'
 
 const formatCurrency = (value) => {
   const amount = Number(value)
@@ -22,7 +23,20 @@ const toDateInputValue = (date) => {
   return new Date(date.getTime() - timezoneOffset).toISOString().split('T')[0]
 }
 
-const getSlotId = (slot) => String(slot.timeSlotId || slot.id || '')
+const parseDateInputValue = (value) => {
+  if (!isDateInputValue(value)) return null
+  const [year, month, day] = value.split('-').map(Number)
+  if (![year, month, day].every(Number.isFinite)) return null
+  return new Date(year, month - 1, day)
+}
+
+const isDateInputOnOrAfter = (value, minValue) => {
+  const date = parseDateInputValue(value)
+  const minDate = parseDateInputValue(minValue)
+  return Boolean(date && minDate && date >= minDate)
+}
+
+const getSlotId = (slot) => String(slot.timeSlotId ?? slot.id ?? '')
 
 const getCalendarDate = (dateValue) => {
   if (!isDateInputValue(dateValue)) {
@@ -61,10 +75,11 @@ const clampQuantityToLimit = (quantity, availableTickets) => {
 }
 
 const TICKET_TYPE_META = {
-  ADULT: { label: 'Vé người lớn', ageLabel: 'Áp dụng theo điều kiện của gói vé' },
-  CHILD: { label: 'Vé trẻ em', ageLabel: 'Vui lòng kiểm tra giới hạn độ tuổi trong mô tả' },
-  FAMILY: { label: 'Vé gia đình', ageLabel: 'Một vé tương ứng với một gói gia đình' },
-  GROUP: { label: 'Vé nhóm', ageLabel: 'Một vé tương ứng với một gói nhóm' },
+  ADULT: { label: 'Vé người lớn' },
+  CHILD: { label: 'Vé trẻ em' },
+  STUDENT: { label: 'Vé học sinh / sinh viên' },
+  FAMILY: { label: 'Vé gia đình' },
+  GROUP: { label: 'Vé nhóm' },
 }
 
 export default function BookingModal({
@@ -82,9 +97,14 @@ export default function BookingModal({
   const navigate = useNavigate()
   const location = useLocation()
   const { isAuthenticated, isAuthLoading } = useAuth()
-  const todayStr = toDateInputValue(new Date())
+  const [todayStr] = useState(() => toDateInputValue(new Date()))
+  const [todayDate] = useState(() => {
+    const date = parseDateInputValue(todayStr) || new Date()
+    date.setHours(0, 0, 0, 0)
+    return date
+  })
   const normalizedInitialDate =
-    isDateInputValue(initialDate) && initialDate >= todayStr ? initialDate : todayStr
+    isDateInputOnOrAfter(initialDate, todayStr) ? initialDate : todayStr
   const normalizedInitialQuantity = normalizeInitialQuantity(initialQuantity)
   const [selectedDate, setSelectedDate] = useState(normalizedInitialDate)
   const [selectedTimeSlotId, setSelectedTimeSlotId] = useState('')
@@ -92,7 +112,8 @@ export default function BookingModal({
   const [quantity, setQuantity] = useState(() => normalizedInitialQuantity)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [fetchError, setFetchError] = useState('')
+  const [actionError, setActionError] = useState('')
 
   const [currentMonth, setCurrentMonth] = useState(() => getCalendarDate(normalizedInitialDate).getMonth())
   const [currentYear, setCurrentYear] = useState(() => getCalendarDate(normalizedInitialDate).getFullYear())
@@ -152,14 +173,14 @@ export default function BookingModal({
       cells.push(<div key={`filler-${i}`} className="h-10 opacity-0 pointer-events-none" />)
     }
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const todayTime = todayDate.getTime()
 
     for (let d = 1; d <= daysInMonth; d++) {
       const cellDate = new Date(currentYear, currentMonth, d)
       cellDate.setHours(0, 0, 0, 0)
-      const isPast = cellDate < today
-      const isToday = cellDate.getTime() === today.getTime()
+      const cellTime = cellDate.getTime()
+      const isPast = cellTime < todayTime
+      const isToday = cellTime === todayTime
 
       const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
       const isSelected = selectedDate === dateStr
@@ -206,9 +227,8 @@ export default function BookingModal({
   }
 
   const isPrevMonthDisabled = () => {
-    const realToday = new Date()
-    return currentYear < realToday.getFullYear() ||
-      (currentYear === realToday.getFullYear() && currentMonth <= realToday.getMonth())
+    return currentYear < todayDate.getFullYear() ||
+      (currentYear === todayDate.getFullYear() && currentMonth <= todayDate.getMonth())
   }
 
   useEffect(() => {
@@ -240,7 +260,8 @@ export default function BookingModal({
 
     const fetchAvailability = async () => {
       setIsLoadingSlots(true)
-      setErrorMessage('')
+      setFetchError('')
+      setActionError('')
 
       try {
         const result = await checkAvailability(ticketId, selectedDate, {
@@ -249,6 +270,7 @@ export default function BookingModal({
         if (controller.signal.aborted) return
         const slots = Array.isArray(result.data) ? result.data : []
         setTimeSlots(slots)
+        setFetchError('')
 
         const preferredSlot = initialTimeSlotId
           ? slots.find(
@@ -269,7 +291,7 @@ export default function BookingModal({
         console.error('Lỗi lấy thông tin khung giờ trống:', error)
         setTimeSlots([])
         setSelectedTimeSlotId('')
-        setErrorMessage(error.message)
+        setFetchError(error.message)
       } finally {
         if (!controller.signal.aborted) setIsLoadingSlots(false)
       }
@@ -284,7 +306,7 @@ export default function BookingModal({
 
   const handleSelectSlot = (slot) => {
     setSelectedTimeSlotId(getSlotId(slot))
-    setErrorMessage('')
+    setActionError('')
     setQuantity((current) => clampQuantityToLimit(current, slot?.availableTickets))
   }
 
@@ -292,17 +314,17 @@ export default function BookingModal({
     setQuantity((current) => {
       const next = Math.max(1, current + delta)
       if (delta > 0 && maxQuantity !== null && next > maxQuantity) {
-        setErrorMessage(`Khung giờ này chỉ còn ${maxQuantity} vé.`)
+        setActionError(`Khung giờ này chỉ còn ${maxQuantity} vé.`)
         return current
       }
 
-      setErrorMessage('')
+      setActionError('')
       return next
     })
   }
 
   const handleCheckout = async () => {
-    setErrorMessage('')
+    setActionError('')
 
     if (isAuthLoading) {
       return
@@ -340,22 +362,22 @@ export default function BookingModal({
     }
 
     if (!ticketId) {
-      setErrorMessage('Không tìm thấy loại vé cần đặt. Vui lòng thử lại.')
+      setActionError('Không tìm thấy loại vé cần đặt. Vui lòng thử lại.')
       return
     }
 
     if (!selectedTimeSlotId) {
-      setErrorMessage('Vui lòng chọn khung giờ tham quan trước khi tiếp tục.')
+      setActionError('Vui lòng chọn khung giờ tham quan trước khi tiếp tục.')
       return
     }
 
     if (maxQuantity !== null && quantity > maxQuantity) {
-      setErrorMessage(`Khung giờ này chỉ còn ${maxQuantity} vé. Vui lòng giảm số lượng.`)
+      setActionError(`Khung giờ này chỉ còn ${maxQuantity} vé. Vui lòng giảm số lượng.`)
       return
     }
 
     setIsSubmitting(true)
-    setErrorMessage('')
+    setActionError('')
 
     try {
       const result = await reserveTickets(ticketId, {
@@ -391,9 +413,15 @@ export default function BookingModal({
         navigate('/login', { state: { from: location } })
         return
       }
-      setErrorMessage(error.message)
+      setActionError(error.message)
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const handleOverlayMouseDown = (event) => {
+    if (event.target === event.currentTarget) {
+      onClose()
     }
   }
 
@@ -405,21 +433,22 @@ export default function BookingModal({
     <React.Fragment>
       <div
         className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-[#1a1c1e]/55 p-4 backdrop-blur-sm"
-        onMouseDown={onClose}
+        onMouseDown={handleOverlayMouseDown}
         role="presentation"
       >
         <section
+          aria-labelledby="booking-modal-title"
           aria-modal="true"
-          className="my-6 w-full max-w-[560px] overflow-hidden rounded-[32px] border border-white/30 bg-white/90 shadow-[0_24px_70px_rgba(0,96,104,0.22)] backdrop-blur-xl"
-          onMouseDown={(event) => event.stopPropagation()}
+          className="my-6 flex max-h-[calc(100dvh-2rem)] w-full max-w-[560px] flex-col overflow-hidden rounded-[32px] border border-white/30 bg-white/90 shadow-[0_24px_70px_rgba(0,96,104,0.22)] backdrop-blur-xl"
+          onClick={(event) => event.stopPropagation()}
           role="dialog"
         >
-          <header className="flex items-center justify-between border-b border-[#bdc9ca]/40 px-8 py-6">
+          <header className="flex shrink-0 items-center justify-between border-b border-[#bdc9ca]/40 px-8 py-6">
             <div>
               <p className="text-xs font-bold uppercase tracking-normal text-[#006068]">
                 {ticketProduct?.name || 'Vé tham quan'}
               </p>
-              <h1 className="mt-1 text-2xl font-bold text-[#1a1c1e]">Đặt vé tham quan</h1>
+              <h1 id="booking-modal-title" className="mt-1 text-2xl font-bold text-[#1a1c1e]">Đặt vé tham quan</h1>
             </div>
             <button
               aria-label="Đóng modal đặt vé"
@@ -433,7 +462,7 @@ export default function BookingModal({
             </button>
           </header>
 
-          <div className="max-h-[70vh] overflow-y-auto px-8 py-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
             <section className="mb-8">
               <div className="mb-4 flex items-center gap-2">
                 <span className="material-symbols-outlined text-[#006068]" aria-hidden="true">
@@ -502,13 +531,13 @@ export default function BookingModal({
               </div>
 
               {isLoadingSlots ? (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 max-h-48 overflow-y-auto pr-1">
                   {Array.from({ length: 4 }).map((_, index) => (
                     <div className="h-20 animate-pulse rounded-2xl bg-[#e2e2e5]" key={index} />
                   ))}
                 </div>
               ) : timeSlots.length > 0 ? (
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 max-h-48 overflow-y-auto pr-1">
                   {timeSlots.map((slot) => {
                     const slotId = getSlotId(slot)
                     const disabled = isSlotUnavailable(slot)
@@ -540,7 +569,7 @@ export default function BookingModal({
                 </div>
               ) : (
                 <div className="rounded-2xl border border-dashed border-[#bdc9ca] bg-[#f3f3f6] p-5 text-sm font-semibold text-[#3e494a]">
-                  {errorMessage || 'Chưa có khung giờ khả dụng cho ngày này.'}
+                  {fetchError || 'Chưa có khung giờ khả dụng cho ngày này.'}
                 </div>
               )}
             </section>
@@ -556,7 +585,7 @@ export default function BookingModal({
               </div>
 
               <TicketCountRow
-                ageLabel={ticketTypeMeta.ageLabel}
+                ageLabel={getTicketEligibilityLabel(ticketProduct)}
                 count={quantity}
                 disableIncrement={maxQuantity !== null && quantity >= maxQuantity}
                 label={ticketTypeMeta.label}
@@ -572,7 +601,7 @@ export default function BookingModal({
             </section>
           </div>
 
-          <footer className="border-t border-[#bdc9ca]/40 bg-white/70 p-8">
+          <footer className="shrink-0 border-t border-[#bdc9ca]/40 bg-white/70 p-8">
             {/* Bảng giá chi tiết để khách biết mình trả tiền cho gì */}
             <div className="mb-4 space-y-1.5 text-sm">
               <div className="flex justify-between text-[#3e494a]">
@@ -607,10 +636,10 @@ export default function BookingModal({
               {confirmationPolicyText}
             </div>
 
-            {errorMessage && (
+            {actionError && (
               <div className="mb-4 flex items-start gap-2 rounded-2xl border border-[#ba1a1a]/20 bg-[#ffedea] px-4 py-3 text-sm font-semibold text-[#ba1a1a]">
                 <span className="material-symbols-outlined mt-0.5 shrink-0 text-[18px]" aria-hidden="true">error</span>
-                {errorMessage}
+                {actionError}
               </div>
             )}
 
@@ -620,10 +649,17 @@ export default function BookingModal({
               onClick={handleCheckout}
               type="button"
             >
+              {isSubmitting ? (
+                <span className="material-symbols-outlined animate-spin text-[22px]" aria-hidden="true">
+                  progress_activity
+                </span>
+              ) : null}
               {checkoutButtonText}
-              <span className="material-symbols-outlined transition-transform group-hover:translate-x-1" aria-hidden="true">
-                arrow_forward
-              </span>
+              {!isSubmitting && (
+                <span className="material-symbols-outlined transition-transform group-hover:translate-x-1" aria-hidden="true">
+                  arrow_forward
+                </span>
+              )}
             </button>
           </footer>
         </section>

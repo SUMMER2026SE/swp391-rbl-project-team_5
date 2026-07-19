@@ -3,12 +3,11 @@ train.py
 ------------------------------------------------------------
 Pipeline huấn luyện model dự báo doanh thu.
 
-Chạy độc lập (bootstrap với dữ liệu synthetic):
-    python -m app.train
+Train bằng dữ liệu thật đã export từ Node backend:
+    python -m app.train --data data/booking_history.csv
 
-Hoặc gọi train_and_save(...) từ FastAPI endpoint POST /train, hoặc từ
-Node backend khi đã có đủ dữ liệu Booking thật (truyền vào DataFrame
-attractions + revenue theo đúng format của generate_synthetic_dataset).
+Chỉ khi bootstrap môi trường demo chưa có lịch sử, phải bật cờ tường minh:
+    python -m app.train --bootstrap-synthetic
 
 Time-based split: KHÔNG random-split, vì đây là bài toán time series -
 random split sẽ để lộ tương lai vào tập train (leakage), làm MAPE trên
@@ -18,7 +17,7 @@ loạt cho mọi attraction.
 """
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple
 
 import numpy as np
@@ -109,11 +108,71 @@ def time_based_split(df: pd.DataFrame, train_ratio: float = TIME_SPLIT_TRAIN_RAT
     return train_df, test_df
 
 
-def mape(y_true: np.ndarray, y_pred: np.ndarray, epsilon: float = 1.0) -> float:
-    """MAPE với epsilon nhỏ để tránh chia cho 0 ở các ngày doanh thu = 0
-    (điểm tham quan mới/ít khách) - chuẩn thực hành cho revenue forecasting."""
-    denom = np.clip(np.abs(y_true), epsilon, None)
-    return float(np.mean(np.abs((y_true - y_pred) / denom)) * 100)
+def mape_on_observed_days(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """MAPE chỉ trên ngày có doanh thu; ngày 0 VND được đánh giá bằng WAPE.
+
+    Dùng epsilon=1 VND cho ngày không bán vé sẽ thổi MAPE lên vô hạn và tạo
+    một metric đẹp/xấu không có ý nghĩa nghiệp vụ.
+    """
+    observed = np.abs(y_true) > 0
+    if not np.any(observed):
+        return 0.0
+    return float(np.mean(np.abs(
+        (y_true[observed] - y_pred[observed]) / y_true[observed]
+    )) * 100)
+
+
+def wape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    denominator = float(np.sum(np.abs(y_true)))
+    if denominator <= 0:
+        return 0.0
+    return float(np.sum(np.abs(y_true - y_pred)) / denominator * 100)
+
+
+def load_training_csv(path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    required = {
+        "attraction_id",
+        "date",
+        "tier",
+        "city",
+        "capacity",
+        "avg_ticket_price",
+        "rating",
+        "num_reviews",
+        "published_days_ago",
+        "revenue",
+        "tickets",
+    }
+    raw = pd.read_csv(path)
+    missing = sorted(required - set(raw.columns))
+    if missing:
+        raise ValueError(f"Dataset thiếu cột bắt buộc: {', '.join(missing)}")
+
+    raw = raw[list(required)].copy()
+    raw["date"] = pd.to_datetime(raw["date"], errors="raise").dt.date
+    raw = raw.sort_values(["attraction_id", "date"]).reset_index(drop=True)
+
+    attraction_columns = [
+        "attraction_id",
+        "tier",
+        "city",
+        "capacity",
+        "avg_ticket_price",
+        "rating",
+        "num_reviews",
+        "published_days_ago",
+    ]
+    attractions = raw[attraction_columns].drop_duplicates("attraction_id", keep="first")
+    revenue = raw[["attraction_id", "date", "revenue", "tickets"]].copy()
+
+    if attractions["attraction_id"].nunique() < 3:
+        raise ValueError("Cần dữ liệu của ít nhất 3 điểm tham quan để train model dùng chung.")
+    if revenue["date"].nunique() < 90:
+        raise ValueError("Cần ít nhất 90 ngày lịch sử thực trước khi retrain.")
+    if (revenue["revenue"] < 0).any() or (revenue["tickets"] < 0).any():
+        raise ValueError("Doanh thu và số vé trong dataset không được âm.")
+
+    return attractions, revenue
 
 
 def train_and_save(
@@ -123,9 +182,10 @@ def train_and_save(
     num_days: int = 365,
     attractions: pd.DataFrame = None,
     revenue: pd.DataFrame = None,
+    training_source: str = "real_booking_history",
 ) -> dict:
     if attractions is None or revenue is None:
-        attractions, revenue = generate_synthetic_dataset(num_attractions=num_attractions, num_days=num_days)
+        raise ValueError("Phải truyền dữ liệu training thực hoặc bật bootstrap synthetic ở CLI.")
 
     merged, city_freq_map = build_training_frame(attractions, revenue)
     train_df, test_df = time_based_split(merged)
@@ -143,30 +203,34 @@ def train_and_save(
     residual_std = float(np.std(y_test_log - pred_log_test)) if len(y_test_log) else 0.3
     pred_revenue_test = np.expm1(pred_log_test)
 
-    test_mape = mape(y_test_actual, pred_revenue_test)
+    test_mape = mape_on_observed_days(y_test_actual, pred_revenue_test)
+    test_wape = wape(y_test_actual, pred_revenue_test)
     test_mae = float(np.mean(np.abs(y_test_actual - pred_revenue_test)))
 
     model.city_freq_map = city_freq_map
     model.residual_std = max(residual_std, 0.05)
-    model.trained_at = datetime.utcnow()
+    model.trained_at = datetime.now(timezone.utc)
     model.metrics = {
-        "mape": test_mape,
+        "mape_observed_days": test_mape,
+        "wape": test_wape,
         "mae": test_mae,
         "num_train_samples": int(len(train_df)),
         "num_test_samples": int(len(test_df)),
+        "training_source": training_source,
     }
     model.save(model_dir)
+    train_percent = round(TIME_SPLIT_TRAIN_RATIO * 100)
 
     return {
         "model_version": model_version,
         "trained_at": model.trained_at,
         "num_samples": int(len(merged)),
         "mape": test_mape,
+        "wape": test_wape,
         "mae": test_mae,
         "notes": (
-            f"Time-based split ({int(TIME_SPLIT_TRAIN_RATIO*100)}/"
-            f"{int((1-TIME_SPLIT_TRAIN_RATIO)*100)}), "
-            f"train={len(train_df)} test={len(test_df)} dòng."
+            f"Time-based split ({train_percent}/{100 - train_percent}), "
+            f"train={len(train_df)} test={len(test_df)} rows."
         ),
     }
 
@@ -175,21 +239,40 @@ def main():
     parser = argparse.ArgumentParser(description="Train ensemble revenue forecast model")
     parser.add_argument("--model-dir", default="./models")
     parser.add_argument("--model-version", default="rf_xgb_ensemble_v1")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--data", help="CSV lịch sử thực do backend export")
+    source.add_argument(
+        "--bootstrap-synthetic",
+        action="store_true",
+        help="Chỉ dùng để bootstrap demo khi chưa có dữ liệu thật",
+    )
     parser.add_argument("--num-attractions", type=int, default=200)
     parser.add_argument("--num-days", type=int, default=365)
     args = parser.parse_args()
 
+    if args.data:
+        attractions, revenue = load_training_csv(args.data)
+        training_source = "real_booking_history"
+    else:
+        attractions, revenue = generate_synthetic_dataset(
+            num_attractions=args.num_attractions,
+            num_days=args.num_days,
+        )
+        training_source = "synthetic_bootstrap"
+
     result = train_and_save(
         model_dir=args.model_dir,
         model_version=args.model_version,
-        num_attractions=args.num_attractions,
-        num_days=args.num_days,
+        attractions=attractions,
+        revenue=revenue,
+        training_source=training_source,
     )
-    print(f"Đã train xong model {result['model_version']}")
-    print(f"  MAPE: {result['mape']:.2f}%")
+    print(f"Trained model {result['model_version']}")
+    print(f"  MAPE (observed days): {result['mape']:.2f}%")
+    print(f"  WAPE (all days):      {result['wape']:.2f}%")
     print(f"  MAE:  {result['mae']:,.0f} VND")
     print(f"  {result['notes']}")
-    print(f"  Model đã lưu vào: {args.model_dir}")
+    print(f"  Model saved to: {args.model_dir}")
 
 
 if __name__ == "__main__":

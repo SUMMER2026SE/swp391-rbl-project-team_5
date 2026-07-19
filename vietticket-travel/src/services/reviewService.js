@@ -36,10 +36,10 @@ export const replyReview = async (reviewId, replyComment) => {
   return result.data
 }
 
-export const moderateReview = async (reviewId, isHidden) => {
+export const moderateReview = async (reviewId, isHidden, reason) => {
   const result = await apiRequest(`/reviews/${reviewId}/moderate`, {
     method: 'PATCH',
-    body: { isHidden },
+    body: { isHidden, reason },
   })
   return result.data
 }
@@ -58,11 +58,31 @@ export const getPartnerReviewStats = async () => {
   return result.data || { averageRating: 0, totalReviews: 0, unrepliedReviews: 0 }
 }
 
-export const getAdminReviews = async () => {
-  const result = await apiRequest('/admin/reviews', {
+export const getAdminReviews = async ({ page = 1, limit = 10, search, rating } = {}) => {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  })
+  if (search) params.set('search', String(search))
+  if (rating && rating !== 'all') params.set('rating', String(rating))
+
+  const result = await apiRequest(`/reviews/moderation?${params.toString()}`, {
     method: 'GET',
   })
-  return result.data || []
+  return {
+    data: result.data || [],
+    pagination: result.pagination || {
+      total: (result.data || []).length,
+      page,
+      limit,
+      totalPages: 1,
+    },
+    stats: result.stats || {
+      total: (result.data || []).length,
+      visible: (result.data || []).filter((review) => !review.isHidden).length,
+      hidden: (result.data || []).filter((review) => review.isHidden).length,
+    },
+  }
 }
 
 const reviewService = {

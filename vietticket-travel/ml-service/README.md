@@ -1,59 +1,109 @@
-# ml-service — VietTicket Revenue Forecast (v2)
+# VietTicket AI Revenue Forecast
 
-## Chạy nhanh
+FastAPI service dự báo **doanh thu vé thuần theo ngày sử dụng dịch vụ** cho
+từng điểm tham quan. Node backend là nơi tổng hợp dữ liệu nghiệp vụ; ML service
+không truy cập trực tiếp PostgreSQL.
+
+## Chạy local
 
 ```bash
 cd ml-service
-python -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
+python -m venv .venv
+
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+
 pip install -r requirements.txt
-cp .env.example .env
-
-# 1. Sinh dữ liệu synthetic đa dạng hơn (60 attractions x 540 ngày mặc định)
-python data_gen.py --attractions 60 --days 540 --out data/booking_history.csv
-
-# 2. Train (time-based split, regularized, có cảnh báo feature dominance)
-python train.py --data data/booking_history.csv --version v1
-
-# 3. Chạy service
-uvicorn app.main:app --reload --port 8001
-curl http://localhost:8001/health
+Copy-Item .env.example .env
+uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Khi có dữ liệu booking thật
+Kiểm tra readiness:
 
 ```bash
-node backend/scripts/export_booking_history.js
-cd ml-service
-python train.py --data data/booking_history.csv --version v$(date +%Y%m%d)
+curl http://127.0.0.1:8000/health
 ```
 
-Nếu dữ liệu thật còn ít (script sẽ tự cảnh báo nếu < 500 dòng), có thể nối
-CSV thật với một phần synthetic để tránh model overfit vào vài attraction có
-nhiều đơn nhất — nhưng đây là giải pháp tạm, nên ưu tiên đợi đủ dữ liệu thật.
+Backend Node cần cấu hình `ML_SERVICE_URL=http://localhost:8000`. Nếu đặt
+`ML_SERVICE_API_KEY`, giá trị phải giống nhau ở hai service.
 
-## Những gì đã thay đổi so với bản Colab cũ (xử lý phản hồi "bias")
+## Định nghĩa dữ liệu
 
-| Vấn đề bản cũ | Xử lý ở bản v2 |
-|---|---|
-| `min_ticket_price` chiếm ~60% importance (XGBoost) | Giá ảnh hưởng demand qua hệ số co giãn (elasticity) ngẫu nhiên theo attraction, không tỉ lệ thuận trực tiếp với revenue |
-| `default_capacity` + `min_ticket_price` chiếm > 35% (RF) | Capacity chỉ là rào cản mềm (soft cap), thêm biến "popularity" độc lập |
-| Random split → có thể leak thông tin tương lai | Time-based split: 15% ngày cuối mỗi attraction làm validation |
-| `min_samples_leaf=1` (RF) → overfit | Ép `min_samples_leaf >= 3`, giới hạn `max_depth` |
-| Không cảnh báo khi lệch | `train.py` tự in cảnh báo nếu 1 feature > 40% importance |
+Backend chỉ đưa vào lịch sử:
+
+- booking `COMPLETED` hoặc `NO_SHOW`;
+- gắn theo `snapshotVisitDate` (fallback sang ngày reservation);
+- payment `SUCCESS`, bỏ payment trùng;
+- trừ refund `SUCCESS`, không trừ lần nữa khoản hoàn payment trùng;
+- zero-fill ngày không có doanh thu và bỏ ngày hiện tại chưa chốt.
+
+Model không được gọi nếu một điểm chưa có ít nhất 14 ngày phát sinh doanh thu
+và 30 booking hoàn tất. Khi đó backend hiển thị rõ `HISTORICAL_BASELINE`, không
+gắn nhãn kết quả AI.
+
+## Retrain bằng dữ liệu thật
+
+Training không được mở thành endpoint HTTP vì tác vụ nặng, dễ bị lạm dụng và có
+thể thay model giữa lúc đang phục vụ request. Quy trình vận hành:
+
+```bash
+# tại thư mục vietticket-travel
+node backend/scripts/export_booking_history.js
+
+cd ml-service
+python -m app.train \
+  --data data/booking_history.csv \
+  --model-version real-v20260719
+```
+
+Sau khi kiểm tra metric trên time-based holdout, restart ML service để nạp model
+mới. CLI từ chối dataset có dưới 3 điểm tham quan hoặc dưới 90 ngày lịch sử.
+
+Chỉ để bootstrap môi trường demo chưa có booking thật:
+
+```bash
+python -m app.train \
+  --bootstrap-synthetic \
+  --num-attractions 200 \
+  --num-days 365 \
+  --model-version synthetic-bootstrap-v1
+```
+
+Synthetic data không phải bằng chứng về độ chính xác thực tế. Metadata của model
+ghi rõ `training_source`; cần thay bằng dữ liệu thật khi lịch sử đủ dài.
+Backend chỉ gắn nhãn `AI_ENSEMBLE` khi `training_source=real_booking_history`;
+model bootstrap tổng hợp sẽ tự động chuyển sang baseline và hiển thị cảnh báo.
+
+## Thiết kế model
+
+- Ensemble `RandomForestRegressor` + `XGBRegressor`.
+- Target `log1p(revenue)` để giảm ảnh hưởng của ngày doanh thu cực lớn.
+- Feature lịch: thứ, tháng, cuối tuần, ngày lễ Việt Nam và giai đoạn Tết.
+- Feature động: lag 1/7/14 ngày, rolling mean 7/28 ngày, rolling standard
+  deviation 7 ngày.
+- Chia train/validation theo thời gian, không random split.
+- Khoảng dự báo nới rộng theo horizon.
+- Backend chặn kết quả âm và không cho doanh thu/số vé dự kiến vượt sức chứa.
+
+## API nội bộ
+
+- `GET /health`
+- `POST /forecast` — yêu cầu header `x-ml-api-key` nếu đã cấu hình key.
 
 ## Cấu trúc
 
-```
+```text
 ml-service/
-  data_gen.py          # sinh synthetic data (v2, chống bias)
-  train.py              # train + regularize + time-based split + cảnh báo dominance
   app/
-    main.py             # FastAPI: GET /health, POST /predict
-    schemas.py          # Pydantic request/response
-    features.py         # feature engineering khớp train.py
-    model.py            # load model, recursive ensemble predict + confidence interval
-  models/               # rf_model.pkl, xgb_model.pkl, metadata.json (sinh ra sau khi train)
+    main.py
+    schemas.py
+    features.py
+    holidays.py
+    model.py
+    train.py
+    synthetic_data.py
+  models/
+    ensemble_model.joblib
+    metadata.json
   requirements.txt
-  .env.example
 ```

@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
-import { listRefundRequests, processRefundRequest } from '../../services/staffApi.js'
+import {
+  listRefundRequests,
+  processRefundRequest,
+  reconcileRefundRequest,
+} from '../../services/staffApi.js'
 
 const STATUS_META = {
   PENDING: {
     label: 'Chờ duyệt',
     badge: 'bg-secondary-fixed text-on-secondary-fixed',
+  },
+  PROCESSING: {
+    label: 'Đang xử lý',
+    badge: 'bg-blue-100 text-blue-800',
   },
   APPROVED: {
     label: 'Đã hoàn',
@@ -16,6 +24,13 @@ const STATUS_META = {
     label: 'Đã từ chối',
     badge: 'bg-error-container text-on-error-container',
   },
+}
+
+const REQUEST_TYPE_LABEL = {
+  CUSTOMER_CANCELLATION: 'Khách yêu cầu hủy',
+  PARTNER_CANCELLATION: 'Đối tác hủy',
+  SYSTEM_CANCELLATION: 'Hệ thống hủy',
+  DUPLICATE_PAYMENT: 'Thanh toán trùng',
 }
 
 function formatMoney(value) {
@@ -29,6 +44,15 @@ function formatDate(value) {
     month: '2-digit',
     year: 'numeric',
     timeZone: 'UTC',
+  }).format(new Date(value))
+}
+
+function formatDateTime(value) {
+  if (!value) return 'Chưa cập nhật'
+  return new Intl.DateTimeFormat('vi-VN', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+    timeZone: 'Asia/Ho_Chi_Minh',
   }).format(new Date(value))
 }
 
@@ -64,7 +88,7 @@ function StatCard({ icon, iconClass, label, value, badge }) {
   )
 }
 
-function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) {
+function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, onReconcile }) {
   if (!selected) {
     return (
       <aside className="hidden w-[400px] shrink-0 border-l border-outline-variant bg-surface-container-lowest xl:flex xl:flex-col">
@@ -84,11 +108,17 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) 
   const booking = selected.booking || {}
   const reservation = booking.reservation || {}
   const ticketProduct = reservation.ticketProduct || {}
-  const totalAmount = Number(booking.totalAmount || 0)
+  const originalAmount = Number(selected.originalAmount ?? booking.totalAmount ?? 0)
   const refundAmount = Number(selected.amount || 0)
-  const feeAmount = Math.max(0, totalAmount - refundAmount)
-  const feeRate = totalAmount > 0 ? Math.round((feeAmount / totalAmount) * 100) : 0
+  const feeAmount = Number(
+    selected.feeAmount ?? Math.max(0, originalAmount - refundAmount),
+  )
+  const feeRate = originalAmount > 0
+    ? Math.round((feeAmount / originalAmount) * 100)
+    : 0
   const isPending = selected.status === 'PENDING'
+  const isReconciling = selected.status === 'PROCESSING'
+  const latestTransaction = selected.refundTransactions?.[0]
 
   return (
     <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-[400px] flex-col border-l border-outline-variant bg-surface-container-lowest shadow-2xl xl:static xl:w-[400px] xl:shrink-0">
@@ -143,6 +173,13 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) 
             </p>
           </div>
           <div className="col-span-2">
+            <p className="mb-1 text-xs uppercase text-on-surface-variant">Loại yêu cầu</p>
+            <p className="text-sm font-semibold text-on-surface">
+              {REQUEST_TYPE_LABEL[selected.type] || selected.type || 'Yêu cầu hoàn tiền'}
+              {selected.mandatory ? ' · Bắt buộc hoàn' : ''}
+            </p>
+          </div>
+          <div className="col-span-2">
             <p className="mb-1 text-xs uppercase text-on-surface-variant">Lý do hoàn trả</p>
             <div className="rounded-lg border border-secondary-container/30 bg-secondary-container/10 p-3">
               <p className="text-sm italic text-on-surface-variant">
@@ -165,7 +202,7 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) 
           <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
             <div className="flex items-center justify-between gap-4">
               <span className="text-sm text-on-surface-variant">Giá trị vé gốc</span>
-              <span className="text-sm text-on-surface">{formatMoney(totalAmount)}</span>
+              <span className="text-sm text-on-surface">{formatMoney(originalAmount)}</span>
             </div>
             <div className="flex items-center justify-between gap-4">
               <span className="text-sm text-on-surface-variant">
@@ -186,7 +223,7 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) 
             <span className="material-symbols-outlined text-primary">schedule</span>
             <div>
               <p className="text-sm font-semibold text-on-surface">
-                Gửi lúc {formatDate(selected.createdAt)}
+                Gửi lúc {formatDateTime(selected.createdAt)}
               </p>
               <p className="text-xs text-on-surface-variant">
                 Mã yêu cầu: {String(selected.id).slice(0, 8).toUpperCase()}
@@ -194,12 +231,24 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) 
             </div>
           </div>
         </div>
+
+        {latestTransaction && (
+          <div className="space-y-2">
+            <p className="text-xs uppercase text-on-surface-variant">Đối soát thanh toán</p>
+            <div className="rounded-lg border border-outline-variant bg-surface-container-low p-3 text-sm text-on-surface">
+              <p className="font-semibold">{latestTransaction.status}</p>
+              <p className="mt-1 text-xs text-on-surface-variant">
+                VNPay: {latestTransaction.gatewayResponseCode || 'N/A'} / {latestTransaction.gatewayTransactionStatus || 'N/A'}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="border-t border-outline-variant bg-surface-container p-6 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
         {isPending ? (
           <>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid gap-3 ${selected.mandatory ? 'grid-cols-1' : 'grid-cols-2'}`}>
               <button
                 type="button"
                 className="flex items-center justify-center gap-2 rounded-xl border-0 bg-primary px-4 py-3 text-sm font-semibold text-on-primary transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
@@ -209,20 +258,36 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject }) 
                 <span className="material-symbols-outlined text-[20px]">check_circle</span>
                 Duyệt hoàn tiền
               </button>
-              <button
-                type="button"
-                className="flex items-center justify-center gap-2 rounded-xl border border-error bg-white px-4 py-3 text-sm font-semibold text-error hover:bg-error/5 disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={onReject}
-                disabled={isProcessing}
-              >
-                <span className="material-symbols-outlined text-[20px]">cancel</span>
-                Từ chối
-              </button>
+              {!selected.mandatory && (
+                <button
+                  type="button"
+                  className="flex items-center justify-center gap-2 rounded-xl border border-error bg-white px-4 py-3 text-sm font-semibold text-error hover:bg-error/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={onReject}
+                  disabled={isProcessing}
+                >
+                  <span className="material-symbols-outlined text-[20px]">cancel</span>
+                  Từ chối
+                </button>
+              )}
             </div>
             <p className="mt-4 text-center text-[11px] text-on-surface-variant">
-              Phê duyệt sẽ hoàn kho vé và vô hiệu hóa toàn bộ mã QR của đơn.
+              {selected.type === 'DUPLICATE_PAYMENT'
+                ? 'Khoản hoàn này chỉ xử lý giao dịch thu trùng, không hủy booking hoặc vé hợp lệ.'
+                : selected.type === 'CUSTOMER_CANCELLATION'
+                  ? 'Booking và mã QR chỉ bị hủy sau khi VNPay xác nhận hoàn tiền thành công.'
+                  : 'Booking đã được hủy theo nghiệp vụ; hệ thống đang hoàn lại toàn bộ khoản đã thu.'}
             </p>
           </>
+        ) : isReconciling ? (
+          <button
+            type="button"
+            className="flex w-full items-center justify-center gap-2 rounded-xl border-0 bg-primary px-4 py-3 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onReconcile}
+            disabled={isProcessing}
+          >
+            <span className="material-symbols-outlined text-[20px]">sync</span>
+            {isProcessing ? 'Đang đối soát...' : 'Đối soát với VNPay'}
+          </button>
         ) : (
           <p className="text-center text-sm font-semibold text-on-surface-variant">
             Yêu cầu này đã được xử lý.
@@ -248,7 +313,7 @@ export default function RefundManagementPage() {
   const [total, setTotal] = useState(0)
   // Thống kê theo trạng thái do server tính trên TOÀN BỘ dữ liệu -> không lệch
   // theo trang/bộ lọc hiện tại.
-  const [stats, setStats] = useState({ total: 0, pending: 0, approved: 0, rejected: 0 })
+  const [stats, setStats] = useState({ total: 0, pending: 0, processing: 0, approved: 0, rejected: 0 })
   const [rejectModal, setRejectModal] = useState({ open: false, notes: '' })
   const [approveModal, setApproveModal] = useState({ open: false, notes: '' })
 
@@ -322,9 +387,28 @@ export default function RefundManagementPage() {
     if (!selected) return
     setIsProcessing(true)
     try {
-      await processRefundRequest(selected.id, 'APPROVED', approveModal.notes.trim())
-      toast.success('Đã duyệt yêu cầu hoàn tiền.')
+      const response = await processRefundRequest(selected.id, 'APPROVED', approveModal.notes.trim())
+      toast.success(
+        response.data?.requiresReconciliation
+          ? 'Khoản hoàn đã chuyển sang đối soát VNPay.'
+          : 'Đã duyệt yêu cầu hoàn tiền.',
+      )
       setApproveModal({ open: false, notes: '' })
+      setSelected(null)
+      await fetchRequests()
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  async function handleReconcile() {
+    if (!selected) return
+    setIsProcessing(true)
+    try {
+      const response = await reconcileRefundRequest(selected.id)
+      toast.success(response.message || 'Đã cập nhật kết quả đối soát.')
       setSelected(null)
       await fetchRequests()
     } catch (error) {
@@ -372,7 +456,13 @@ export default function RefundManagementPage() {
               </p>
             </div>
 
-            <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+            <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-5">
+              <StatCard
+                icon="sync"
+                iconClass="bg-blue-100 text-blue-800"
+                label="Đang xử lý"
+                value={stats.processing}
+              />
               <StatCard
                 icon="analytics"
                 iconClass="bg-primary-fixed-dim/20 text-primary"
@@ -442,6 +532,7 @@ export default function RefundManagementPage() {
                   >
                     <option value="">Tất cả trạng thái</option>
                     <option value="PENDING">Chờ duyệt</option>
+                    <option value="PROCESSING">Đang xử lý</option>
                     <option value="APPROVED">Đã hoàn</option>
                     <option value="REJECTED">Đã từ chối</option>
                   </select>
@@ -564,6 +655,7 @@ export default function RefundManagementPage() {
             onClose={() => setSelected(null)}
             onApprove={() => setApproveModal({ open: true, notes: '' })}
             onReject={() => setRejectModal({ open: true, notes: '' })}
+            onReconcile={() => void handleReconcile()}
           />
         </div>
       </div>

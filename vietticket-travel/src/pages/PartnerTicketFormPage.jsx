@@ -10,16 +10,17 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
 const TICKET_TYPES = [
-  { value: 'ADULT',  label: 'Người lớn',  icon: 'person',        desc: 'Khách từ 12 tuổi trở lên' },
-  { value: 'CHILD',  label: 'Trẻ em',     icon: 'child_care',    desc: 'Trẻ em từ 3 – 11 tuổi' },
-  { value: 'FAMILY', label: 'Gia đình',   icon: 'family_restroom', desc: '2 người lớn + 2 trẻ em' },
-  { value: 'GROUP',  label: 'Nhóm',       icon: 'groups',        desc: 'Từ 10 người trở lên' },
+  { value: 'ADULT',  label: 'Người lớn',  icon: 'person',        desc: 'Theo điều kiện của điểm' },
+  { value: 'CHILD',  label: 'Trẻ em',     icon: 'child_care',    desc: 'Cần khai báo tuổi/chiều cao' },
+  { value: 'STUDENT', label: 'Học sinh / sinh viên', icon: 'school', desc: 'Yêu cầu xuất trình giấy tờ hợp lệ' },
+  { value: 'FAMILY', label: 'Gia đình',   icon: 'family_restroom', desc: 'Nêu rõ phạm vi gói trong mô tả' },
+  { value: 'GROUP',  label: 'Nhóm',       icon: 'groups',        desc: 'Nêu rõ quy mô nhóm trong mô tả' },
 ]
 
 const REFUND_POLICIES = [
   { value: 'NONE',    label: 'Không hoàn tiền',         desc: 'Không hỗ trợ hoàn tiền trong bất kỳ trường hợp nào.', color: 'border-[#ba1a1a] bg-[#ffdad6]/30 text-[#ba1a1a]' },
-  { value: 'PARTIAL', label: 'Hoàn tiền một phần',       desc: 'Có hỗ trợ hoàn tiền một phần theo chính sách của đối tác.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
-  { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% giá vé nếu hủy trước ngày tham quan.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
+  { value: 'PARTIAL', label: 'Hoàn tiền một phần',       desc: 'Khách nhận lại tiền sau khi trừ phí hủy đã công bố.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
+  { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% nếu khách hủy trước thời hạn đã công bố.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
 ]
 
 function PartnerTicketFormPage() {
@@ -34,7 +35,10 @@ function PartnerTicketFormPage() {
 
   const [form, setForm] = useState({
     name: '', type: 'ADULT', originalPrice: '', sellingPrice: '',
-    description: '', refundPolicy: 'PARTIAL', status: 'active',
+    description: '', refundPolicy: 'PARTIAL', refundFeePercent: '10',
+    refundCutoffHours: '24', status: 'active',
+    minAgeYears: '', maxAgeYears: '', minHeightCm: '', maxHeightCm: '',
+    requiresAdult: false,
   })
 
   useEffect(() => {
@@ -59,7 +63,14 @@ function PartnerTicketFormPage() {
           sellingPrice: t.sellingPrice ?? '',
           description: t.description ?? '',
           refundPolicy: t.refundPolicy ?? 'PARTIAL',
+          refundFeePercent: String(Math.round(Number(t.refundFeeRate ?? 0.1) * 100)),
+          refundCutoffHours: String(t.refundCutoffHours ?? 24),
           status: t.status ?? 'active',
+          minAgeYears: t.minAgeYears ?? '',
+          maxAgeYears: t.maxAgeYears ?? '',
+          minHeightCm: t.minHeightCm ?? '',
+          maxHeightCm: t.maxHeightCm ?? '',
+          requiresAdult: Boolean(t.requiresAdult),
         })
       } catch (err) {
         if (!active) return
@@ -84,6 +95,49 @@ function PartnerTicketFormPage() {
       : Number(form.sellingPrice) > Number(form.originalPrice)
         ? 'Giá bán không được vượt quá giá gốc.'
         : '',
+    refundFeePercent: form.refundPolicy === 'PARTIAL'
+      && (!Number.isInteger(Number(form.refundFeePercent))
+        || Number(form.refundFeePercent) < 1
+        || Number(form.refundFeePercent) > 99)
+      ? 'Phí hủy phải là số nguyên từ 1% đến 99%.'
+      : '',
+    refundCutoffHours: form.refundPolicy !== 'NONE'
+      && (!Number.isInteger(Number(form.refundCutoffHours))
+        || Number(form.refundCutoffHours) < 0
+        || Number(form.refundCutoffHours) > 720)
+      ? 'Thời hạn hủy phải là số giờ nguyên từ 0 đến 720.'
+      : '',
+    eligibility: (() => {
+      const fields = [
+        ['minAgeYears', 0, 120],
+        ['maxAgeYears', 0, 120],
+        ['minHeightCm', 30, 250],
+        ['maxHeightCm', 30, 250],
+      ]
+      for (const [field, min, max] of fields) {
+        if (form[field] === '') continue
+        const value = Number(form[field])
+        if (!Number.isInteger(value) || value < min || value > max) {
+          return `Điều kiện ${field.includes('Age') ? 'tuổi' : 'chiều cao'} không hợp lệ.`
+        }
+      }
+      if (
+        form.minAgeYears !== ''
+        && form.maxAgeYears !== ''
+        && Number(form.minAgeYears) > Number(form.maxAgeYears)
+      ) return 'Tuổi tối thiểu không được lớn hơn tuổi tối đa.'
+      if (
+        form.minHeightCm !== ''
+        && form.maxHeightCm !== ''
+        && Number(form.minHeightCm) > Number(form.maxHeightCm)
+      ) return 'Chiều cao tối thiểu không được lớn hơn chiều cao tối đa.'
+      if (
+        form.type === 'CHILD'
+        && [form.minAgeYears, form.maxAgeYears, form.minHeightCm, form.maxHeightCm]
+          .every((value) => value === '')
+      ) return 'Vé trẻ em cần ít nhất một điều kiện tuổi hoặc chiều cao.'
+      return ''
+    })(),
   }
   const isValid = Object.values(errors).every((e) => !e)
 
@@ -92,7 +146,14 @@ function PartnerTicketFormPage() {
     : 0
 
   const handleSubmit = async () => {
-    setTouched({ name: true, originalPrice: true, sellingPrice: true })
+    setTouched({
+      name: true,
+      originalPrice: true,
+      sellingPrice: true,
+      refundFeePercent: true,
+      refundCutoffHours: true,
+      eligibility: true,
+    })
     if (!isValid) { toast.error('Vui lòng kiểm tra lại thông tin.'); return }
     const payload = {
       name: form.name,
@@ -101,7 +162,18 @@ function PartnerTicketFormPage() {
       originalPrice: Number(form.originalPrice),
       sellingPrice: Number(form.sellingPrice),
       refundPolicy: form.refundPolicy,
+      refundFeeRate: form.refundPolicy === 'PARTIAL'
+        ? Number(form.refundFeePercent) / 100
+        : 0,
+      refundCutoffHours: form.refundPolicy === 'NONE'
+        ? 24
+        : Number(form.refundCutoffHours),
       status: form.status,
+      minAgeYears: form.minAgeYears === '' ? null : Number(form.minAgeYears),
+      maxAgeYears: form.maxAgeYears === '' ? null : Number(form.maxAgeYears),
+      minHeightCm: form.minHeightCm === '' ? null : Number(form.minHeightCm),
+      maxHeightCm: form.maxHeightCm === '' ? null : Number(form.maxHeightCm),
+      requiresAdult: form.type === 'CHILD' && form.requiresAdult,
     }
     setIsSubmitting(true)
     try {
@@ -173,12 +245,18 @@ function PartnerTicketFormPage() {
                   className={`${inputCls(false)} resize-none`}
                 />
               </FormField>
+              {form.type === 'GROUP' && (
+                <div className="rounded-lg bg-[#00474d]/5 border border-[#00474d]/20 p-3 text-xs text-[#00474d] font-semibold flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[16px] mt-0.5" aria-hidden="true">info</span>
+                  <p>Mẹo: Hãy nêu rõ số lượng khách tối thiểu áp dụng cho gói vé Nhóm (ví dụ: Áp dụng khi mua từ 10 vé trở lên) trong Mô tả gói vé.</p>
+                </div>
+              )}
             </div>
           </FormCard>
 
           {/* Ticket Type */}
           <FormCard title="Loại vé" icon="sell">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               {TICKET_TYPES.map((t) => (
                 <button
                   key={t.value} type="button"
@@ -195,6 +273,51 @@ function PartnerTicketFormPage() {
                 </button>
               ))}
             </div>
+          </FormCard>
+
+          <FormCard title="Điều kiện áp dụng" icon="rule">
+            <p className="mb-4 text-xs text-[#3f484a]">
+              Khai báo có cấu trúc để khách và bộ lập lịch không chọn nhầm loại vé. Để trống trường không áp dụng.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {[
+                ['minAgeYears', 'Tuổi tối thiểu', 0, 120, 'tuổi'],
+                ['maxAgeYears', 'Tuổi tối đa', 0, 120, 'tuổi'],
+                ['minHeightCm', 'Chiều cao tối thiểu', 30, 250, 'cm'],
+                ['maxHeightCm', 'Chiều cao tối đa', 30, 250, 'cm'],
+              ].map(([field, label, min, max, unit]) => (
+                <FormField key={field} label={label}>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min={min}
+                      max={max}
+                      step="1"
+                      value={form[field]}
+                      onChange={(e) => update(field, e.target.value)}
+                      className={`${inputCls(touched.eligibility && errors.eligibility)} pr-14`}
+                    />
+                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[#6f797a]">
+                      {unit}
+                    </span>
+                  </div>
+                </FormField>
+              ))}
+            </div>
+            {form.type === 'CHILD' && (
+              <label className="mt-4 flex items-center gap-3 rounded-lg border border-[#dbe4e8] bg-[#f8fafb] p-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.requiresAdult}
+                  onChange={(e) => update('requiresAdult', e.target.checked)}
+                  className="accent-[#00474d]"
+                />
+                Trẻ phải đi cùng ít nhất một người lớn
+              </label>
+            )}
+            {touched.eligibility && errors.eligibility && (
+              <p className="mt-2 text-xs font-semibold text-[#ba1a1a]">{errors.eligibility}</p>
+            )}
           </FormCard>
 
           {/* Pricing */}
@@ -263,6 +386,59 @@ function PartnerTicketFormPage() {
                 </label>
               ))}
             </div>
+
+            {form.refundPolicy !== 'NONE' && (
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                {form.refundPolicy === 'PARTIAL' && (
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-[#191c1d]" htmlFor="refund-fee-percent">
+                      Phí hủy (%)
+                    </label>
+                    <input
+                      id="refund-fee-percent"
+                      type="number"
+                      min="1"
+                      max="99"
+                      step="1"
+                      className={`w-full rounded-lg border bg-white px-3 py-2.5 text-sm outline-none focus:border-[#006068] ${
+                        touched.refundFeePercent && errors.refundFeePercent ? 'border-[#ba1a1a]' : 'border-[#bec8ca]'
+                      }`}
+                      value={form.refundFeePercent}
+                      onChange={(event) => update('refundFeePercent', event.target.value)}
+                      onBlur={() => touch('refundFeePercent')}
+                    />
+                    {touched.refundFeePercent && errors.refundFeePercent && (
+                      <p className="mt-1 text-xs text-[#ba1a1a]">{errors.refundFeePercent}</p>
+                    )}
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-[#191c1d]" htmlFor="refund-cutoff-hours">
+                    Hạn hủy trước giờ bắt đầu
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="refund-cutoff-hours"
+                      type="number"
+                      min="0"
+                      max="720"
+                      step="1"
+                      className={`w-full rounded-lg border bg-white px-3 py-2.5 pr-12 text-sm outline-none focus:border-[#006068] ${
+                        touched.refundCutoffHours && errors.refundCutoffHours ? 'border-[#ba1a1a]' : 'border-[#bec8ca]'
+                      }`}
+                      value={form.refundCutoffHours}
+                      onChange={(event) => update('refundCutoffHours', event.target.value)}
+                      onBlur={() => touch('refundCutoffHours')}
+                    />
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#6f797a]">giờ</span>
+                  </div>
+                  {touched.refundCutoffHours && errors.refundCutoffHours && (
+                    <p className="mt-1 text-xs text-[#ba1a1a]">{errors.refundCutoffHours}</p>
+                  )}
+                </div>
+              </div>
+            )}
           </FormCard>
         </div>
 

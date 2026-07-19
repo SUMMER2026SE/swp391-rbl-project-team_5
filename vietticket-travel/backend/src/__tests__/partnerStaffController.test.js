@@ -11,6 +11,7 @@ const {
   createStaff,
   changeStaffStatus,
   replaceStaffAssignments,
+  removeStaff,
 } = require('../controllers/partnerStaffController');
 
 function makeReqRes(overrides = {}) {
@@ -41,6 +42,7 @@ function staffFixture(overrides = {}) {
     status: 'ACTIVE',
     passwordHash: 'hashed',
     employerPartnerId: 'partner-1',
+    roleMemberships: [{ role: 'STAFF' }],
     createdAt: new Date('2026-06-18T00:00:00.000Z'),
     profile: { phoneNumber: '0901234567' },
     staffAssignments: [],
@@ -61,7 +63,10 @@ describe('listStaff', () => {
 
     expect(prisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { role: 'STAFF', employerPartnerId: 'partner-1' },
+        where: {
+          roleMemberships: { some: { role: 'STAFF' } },
+          employerPartnerId: 'partner-1',
+        },
       }),
     );
     expect(res.json).toHaveBeenCalledWith(
@@ -246,6 +251,64 @@ describe('replaceStaffAssignments', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
     );
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('removeStaff', () => {
+  test('releases the identity, revokes STAFF access, assignments and all sessions', async () => {
+    const tx = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue(staffFixture()),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      staffAttractionAssignment: {
+        updateMany: jest.fn().mockResolvedValue({ count: 2 }),
+      },
+      userRoleMembership: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        upsert: jest.fn().mockResolvedValue({}),
+      },
+      passwordResetToken: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      authSession: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const { req, res, next } = makeReqRes({
+      params: { staffId: 'staff-1' },
+    });
+
+    await removeStaff(req, res, next);
+
+    expect(tx.user.update).toHaveBeenCalledWith({
+      where: { id: 'staff-1' },
+      data: {
+        role: 'CUSTOMER',
+        employerPartnerId: null,
+        status: 'LOCKED',
+        tokenVersion: { increment: 1 },
+      },
+    });
+    expect(tx.userRoleMembership.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'staff-1', role: 'STAFF' },
+    });
+    expect(tx.userRoleMembership.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: { userId: 'staff-1', role: 'CUSTOMER' },
+    }));
+    expect(tx.authSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'staff-1', revokedAt: null },
+    }));
+    expect(tx.staffAttractionAssignment.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { staffId: 'staff-1', revokedAt: null } }),
+    );
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: { staffId: 'staff-1' },
+    });
     expect(next).not.toHaveBeenCalled();
   });
 });

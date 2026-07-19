@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { toast } from 'react-toastify'
 import bookingService from '../../services/bookingService.js'
 
@@ -58,7 +59,7 @@ function RefundModal({ booking, onClose, onSuccess }) {
 
   const feeRate = preview ? Math.round(Number(preview.refundFeeRate) * 100) : 0
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       role="presentation"
@@ -127,16 +128,22 @@ function RefundModal({ booking, onClose, onSuccess }) {
               </div>
             </div>
 
-            {preview.refundable && preview.visitDate && (
+            {preview.refundable && preview.refundDeadline && (
               <div className="mt-4 flex gap-3 rounded-xl border border-error/20 bg-red-50 p-3 text-xs text-error">
                 <span className="material-symbols-outlined shrink-0 text-[18px] text-error" style={{ fontVariationSettings: "'FILL' 1" }}>
                   warning
                 </span>
                 <div>
-                  <strong className="block mb-0.5">Thời hạn hoàn tiền:</strong>
-                  Yêu cầu phải được gửi trước ngày sử dụng vé (ngày{' '}
-                  <strong>{new Date(preview.visitDate).toLocaleDateString('vi-VN')}</strong>).
-                  Sau ngày này, vé sẽ không còn hiệu lực để hoàn trả.
+                  <strong className="block mb-0.5">Thời hạn gửi yêu cầu:</strong>
+                  Trước{' '}
+                  <strong>
+                    {new Intl.DateTimeFormat('vi-VN', {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                      timeZone: 'Asia/Ho_Chi_Minh',
+                    }).format(new Date(preview.refundDeadline))}
+                  </strong>{' '}
+                  ({preview.refundCutoffHours} giờ trước khi hoạt động bắt đầu).
                 </div>
               </div>
             )}
@@ -158,6 +165,9 @@ function RefundModal({ booking, onClose, onSuccess }) {
                   maxLength={1000}
                   autoFocus
                 />
+                <p className="mt-1 text-right text-xs text-on-surface-variant">
+                  {reason.length}/1000
+                </p>
               </>
             )}
 
@@ -192,7 +202,8 @@ function RefundModal({ booking, onClose, onSuccess }) {
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

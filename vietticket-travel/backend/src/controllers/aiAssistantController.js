@@ -28,8 +28,17 @@ const MAX_CHAT_MESSAGE_LENGTH = 1200;
 const MAX_CHAT_HISTORY_ITEMS = 12;
 const MAX_CHAT_HISTORY_CONTENT_LENGTH = 1200;
 const CHAT_HISTORY_ROLES = new Set(['assistant', 'user']);
-// P1-C: Giới hạn số lịch trình được lưu mỗi tài khoản.
 const MAX_SAVED_ITINERARIES_PER_USER = 20;
+const MAX_PARTY_SIZE = 50;
+const MAX_BUDGET_VND = 1_000_000_000;
+const MAX_CITY_LENGTH = 100;
+const MAX_INTERESTS_LENGTH = 400;
+const MAX_PLAN_ID_LENGTH = 120;
+const MAX_PLAN_TITLE_LENGTH = 200;
+const MAX_SAVED_PLAN_BYTES = 500_000;
+const ALLOWED_PRIORITY = new Set(['balanced', 'rating', 'budget']);
+const ALLOWED_COMPANION = new Set(['solo', 'couple', 'family', 'friends']);
+const ALLOWED_PACE = new Set(['relaxed', 'normal', 'packed']);
 
 function normalizeChatMessage(value) {
   if (typeof value !== 'string') return null;
@@ -65,6 +74,51 @@ function normalizeDateOnly(value) {
   return date.toISOString().slice(0, 10) === value ? value : null;
 }
 
+function normalizeOptionalText(value, maxLength) {
+  if (value == null || value === '') return undefined;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length <= maxLength ? trimmed : null;
+}
+
+function isValidMoney(value) {
+  return Number.isSafeInteger(value) && value > 0 && value <= MAX_BUDGET_VND;
+}
+
+function isPlainObject(value) {
+  return Boolean(value)
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function validateSavedPlan(plan) {
+  if (!isPlainObject(plan)) return 'Trường "plan" phải là một object JSON.';
+  if (!Array.isArray(plan.days) || plan.days.length > MAX_ITINERARY_DAYS) {
+    return `Trường "plan.days" phải là mảng có tối đa ${MAX_ITINERARY_DAYS} ngày.`;
+  }
+
+  for (const day of plan.days) {
+    if (!isPlainObject(day)) return 'Mỗi ngày trong lịch trình phải là một object.';
+    if (day.activities != null && (!Array.isArray(day.activities) || day.activities.length > 4)) {
+      return 'Mỗi ngày chỉ được lưu tối đa 4 hoạt động.';
+    }
+    if (day.alternatives != null && (!Array.isArray(day.alternatives) || day.alternatives.length > 2)) {
+      return 'Mỗi ngày chỉ được lưu tối đa 2 địa điểm tham khảo.';
+    }
+  }
+
+  try {
+    if (Buffer.byteLength(JSON.stringify(plan), 'utf8') > MAX_SAVED_PLAN_BYTES) {
+      return 'Dữ liệu lịch trình quá lớn.';
+    }
+  } catch {
+    return 'Dữ liệu lịch trình không thể chuyển thành JSON.';
+  }
+  return '';
+}
+
 /**
  * Tách số người lớn/trẻ em từ body, có suy ra tổng số người.
  * Trả về { adults, children, total } hoặc null nếu không hợp lệ.
@@ -73,7 +127,7 @@ function parseParty({ people, adults, children }) {
   const toCount = (v) => {
     if (v == null || v === '') return undefined;
     const n = Number(v);
-    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : NaN;
+    return Number.isSafeInteger(n) && n >= 0 ? n : NaN;
   };
 
   const adultsNum = toCount(adults);
@@ -86,12 +140,12 @@ function parseParty({ people, adults, children }) {
 
   const splitTotal = (adultsNum || 0) + (childrenNum || 0);
   const total = splitTotal > 0 ? splitTotal : (peopleNum || 0);
-  if (total <= 0) return null;
+  if (total <= 0 || total > MAX_PARTY_SIZE) return null;
 
   return {
-    adults: adultsNum,
-    children: childrenNum,
-    people: peopleNum,
+    adults: adultsNum ?? 0,
+    children: childrenNum ?? 0,
+    people: peopleNum ?? 0,
     total,
   };
 }
@@ -146,10 +200,10 @@ async function recommend(req, res, next) {
     const { budget, people, adults, children, city, interests, priority, companion, visitDate } = req.body || {};
 
     const budgetNum = Number(budget);
-    if (!budgetNum || budgetNum <= 0) {
+    if (!isValidMoney(budgetNum)) {
       return res.status(400).json({
         success: false,
-        message: 'Thiếu hoặc sai trường "budget" (số tiền, VND).',
+        message: `Ngân sách phải là số nguyên dương không quá ${MAX_BUDGET_VND.toLocaleString('vi-VN')} VND.`,
       });
     }
 
@@ -159,6 +213,21 @@ async function recommend(req, res, next) {
         success: false,
         message: 'Thiếu hoặc sai số người (people hoặc adults/children).',
       });
+    }
+
+    const normalizedCity = normalizeOptionalText(city, MAX_CITY_LENGTH);
+    const normalizedInterests = normalizeOptionalText(interests, MAX_INTERESTS_LENGTH);
+    if (normalizedCity === null || normalizedInterests === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thành phố hoặc sở thích không đúng định dạng/độ dài cho phép.',
+      });
+    }
+    if (priority != null && !ALLOWED_PRIORITY.has(priority)) {
+      return res.status(400).json({ success: false, message: 'Giá trị "priority" không hợp lệ.' });
+    }
+    if (companion != null && !ALLOWED_COMPANION.has(companion)) {
+      return res.status(400).json({ success: false, message: 'Giá trị "companion" không hợp lệ.' });
     }
 
     const normalizedVisitDate = normalizeDateOnly(visitDate);
@@ -180,10 +249,10 @@ async function recommend(req, res, next) {
       adults: party.adults,
       children: party.children,
       people: party.people,
-      city: city ? String(city) : undefined,
-      interests: interests ? String(interests) : undefined,
-      priority: priority ? String(priority) : undefined,
-      companion: companion ? String(companion) : undefined,
+      city: normalizedCity,
+      interests: normalizedInterests,
+      priority,
+      companion,
       visitDate: normalizedVisitDate,
       userId: req.user?.id,
     });
@@ -209,10 +278,11 @@ async function itinerary(req, res, next) {
     const daysNum = Number(days);
     const budgetNum = budget == null || budget === '' ? undefined : Number(budget);
 
-    if (!city || typeof city !== 'string') {
+    const normalizedCity = normalizeOptionalText(city, MAX_CITY_LENGTH);
+    if (!normalizedCity) {
       return res.status(400).json({
         success: false,
-        message: 'Thiếu trường "city" (string).',
+        message: `Trường "city" phải là chuỗi không rỗng, tối đa ${MAX_CITY_LENGTH} ký tự.`,
       });
     }
     if (!daysNum || daysNum <= 0) {
@@ -228,11 +298,25 @@ async function itinerary(req, res, next) {
       });
     }
 
-    if (budgetNum !== undefined && (!Number.isFinite(budgetNum) || budgetNum <= 0)) {
+    if (budgetNum !== undefined && !isValidMoney(budgetNum)) {
       return res.status(400).json({
         success: false,
         message: 'Thiếu hoặc sai trường "budget" (số tiền, VND).',
       });
+    }
+
+    const normalizedInterests = normalizeOptionalText(interests, MAX_INTERESTS_LENGTH);
+    if (normalizedInterests === null) {
+      return res.status(400).json({ success: false, message: 'Trường "interests" không hợp lệ.' });
+    }
+    if (pace != null && !ALLOWED_PACE.has(pace)) {
+      return res.status(400).json({ success: false, message: 'Giá trị "pace" không hợp lệ.' });
+    }
+    if (priority != null && !ALLOWED_PRIORITY.has(priority)) {
+      return res.status(400).json({ success: false, message: 'Giá trị "priority" không hợp lệ.' });
+    }
+    if (companion != null && !ALLOWED_COMPANION.has(companion)) {
+      return res.status(400).json({ success: false, message: 'Giá trị "companion" không hợp lệ.' });
     }
 
     const normalizedStartDate = normalizeDateOnly(startDate);
@@ -255,19 +339,30 @@ async function itinerary(req, res, next) {
       });
     }
 
-    const party = parseParty({ people, adults, children }) || { adults: 1, children: 0, people: 1 };
+    const hasPartyInput = [people, adults, children].some(
+      (value) => value != null && value !== '',
+    );
+    const party = hasPartyInput
+      ? parseParty({ people, adults, children })
+      : { adults: 1, children: 0, people: 1, total: 1 };
+    if (!party) {
+      return res.status(400).json({
+        success: false,
+        message: `Số khách phải là số nguyên, từ 1 đến ${MAX_PARTY_SIZE} người.`,
+      });
+    }
 
     const result = await generateItinerary({
-      city,
+      city: normalizedCity,
       days: daysNum,
       adults: party.adults,
       children: party.children,
       people: party.people,
       budget: budgetNum,
-      interests: interests ? String(interests) : undefined,
-      pace: pace ? String(pace) : undefined,
-      priority: priority ? String(priority) : undefined,
-      companion: companion ? String(companion) : undefined,
+      interests: normalizedInterests,
+      pace,
+      priority,
+      companion,
       startDate: normalizedStartDate,
       userId: req.user?.id,
     });
@@ -301,19 +396,35 @@ async function saveItinerary(req, res, next) {
 
     const { planId, title, plan, criteria } = req.body || {};
 
-    if (!planId || typeof planId !== 'string' || planId.trim().length === 0) {
-      return res.status(400).json({ success: false, message: 'Thiếu trường "planId".' });
+    const normalizedPlanId = typeof planId === 'string' ? planId.trim() : '';
+    if (
+      !normalizedPlanId
+      || normalizedPlanId.length > MAX_PLAN_ID_LENGTH
+      || !/^[A-Za-z0-9_-]+$/.test(normalizedPlanId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Trường "planId" không hợp lệ.',
+      });
     }
-    if (!title || typeof title !== 'string' || title.trim().length === 0) {
-      return res.status(400).json({ success: false, message: 'Thiếu trường "title".' });
+    const normalizedTitle = typeof title === 'string' ? title.trim() : '';
+    if (!normalizedTitle || normalizedTitle.length > MAX_PLAN_TITLE_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        message: `Trường "title" phải có từ 1 đến ${MAX_PLAN_TITLE_LENGTH} ký tự.`,
+      });
     }
-    if (!plan || typeof plan !== 'object') {
-      return res.status(400).json({ success: false, message: 'Thiếu hoặc sai định dạng trường "plan".' });
+    const planValidationError = validateSavedPlan(plan);
+    if (planValidationError) {
+      return res.status(400).json({ success: false, message: planValidationError });
+    }
+    if (criteria != null && !isPlainObject(criteria)) {
+      return res.status(400).json({ success: false, message: 'Trường "criteria" phải là object JSON.' });
     }
 
     // Kiểm tra giới hạn số lượng (bỏ qua nếu đang cập nhật bản đã có).
     const existingCount = await prisma.savedItinerary.count({
-      where: { userId, NOT: { planId: planId.trim() } },
+      where: { userId, NOT: { planId: normalizedPlanId } },
     });
     if (existingCount >= MAX_SAVED_ITINERARIES_PER_USER) {
       return res.status(400).json({
@@ -323,16 +434,16 @@ async function saveItinerary(req, res, next) {
     }
 
     const saved = await prisma.savedItinerary.upsert({
-      where: { userId_planId: { userId, planId: planId.trim() } },
+      where: { userId_planId: { userId, planId: normalizedPlanId } },
       create: {
         userId,
-        planId: planId.trim(),
-        title: title.trim(),
+        planId: normalizedPlanId,
+        title: normalizedTitle,
         data: plan,
         criteria: criteria || null,
       },
       update: {
-        title: title.trim(),
+        title: normalizedTitle,
         data: plan,
         criteria: criteria || null,
         updatedAt: new Date(),

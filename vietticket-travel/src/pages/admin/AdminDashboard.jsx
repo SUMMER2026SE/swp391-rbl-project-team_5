@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout'
+import RevenueForecastPanel from '../../components/forecast/RevenueForecastPanel'
 import { getDashboard } from '../../services/adminApi'
 import '../../styles/admin.css'
 
@@ -47,20 +48,35 @@ export default function AdminDashboard() {
     }
   }, [period])
 
-  const maxRevenue = useMemo(
-    () => Math.max(1, ...(data?.trend || []).map((item) => item.revenue)),
+  const maxCapturedAmount = useMemo(
+    () => Math.max(1, ...(data?.trend || []).map((item) => item.capturedAmount || 0)),
     [data],
   )
 
   const stats = [
     {
       icon: 'payments',
-      label: 'Doanh thu đã thanh toán',
-      value: formatCurrency(data?.stats.revenue),
+      label: 'Tổng tiền cổng đã thu',
+      value: formatCurrency(data?.stats.capturedAmount),
+    },
+    {
+      icon: 'currency_exchange',
+      label: 'Tiền hoàn thành công',
+      value: formatCurrency(data?.stats.refundedAmount),
+    },
+    {
+      icon: 'account_balance_wallet',
+      label: 'Dòng tiền thuần',
+      value: formatCurrency(data?.stats.netCashAmount),
+    },
+    {
+      icon: 'percent',
+      label: 'Hoa hồng đã ghi nhận',
+      value: formatCurrency(data?.stats.commissionRevenueAmount),
     },
     {
       icon: 'confirmation_number',
-      label: 'Đơn trong kỳ',
+      label: 'Booking trong kỳ',
       value: (data?.stats.bookings || 0).toLocaleString('vi-VN'),
     },
     {
@@ -70,16 +86,28 @@ export default function AdminDashboard() {
     },
     {
       icon: 'person_add',
-      label: 'Đối tác mới trong kỳ',
-      value: (data?.stats.newPartners || 0).toLocaleString('vi-VN'),
+      label: 'KYC đang chờ',
+      value: (data?.stats.pendingPartners || 0).toLocaleString('vi-VN'),
+    },
+    {
+      icon: 'sync_problem',
+      label: 'Giao dịch cần đối soát',
+      value: (data?.stats.needsReconciliationCount || 0).toLocaleString('vi-VN'),
     },
   ]
 
   const exportCsv = () => {
     if (!data) return
     const rows = [
-      ['Mốc thời gian', 'Doanh thu', 'Số giao dịch'],
-      ...data.trend.map((item) => [item.label, item.revenue, item.bookings]),
+      ['Mốc thời gian', 'Tiền thu', 'Tiền hoàn', 'Dòng tiền thuần', 'Số payment', 'Số refund'],
+      ...data.trend.map((item) => [
+        item.label,
+        item.capturedAmount,
+        item.refundedAmount,
+        item.netCashAmount,
+        item.paymentCount,
+        item.refundCount,
+      ]),
     ]
     const csv = rows
       .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(','))
@@ -97,12 +125,18 @@ export default function AdminDashboard() {
       <div className="admin-page-header">
         <div>
           <h2>Tổng quan hệ thống</h2>
-          <p>Dữ liệu doanh thu chỉ ghi nhận giao dịch thành công và đơn hợp lệ.</p>
+          <p>Kỳ báo cáo theo thời điểm cổng thanh toán ghi nhận giao dịch.</p>
         </div>
-        <button className="admin-export-btn" onClick={exportCsv} disabled={!data}>
-          <span className="material-symbols-outlined">download</span>
-          Xuất CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link className="admin-export-btn" to="/admin/reports">
+            <span className="material-symbols-outlined">finance</span>
+            Báo cáo tài chính
+          </Link>
+          <button className="admin-export-btn" onClick={exportCsv} disabled={!data}>
+            <span className="material-symbols-outlined">download</span>
+            Xuất CSV
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -130,7 +164,7 @@ export default function AdminDashboard() {
           <div className="admin-viz-grid">
             <section className="admin-chart-card soft-elevation">
               <div className="admin-chart-card__header">
-                <h3 className="admin-chart-card__title">Xu hướng doanh thu</h3>
+                <h3 className="admin-chart-card__title">Tiền thu qua cổng thanh toán</h3>
                 <div className="admin-chart-period-toggle">
                   {PERIODS.map((item) => (
                     <button
@@ -152,8 +186,8 @@ export default function AdminDashboard() {
                   <div
                     className="admin-chart-bar admin-chart-bar--inactive"
                     key={item.label}
-                    title={`${item.label}: ${formatCurrency(item.revenue)}`}
-                    style={{ height: `${Math.max(3, (item.revenue / maxRevenue) * 100)}%` }}
+                    title={`${item.label}: thu ${formatCurrency(item.capturedAmount)}, hoàn ${formatCurrency(item.refundedAmount)}, thuần ${formatCurrency(item.netCashAmount)}`}
+                    style={{ height: `${Math.max(3, ((item.capturedAmount || 0) / maxCapturedAmount) * 100)}%` }}
                   />
                 ))}
               </div>
@@ -231,6 +265,10 @@ export default function AdminDashboard() {
           </section>
         </>
       )}
+
+      <div className="mt-6">
+        <RevenueForecastPanel mode="admin" />
+      </div>
     </AdminLayout>
   )
 }

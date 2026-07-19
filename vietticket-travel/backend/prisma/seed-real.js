@@ -10,53 +10,141 @@ require('dotenv').config({ quiet: true });
 
 const fs = require('fs');
 const path = require('path');
-const bcrypt = require('bcrypt');
 const prisma = require('../src/config/prisma');
+const {
+  ensureSeedPartnerIdentity,
+  ensureSeedPartnerKycDocument,
+} = require('./seedPartnerIdentity');
 const { realAttractions } = require('./data/realAttractions');
 const { attractionContent } = require('./data/attractionContent');
 
-const PARTNER_EMAIL = 'partner@vietticket.com';
-const PARTNER_PASSWORD = 'Partner@123';
+const PARTNER_EMAIL = String(process.env.SEED_PARTNER_EMAIL || '').trim().toLowerCase();
+const PARTNER_PASSWORD = String(process.env.SEED_PARTNER_PASSWORD || '');
 
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
 const UPLOAD_DIR = path.join(__dirname, '../public/uploads');
 const MAX_GOOGLE_PHOTOS = 3;
 
+const VISIT_PROFILE_BY_CATEGORY = {
+  'Theme Park & Resort': {
+    recommendedVisitMinutes: 420,
+    environment: 'MIXED',
+    isFullDay: true,
+  },
+  'Adventure Activities': {
+    recommendedVisitMinutes: 300,
+    environment: 'OUTDOOR',
+    isFullDay: false,
+  },
+  'Nature & Sightseeing': {
+    recommendedVisitMinutes: 240,
+    environment: 'OUTDOOR',
+    isFullDay: false,
+  },
+  'Museums & Art': {
+    recommendedVisitMinutes: 120,
+    environment: 'INDOOR',
+    isFullDay: false,
+  },
+};
+
+function visitProfileForSeed(attraction) {
+  const categoryProfile = VISIT_PROFILE_BY_CATEGORY[attraction.category] || {
+    recommendedVisitMinutes: 150,
+    environment: 'MIXED',
+    isFullDay: false,
+  };
+
+  return {
+    recommendedVisitMinutes:
+      attraction.recommendedVisitMinutes ?? categoryProfile.recommendedVisitMinutes,
+    environment: attraction.environment || categoryProfile.environment,
+    isFullDay: attraction.isFullDay ?? categoryProfile.isFullDay,
+  };
+}
+
+function ticketEligibilityForSeed(ticket) {
+  const explicit = {
+    minAgeYears: ticket.minAgeYears ?? null,
+    maxAgeYears: ticket.maxAgeYears ?? null,
+    minHeightCm: ticket.minHeightCm ?? null,
+    maxHeightCm: ticket.maxHeightCm ?? null,
+    requiresAdult: ticket.requiresAdult ?? false,
+  };
+  if (ticket.type !== 'CHILD') return explicit;
+
+  const description = String(ticket.description || '').toLocaleLowerCase('vi');
+  if (description.includes('5–9 tuổi')) {
+    explicit.minAgeYears ??= 5;
+    explicit.maxAgeYears ??= 9;
+  } else if (description.includes('7–12 tuổi')) {
+    explicit.minAgeYears ??= 7;
+    explicit.maxAgeYears ??= 12;
+  }
+
+  if (description.includes('1m1–1m3')) {
+    explicit.minHeightCm ??= 110;
+    explicit.maxHeightCm ??= 130;
+  } else if (description.includes('1m–1m4')) {
+    explicit.minHeightCm ??= 100;
+    explicit.maxHeightCm ??= 140;
+  } else if (description.includes('1m–1m3')) {
+    explicit.minHeightCm ??= 100;
+    explicit.maxHeightCm ??= 130;
+  } else if (description.includes('dưới 1m4')) {
+    explicit.maxHeightCm ??= 139;
+  }
+
+  if (description.includes('đi kèm người lớn')) {
+    explicit.requiresAdult = true;
+  }
+  return explicit;
+}
+
 // --- Đảm bảo có một đối tác đã được duyệt để gắn điểm tham quan ---
 async function ensurePartner() {
-  let user = await prisma.user.findUnique({ where: { email: PARTNER_EMAIL } });
-  if (!user) {
-    const passwordHash = await bcrypt.hash(PARTNER_PASSWORD, 10);
-    user = await prisma.user.create({
-      data: {
-        email: PARTNER_EMAIL,
-        passwordHash,
-        fullName: 'Nguyễn Văn Lộc',
-        role: 'PARTNER',
-        isEmailVerified: true,
-        status: 'ACTIVE',
-        profile: { create: { phoneNumber: '0901234567' } },
-      },
-    });
-  } else {
-    user = await prisma.user.update({
-      where: { id: user.id },
-      data: { role: 'PARTNER', isEmailVerified: true, status: 'ACTIVE' },
-    });
+  if (!PARTNER_EMAIL || PARTNER_PASSWORD.length < 12) {
+    throw new Error(
+      'Cần cấu hình SEED_PARTNER_EMAIL và SEED_PARTNER_PASSWORD (ít nhất 12 ký tự).',
+    );
   }
+  const { user } = await ensureSeedPartnerIdentity({
+    client: prisma,
+    email: PARTNER_EMAIL,
+    password: PARTNER_PASSWORD,
+    fullName: 'Nguyễn Văn Lộc',
+    phoneNumber: '0901234567',
+  });
+  const businessLicenseUrl = await ensureSeedPartnerKycDocument({
+    userId: user.id,
+    backendUrl: BACKEND_URL,
+  });
+  const kycData = {
+    businessName: 'VietTicket Content Partner',
+    taxCode: '0312345678',
+    registrationDate: new Date('2020-01-15T00:00:00.000Z'),
+    representativeName: 'Nguyễn Văn Lộc',
+    representativePhone: '0901234567',
+    businessAddress: '123 Đường Demo, TP. Hồ Chí Minh',
+    businessLicenseUrl,
+    bankName: 'Vietcombank',
+    branchName: 'Chi nhánh Demo TP. Hồ Chí Minh',
+    bankAccountNumber: '0123456789',
+    bankAccountName: 'NGUYEN VAN LOC',
+    payoutCurrency: 'VND',
+    kycConsentAccepted: true,
+    kycConsentVersion: '2026-07-17-v1',
+    kycConsentAcceptedAt: new Date(),
+    status: 'APPROVED',
+  };
 
   const partner = await prisma.partnerProfile.upsert({
     where: { userId: user.id },
-    update: { status: 'APPROVED' },
+    update: kycData,
     create: {
       userId: user.id,
-      businessName: 'VietTicket Content Partner',
-      taxCode: '0312345678',
-      bankName: 'Vietcombank',
-      bankAccountNumber: '0123456789',
-      bankAccountName: 'NGUYEN VAN LOC',
-      status: 'APPROVED',
+      ...kycData,
     },
   });
   console.log(`✓ Đối tác sẵn sàng: ${PARTNER_EMAIL} (id ${partner.id.slice(0, 8)})`);
@@ -75,6 +163,7 @@ async function createAttraction(partner, a) {
     return existing.id;
   }
 
+  const visitProfile = visitProfileForSeed(a);
   const created = await prisma.attraction.create({
     data: {
       partnerId: partner.id,
@@ -90,6 +179,7 @@ async function createAttraction(partner, a) {
       closeTime: a.closeTime || null,
       openDays: a.openDays || '1,1,1,1,1,1,1',
       defaultCapacity: a.defaultCapacity || 100,
+      ...visitProfile,
       status: 'APPROVED', // bắt buộc để hiện ở trang tìm kiếm công khai
       publicationStatus: 'ACTIVE',
       publishedAt: new Date(),
@@ -111,24 +201,30 @@ async function createAttraction(partner, a) {
         ? { create: [{ imageUrl: a.image, isPrimary: true }] }
         : undefined,
       ticketProducts: {
-        create: a.ticketProducts.map((tp) => ({
-          name: tp.name,
-          type: tp.type || 'ADULT',
-          description: tp.description || '',
-          originalPrice: tp.originalPrice,
-          sellingPrice: tp.sellingPrice,
-          status: 'ACTIVE', // bắt buộc để hiện giá & cho đặt vé
-          refundPolicy: tp.refundPolicy || 'NON_REFUNDABLE',
-          // Khung giờ GẮN THEO VÉ -> nguồn tính sức chứa của luồng đặt vé.
-          timeSlots: {
-            create: (tp.timeSlots || []).map((s) => ({
-              startTime: s.startTime,
-              endTime: s.endTime,
-              maxCapacity: s.maxCapacity,
-              isActive: true,
-            })),
-          },
-        })),
+        create: a.ticketProducts.map((tp) => {
+          const refundPolicy = tp.refundPolicy || 'NON_REFUNDABLE';
+          return {
+            name: tp.name,
+            type: tp.type || 'ADULT',
+            description: tp.description || '',
+            originalPrice: tp.originalPrice,
+            sellingPrice: tp.sellingPrice,
+            status: 'ACTIVE', // bắt buộc để hiện giá & cho đặt vé
+            refundPolicy,
+            refundFeeRate:
+              tp.refundFeeRate ?? (refundPolicy === 'REFUND_WITH_FEE' ? 0.5 : 0),
+            ...ticketEligibilityForSeed(tp),
+            // Khung giờ GẮN THEO VÉ -> nguồn tính sức chứa của luồng đặt vé.
+            timeSlots: {
+              create: (tp.timeSlots || []).map((s) => ({
+                startTime: s.startTime,
+                endTime: s.endTime,
+                maxCapacity: s.maxCapacity,
+                isActive: true,
+              })),
+            },
+          };
+        }),
       },
     },
   });
@@ -208,6 +304,12 @@ async function enrichWithGoogle(attractionId, a) {
 
 async function main() {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Seed dữ liệu nội dung bị cấm trong production.');
+    }
+    if (process.env.ALLOW_DEMO_SEED !== 'true') {
+      throw new Error('Đặt ALLOW_DEMO_SEED=true để xác nhận seed dữ liệu.');
+    }
     await prisma.$connect();
     console.log('Đang seed dữ liệu THẬT cho trang khách...');
 
@@ -235,7 +337,7 @@ async function main() {
     }
 
     console.log('\nĐang tính toán lại minTicketPrice cho tất cả điểm tham quan...');
-    await prisma.$executeRawUnsafe(`
+    await prisma.$executeRaw`
       UPDATE "Attraction" a
       SET "minTicketPrice" = (
         SELECT MIN(tp."sellingPrice")
@@ -243,8 +345,8 @@ async function main() {
         WHERE tp."attractionId" = a."id"
           AND tp."status" = 'ACTIVE'
           AND tp."archivedAt" IS NULL
-      );
-    `);
+      )
+    `;
 
     console.log('\n==================================================');
     console.log('SEED DỮ LIỆU THẬT THÀNH CÔNG!');

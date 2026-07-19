@@ -29,6 +29,41 @@ const formatDate = (value) => {
       })
 }
 
+const parseTimeSlot = (timeSlotLabel) => {
+  const match = String(timeSlotLabel || '').match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/)
+  if (!match) return null
+  return {
+    startHour: Number(match[1]),
+    startMinute: Number(match[2]),
+    endHour: Number(match[3]),
+    endMinute: Number(match[4]),
+  }
+}
+
+const toCalendarStamp = (dateValue, timeSlotLabel, edge) => {
+  if (!dateValue) return ''
+  const [year, month, day] = String(dateValue).split('-').map(Number)
+  if (![year, month, day].every(Number.isFinite)) return ''
+
+  const slot = parseTimeSlot(timeSlotLabel)
+  const hour = edge === 'end' ? slot?.endHour ?? 23 : slot?.startHour ?? 8
+  const minute = edge === 'end' ? slot?.endMinute ?? 59 : slot?.startMinute ?? 0
+  const date = new Date(year, month - 1, day, hour, minute, 0)
+  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+}
+
+const escapeCalendarText = (value) =>
+  String(value || '')
+    .replaceAll('\\', '\\\\')
+    .replaceAll(',', '\\,')
+    .replaceAll(';', '\\;')
+    .replaceAll('\n', '\\n')
+
+const getMapsUrl = (booking) => {
+  const query = [booking.attractionTitle, booking.attractionLocation].filter(Boolean).join(' ')
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
+}
+
 function ETicketPage() {
   const { bookingId } = useParams()
   const socket = useSocket()
@@ -58,7 +93,7 @@ function ETicketPage() {
 
   useEffect(() => {
     function handleBookingStatusUpdated(payload) {
-      if (payload.bookingId !== bookingId) return
+      if (String(payload.bookingId ?? '') !== String(bookingId ?? '')) return
 
       const status = String(payload.status || '').toLowerCase()
       const shortCode = bookingId.slice(0, 8).toUpperCase()
@@ -99,9 +134,13 @@ function ETicketPage() {
 
   if (isLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-surface">
-        <p className="font-semibold text-primary">Đang tải vé điện tử...</p>
-      </main>
+      <>
+        <div className="print:hidden"><Header activeLink="My Tickets" /></div>
+        <main className="flex min-h-[65vh] items-center justify-center bg-surface px-5 py-16">
+          <p className="font-semibold text-primary">Đang tải vé điện tử...</p>
+        </main>
+        <div className="print:hidden"><Footer /></div>
+      </>
     )
   }
 
@@ -186,6 +225,59 @@ function ETicketPage() {
         { icon: 'shield', text: 'Không chia sẻ thông tin đơn đặt chỗ công khai.' },
       ]
   const quantityText = `${booking.quantity || 1} vé`
+  const mapsUrl = getMapsUrl(booking)
+
+  const handleAddToCalendar = () => {
+    const start = toCalendarStamp(booking.visitDate, booking.timeSlotLabel, 'start')
+    const end = toCalendarStamp(booking.visitDate, booking.timeSlotLabel, 'end')
+    if (!start || !end) {
+      toast.info('Chưa đủ thông tin ngày giờ để thêm vào lịch.')
+      return
+    }
+
+    const title = `VietTicket - ${booking.attractionTitle}`
+    const description = [
+      `Mã đặt chỗ: ${booking.id}`,
+      `Vé: ${booking.ticketName || 'Vé tham quan'}`,
+      `Số lượng: ${quantityText}`,
+      'Có mặt trước giờ tham quan ít nhất 15 phút.',
+    ].join('\\n')
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//VietTicket Travel//ETicket//VI',
+      'BEGIN:VEVENT',
+      `UID:${booking.id}@vietticket.travel`,
+      `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')}`,
+      `DTSTART:${start}`,
+      `DTEND:${end}`,
+      `SUMMARY:${escapeCalendarText(title)}`,
+      `LOCATION:${escapeCalendarText(booking.attractionLocation)}`,
+      `DESCRIPTION:${escapeCalendarText(description)}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n')
+
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `vietticket-${String(booking.id).slice(0, 8)}.ics`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    toast.success('Đã tạo file lịch cho chuyến đi.')
+  }
+
+  const handleCopyBookingCode = async () => {
+    try {
+      await navigator.clipboard.writeText(booking.id)
+      toast.success('Đã sao chép mã đặt chỗ.')
+    } catch {
+      toast.error('Không thể sao chép tự động. Vui lòng sao chép mã trên vé.')
+    }
+  }
 
   return (
     <>
@@ -279,7 +371,7 @@ function ETicketPage() {
             <div className="ticket-divider relative border-t-2 border-dashed border-outline-variant" />
 
             <section
-              className={`p-8 md:p-12${
+              className={`p-8 md:p-12 ${
                 canShowQr && ticketInstances.length > 1
                   ? ''
                   : ' grid items-center gap-8 md:grid-cols-[1fr_auto]'
@@ -337,6 +429,61 @@ function ETicketPage() {
               )}
             </section>
           </article>
+
+          <section className="print:hidden mx-auto mt-6 max-w-4xl rounded-2xl border border-outline-variant/30 bg-white p-5 shadow-[0_8px_30px_rgba(0,71,77,0.08)]">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-normal text-secondary">
+                  Tiện ích chuyến đi
+                </p>
+                <h2 className="mt-1 text-xl font-bold text-primary">
+                  Chuẩn bị nhanh trước khi check-in
+                </h2>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 md:flex md:flex-wrap md:justify-end">
+                <a
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-sm font-bold text-primary transition hover:bg-primary/5"
+                  href={mapsUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                    map
+                  </span>
+                  Mở bản đồ
+                </a>
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-sm font-bold text-primary transition hover:bg-primary/5"
+                  onClick={handleAddToCalendar}
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                    event
+                  </span>
+                  Thêm vào lịch
+                </button>
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-on-surface-variant transition hover:bg-surface-container"
+                  onClick={handleCopyBookingCode}
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                    content_copy
+                  </span>
+                  Sao chép mã
+                </button>
+                <Link
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110"
+                  to={`/support?bookingId=${booking.id}`}
+                >
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                    support_agent
+                  </span>
+                  Cần hỗ trợ
+                </Link>
+              </div>
+            </div>
+          </section>
         </div>
       </main>
       <div className="print:hidden"><Footer /></div>

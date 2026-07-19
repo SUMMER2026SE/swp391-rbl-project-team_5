@@ -11,8 +11,6 @@
 //   GET  /api/forecast/partner/overview           - tổng quan tất cả
 //                                                    attraction của đối tác
 //   GET  /api/forecast/admin/overview             - tổng quan toàn nền tảng
-//   POST /api/forecast/admin/retrain              - train lại model ml-service
-//
 // STAFF không có quyền truy cập bất kỳ endpoint nào ở đây (theo thiết kế:
 // dự báo doanh thu là dữ liệu nhạy cảm, chỉ chủ đối tác/ADMIN mới xem).
 // ============================================================
@@ -26,7 +24,6 @@ const {
   getAttractionForecast,
   getPartnerForecastOverview,
   getAdminForecastOverview,
-  triggerRetrain,
 } = require('../controllers/aiForecastController');
 
 const router = express.Router();
@@ -38,20 +35,10 @@ const forecastLimiter = rateLimit({
   limit: 30,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
   message: {
     success: false,
     error: { code: 'RATE_LIMITED', message: 'Bạn đang tải dự báo doanh thu quá nhanh. Vui lòng thử lại sau ít phút.' },
-  },
-});
-
-const retrainLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  limit: 3,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: {
-    success: false,
-    error: { code: 'RATE_LIMITED', message: 'Bạn vừa train lại model gần đây. Vui lòng thử lại sau.' },
   },
 });
 
@@ -69,6 +56,5 @@ router.get(
 );
 
 router.get('/admin/overview', forecastLimiter, restrictTo('ADMIN'), getAdminForecastOverview);
-router.post('/admin/retrain', retrainLimiter, restrictTo('ADMIN'), triggerRetrain);
 
 module.exports = router;

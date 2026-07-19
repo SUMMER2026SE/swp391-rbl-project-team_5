@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { apiRequest } from '../services/api'
 
@@ -52,10 +53,20 @@ function Newsletter() {
                   required
                 />
               </div>
-              <button className="button button--primary" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Đang đăng ký...' : 'Đăng ký'}
+              <button
+                className="button button--primary"
+                type="submit"
+                value="subscribe"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Đang xử lý...' : 'Đăng ký'}
               </button>
             </form>
+            <p style={{ marginTop: 12, fontSize: 13, lineHeight: 1.6 }}>
+              Khi đăng ký, bạn đồng ý nhận email ưu đãi. Bạn có thể hủy an toàn
+              bằng liên kết cá nhân trong mỗi email. Xem{' '}
+              <Link to="/privacy">Chính sách bảo mật</Link>.
+            </p>
           </div>
         </div>
       </div>

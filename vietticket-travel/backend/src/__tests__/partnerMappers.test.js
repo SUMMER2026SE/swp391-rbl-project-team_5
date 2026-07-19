@@ -101,7 +101,17 @@ describe('bộ chuyển đổi bản ghi', () => {
     });
     expect(t).toEqual({
       id: 'tkt-001', name: 'Vé', type: 'ADULT', description: 'desc',
-      originalPrice: 150000, sellingPrice: 120000, refundPolicy: 'FULL', status: 'active',
+      originalPrice: 150000,
+      sellingPrice: 120000,
+      refundPolicy: 'FULL',
+      refundFeeRate: 0,
+      refundCutoffHours: 24,
+      minAgeYears: null,
+      maxAgeYears: null,
+      minHeightCm: null,
+      maxHeightCm: null,
+      requiresAdult: false,
+      status: 'active',
     });
   });
 

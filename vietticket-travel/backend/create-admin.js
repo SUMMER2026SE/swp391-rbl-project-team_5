@@ -1,5 +1,6 @@
 const bcrypt = require('bcrypt');
 const prisma = require('./src/config/prisma');
+const { grantRole } = require('./src/utils/userRoles');
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 const ADMIN_PASSWORD = String(process.env.ADMIN_PASSWORD || '');
@@ -19,20 +20,65 @@ async function createAdmin() {
     console.log(`Đang kiểm tra tài khoản ${ADMIN_EMAIL}...`);
     const existingUser = await prisma.user.findUnique({
       where: { email: ADMIN_EMAIL },
+      include: {
+        roleMemberships: { select: { role: true } },
+        partnerProfile: { select: { id: true } },
+        oauthAccounts: { select: { id: true, provider: true } },
+      },
     });
 
     if (existingUser) {
-      console.log(`Tài khoản ${ADMIN_EMAIL} đã tồn tại trong hệ thống.`);
-      
-      // If it exists but is not ADMIN, update its role
-      if (existingUser.role !== 'ADMIN') {
-        console.log('Đang cập nhật vai trò thành ADMIN...');
-        await prisma.user.update({
-          where: { id: existingUser.id },
-          data: { role: 'ADMIN', status: 'ACTIVE', isEmailVerified: true },
-        });
-        console.log('Cập nhật vai trò Admin thành công!');
+      const assignedRoles = new Set([
+        existingUser.role,
+        ...(existingUser.roleMemberships || []).map((membership) => membership.role),
+      ]);
+      if (
+        existingUser.partnerProfile
+        || existingUser.employerPartnerId
+        || assignedRoles.has('PARTNER')
+        || assignedRoles.has('STAFF')
+      ) {
+        throw new Error(
+          'Từ chối cấp ADMIN cho tài khoản đang là đối tác/nhân viên. Hãy dùng một danh tính quản trị riêng.',
+        );
       }
+      if (existingUser.provider !== 'LOCAL' || existingUser.oauthAccounts?.length > 0) {
+        throw new Error(
+          'Từ chối cấp ADMIN cho tài khoản OAuth hoặc đã liên kết OAuth. Hãy tạo một tài khoản LOCAL chuyên dụng.',
+        );
+      }
+      if (!assignedRoles.has('ADMIN') && process.env.ALLOW_ADMIN_PROMOTION !== 'true') {
+        throw new Error(
+          'Đặt ALLOW_ADMIN_PROMOTION=true để xác nhận rõ việc nâng tài khoản hiện có thành ADMIN.',
+        );
+      }
+
+      console.log(`Tài khoản ${ADMIN_EMAIL} đã tồn tại trong hệ thống.`);
+      console.log('Đang đảm bảo vai trò, trạng thái và mật khẩu Admin theo biến môi trường...');
+      const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: existingUser.id },
+          data: {
+            fullName: ADMIN_FULLNAME || existingUser.fullName,
+            isEmailVerified: true,
+            passwordHash,
+            role: 'ADMIN',
+            status: 'ACTIVE',
+            employerPartnerId: null,
+            tokenVersion: { increment: 1 },
+          },
+        });
+        await tx.authSession.updateMany({
+          where: { userId: existingUser.id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        await tx.userRoleMembership.deleteMany({
+          where: { userId: existingUser.id },
+        });
+        await grantRole(tx, existingUser.id, 'ADMIN');
+      });
+      console.log('Cập nhật tài khoản Admin thành công!');
       return;
     }
 
@@ -49,13 +95,7 @@ async function createAdmin() {
         role: 'ADMIN',
         isEmailVerified: true,
         status: 'ACTIVE',
-        profile: {
-          create: {
-            phoneNumber: '0901234567',
-            gender: 'MALE',
-            address: 'Hà Nội, Việt Nam',
-          },
-        },
+        roleMemberships: { create: { role: 'ADMIN' } },
       },
     });
 
@@ -66,6 +106,7 @@ async function createAdmin() {
     console.log('==================================================');
   } catch (error) {
     console.error('Tạo tài khoản Admin thất bại:', error);
+    process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }

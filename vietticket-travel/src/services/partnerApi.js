@@ -46,6 +46,15 @@ export function getReports(period = 'month') {
   return apiRequest(`/partners/reports?period=${encodeURIComponent(period)}`, { method: 'GET' })
 }
 
+export function getPartnerSettlements(params = {}) {
+  const query = new URLSearchParams()
+  if (params.status) query.set('status', params.status)
+  if (params.page) query.set('page', params.page)
+  if (params.limit) query.set('limit', params.limit)
+  const qs = query.toString()
+  return apiRequest(`/partners/settlements${qs ? `?${qs}` : ''}`, { method: 'GET' })
+}
+
 export function getCategories() {
   return apiRequest('/partners/categories', { method: 'GET' })
 }
@@ -179,6 +188,13 @@ export function approveBooking(id) {
 
 export function rejectBooking(id, reason) {
   return apiRequest(`/partners/bookings/${id}/reject`, {
+    method: 'PATCH',
+    body: { reason },
+  })
+}
+
+export function cancelConfirmedBooking(id, reason) {
+  return apiRequest(`/partners/bookings/${id}/cancel`, {
     method: 'PATCH',
     body: { reason },
   })

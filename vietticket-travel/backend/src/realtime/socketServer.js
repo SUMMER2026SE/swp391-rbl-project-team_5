@@ -4,9 +4,23 @@ const prisma = require('../config/prisma');
 const { corsOptions } = require('../config/cors');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { AUTH_COOKIE_NAME } = require('../utils/authCookie');
+const { getEffectiveRoles, hasRole } = require('../utils/userRoles');
 const { setSocketServer } = require('./events');
 
 let io = null;
+const SUPPORT_JOIN_WINDOW_MS = 60 * 1000;
+const SUPPORT_JOIN_LIMIT = 30;
+const SOCKET_USER_SELECT = {
+  id: true,
+  role: true,
+  status: true,
+  tokenVersion: true,
+  employerPartnerId: true,
+  roleMemberships: { select: { role: true } },
+  partnerProfile: {
+    select: { id: true, status: true },
+  },
+};
 
 function parseCookies(cookieHeader = '') {
   return cookieHeader.split(';').reduce((cookies, pair) => {
@@ -41,6 +55,43 @@ function readSocketToken(socket) {
   );
 }
 
+async function loadSocketPrincipal({ userId, sessionId, tokenVersion }) {
+  const [user, session] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: SOCKET_USER_SELECT,
+    }),
+    prisma.authSession.findUnique({
+      where: { id: sessionId },
+    }),
+  ]);
+
+  if (
+    !user
+    || user.status !== 'ACTIVE'
+    || !session
+    || session.userId !== user.id
+    || session.revokedAt
+    || new Date(session.expiresAt) <= new Date()
+    || Number(tokenVersion || 0) !== Number(user.tokenVersion || 0)
+  ) {
+    return null;
+  }
+
+  const approvedPartner =
+    hasRole(user, 'PARTNER') && user.partnerProfile?.status === 'APPROVED'
+      ? user.partnerProfile
+      : null;
+
+  return {
+    id: user.id,
+    role: user.role,
+    roles: getEffectiveRoles(user),
+    employerPartnerId: user.employerPartnerId || null,
+    partnerProfileId: approvedPartner?.id || null,
+  };
+}
+
 async function authenticateSocket(socket, next) {
   try {
     const token = readSocketToken(socket);
@@ -50,60 +101,47 @@ async function authenticateSocket(socket, next) {
     const userId = decoded.userId || decoded.id;
     if (!userId || !decoded.sessionId) return next(new Error('Unauthorized'));
 
-    const [user, session] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        // FIX [P1]: Dùng select thay vì include để lấy đúng scalar field
-        // employerPartnerId từ bảng User.
-        //   - employerPartnerId = null  → platform ADMIN/STAFF → isPlatformStaff() = true
-        //   - employerPartnerId = <id>  → partner STAFF       → isPlatformStaff() = false
-        // Trước đây dùng include({ partnerProfile: ... }) không kéo scalar fields
-        // của bảng User → employerPartnerId luôn undefined → isPlatformStaff trả
-        // true cho mọi STAFF, bao gồm partner staff → lỗ hổng nghe ticket chat.
-        select: {
-          id: true,
-          role: true,
-          status: true,
-          tokenVersion: true,
-          employerPartnerId: true,
-          partnerProfile: {
-            select: { id: true, status: true },
-          },
-        },
-      }),
-      prisma.authSession.findUnique({
-        where: { id: decoded.sessionId },
-      }),
-    ]);
-
-    if (
-      !user
-      || user.status !== 'ACTIVE'
-      || !session
-      || session.userId !== user.id
-      || session.revokedAt
-      || new Date(session.expiresAt) <= new Date()
-      || Number(decoded.tokenVersion || 0) !== Number(user.tokenVersion || 0)
-    ) {
-      return next(new Error('Unauthorized'));
-    }
-
-    const approvedPartner =
-      user.role === 'PARTNER' && user.partnerProfile?.status === 'APPROVED'
-        ? user.partnerProfile
-        : null;
-
-    socket.user = {
-      id: user.id,
-      role: user.role,
-      employerPartnerId: user.employerPartnerId || null,
-      partnerProfileId: approvedPartner?.id || null,
+    const authContext = {
+      userId,
+      sessionId: decoded.sessionId,
+      tokenVersion: Number(decoded.tokenVersion || 0),
     };
+    const principal = await loadSocketPrincipal(authContext);
+    if (!principal) return next(new Error('Unauthorized'));
+
+    socket.authContext = authContext;
+    socket.user = principal;
 
     return next();
   } catch {
     return next(new Error('Unauthorized'));
   }
+}
+
+async function revalidateSocket(socket) {
+  if (!socket?.authContext) return null;
+  const principal = await loadSocketPrincipal(socket.authContext);
+  if (!principal) {
+    socket.emit?.('AUTHORIZATION_REVOKED', {
+      message: 'Phiên đăng nhập đã hết hiệu lực.',
+    });
+    socket.disconnect?.(true);
+    return null;
+  }
+  socket.user = principal;
+  return principal;
+}
+
+function consumeSupportJoinAttempt(socket) {
+  const now = Date.now();
+  if (!socket.data) socket.data = {};
+  const current = socket.data.supportJoinRate;
+  if (!current || now - current.startedAt >= SUPPORT_JOIN_WINDOW_MS) {
+    socket.data.supportJoinRate = { startedAt: now, count: 1 };
+    return true;
+  }
+  current.count += 1;
+  return current.count <= SUPPORT_JOIN_LIMIT;
 }
 
 async function canJoinSupportTicket(user, ticketId) {
@@ -127,7 +165,7 @@ function initializeSocketServer(httpServer) {
   io.on('connection', (socket) => {
     socket.join(`user:${socket.user.id}`);
 
-    if (socket.user.role === 'PARTNER' && socket.user.partnerProfileId) {
+    if (hasRole(socket.user, 'PARTNER') && socket.user.partnerProfileId) {
       socket.join(`partner:${socket.user.partnerProfileId}`);
     }
 
@@ -137,7 +175,14 @@ function initializeSocketServer(httpServer) {
     // trả false khi user.employerPartnerId != null.
     socket.on('JOIN_SUPPORT_TICKET', async (ticketId) => {
       try {
-        if (await canJoinSupportTicket(socket.user, ticketId)) {
+        if (!consumeSupportJoinAttempt(socket)) {
+          socket.emit('SUPPORT_JOIN_RATE_LIMITED', {
+            message: 'Bạn đã yêu cầu tham gia phòng hỗ trợ quá thường xuyên.',
+          });
+          return;
+        }
+        const freshUser = await revalidateSocket(socket);
+        if (freshUser && await canJoinSupportTicket(freshUser, ticketId)) {
           socket.join(`ticket:${ticketId}`);
         }
       } catch (error) {
@@ -171,8 +216,11 @@ async function closeSocketServer() {
 module.exports = {
   authenticateSocket,
   canJoinSupportTicket,
+  consumeSupportJoinAttempt,
   closeSocketServer,
   initializeSocketServer,
+  loadSocketPrincipal,
   parseCookies,
   readSocketToken,
+  revalidateSocket,
 };

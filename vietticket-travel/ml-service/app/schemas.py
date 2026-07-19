@@ -13,7 +13,7 @@ ml-service chỉ làm feature engineering + inference/training thuần túy.
 from datetime import date, datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Tier = Literal["BUDGET", "STANDARD", "PREMIUM", "LUXURY"]
 
@@ -21,7 +21,7 @@ Tier = Literal["BUDGET", "STANDARD", "PREMIUM", "LUXURY"]
 class HistoryPoint(BaseModel):
     date: date
     revenue: float = Field(ge=0)
-    bookings: int = Field(ge=0, default=0)
+    tickets: int = Field(ge=0, default=0)
 
 
 class ForecastRequest(BaseModel):
@@ -43,39 +43,27 @@ class ForecastRequest(BaseModel):
 class ForecastPoint(BaseModel):
     date: date
     predicted_revenue: float
-    predicted_bookings: int
+    predicted_tickets: int
     confidence_lower: float
     confidence_upper: float
 
 
 class ForecastResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     attraction_id: str
     model_version: str
+    training_source: str
     generated_at: datetime
     forecast: List[ForecastPoint]
     warning: Optional[str] = None
 
 
-class TrainRequest(BaseModel):
-    # Nếu không truyền dataset_path, dùng dữ liệu synthetic tự sinh
-    # (xem synthetic_data.py) - phù hợp để test pipeline khi chưa có
-    # đủ dữ liệu booking thật trong production.
-    use_synthetic: bool = True
-    num_synthetic_attractions: int = Field(ge=10, le=2000, default=200)
-    synthetic_days: int = Field(ge=90, le=1095, default=365)
-
-
-class TrainResponse(BaseModel):
-    model_version: str
-    trained_at: datetime
-    num_samples: int
-    mape: float
-    mae: float
-    notes: str
-
-
 class HealthResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     model_loaded: bool
     model_version: Optional[str] = None
+    training_source: Optional[str] = None
     trained_at: Optional[datetime] = None

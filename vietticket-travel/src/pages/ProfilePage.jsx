@@ -18,6 +18,19 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
 }
 
+const formatBookingCode = (value) => {
+  const code = String(value || '').slice(0, 8).toUpperCase()
+  return code || 'N/A'
+}
+
+const getGenderLabel = (value) => {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (['male', 'nam'].includes(normalized)) return 'Nam'
+  if (['female', 'nữ', 'nu'].includes(normalized)) return 'Nữ'
+  if (['other', 'khác', 'khac'].includes(normalized)) return 'Khác'
+  return 'Chưa cập nhật'
+}
+
 const getAttraction = (favorite) => favorite.attraction || favorite
 
 const getAttractionImage = (attraction) => {
@@ -144,23 +157,11 @@ function ProfilePage() {
           </div>
           <div className="profile-field">
             <span>Ngày sinh</span>
-            <p>
-              {currentUser.dateOfBirth
-                ? new Date(currentUser.dateOfBirth).toLocaleDateString('vi-VN', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                  })
-                : 'Chưa cập nhật'}
-            </p>
+            <p>{formatDate(currentUser.dateOfBirth)}</p>
           </div>
           <div className="profile-field">
             <span>Giới tính</span>
-            <p>
-              {currentUser.gender
-                ? currentUser.gender.charAt(0).toUpperCase() + currentUser.gender.slice(1)
-                : 'Chưa cập nhật'}
-            </p>
+            <p>{getGenderLabel(currentUser.gender)}</p>
           </div>
           <div className="profile-field">
             <span>Địa chỉ</span>
@@ -217,17 +218,24 @@ function ProfilePage() {
           </div>
         ) : (
           <div className="activity-list">
-            {recentBookings.map((booking) => (
-              <Link to="/my-tickets" className="activity-item" key={booking.id}>
-                <img src={booking.attractionImage || fallbackImage} alt={booking.attractionTitle} />
-                <div className="activity-item__content">
-                  <h4 style={{ fontWeight: 'bold', fontSize: '15px' }}>{booking.attractionTitle}</h4>
-                  <p>Mã: {booking.id.slice(0, 8).toUpperCase()} · SL: {booking.quantity || 1} vé</p>
-                  <p>Ngày đi: {formatDate(booking.visitDate)}</p>
-                </div>
-                <div className="activity-price">{formatCurrency(booking.totalAmount)}</div>
-              </Link>
-            ))}
+            {recentBookings.map((booking) => {
+              const bookingId = booking.id ?? booking.bookingId ?? ''
+              return (
+                <Link
+                  to={bookingId ? `/tickets/${bookingId}` : '/my-tickets'}
+                  className="activity-item"
+                  key={bookingId || booking.reservationId}
+                >
+                  <img src={booking.attractionImage || fallbackImage} alt={booking.attractionTitle} />
+                  <div className="activity-item__content">
+                    <h4 style={{ fontWeight: 'bold', fontSize: '15px' }}>{booking.attractionTitle}</h4>
+                    <p>Mã: {formatBookingCode(bookingId)} · SL: {booking.quantity || 1} vé</p>
+                    <p>Ngày đi: {formatDate(booking.visitDate)}</p>
+                  </div>
+                  <div className="activity-price">{formatCurrency(booking.totalAmount)}</div>
+                </Link>
+              )
+            })}
           </div>
         )}
       </section>
@@ -282,21 +290,21 @@ function ProfilePage() {
             credit_card
           </span>
           <h3>Phương thức thanh toán</h3>
-          <p>Thẻ Visa kết thúc bằng 4242. Tích hợp thanh toán sẽ làm sau.</p>
+          <p>Thanh toán an toàn qua VNPay và nhận cập nhật trạng thái ngay sau giao dịch.</p>
         </article>
         <article className="summary-card">
           <span className="material-symbols-outlined" aria-hidden="true">
             security
           </span>
           <h3>Bảo mật tài khoản</h3>
-          <p>Email đã xác minh, mật khẩu đã hash ở backend, JWT bảo vệ API.</p>
+          <p>{currentUser.emailVerified ? 'Email đã được xác minh.' : 'Email chưa xác minh.'} Bạn có thể đổi mật khẩu trong phần cài đặt tài khoản.</p>
         </article>
         <article className="summary-card">
           <span className="material-symbols-outlined" aria-hidden="true">
             qr_code_2
           </span>
           <h3>Vé điện tử QR</h3>
-          <p>Các đặt chỗ sau này sẽ hiển thị tại đây cùng vé QR.</p>
+          <p>Vé đủ điều kiện sẽ có mã QR trong mục Vé của tôi để sử dụng khi check-in.</p>
         </article>
       </section>
     </AccountLayout>

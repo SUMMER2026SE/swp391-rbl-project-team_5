@@ -1,13 +1,13 @@
 .auth-shell {
   min-height: 100svh;
   display: grid;
-  grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   background: #ffffff;
   color: var(--color-text);
 }
 
 .auth-shell--compact {
-  grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
 }
 
 .auth-visual {

@@ -43,8 +43,9 @@ describe('listFavorites', () => {
           attraction: {
             publishedAt: { not: null },
             publicationStatus: 'ACTIVE',
-            status: { not: 'SUSPENDED' },
+            operationalStatus: 'ACTIVE',
             archivedAt: null,
+            partner: { status: 'APPROVED' },
           },
         },
       }),
@@ -79,6 +80,7 @@ describe('toggleFavorite', () => {
       publicationStatus: 'ACTIVE',
       publishedAt: new Date('2026-06-01T00:00:00.000Z'),
       archivedAt: null,
+      partner: { status: 'APPROVED' },
     });
     mockPrisma.favoriteAttraction.findUnique.mockResolvedValue(null);
     mockPrisma.favoriteAttraction.create.mockResolvedValue({
@@ -109,6 +111,7 @@ describe('toggleFavorite', () => {
       publicationStatus: 'ACTIVE',
       publishedAt: new Date('2026-06-01T00:00:00.000Z'),
       archivedAt: null,
+      partner: { status: 'APPROVED' },
     });
     mockPrisma.favoriteAttraction.findUnique.mockResolvedValue({
       userId: 'user-001',

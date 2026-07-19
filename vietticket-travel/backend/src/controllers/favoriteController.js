@@ -1,4 +1,8 @@
 const prisma = require('../config/prisma');
+const {
+  isAttractionSaleEnabled,
+  publicAttractionWhere,
+} = require('../services/catalogVisibilityService');
 
 const favoriteAttractionInclude = {
   attraction: {
@@ -41,12 +45,7 @@ async function listFavorites(req, res, next) {
     const favorites = await prisma.favoriteAttraction.findMany({
       where: {
         userId: req.user.id,
-        attraction: {
-          publishedAt: { not: null },
-          publicationStatus: 'ACTIVE',
-          status: { not: 'SUSPENDED' },
-          archivedAt: null,
-        },
+        attraction: publicAttractionWhere(),
       },
       include: favoriteAttractionInclude,
       orderBy: { createdAt: 'desc' },
@@ -76,15 +75,13 @@ async function toggleFavorite(req, res, next) {
         publicationStatus: true,
         publishedAt: true,
         archivedAt: true,
+        partner: { select: { status: true } },
       },
     });
 
     if (
       !attraction
-      || attraction.archivedAt
-      || !attraction.publishedAt
-      || attraction.publicationStatus !== 'ACTIVE'
-      || attraction.status === 'SUSPENDED'
+      || !isAttractionSaleEnabled(attraction)
     ) {
       return res.status(404).json({
         success: false,

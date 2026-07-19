@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
-import { listTodayBookings, lookupTicketByQr, checkInTicket } from '../../services/staffApi.js'
+import {
+  checkInTicket,
+  listTodayBookings,
+  lookupTicketByQr,
+  reissueTicket,
+} from '../../services/staffApi.js'
+
+const REISSUE_REASON_OPTIONS = [
+  { value: 'LOST_BY_CUSTOMER', label: 'Khách làm mất vé' },
+  { value: 'DAMAGED_QR', label: 'Mã QR bị lỗi/không đọc được' },
+  { value: 'CONTACT_CHANGED', label: 'Khách đổi thông tin liên hệ' },
+  { value: 'OPERATIONAL_ERROR', label: 'Lỗi vận hành tại cổng' },
+  { value: 'OTHER', label: 'Lý do khác' },
+]
 
 // Trang check-in tại cổng cho nhân viên:
 // - Ô nhập nhận mã từ máy quét QR (máy quét gõ chuỗi + Enter như bàn phím)
@@ -37,7 +50,8 @@ function TicketResultCard({ ticket, onCheckin, isChecking }) {
         <InfoRow label="Khách hàng" value={ticket.customer} />
         <InfoRow label="Số điện thoại" value={ticket.phone || '—'} />
         <InfoRow label="Địa điểm" value={ticket.attraction} />
-        <InfoRow label="Loại vé" value={`${ticket.ticketName} × ${ticket.quantity}`} />
+        <InfoRow label="Vé đang quét" value={`${ticket.ticketName} × 1`} />
+        <InfoRow label="Tổng vé trong đơn" value={ticket.bookingQuantity} />
         <InfoRow label="Ngày tham quan" value={ticket.visitDate} />
         <InfoRow label="Khung giờ" value={ticket.timeSlot || 'Cả ngày'} />
         <InfoRow label="Trạng thái vé" value={ticket.ticketStatus} />
@@ -51,7 +65,7 @@ function TicketResultCard({ ticket, onCheckin, isChecking }) {
           className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-4 text-base font-bold text-on-primary hover:opacity-90 disabled:opacity-50"
         >
           <span className="material-symbols-outlined" aria-hidden="true">how_to_reg</span>
-          {isChecking ? 'Đang check-in…' : `Check-in ${ticket.quantity} khách`}
+          {isChecking ? 'Đang check-in…' : 'Check-in vé này'}
         </button>
       )}
     </div>
@@ -78,6 +92,10 @@ export default function CheckinPage() {
   const [todayBookings, setTodayBookings] = useState([])
   const [todayMeta, setTodayMeta] = useState({ date: '', total: 0, checkedIn: 0 })
   const [todaySearch, setTodaySearch] = useState('')
+  const [reissueTarget, setReissueTarget] = useState(null)
+  const [reissueReasonCode, setReissueReasonCode] = useState('LOST_BY_CUSTOMER')
+  const [reissueReason, setReissueReason] = useState('')
+  const [isReissuing, setIsReissuing] = useState(false)
   const inputRef = useRef(null)
 
   useEffect(() => {
@@ -138,6 +156,38 @@ export default function CheckinPage() {
     }
   }
 
+  async function handleReissue() {
+    if (!reissueTarget) return
+    const reason = reissueReason.trim()
+    if (reason.length < 5) {
+      toast.warning('Vui lòng mô tả lý do cấp lại vé, tối thiểu 5 ký tự.')
+      return
+    }
+
+    setIsReissuing(true)
+    try {
+      const response = await reissueTicket(
+        reissueTarget.bookingId,
+        reissueReasonCode,
+        reason,
+      )
+      const count = Number(response.data?.reissuedCount || 0)
+      toast.success(
+        response.data?.emailDelivered === false
+          ? `Đã cấp lại ${count} vé. Email chưa gửi được; vui lòng hướng dẫn khách mở vé trong tài khoản.`
+          : `Đã cấp lại ${count} vé và gửi thông báo cho khách.`,
+      )
+      setReissueTarget(null)
+      setReissueReason('')
+      setReissueReasonCode('LOST_BY_CUSTOMER')
+      void fetchToday()
+    } catch (error) {
+      toast.error(error.message || 'Không thể cấp lại vé.')
+    } finally {
+      setIsReissuing(false)
+    }
+  }
+
   const filteredToday = todayBookings.filter((b) => {
     const query = todaySearch.trim().toLowerCase()
     if (!query) return true
@@ -162,10 +212,10 @@ export default function CheckinPage() {
         >
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <label className="text-sm font-bold text-on-surface" htmlFor="staff-checkin-token">
-              Mã QR / QR token
+              Mã QR / mã vé
             </label>
             <span className="inline-flex w-fit rounded-full bg-primary-fixed-dim/20 px-3 py-1 text-xs font-semibold text-primary">
-              Hỗ trợ VIETTICKET:&lt;token&gt; hoặc qrCodeToken
+              Sẵn sàng nhận dữ liệu từ máy quét QR
             </span>
           </div>
 
@@ -180,7 +230,7 @@ export default function CheckinPage() {
                 ref={inputRef}
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="Dán VIETTICKET:<token> hoặc qrCodeToken..."
+                placeholder="Quét mã QR hoặc nhập mã vé..."
                 autoComplete="off"
                 className="h-14 w-full rounded-xl border border-outline-variant bg-surface pl-11 pr-4 text-base outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
@@ -196,7 +246,7 @@ export default function CheckinPage() {
           </div>
 
           <p id="staff-checkin-token-hint" className="mt-3 text-xs text-on-surface-variant">
-            Khi test thủ công, copy qrCodeToken của vé rồi dán vào ô trên.
+            Đưa mã QR vào máy quét hoặc nhập mã vé do khách cung cấp, sau đó tra cứu trước khi xác nhận.
           </p>
         </form>
 
@@ -215,7 +265,7 @@ export default function CheckinPage() {
             </span>
             <div>
               <p className="text-lg font-bold text-primary">
-                Đã check-in {lastCheckin.checkedInCount} khách — {lastCheckin.customer}
+                Đã check-in {lastCheckin.checkedInCount} vé — {lastCheckin.customer}
               </p>
               <p className="text-sm text-on-surface-variant">
                 {lastCheckin.attraction} · {lastCheckin.ticketName} ·{' '}
@@ -262,7 +312,7 @@ export default function CheckinPage() {
                   <th className="px-5 py-3">Địa điểm / Vé</th>
                   <th className="px-5 py-3">Khung giờ</th>
                   <th className="px-5 py-3">SL</th>
-                  <th className="px-5 py-3">Check-in</th>
+                  <th className="px-5 py-3">Trạng thái / thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -292,17 +342,36 @@ export default function CheckinPage() {
                         {b.timeSlot || 'Cả ngày'}
                       </td>
                       <td className="px-5 py-3 text-on-surface">{b.quantity}</td>
-                      <td className="px-5 py-3">
+                      <td className="px-5 py-3 space-y-2">
                         {b.checkedIn ? (
                           <span className="inline-flex items-center gap-1 rounded-full bg-primary-fixed-dim/20 px-2.5 py-1 text-xs font-bold text-primary">
                             <span className="material-symbols-outlined text-[14px]" aria-hidden="true">check</span>
                             Đã vào cổng
+                          </span>
+                        ) : b.usedCount > 0 ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-primary-fixed-dim/20 px-2.5 py-1 text-xs font-bold text-primary">
+                            <span className="material-symbols-outlined text-[14px]" aria-hidden="true">group</span>
+                            Đã vào {b.usedCount}/{b.quantity}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-secondary-fixed/30 px-2.5 py-1 text-xs font-bold text-secondary">
                             <span className="material-symbols-outlined text-[14px]" aria-hidden="true">schedule</span>
                             Chưa đến
                           </span>
+                        )}
+                        {b.bookingStatus === 'CONFIRMED' && b.validCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReissueTarget(b)
+                              setReissueReason('')
+                              setReissueReasonCode('LOST_BY_CUSTOMER')
+                            }}
+                            className="flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/5"
+                          >
+                            <span className="material-symbols-outlined text-[15px]" aria-hidden="true">autorenew</span>
+                            Cấp lại vé
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -312,6 +381,78 @@ export default function CheckinPage() {
             </table>
           </div>
         </div>
+
+        {reissueTarget && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={isReissuing ? undefined : () => setReissueTarget(null)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reissue-title"
+              className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h3 id="reissue-title" className="text-xl font-bold text-on-surface">
+                Cấp lại vé điện tử
+              </h3>
+              <p className="mt-2 text-sm text-on-surface-variant">
+                Đơn <strong>#{reissueTarget.bookingId.slice(0, 8).toUpperCase()}</strong> ·{' '}
+                {reissueTarget.customer}. Toàn bộ mã QR còn hiệu lực sẽ bị thu hồi và thay bằng mã mới.
+              </p>
+
+              <label className="mt-5 block text-sm font-semibold text-on-surface">
+                Nhóm lý do
+                <select
+                  value={reissueReasonCode}
+                  onChange={(event) => setReissueReasonCode(event.target.value)}
+                  disabled={isReissuing}
+                  className="mt-2 w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary"
+                >
+                  {REISSUE_REASON_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="mt-4 block text-sm font-semibold text-on-surface">
+                Mô tả sự việc
+                <textarea
+                  value={reissueReason}
+                  onChange={(event) => setReissueReason(event.target.value)}
+                  maxLength={500}
+                  rows={4}
+                  disabled={isReissuing}
+                  placeholder="Ví dụ: Khách báo mất điện thoại và đã xác minh họ tên, số điện thoại, mã đơn tại quầy."
+                  className="mt-2 w-full resize-none rounded-xl border border-outline-variant px-3 py-2.5 outline-none focus:border-primary"
+                />
+              </label>
+              <p className="mt-1 text-right text-xs text-on-surface-variant">
+                {reissueReason.length}/500
+              </p>
+
+              <div className="mt-5 flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isReissuing}
+                  onClick={() => setReissueTarget(null)}
+                  className="rounded-xl border border-outline-variant px-4 py-2.5 text-sm font-bold text-on-surface"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={isReissuing || reissueReason.trim().length < 5}
+                  onClick={() => void handleReissue()}
+                  className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50"
+                >
+                  {isReissuing ? 'Đang cấp lại…' : 'Xác nhận cấp lại'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AdminLayout>
   )

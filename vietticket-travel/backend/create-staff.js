@@ -3,44 +3,102 @@
 const bcrypt = require('bcrypt');
 const prisma = require('./src/config/prisma');
 
-const ACCOUNTS = [
-  {
-    email: 'staff@vietticket.com',
-    password: 'Staff@123456',
-    fullName: 'Nhân viên Hỗ trợ',
-    role: 'STAFF',
-    phone: '0912345678',
-  },
-  {
-    email: 'staff2@vietticket.com',
-    password: 'Staff@123456',
-    fullName: 'Nhân viên Hoàn tiền',
-    role: 'STAFF',
-    phone: '0923456789',
-  },
-];
+function getConfiguredAccounts() {
+  const email = String(process.env.STAFF_EMAIL || '').trim().toLowerCase();
+  const password = String(process.env.STAFF_PASSWORD || '');
+  const fullName = String(process.env.STAFF_FULLNAME || '').trim();
+  const phone = String(process.env.STAFF_PHONE || '').trim() || null;
+  if (!email || !password || !fullName) {
+    throw new Error('Cần cấu hình STAFF_EMAIL, STAFF_PASSWORD và STAFF_FULLNAME.');
+  }
+  if (password.length < 12) {
+    throw new Error('STAFF_PASSWORD phải có ít nhất 12 ký tự.');
+  }
+  return [{ email, password, fullName, role: 'STAFF', phone }];
+}
+
+function assertRotatablePlatformStaff(existing) {
+  const roles = new Set([
+    existing.role,
+    ...(existing.roleMemberships || []).map((membership) => membership.role),
+  ]);
+  const hasNonStaffRole = [...roles].some((role) => role !== 'STAFF');
+
+  if (existing.provider !== 'LOCAL' || (existing.oauthAccounts || []).length > 0) {
+    throw new Error('Từ chối xoay mật khẩu cho tài khoản staff OAuth hoặc đã liên kết OAuth.');
+  }
+  if (
+    existing.employerPartnerId
+    || existing.partnerProfile
+    || !roles.has('STAFF')
+    || hasNonStaffRole
+  ) {
+    throw new Error(
+      'Chỉ được xoay mật khẩu cho danh tính platform STAFF độc lập, không thuộc đối tác.',
+    );
+  }
+}
+
+async function rotateExistingStaff(client, existing, account, hashPassword = bcrypt.hash) {
+  assertRotatablePlatformStaff(existing);
+  const passwordHash = await hashPassword(account.password, 10);
+
+  return client.$transaction(async (tx) => {
+    const updated = await tx.user.update({
+      where: { id: existing.id },
+      data: {
+        passwordHash,
+        fullName: account.fullName,
+        role: 'STAFF',
+        isEmailVerified: true,
+        tokenVersion: { increment: 1 },
+      },
+    });
+    await tx.authSession.updateMany({
+      where: { userId: existing.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    await tx.userRoleMembership.upsert({
+      where: { userId_role: { userId: existing.id, role: 'STAFF' } },
+      update: {},
+      create: { userId: existing.id, role: 'STAFF' },
+    });
+    return updated;
+  });
+}
 
 async function createStaff() {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Script tạo staff mẫu bị cấm trong production.');
+    }
+    if (process.env.ALLOW_DEMO_SCRIPTS !== 'true') {
+      throw new Error('Đặt ALLOW_DEMO_SCRIPTS=true để xác nhận chạy script ngoài production.');
+    }
+    const accounts = getConfiguredAccounts();
+
     console.log('Đang kết nối cơ sở dữ liệu...');
     await prisma.$connect();
 
-    for (const account of ACCOUNTS) {
+    for (const account of accounts) {
       console.log(`\nKiểm tra tài khoản: ${account.email}`);
       const existing = await prisma.user.findUnique({
         where: { email: account.email },
+        include: {
+          roleMemberships: { select: { role: true } },
+          partnerProfile: { select: { id: true } },
+          oauthAccounts: { select: { id: true, provider: true } },
+        },
       });
 
       if (existing) {
-        if (existing.role !== account.role) {
-          await prisma.user.update({
-            where: { id: existing.id },
-            data: { role: account.role, status: 'ACTIVE', isEmailVerified: true },
-          });
-          console.log(`  ✅ Cập nhật role → ${account.role}: ${account.email}`);
-        } else {
-          console.log(`  ℹ️  Đã tồn tại (${account.role}): ${account.email}`);
+        if (process.env.ROTATE_EXISTING_STAFF !== 'true') {
+          throw new Error(
+            `Tài khoản ${account.email} đã tồn tại. Đặt ROTATE_EXISTING_STAFF=true để xác nhận xoay mật khẩu platform STAFF hợp lệ.`,
+          );
         }
+        await rotateExistingStaff(prisma, existing, account);
+        console.log(`  ✅ Đã xoay mật khẩu và thu hồi phiên cũ: ${account.email}`);
         continue;
       }
 
@@ -53,6 +111,7 @@ async function createStaff() {
           role: account.role,
           isEmailVerified: true,
           status: 'ACTIVE',
+          roleMemberships: { create: { role: 'STAFF' } },
           profile: {
             create: {
               phoneNumber: account.phone,
@@ -66,21 +125,29 @@ async function createStaff() {
     }
 
     console.log('\n==================================================');
-    console.log('         THÔNG TIN TÀI KHOẢN STAFF              ');
+    console.log('         ĐÃ TẠO TÀI KHOẢN STAFF                 ');
     console.log('==================================================');
-    for (const a of ACCOUNTS) {
+    for (const a of accounts) {
       console.log(`Role     : ${a.role}`);
       console.log(`Email    : ${a.email}`);
-      console.log(`Password : ${a.password}`);
       console.log(`Tên      : ${a.fullName}`);
       console.log('--------------------------------------------------');
     }
   } catch (error) {
     console.error('Lỗi:', error.message);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }
 }
 
-createStaff();
+if (require.main === module) {
+  createStaff();
+}
+
+module.exports = {
+  assertRotatablePlatformStaff,
+  createStaff,
+  getConfiguredAccounts,
+  rotateExistingStaff,
+};

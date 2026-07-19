@@ -1,7 +1,11 @@
 jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 
 const prisma = require('./helpers/mockPrisma');
-const { subscribe } = require('../controllers/newsletterController');
+const {
+  createNewsletterUnsubscribeToken,
+  subscribe,
+  unsubscribe,
+} = require('../controllers/newsletterController');
 
 function response() {
   return {
@@ -36,5 +40,51 @@ describe('newsletterController.subscribe', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(prisma.newsletterSubscription.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('newsletterController.unsubscribe', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.NEWSLETTER_TOKEN_SECRET = 'newsletter-test-secret-that-is-long-enough';
+  });
+
+  it('deactivates only the subscription named by a valid signed token', async () => {
+    prisma.newsletterSubscription.updateMany.mockResolvedValue({ count: 1 });
+    const token = createNewsletterUnsubscribeToken('  Guest@Example.com ');
+    const req = { body: { token } };
+    const res = response();
+
+    await unsubscribe(req, res, jest.fn());
+
+    expect(prisma.newsletterSubscription.updateMany).toHaveBeenCalledWith({
+      where: { email: 'guest@example.com', isActive: true },
+      data: { isActive: false },
+    });
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it('does not disclose whether the signed email was subscribed', async () => {
+    prisma.newsletterSubscription.updateMany.mockResolvedValue({ count: 0 });
+    const token = createNewsletterUnsubscribeToken('unknown@example.com');
+    const req = { body: { token } };
+    const res = response();
+
+    await unsubscribe(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Đã ghi nhận yêu cầu hủy nhận tin cho địa chỉ email này.',
+    });
+  });
+
+  it('rejects an unsigned email-only request', async () => {
+    const req = { body: { email: 'victim@example.com' } };
+    const res = response();
+
+    await unsubscribe(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(prisma.newsletterSubscription.updateMany).not.toHaveBeenCalled();
   });
 });
