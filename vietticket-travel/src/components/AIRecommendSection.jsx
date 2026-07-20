@@ -9,6 +9,7 @@ import {
   interestsToParam,
 } from '../constants/travelCriteria.js'
 import { AI_BOOKING_SOURCE, buildAiBookingUrl } from '../utils/aiBookingPrefill.js'
+import { getVietnamTodayInput, getVietnamTomorrowInput } from '../utils/businessDate.js'
 
 function formatCurrency(value) {
   const amount = Number(value)
@@ -35,12 +36,6 @@ function refundPolicyLabel(ticket) {
       : `Phí hủy${feeText} theo điều kiện vé`
   }
   return ''
-}
-
-function todayInputValue() {
-  const date = new Date()
-  const timezoneOffset = date.getTimezoneOffset() * 60000
-  return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 10)
 }
 
 function formatCheckedAt(value) {
@@ -79,7 +74,7 @@ function buildAiDetailUrl(attractionId, criteria) {
 function AIRecommendSection() {
   const navigate = useNavigate()
   const [budget, setBudget] = useState('')
-  const [visitDate, setVisitDate] = useState(todayInputValue)
+  const [visitDate, setVisitDate] = useState(getVietnamTomorrowInput)
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
   const [city, setCity] = useState('')
@@ -185,7 +180,7 @@ function AIRecommendSection() {
             <span className="mb-2 block text-sm font-semibold text-[#334155]">Ngày tham quan</span>
             <input
               className={inputClass}
-              min={todayInputValue()}
+              min={getVietnamTodayInput()}
               onChange={(event) => setVisitDate(event.target.value)}
               type="date"
               value={visitDate}

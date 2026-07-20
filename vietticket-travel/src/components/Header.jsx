@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
-import { toast } from 'react-toastify'
 import { hasRole } from '../utils/userRoles.js'
 
 const defaultLinks = [
@@ -25,15 +24,21 @@ function Header({ links = defaultLinks, activeLink = '' }) {
   const avatar = user?.avatar || defaultUser.avatar
   const staffPortalPath = user?.employerPartnerId ? '/staff/checkin' : '/staff/tickets'
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     closeMenu()
-    navigate('/')
+    navigate('/', { replace: true })
   }
 
   const isHomePage = location.pathname === '/'
 
-  const displayLinks = links.map((link) => ({
+  const isOperationalUser = hasRole(user, 'ADMIN') || hasRole(user, 'STAFF') || hasRole(user, 'PARTNER')
+  const customerOnlyPaths = new Set(['/my-tickets', '/favorites', '/support', '/my-support'])
+  const visibleLinks = isOperationalUser
+    ? links.filter((link) => !customerOnlyPaths.has(link.href))
+    : links
+
+  const displayLinks = visibleLinks.map((link) => ({
     ...link,
     active:
       link.active ||
@@ -77,16 +82,6 @@ function Header({ links = defaultLinks, activeLink = '' }) {
         </div>
 
         <div className="header-actions">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="Đổi ngôn ngữ"
-            onClick={() => toast.info('Tính năng đa ngôn ngữ đang được phát triển!')}
-          >
-            <span className="material-symbols-outlined" aria-hidden="true">
-              language
-            </span>
-          </button>
           {isAuthenticated ? (
             <>
               {hasRole(user, 'ADMIN') && (

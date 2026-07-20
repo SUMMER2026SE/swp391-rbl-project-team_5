@@ -14,9 +14,10 @@ export function getPartnerForecastOverview({ days = 7 } = {}) {
   return apiRequest(`/forecast/partner/overview?${params.toString()}`, { method: 'GET' })
 }
 
-export function getAdminForecastOverview({ days = 7, city, partnerId } = {}) {
+export function getAdminForecastOverview({ days = 7, city, partnerId, refresh = false } = {}) {
   const params = new URLSearchParams({ days: String(days) })
   if (city) params.set('city', city)
   if (partnerId) params.set('partnerId', partnerId)
+  if (refresh) params.set('refresh', 'true')
   return apiRequest(`/forecast/admin/overview?${params.toString()}`, { method: 'GET' })
 }

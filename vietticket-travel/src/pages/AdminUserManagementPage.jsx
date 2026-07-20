@@ -275,27 +275,6 @@ function AdminUserManagementPage() {
           </div>
 
           <div className="admin-topbar__actions">
-            <button
-              className="admin-icon-button admin-notification-button"
-              id="btn-admin-notifications"
-              type="button"
-              aria-label="Mở thông báo"
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">
-                notifications
-              </span>
-              <span className="admin-notification-dot" aria-hidden="true" />
-            </button>
-            <button
-              className="admin-icon-button"
-              id="btn-admin-help"
-              type="button"
-              aria-label="Mở trợ giúp"
-            >
-              <span className="material-symbols-outlined" aria-hidden="true">
-                help_outline
-              </span>
-            </button>
             <div className="admin-profile-chip">
               <div className="admin-profile-chip__text">
                 <p>{currentUser?.fullName || 'Admin'}</p>

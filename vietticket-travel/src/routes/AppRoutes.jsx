@@ -8,6 +8,7 @@ const AttractionDetailPage = lazy(() => import('../pages/AttractionDetailPage.js
 const BookingSuccessPage = lazy(() => import('../pages/BookingSuccessPage.jsx'))
 const ChangePasswordPage = lazy(() => import('../pages/ChangePasswordPage.jsx'))
 const CheckoutPage = lazy(() => import('../pages/CheckoutPage.jsx'))
+const ItineraryCheckoutPage = lazy(() => import('../pages/ItineraryCheckoutPage.jsx'))
 const ETicketPage = lazy(() => import('../pages/ETicketPage.jsx'))
 const EditProfilePage = lazy(() => import('../pages/EditProfilePage.jsx'))
 const ForgotPasswordPage = lazy(() => import('../pages/ForgotPasswordPage.jsx'))
@@ -310,7 +311,7 @@ function AppRoutes() {
       <Route
         path="/admin/audit-logs"
         element={
-          <ProtectedRoute roles={['ADMIN']}>
+          <ProtectedRoute allowedRoles={['ADMIN']}>
             <AuditLogPage />
           </ProtectedRoute>
         }
@@ -318,8 +319,16 @@ function AppRoutes() {
       <Route
         path="/admin/settlements"
         element={
-          <ProtectedRoute roles={['ADMIN']}>
+          <ProtectedRoute allowedRoles={['ADMIN']}>
             <SettlementManagementPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/itinerary-checkout/:queueId"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <ItineraryCheckoutPage />
           </ProtectedRoute>
         }
       />

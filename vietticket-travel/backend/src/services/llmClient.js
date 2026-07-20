@@ -42,6 +42,19 @@ function resolveTimeoutMs(value, fallback = DEFAULT_LLM_TIMEOUT_MS) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function resolveGeminiThinkingBudget(value, model = GEMINI_MODEL) {
+  if (value !== undefined && value !== null && String(value).trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isInteger(parsed) && parsed >= -1 && parsed <= 24576) return parsed;
+  }
+
+  // Gemini 2.5 Flash enables dynamic thinking by default. These application
+  // prompts are short JSON/copy tasks, so dynamic thinking can consume the
+  // small output allowance before visible text is emitted. Google supports
+  // thinkingBudget=0 for this model family; other models keep their defaults.
+  return /^gemini-2\.5-flash(?:$|-)/i.test(String(model)) ? 0 : null;
+}
+
 async function fetchWithTimeout(url, fetchOptions = {}, timeoutMs = LLM_TIMEOUT_MS) {
   const timeout = resolveTimeoutMs(timeoutMs, LLM_TIMEOUT_MS);
   const timeoutError = () => new Error(`LLM request timed out after ${timeout}ms`);
@@ -101,6 +114,10 @@ function safeProviderErrorMessage(error) {
 async function callGemini(systemPrompt, userPrompt, options = {}) {
   if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY chưa được cấu hình');
 
+  const thinkingBudget = resolveGeminiThinkingBudget(
+    options.thinkingBudget ?? process.env.GEMINI_THINKING_BUDGET,
+  );
+
   const body = {
     systemInstruction: {
       parts: [{ text: systemPrompt }],
@@ -115,6 +132,7 @@ async function callGemini(systemPrompt, userPrompt, options = {}) {
       temperature: options.temperature ?? 0.4,
       maxOutputTokens: options.maxOutputTokens ?? 2048,
       ...(options.json ? { responseMimeType: 'application/json' } : {}),
+      ...(thinkingBudget === null ? {} : { thinkingConfig: { thinkingBudget } }),
     },
   };
 

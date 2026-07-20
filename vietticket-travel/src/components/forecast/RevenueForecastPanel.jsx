@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import {
   getAdminForecastOverview,
@@ -24,6 +24,29 @@ const formatDate = (date) =>
     month: '2-digit',
   }).format(new Date(`${date}T00:00:00`))
 
+const METHOD_LABELS = {
+  AI_ENSEMBLE: 'Mô hình dự báo nâng cao',
+  AI_DEMO_ENSEMBLE: 'Mô hình ước tính thử nghiệm',
+  HISTORICAL_BASELINE: 'Xu hướng từ dữ liệu lịch sử',
+  INSUFFICIENT_DATA: 'Chưa đủ dữ liệu',
+}
+
+const getMethodLabel = (item) =>
+  METHOD_LABELS[item.method]
+  || (item.usedFallback ? 'Xu hướng từ dữ liệu lịch sử' : 'Phương pháp chưa xác định')
+
+const getMethodSummaryLabel = (summary = {}) => {
+  const parts = [
+    [summary.ai, 'mô hình nâng cao'],
+    [summary.demoAi, 'mô hình thử nghiệm'],
+    [summary.baseline, 'theo dữ liệu lịch sử'],
+    [summary.insufficientData, 'chưa đủ dữ liệu'],
+  ]
+    .filter(([count]) => Number(count || 0) > 0)
+    .map(([count, label]) => `${count} ${label}`)
+  return parts.join(' · ') || 'Chưa có kết quả'
+}
+
 function StatCard({ label, value, note }) {
   return (
     <div className="rounded-xl border border-[#e1e3e4] bg-[#f8fafb] p-4">
@@ -39,13 +62,16 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
+  const forceRefreshRef = useRef(false)
 
   useEffect(() => {
     let active = true
     const loadOverview =
       mode === 'admin' ? getAdminForecastOverview : getPartnerForecastOverview
+    const forceRefresh = mode === 'admin' && forceRefreshRef.current
+    forceRefreshRef.current = false
 
-    loadOverview({ days })
+    loadOverview({ days, refresh: forceRefresh })
       .then((response) => {
         if (active) setData(response.data)
       })
@@ -85,12 +111,12 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
               Dự báo doanh thu vé
             </h3>
             <span className="rounded-full bg-[#d7f4f6] px-2 py-0.5 text-[11px] font-semibold text-[#004f56]">
-              AI có kiểm soát
+              Dự báo có kiểm soát
             </span>
           </div>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-[#6f797a]">
             Ước tính doanh thu vé thuần trước hoa hồng, theo ngày khách sử dụng dịch vụ.
-            Dữ liệu đầu vào chỉ gồm booking đã hoàn tất/no-show, đã loại giao dịch trùng và tiền hoàn.
+            Dữ liệu đầu vào chỉ gồm đơn đã hoàn tất hoặc khách không đến, đã loại giao dịch trùng và tiền hoàn.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -111,8 +137,10 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
           </select>
           <button
             type="button"
-            aria-label="Tải lại dự báo"
+            aria-label={mode === 'admin' ? 'Tạo lại dự báo' : 'Tải lại dữ liệu dự báo'}
+            title={mode === 'admin' ? 'Tạo lại dự báo, bỏ qua cache' : 'Tải lại dữ liệu dự báo'}
             onClick={() => {
+              forceRefreshRef.current = mode === 'admin'
               setLoading(true)
               setReloadKey((value) => value + 1)
             }}
@@ -155,23 +183,33 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
               note={mode === 'admin' ? 'Tổng các điểm đang mở bán' : 'Trước hoa hồng nền tảng'}
             />
             <StatCard
-              label="Điểm dự báo thành công"
+              label="Điểm có đủ cơ sở dự báo"
               value={`${data.successfulAttractions}/${data.totalAttractions}`}
-              note={data.failedAttractions ? `${data.failedAttractions} điểm cần kiểm tra dữ liệu` : 'Không có lỗi dữ liệu'}
+              note={`${data.insufficientDataAttractions || 0} điểm chưa có dữ liệu · ${data.failedAttractions || 0} lỗi xử lý`}
             />
             <StatCard
               label="Phương pháp"
-              value={`${data.methodSummary?.ai || 0} AI thật · ${data.methodSummary?.demoAi || 0} AI demo · ${data.methodSummary?.baseline || 0} baseline`}
-              note="AI demo dùng booking mô phỏng; baseline dùng khi dữ liệu chưa đủ hoặc AI gián đoạn"
+              value={getMethodSummaryLabel(data.methodSummary)}
+              note="Chỉ tạo dự báo khi lịch sử có đủ số đơn và độ phủ theo ngày"
             />
           </div>
+
+          {(data.methodSummary?.insufficientData || 0) > 0 && (
+            <div className="flex items-start gap-2 rounded-lg border border-[#d8dee0] bg-[#f7f9fa] px-4 py-3 text-xs leading-5 text-[#3f484a]">
+              <span className="material-symbols-outlined mt-0.5 text-[18px]">database_off</span>
+              <span>
+                Có {data.methodSummary.insufficientData} điểm chưa có đủ đơn hoàn tất phát sinh doanh thu.
+                Các điểm này không được cộng vào tổng doanh thu và không được ghi nhận là dự báo thành công.
+              </span>
+            </div>
+          )}
 
           {(data.methodSummary?.baseline || 0) > 0 && (
             <div className="flex items-start gap-2 rounded-lg border border-[#f2d58b] bg-[#fff8e6] px-4 py-3 text-xs leading-5 text-[#6b5100]">
               <span className="material-symbols-outlined mt-0.5 text-[18px]">info</span>
               <span>
-                Có {data.methodSummary.baseline} điểm đang dùng baseline theo thứ trong tuần và
-                xu hướng 28 ngày. Các điểm này không được trình bày như kết quả của model AI.
+                Có {data.methodSummary.baseline} điểm đang được ước tính theo thứ trong tuần và
+                xu hướng 28 ngày gần nhất. Đây là phương pháp thống kê từ dữ liệu lịch sử.
               </span>
             </div>
           )}
@@ -180,9 +218,8 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
             <div className="flex items-start gap-2 rounded-lg border border-[#b7d9e8] bg-[#eef8fc] px-4 py-3 text-xs leading-5 text-[#164e63]">
               <span className="material-symbols-outlined mt-0.5 text-[18px]">science</span>
               <span>
-                Có {data.methodSummary.demoAi} điểm đang chạy model AI bằng booking mô phỏng
-                để trình diễn pipeline local. Kết quả không phải cam kết doanh thu hoặc bằng chứng
-                độ chính xác trên giao dịch thực.
+                Có {data.methodSummary.demoAi} điểm đang dùng mô hình ước tính trong môi trường học thuật.
+                Kết quả chỉ phục vụ kiểm thử và không phải cam kết doanh thu.
               </span>
             </div>
           )}
@@ -209,10 +246,12 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
                       <div
                         className="w-full rounded-t bg-[#0b7c84]"
                         style={{
-                          height: `${Math.max(
-                            3,
-                            (Number(point.predictedRevenue || 0) / maxTimelineRevenue) * 100,
-                          )}%`,
+                          height: Number(point.predictedRevenue || 0) > 0
+                            ? `${Math.max(
+                              3,
+                              (Number(point.predictedRevenue) / maxTimelineRevenue) * 100,
+                            )}%`
+                            : '0%',
                         }}
                       />
                     </div>
@@ -246,18 +285,23 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
                         <p className="text-xs text-[#b3261e]">{item.error}</p>
                       ) : (
                         <p className="mt-0.5 text-xs text-[#6f797a]">
-                          {[item.city, item.usedFallback ? 'Baseline lịch sử' : 'AI ensemble']
+                          {[item.city, getMethodLabel(item)]
                             .filter(Boolean)
                             .join(' · ')}
                           {item.dataQuality?.completedBookings != null
-                            ? ` · ${item.dataQuality.completedBookings} booking mẫu`
+                            ? ` · ${item.dataQuality.completedBookings} đơn lịch sử`
+                            : ''}
+                          {item.dataQuality?.observedDays != null
+                            ? ` · ${item.dataQuality.observedDays} ngày có doanh thu`
                             : ''}
                         </p>
                       )}
                     </div>
                     {!item.error && (
                       <span className="whitespace-nowrap text-sm font-semibold text-[#006068]">
-                        {formatVND(item.totalPredictedRevenue)}
+                        {item.forecastAvailable === false
+                          ? 'Chưa đủ dữ liệu'
+                          : formatVND(item.totalPredictedRevenue)}
                       </span>
                     )}
                   </div>

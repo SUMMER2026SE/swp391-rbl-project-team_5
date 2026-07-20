@@ -4,6 +4,7 @@ const mockPrisma = require('./helpers/mockPrisma');
 const {
   lookupTicketByQr,
   checkInTicket,
+  listOperationalBookings,
   listTodayBookings,
 } = require('../controllers/staffController');
 
@@ -361,5 +362,50 @@ describe('listTodayBookings', () => {
         }),
       }),
     );
+  });
+});
+
+describe('listOperationalBookings', () => {
+  test('returns future confirmed bookings so staff can reissue before visit day', async () => {
+    const futureDate = new Date(`${TODAY_VN}T00:00:00.000Z`);
+    futureDate.setUTCDate(futureDate.getUTCDate() + 3);
+    mockPrisma.booking.findMany.mockResolvedValue([{
+      id: 'booking-future',
+      status: 'CONFIRMED',
+      fullName: 'Nguyễn Văn A',
+      phone: '0901234567',
+      snapshotVisitDate: futureDate,
+      snapshotAttractionTitle: 'Sun World',
+      snapshotTicketName: 'Vé người lớn',
+      snapshotTimeSlotLabel: null,
+      ticketInstances: [{ status: 'VALID' }, { status: 'VALID' }],
+      reservation: {
+        date: futureDate,
+        quantity: 2,
+        timeSlot: { startTime: '08:00', endTime: '10:00' },
+        ticketProduct: {
+          name: 'Vé người lớn',
+          attraction: { id: ATTRACTION_ID, title: 'Sun World' },
+        },
+      },
+    }]);
+
+    const { req, res, next } = makeReqRes({ query: { search: 'future' } });
+    await listOperationalBookings(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: [expect.objectContaining({
+        bookingId: 'booking-future',
+        validCount: 2,
+      })],
+    }));
+    expect(mockPrisma.booking.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: 'CONFIRMED',
+        OR: expect.arrayContaining([{ id: { contains: 'future', mode: 'insensitive' } }]),
+      }),
+    }));
   });
 });

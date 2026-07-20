@@ -7,7 +7,10 @@ const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_DAYS = 180;
 const MIN_AI_OBSERVED_DAYS = 14;
 const MIN_AI_BOOKINGS = 30;
+const MIN_BASELINE_OBSERVED_DAYS = 7;
+const MIN_BASELINE_BOOKINGS = 10;
 const FALLBACK_MODEL_VERSION = 'seasonal_baseline_v2';
+const INSUFFICIENT_DATA_MODEL_VERSION = 'insufficient_data_v1';
 const FORECAST_DATA_BASIS = 'NET_TICKET_REVENUE_BY_VISIT_DATE';
 
 function positiveInteger(value, fallback, minimum, maximum) {
@@ -231,6 +234,10 @@ async function getAttractionForecastFeatures(attractionId) {
       publicationStatus: true,
       operationalStatus: true,
       archivedAt: true,
+      publishedAt: true,
+      partner: {
+        select: { status: true },
+      },
       ticketProducts: {
         where: { status: 'ACTIVE', archivedAt: null },
         select: { sellingPrice: true },
@@ -255,6 +262,8 @@ async function getAttractionForecastFeatures(attractionId) {
     numReviews: Number(attraction.totalReviews || 0),
     isForecastable:
       !attraction.archivedAt
+      && Boolean(attraction.publishedAt)
+      && attraction.partner?.status === 'APPROVED'
       && attraction.status === 'APPROVED'
       && attraction.publicationStatus === 'ACTIVE'
       && attraction.operationalStatus === 'ACTIVE'
@@ -281,6 +290,9 @@ function summarizeHistory(history) {
     completedBookings,
     soldTickets,
     avgRealizedTicketPrice,
+    sufficientForBaseline:
+      observedDays >= MIN_BASELINE_OBSERVED_DAYS
+      && completedBookings >= MIN_BASELINE_BOOKINGS,
     sufficientForAi:
       history.length >= 56
       && observedDays >= MIN_AI_OBSERVED_DAYS
@@ -445,40 +457,78 @@ function buildFallbackForecast(history, forecastDays, features, reason) {
     modelVersion: FALLBACK_MODEL_VERSION,
     trainingSource: 'historical_baseline',
     usedFallback: true,
+    forecastAvailable: true,
     method: 'HISTORICAL_BASELINE',
     warning: reason,
   };
 }
 
-function mapStoredRows(attractionId, rows) {
+function buildInsufficientDataForecast(history, forecastDays, warning = '') {
+  const lastDate = history[history.length - 1]?.date
+    || addDateKeyDays(vietnamDateKey(), -1);
+  return {
+    forecast: Array.from({ length: forecastDays }, (_, index) => ({
+      date: addDateKeyDays(lastDate, index + 1),
+      predictedRevenue: 0,
+      predictedTickets: 0,
+      confidenceLower: 0,
+      confidenceUpper: 0,
+    })),
+    modelVersion: INSUFFICIENT_DATA_MODEL_VERSION,
+    trainingSource: 'insufficient_data',
+    usedFallback: true,
+    forecastAvailable: false,
+    method: 'INSUFFICIENT_DATA',
+    warning: warning || 'Chưa có booking hoàn tất phát sinh doanh thu thực để lập dự báo. Hệ thống không tự biến dữ liệu trống thành dự báo 0 đồng.',
+  };
+}
+
+function mapStoredRows(attractionId, rows, features) {
   const first = rows[0];
   const trainingSource = String(first.trainingSource || 'unknown');
   const isDemoModel = trainingSource === 'demo_booking_history';
+  // Tương thích cache cũ: baseline toàn số 0 khi không có booking không phải là
+  // một dự báo hợp lệ, dù trước đây nó từng được ghi là HISTORICAL_BASELINE.
+  const hasInsufficientBaselineData = Number(first.observedDays || 0) < MIN_BASELINE_OBSERVED_DAYS
+    || Number(first.sampleBookings || 0) < MIN_BASELINE_BOOKINGS;
+  const isInsufficientData = trainingSource === 'insufficient_data'
+    || (trainingSource === 'historical_baseline' && hasInsufficientBaselineData);
+  let method = isDemoModel ? 'AI_DEMO_ENSEMBLE' : 'AI_ENSEMBLE';
+  let warning = isDemoModel
+    ? 'Model AI này được huấn luyện bằng booking mô phỏng để kiểm thử kỹ thuật, không phải bằng chứng độ chính xác kinh doanh thực tế.'
+    : null;
+  if (first.usedFallback) {
+    method = 'HISTORICAL_BASELINE';
+    warning = 'Dự báo đang dùng baseline lịch sử do dữ liệu chưa đủ hoặc dịch vụ AI chưa sẵn sàng.';
+  }
+  if (isInsufficientData) {
+    method = 'INSUFFICIENT_DATA';
+    warning = `Chưa đủ dữ liệu để lập dự báo đáng tin cậy (cần tối thiểu ${MIN_BASELINE_OBSERVED_DAYS} ngày có doanh thu và ${MIN_BASELINE_BOOKINGS} booking hoàn tất).`;
+  }
   return {
     attractionId,
+    attractionTitle: features?.title,
     modelVersion: first.modelVersion,
     trainingSource,
     generatedAt: first.generatedAt,
     fromCache: true,
     usedFallback: Boolean(first.usedFallback),
-    method: first.usedFallback
-      ? 'HISTORICAL_BASELINE'
-      : isDemoModel ? 'AI_DEMO_ENSEMBLE' : 'AI_ENSEMBLE',
+    forecastAvailable: !isInsufficientData,
+    method,
     dataBasis: FORECAST_DATA_BASIS,
     dataQuality: {
       lookbackDays: first.historyDays,
       observedDays: first.observedDays,
       completedBookings: first.sampleBookings,
+      sufficientForBaseline:
+        first.observedDays >= MIN_BASELINE_OBSERVED_DAYS
+        && first.sampleBookings >= MIN_BASELINE_BOOKINGS,
       sufficientForAi:
         first.historyDays >= 56
         && first.observedDays >= MIN_AI_OBSERVED_DAYS
         && first.sampleBookings >= MIN_AI_BOOKINGS,
     },
-    warning: first.usedFallback
-      ? 'Dự báo đang dùng baseline lịch sử do dữ liệu chưa đủ hoặc dịch vụ AI chưa sẵn sàng.'
-      : isDemoModel
-        ? 'Model AI này được huấn luyện bằng booking mô phỏng để kiểm thử kỹ thuật, không phải bằng chứng độ chính xác kinh doanh thực tế.'
-        : null,
+    warning,
     forecast: rows.map((row) => ({
       date: row.forecastDate.toISOString().slice(0, 10),
       predictedRevenue: Number(row.predictedRevenue),
@@ -489,7 +539,12 @@ function mapStoredRows(attractionId, rows) {
   };
 }
 
-async function getFreshStoredForecast(attractionId, forecastDays, now = new Date()) {
+async function getFreshStoredForecast(
+  attractionId,
+  forecastDays,
+  features,
+  now = new Date(),
+) {
   const todayKey = vietnamDateKey(now);
   const rows = await prisma.revenueForecast.findMany({
     where: {
@@ -511,7 +566,27 @@ async function getFreshStoredForecast(attractionId, forecastDays, now = new Date
   );
   if (!isContiguous) return null;
 
-  return mapStoredRows(attractionId, rows);
+  // Unique key chỉ gồm attraction + forecastDate. Một lần refresh horizon ngắn
+  // có thể ghi đè vài ngày đầu và để lại các ngày cũ. Không được ghép hai lần
+  // sinh/model thành một đường dự báo duy nhất.
+  const first = rows[0];
+  const sameForecastRun = rows.every((row) => (
+    new Date(row.generatedAt).getTime() === new Date(first.generatedAt).getTime()
+    && row.modelVersion === first.modelVersion
+    && String(row.trainingSource || 'unknown') === String(first.trainingSource || 'unknown')
+    && Boolean(row.usedFallback) === Boolean(first.usedFallback)
+    && Number(row.historyDays || 0) === Number(first.historyDays || 0)
+    && Number(row.observedDays || 0) === Number(first.observedDays || 0)
+    && Number(row.sampleBookings || 0) === Number(first.sampleBookings || 0)
+  ));
+  if (!sameForecastRun) return null;
+
+  const source = String(first.trainingSource || 'unknown');
+  const isKnownNonAiResult = source === 'historical_baseline'
+    || source === 'insufficient_data';
+  if (!isKnownNonAiResult && !resolveTrainingSourceMode(source)) return null;
+
+  return mapStoredRows(attractionId, rows, features);
 }
 
 async function reconcileActualRevenue(attractionId, history) {
@@ -588,11 +663,6 @@ async function getForecastForAttraction(
   { forecastDays = 7, forceRefresh = false } = {},
 ) {
   const normalizedDays = positiveInteger(forecastDays, 7, 1, 30);
-  if (!forceRefresh) {
-    const cached = await getFreshStoredForecast(attractionId, normalizedDays);
-    if (cached) return cached;
-  }
-
   const features = await getAttractionForecastFeatures(attractionId);
   if (!features) {
     const error = new Error('Không tìm thấy điểm tham quan.');
@@ -605,6 +675,15 @@ async function getForecastForAttraction(
     );
     error.statusCode = 422;
     throw error;
+  }
+
+  if (!forceRefresh) {
+    const cached = await getFreshStoredForecast(
+      attractionId,
+      normalizedDays,
+      features,
+    );
+    if (cached) return cached;
   }
 
   const history = await getDailyRevenueHistory(attractionId);
@@ -620,7 +699,15 @@ async function getForecastForAttraction(
   await reconcileActualRevenue(attractionId, history);
 
   let result;
-  if (!dataQuality.sufficientForAi) {
+  if (!dataQuality.sufficientForBaseline) {
+    result = buildInsufficientDataForecast(
+      history,
+      normalizedDays,
+      dataQuality.completedBookings === 0
+        ? ''
+        : `Chưa đủ dữ liệu để lập dự báo đáng tin cậy (cần tối thiểu ${MIN_BASELINE_OBSERVED_DAYS} ngày có doanh thu và ${MIN_BASELINE_BOOKINGS} booking hoàn tất).`,
+    );
+  } else if (!dataQuality.sufficientForAi) {
     result = buildFallbackForecast(
       history,
       normalizedDays,
@@ -653,6 +740,7 @@ async function getForecastForAttraction(
           modelVersion: String(mlResult.model_version || 'unknown'),
           trainingSource: mlResult.training_source,
           usedFallback: false,
+          forecastAvailable: true,
           method: modelMode.method,
           warning: modelMode.warning || mlResult.warning || null,
         };
@@ -680,6 +768,7 @@ async function getForecastForAttraction(
     generatedAt,
     fromCache: false,
     usedFallback: result.usedFallback,
+    forecastAvailable: result.forecastAvailable !== false,
     method: result.method,
     dataBasis: FORECAST_DATA_BASIS,
     dataQuality,
@@ -691,10 +780,12 @@ async function getForecastForAttraction(
 module.exports = {
   FORECAST_DATA_BASIS,
   buildFallbackForecast,
+  buildInsufficientDataForecast,
   derivePriceTier,
   getAttractionForecastFeatures,
   getDailyRevenueHistory,
   getForecastForAttraction,
+  getFreshStoredForecast,
   resolveTrainingSourceMode,
   summarizeHistory,
   vietnamDateKey,

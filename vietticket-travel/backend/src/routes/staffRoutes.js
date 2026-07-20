@@ -14,6 +14,7 @@ const {
   lookupTicketByQr,
   checkInTicket,
   listTodayBookings,
+  listOperationalBookings,
   listStaffAssignments,
   replaceStaffAssignments,
 } = require('../controllers/staffController');
@@ -31,6 +32,7 @@ router.post('/refunds/:refundId/reconcile', requirePlatformStaff, reconcileRefun
 // Nhân viên chỉ thao tác được khi đối tác chủ quản còn hoạt động (APPROVED).
 router.post('/bookings/:bookingId/reissue', requireCheckInEmployer, reissueTicket);
 router.get('/bookings/today', requireCheckInEmployer, listTodayBookings);
+router.get('/bookings', requireCheckInEmployer, listOperationalBookings);
 router.get('/checkin/:token', requireCheckInEmployer, lookupTicketByQr);
 router.post('/checkin/:token', requireCheckInEmployer, checkInTicket);
 

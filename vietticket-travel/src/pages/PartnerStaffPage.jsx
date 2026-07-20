@@ -174,7 +174,7 @@ export default function PartnerStaffPage() {
         <div>
           <h2 className="text-xl font-semibold text-[#191c1d]">Nhân viên của bạn</h2>
           <p className="text-sm text-[#3f484a]">
-            Tạo và phân công nhân viên check-in, xử lý hoàn vé cho các địa điểm của bạn.
+            Tạo và phân công nhân viên check-in tại các địa điểm của bạn. Hoàn tiền do nhân viên nền tảng xử lý.
           </p>
         </div>
         <button

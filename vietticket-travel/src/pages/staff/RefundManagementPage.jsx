@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import {
+  formatBookingReference,
+  formatRefundRequestReference,
+} from '../../utils/bookingReference.js'
+import {
   listRefundRequests,
   processRefundRequest,
   reconcileRefundRequest,
@@ -54,10 +58,6 @@ function formatDateTime(value) {
     timeStyle: 'short',
     timeZone: 'Asia/Ho_Chi_Minh',
   }).format(new Date(value))
-}
-
-function shortBookingId(value) {
-  return `VT-${String(value || '').replaceAll('-', '').slice(0, 8).toUpperCase()}`
 }
 
 function StatusBadge({ status }) {
@@ -119,6 +119,8 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
   const isPending = selected.status === 'PENDING'
   const isReconciling = selected.status === 'PROCESSING'
   const latestTransaction = selected.refundTransactions?.[0]
+  const canApprove = selected.processingEligibility?.canApprove !== false
+  const approvalBlockReason = selected.processingEligibility?.blockReason
 
   return (
     <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-[400px] flex-col border-l border-outline-variant bg-surface-container-lowest shadow-2xl xl:static xl:w-[400px] xl:shrink-0">
@@ -145,7 +147,7 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
             <div className="min-w-0">
               <div className="mb-1 flex flex-wrap items-center gap-2">
                 <span className="text-sm font-bold text-primary">
-                  {shortBookingId(booking.id)}
+                  {formatBookingReference(booking.id)}
                 </span>
                 <StatusBadge status={selected.status} />
               </div>
@@ -226,7 +228,7 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
                 Gửi lúc {formatDateTime(selected.createdAt)}
               </p>
               <p className="text-xs text-on-surface-variant">
-                Mã yêu cầu: {String(selected.id).slice(0, 8).toUpperCase()}
+                Mã yêu cầu: {formatRefundRequestReference(selected.id)}
               </p>
             </div>
           </div>
@@ -248,12 +250,20 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
       <div className="border-t border-outline-variant bg-surface-container p-6 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
         {isPending ? (
           <>
+            {!canApprove && (
+              <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+                <div className="flex items-start gap-2">
+                  <span className="material-symbols-outlined text-[20px]">warning</span>
+                  <p>{approvalBlockReason}</p>
+                </div>
+              </div>
+            )}
             <div className={`grid gap-3 ${selected.mandatory ? 'grid-cols-1' : 'grid-cols-2'}`}>
               <button
                 type="button"
                 className="flex items-center justify-center gap-2 rounded-xl border-0 bg-primary px-4 py-3 text-sm font-semibold text-on-primary transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={onApprove}
-                disabled={isProcessing}
+                disabled={isProcessing || !canApprove}
               >
                 <span className="material-symbols-outlined text-[20px]">check_circle</span>
                 Duyệt hoàn tiền
@@ -385,6 +395,11 @@ export default function RefundManagementPage() {
 
   async function handleApprove() {
     if (!selected) return
+    if (selected.processingEligibility?.canApprove === false) {
+      toast.error(selected.processingEligibility.blockReason)
+      setApproveModal({ open: false, notes: '' })
+      return
+    }
     setIsProcessing(true)
     try {
       const response = await processRefundRequest(selected.id, 'APPROVED', approveModal.notes.trim())
@@ -585,7 +600,7 @@ export default function RefundManagementPage() {
                             onClick={() => setSelected(request)}
                           >
                             <td className="px-6 py-4 text-sm font-bold text-primary">
-                              {shortBookingId(booking.id)}
+                              {formatBookingReference(booking.id)}
                             </td>
                             <td className="px-6 py-4 text-sm text-on-surface">
                               {booking.user?.fullName || booking.fullName || 'Chưa cập nhật'}
@@ -700,7 +715,7 @@ export default function RefundManagementPage() {
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-on-surface-variant">Đơn hàng</span>
                 <span className="text-sm font-bold text-primary">
-                  {shortBookingId(selected.booking?.id)}
+                  {formatBookingReference(selected.booking?.id)}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-4">

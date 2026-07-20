@@ -3,6 +3,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { isTicketProductSaleEnabled } = require('../services/catalogVisibilityService');
 const { MAX_TICKETS_PER_ORDER } = require('../config/bookingPolicy');
+const { formatLocation } = require('../utils/location');
 const {
   MIN_VNPAY_AMOUNT,
   parseVndInteger,
@@ -84,9 +85,7 @@ function resolveBookingPaymentStatus(payments = []) {
 }
 
 function getAttractionLocation(attraction) {
-  return [attraction.address, attraction.district, attraction.city]
-    .filter(Boolean)
-    .join(', ');
+  return formatLocation(attraction);
 }
 
 function getTimeSlotLabel(timeSlot) {
@@ -154,11 +153,11 @@ function getBookingSnapshotView(booking) {
   return {
     attractionId: booking.snapshotAttractionId || attraction.id,
     attractionTitle: booking.snapshotAttractionTitle || attraction.title,
-    attractionLocation: [
-      booking.snapshotAttractionAddress || attraction.address,
-      booking.snapshotAttractionDistrict || attraction.district,
-      booking.snapshotAttractionCity || attraction.city,
-    ].filter(Boolean).join(', '),
+    attractionLocation: formatLocation({
+      address: booking.snapshotAttractionAddress || attraction.address,
+      district: booking.snapshotAttractionDistrict || attraction.district,
+      city: booking.snapshotAttractionCity || attraction.city,
+    }),
     attractionImage: booking.snapshotAttractionImage || attraction.images?.[0]?.imageUrl || '',
     ticketName: booking.snapshotTicketName || product.name,
     visitDate: booking.snapshotVisitDate || reservation.date,

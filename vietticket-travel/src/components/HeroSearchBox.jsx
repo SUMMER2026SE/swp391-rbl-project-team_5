@@ -7,13 +7,13 @@ const intentSuggestions = [
     label: 'Công viên chủ đề',
     subtitle: 'Gia đình, nhóm bạn, cuối tuần',
     icon: 'fort',
-    params: { category: 'Theme Park & Resort', sort: 'popular' },
+    params: { category: 'Công viên giải trí & Nghỉ dưỡng', sort: 'popular' },
   },
   {
     label: 'Thiên nhiên thư giãn',
     subtitle: 'Di sản, cảnh đẹp, đi nhẹ nhàng',
     icon: 'forest',
-    params: { category: 'Nature & Sightseeing', sort: 'rating' },
+    params: { category: 'Thiên nhiên & Tham quan', sort: 'rating' },
   },
   {
     label: 'Vé dưới 500k',

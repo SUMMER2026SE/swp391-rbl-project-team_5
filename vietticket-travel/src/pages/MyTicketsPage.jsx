@@ -8,6 +8,7 @@ import ReviewModal from '../components/tickets/ReviewModal.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
+import { formatBookingReference } from '../utils/bookingReference.js'
 import { hasUsableTicketInstances } from '../utils/ticketInstanceStatus.js'
 import {
   filterBookingsByTicketTab,
@@ -35,10 +36,7 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
 }
 
-const formatBookingCode = (value) => {
-  const code = String(value || '').replaceAll('-', '').slice(0, 8).toUpperCase()
-  return code || 'N/A'
-}
+const formatBookingCode = formatBookingReference
 
 const formatCountdown = (milliseconds) => {
   const safeMilliseconds = Number.isFinite(milliseconds) ? Math.max(0, milliseconds) : 0
@@ -129,7 +127,7 @@ function MyTicketsPage() {
   useEffect(() => {
     function handleBookingStatusUpdated(payload) {
       const status = String(payload.status || '').toLowerCase()
-      const shortCode = String(payload.bookingId || '').slice(0, 8).toUpperCase()
+      const shortCode = formatBookingReference(payload.bookingId)
 
       let message = payload.message
       if (!message) {
@@ -355,7 +353,7 @@ function TicketCard({ booking, now, onRefetch, onOpenReview }) {
           </div>
 
           <div className="mb-6 grid grid-cols-2 gap-x-8 gap-y-4">
-            <TicketFact label="Mã đặt chỗ" title={booking.id} value={formatBookingCode(booking.id)} />
+            <TicketFact label="Mã đặt chỗ" title={formatBookingCode(booking.id)} value={formatBookingCode(booking.id)} />
             <TicketFact label="Ngày" value={formatDate(booking.visitDate)} />
             <TicketFact label="Số lượng" value={quantityText} />
             <TicketFact

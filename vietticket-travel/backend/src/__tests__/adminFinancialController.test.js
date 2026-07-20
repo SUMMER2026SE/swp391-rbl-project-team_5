@@ -29,6 +29,7 @@ describe('admin financial controller', () => {
     prisma.partnerProfile.findUnique.mockResolvedValue({
       id: 'partner-1',
       businessName: 'Museum Partner',
+      status: 'APPROVED',
       commissionRate: 0.1,
     });
     const tx = {
@@ -87,6 +88,25 @@ describe('admin financial controller', () => {
       expect(next).not.toHaveBeenCalled();
     },
   );
+
+  test('does not change commission for a partner that is not approved', async () => {
+    prisma.partnerProfile.findUnique.mockResolvedValue({
+      id: 'partner-pending',
+      businessName: 'New Partner',
+      status: 'PENDING',
+      commissionRate: 0.1,
+    });
+    const { req, res, next } = makeReqRes({
+      params: { id: 'partner-pending' },
+      body: { commissionRatePercent: 15 },
+    });
+
+    await changePartnerCommissionRate(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
 
   test('rejects unsupported transaction status before querying the ledger', async () => {
     const { req, res, next } = makeReqRes({

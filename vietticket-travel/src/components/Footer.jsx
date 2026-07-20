@@ -32,7 +32,10 @@ function Footer({ links = footerLinks }) {
       </div>
 
       <div className="container footer-bottom">
-        <p>© 2026 VietTicket Travel. Tất cả quyền được bảo lưu.</p>
+        <div>
+          <p>© 2026 VietTicket Travel — Sản phẩm học thuật Team 5, SWP391.</p>
+          <p className="mt-1 text-sm opacity-80">Môi trường trình diễn, không phải pháp nhân kinh doanh du lịch. Hỗ trợ: support@vietticket.com</p>
+        </div>
       </div>
     </footer>
   )

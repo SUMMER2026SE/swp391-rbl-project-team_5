@@ -5,6 +5,7 @@ import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
 import supportApi from '../services/supportApi.js'
+import { formatBookingReference } from '../utils/bookingReference.js'
 
 const SUBJECT_OPTIONS = [
   'Lỗi thanh toán',
@@ -18,9 +19,6 @@ const formatDate = (value) => {
   const date = new Date(`${value}T00:00:00`)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
 }
-
-const shortCode = (value) =>
-  `VT-${String(value || '').replaceAll('-', '').slice(0, 8).toUpperCase()}`
 
 function SupportCenterPage() {
   const navigate = useNavigate()
@@ -78,13 +76,16 @@ function SupportCenterPage() {
 
     setIsSubmitting(true)
     try {
-      await supportApi.createTicket({
+      const createdTicket = await supportApi.createTicket({
         subject: `[${subject}] ${title.trim()}`,
         description: description.trim(),
         bookingId: bookingId || undefined,
       })
+      if (!createdTicket?.id) {
+        throw new Error('Hệ thống chưa xác nhận đã lưu yêu cầu hỗ trợ. Vui lòng thử lại.')
+      }
       toast.success('Đã gửi yêu cầu hỗ trợ thành công!')
-      navigate('/my-support')
+      navigate('/my-support', { state: { createdTicketId: createdTicket.id } })
     } catch (error) {
       toast.error(error.message)
     } finally {
@@ -156,7 +157,7 @@ function SupportCenterPage() {
               <option value="">— Không chọn —</option>
               {bookings.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {shortCode(b.id)} - {b.attractionTitle} - {formatDate(b.visitDate)}
+                  {formatBookingReference(b.id)} - {b.attractionTitle} - {formatDate(b.visitDate)}
                 </option>
               ))}
             </select>

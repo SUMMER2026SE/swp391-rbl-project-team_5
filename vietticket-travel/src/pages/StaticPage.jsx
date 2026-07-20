@@ -10,8 +10,9 @@ const PAGES = {
     heading: 'Du lịch thuận tiện hơn với vé điện tử minh bạch',
     sections: [
       ['VietTicket là gì?', 'VietTicket Travel là nền tảng kết nối du khách với các đơn vị vận hành điểm tham quan. Hệ thống hỗ trợ tìm kiếm, giữ chỗ, thanh toán trực tuyến và phát hành vé QR.'],
+      ['Chủ thể của bản trình diễn', 'VietTicket Travel trong phạm vi website này là sản phẩm phần mềm học thuật do Team 5 phát triển cho học phần SWP391. Hệ thống chưa đại diện cho một pháp nhân kinh doanh du lịch và không nhận giao dịch thương mại ngoài môi trường trình diễn. Thông tin doanh nghiệp, địa chỉ đăng ký và hotline thương mại chỉ được công bố khi có đơn vị chủ quản hợp pháp trước thời điểm vận hành thực tế.'],
       ['Nguyên tắc vận hành', 'Thông tin điểm tham quan và hồ sơ đối tác được kiểm duyệt trước khi mở bán. Giá, tồn kho và điều kiện hoàn hủy được xác nhận lại trong quá trình đặt vé.'],
-      ['Liên hệ', 'Các yêu cầu hỗ trợ có thể được gửi qua Trung tâm hỗ trợ sau khi đăng nhập hoặc qua email support@vietticket.com.'],
+      ['Liên hệ bản trình diễn', 'Kênh hỗ trợ có lưu vết là Trung tâm hỗ trợ sau khi đăng nhập hoặc email support@vietticket.com. Bản trình diễn không công bố số hotline hay địa chỉ doanh nghiệp giả; thông tin pháp nhân bắt buộc phải được cấu hình và xác minh trước khi triển khai thương mại.'],
     ],
   },
   faq: {
@@ -31,7 +32,7 @@ const PAGES = {
     heading: 'Điều khoản dịch vụ',
     updated: 'Cập nhật ngày 17 tháng 7 năm 2026',
     sections: [
-      ['1. Đơn vị vận hành và phạm vi dịch vụ', 'VietTicket Travel vận hành nền tảng trung gian giúp khách hàng tìm kiếm, giữ chỗ, thanh toán và quản lý vé tham quan. Đối tác điểm tham quan là bên cung cấp trải nghiệm, chịu trách nhiệm về tính chính xác của nội dung đã công bố và chất lượng dịch vụ tại địa điểm.'],
+      ['1. Đơn vị vận hành và phạm vi dịch vụ', 'Website hiện là sản phẩm học thuật của Team 5 trong học phần SWP391, chưa phải dịch vụ do một pháp nhân du lịch cung cấp ra thị trường. Trong mô hình nghiệp vụ, VietTicket Travel là nền tảng trung gian giúp khách hàng tìm kiếm, giữ chỗ, thanh toán và quản lý vé; đối tác điểm tham quan là bên cung cấp trải nghiệm và chịu trách nhiệm về nội dung, giấy phép cùng chất lượng tại địa điểm. Trước khi vận hành thương mại, tên pháp nhân, mã số doanh nghiệp, địa chỉ đăng ký và hotline phải được công bố tại mục này.'],
       ['2. Điều kiện sử dụng và tài khoản', 'Người dùng phải có năng lực thực hiện giao dịch theo pháp luật Việt Nam, cung cấp thông tin chính xác, bảo vệ thông tin đăng nhập và thông báo ngay khi phát hiện truy cập trái phép. Mọi thao tác thực hiện trong phiên đăng nhập hợp lệ được xem là do chủ tài khoản thực hiện, trừ khi có bằng chứng về sự cố bảo mật.'],
       ['3. Thông tin sản phẩm, giá và thuế phí', 'Mô tả, lịch hoạt động, điều kiện độ tuổi, giá bán, thuế phí và khả năng cung ứng do đối tác cập nhật và được hệ thống kiểm tra trước khi mở bán. Giá cuối cùng, ưu đãi và tổng tiền được hiển thị tại bước xác nhận; thông tin tại bước này được ưu tiên nếu khác nội dung quảng bá trước đó.'],
       ['4. Giữ chỗ và xác nhận đơn', 'Giữ chỗ chỉ có hiệu lực trong thời hạn hiển thị. Đơn đặt vé được xác nhận sau khi hệ thống ghi nhận thanh toán hợp lệ và kiểm tra lại tồn kho. Một số sản phẩm cần đối tác duyệt thủ công; trạng thái và thời hạn xử lý được hiển thị trong tài khoản. Nếu không thể xác nhận, hệ thống sẽ hủy đơn và xử lý hoàn tiền theo phương thức thanh toán ban đầu.'],
@@ -45,7 +46,7 @@ const PAGES = {
       ['12. Sự kiện bất khả kháng và giới hạn trách nhiệm', 'Trong trường hợp thiên tai, dịch bệnh, yêu cầu của cơ quan nhà nước, gián đoạn hạ tầng hoặc sự kiện ngoài khả năng kiểm soát hợp lý, VietTicket sẽ thông báo và phối hợp bảo vệ quyền lợi theo chính sách áp dụng. Không điều khoản nào loại trừ trách nhiệm mà pháp luật bắt buộc một bên phải chịu.'],
       ['13. Tạm ngừng và chấm dứt', 'VietTicket có thể giới hạn tính năng hoặc khóa tài khoản khi cần bảo vệ người dùng, ngăn gian lận, tuân thủ pháp luật hoặc xử lý vi phạm. Trường hợp phù hợp, người dùng sẽ được thông báo lý do và cơ chế khiếu nại; nghĩa vụ thanh toán, hoàn tiền và bảo mật đã phát sinh vẫn tiếp tục có hiệu lực.'],
       ['14. Khiếu nại và giải quyết tranh chấp', 'Người dùng nên gửi yêu cầu qua Trung tâm hỗ trợ, kèm mã đơn và tài liệu liên quan. Các bên ưu tiên thương lượng trên cơ sở dữ liệu giao dịch đã lưu. Nếu không giải quyết được, tranh chấp được xử lý theo pháp luật Việt Nam tại cơ quan có thẩm quyền.'],
-      ['15. Thay đổi và liên hệ', 'Điều khoản mới sẽ ghi rõ ngày cập nhật và áp dụng cho giao dịch phát sinh sau thời điểm có hiệu lực, trừ trường hợp pháp luật yêu cầu khác. Câu hỏi về dịch vụ có thể gửi qua Trung tâm hỗ trợ hoặc support@vietticket.com.'],
+      ['15. Thay đổi và liên hệ', 'Điều khoản mới sẽ ghi rõ ngày cập nhật và áp dụng cho giao dịch phát sinh sau thời điểm có hiệu lực, trừ trường hợp pháp luật yêu cầu khác. Trong môi trường trình diễn, câu hỏi được tiếp nhận qua Trung tâm hỗ trợ hoặc support@vietticket.com; không sử dụng website này cho giao dịch thương mại thực tế.'],
     ],
   },
   privacy: {

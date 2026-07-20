@@ -21,6 +21,10 @@ const {
   isAttractionSaleEnabled,
   publicAttractionWhere,
 } = require('../services/catalogVisibilityService');
+const {
+  buildNormalizedContainsConditions,
+  normalizeAttractionSearch,
+} = require('../utils/attractionSearch');
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
@@ -177,7 +181,8 @@ async function listAttractions(req, res, next) {
     const city = String(req.query.city || '').trim();
     if (city) where.city = city;
 
-    const [items, total] = await prisma.$transaction([
+    const cityWhere = { partnerId: req.partner.id, archivedAt: null };
+    const [items, total, cityRows = []] = await prisma.$transaction([
       prisma.attraction.findMany({
         where,
         include: attractionInclude,
@@ -186,11 +191,20 @@ async function listAttractions(req, res, next) {
         take: limit,
       }),
       prisma.attraction.count({ where }),
+      prisma.attraction.findMany({
+        where: { ...cityWhere, city: { not: '' } },
+        distinct: ['city'],
+        orderBy: { city: 'asc' },
+        select: { city: true },
+      }),
     ]);
 
     return res.json({
       attractions: items.map(toAttractionListItem),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) || 1 },
+      filters: {
+        cities: cityRows.map((item) => item.city).filter(Boolean),
+      },
     });
   } catch (error) {
     next(error);
@@ -698,26 +712,43 @@ async function searchAttractions(req, res, next) {
     const where = publicAttractionWhere();
     const andConditions = [];
 
-    if (city) {
-      let citySearchTerm = city;
-      if (/tp\.?\s*hcm/i.test(city) || /hồ chí minh/i.test(city)) {
-        citySearchTerm = 'Hồ Chí Minh';
-      }
-      andConditions.push({
-        OR: [
-          { city: { contains: citySearchTerm, mode: 'insensitive' } },
-          { district: { contains: citySearchTerm, mode: 'insensitive' } },
-        ]
-      });
-    }
+    andConditions.push(
+      ...buildNormalizedContainsConditions('locationTextNormalized', city),
+    );
 
     if (search) {
-      andConditions.push({
-        OR: [
-          { title: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-        ]
-      });
+      const normalizedPhrase = normalizeAttractionSearch(search);
+      const exactPhraseFilter = normalizedPhrase
+        ? { contains: ` ${normalizedPhrase} ` }
+        : null;
+
+      if (exactPhraseFilter) {
+        // Prefer a location phrase over incidental mentions in descriptions.
+        // If it is not a location, prefer the exact phrase before falling back
+        // to word-wise matching across title, description and address.
+        const [exactLocationCount, exactContentCount] = await prisma.$transaction([
+          prisma.attraction.count({
+            where: publicAttractionWhere({
+              locationTextNormalized: exactPhraseFilter,
+            }),
+          }),
+          prisma.attraction.count({
+            where: publicAttractionWhere({
+              searchTextNormalized: exactPhraseFilter,
+            }),
+          }),
+        ]);
+
+        if (exactLocationCount > 0) {
+          andConditions.push({ locationTextNormalized: exactPhraseFilter });
+        } else if (exactContentCount > 0) {
+          andConditions.push({ searchTextNormalized: exactPhraseFilter });
+        } else {
+          andConditions.push(
+            ...buildNormalizedContainsConditions('searchTextNormalized', search),
+          );
+        }
+      }
     }
 
     if (minRating) {
@@ -882,7 +913,12 @@ async function getAttractionDetail(req, res, next) {
         partner: { select: { status: true } },
         images: true,
         categories: { include: { category: true } },
-      ticketProducts: { where: { status: 'ACTIVE', archivedAt: null } },
+        ticketProducts: { where: { status: 'ACTIVE', archivedAt: null } },
+        timeSlots: {
+          where: { isActive: true },
+          orderBy: { startTime: 'asc' },
+          select: { id: true, startTime: true, endTime: true },
+        },
       },
     });
 
@@ -929,6 +965,10 @@ async function getAttractionDetail(req, res, next) {
       recommendedVisitMinutes: attraction.recommendedVisitMinutes,
       environment: attraction.environment,
       isFullDay: attraction.isFullDay,
+      openTime: attraction.openTime,
+      closeTime: attraction.closeTime,
+      openDays: attraction.openDays,
+      timeSlots: attraction.timeSlots,
     };
 
     return res.status(200).json({ success: true, data: result });

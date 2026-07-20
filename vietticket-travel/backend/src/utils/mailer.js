@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const { getFrontendUrl } = require('../config/runtimeConfig');
+const { formatBookingReference } = require('./bookingReference');
 
 function hasSmtpConfig() {
   return Boolean(
@@ -337,7 +338,7 @@ async function sendTicketConfirmationEmail({ booking, pdfBuffer }) {
   const safeName = escapeHtml(booking.fullName || 'quý khách');
   const safeAttraction = escapeHtml(attraction.title);
   const safeVisitDate = escapeHtml(visitDate);
-  const fileName = `VietTicket_VeDienTu_${booking.id.slice(0, 8)}.pdf`;
+  const fileName = `VietTicket_VeDienTu_${formatBookingReference(booking.id)}.pdf`;
 
   return sendMail({
     to: booking.email,
@@ -375,7 +376,7 @@ async function sendRefundRequestReceivedEmail({
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
-  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const shortId = formatBookingReference(bookingId);
   const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
 
   return sendMail({
@@ -409,7 +410,7 @@ async function sendRefundStatusEmail({
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
-  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const shortId = formatBookingReference(bookingId);
   const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
 
   if (action === 'APPROVED') {
@@ -453,7 +454,7 @@ async function sendReissueTicketEmail({
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/tickets/${bookingId}`;
   const safeName = escapeHtml(fullName || 'bạn');
-  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const shortId = formatBookingReference(bookingId);
 
   return sendMail({
     to,
@@ -479,7 +480,7 @@ async function sendBookingRejectedEmail({
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
-  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const shortId = formatBookingReference(bookingId);
   const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
   const hasRefund = Number(refundAmount || 0) > 0;
 
@@ -516,7 +517,7 @@ async function sendPendingApprovalExpiredEmail({
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
-  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const shortId = formatBookingReference(bookingId);
   const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
 
   return sendMail({
@@ -568,7 +569,7 @@ async function sendBookingCancelledByPartnerEmail({
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
   const safeReason = escapeHtml(reason || 'Sự cố vận hành từ đối tác.');
-  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const shortId = formatBookingReference(bookingId);
   const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
 
   return sendMail({
@@ -589,7 +590,7 @@ async function sendHoldExpiredEmail({ to, fullName, bookingId, attractionTitle }
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/attractions`;
   const safeName = escapeHtml(fullName || 'bạn');
-  const shortId = String(bookingId).slice(0, 8).toUpperCase();
+  const shortId = formatBookingReference(bookingId);
 
   return sendMail({
     to,

@@ -111,6 +111,43 @@ function findRefundTargetPayment(refundRequest) {
   )) || null;
 }
 
+function isLocalDemoPayment(payment) {
+  const raw = payment?.rawResponse;
+  return process.env.NODE_ENV !== 'production'
+    && String(payment?.id || '').startsWith('defense-demo-v1-payment-')
+    && raw
+    && typeof raw === 'object'
+    && !Array.isArray(raw)
+    && raw.source === 'defense_demo_fixture';
+}
+
+function getRefundProcessingEligibility(payment) {
+  if (!payment) {
+    return {
+      canApprove: false,
+      mode: 'BLOCKED',
+      blockReason: 'Không tìm thấy giao dịch VNPay đã thu tiền để thực hiện hoàn tiền.',
+    };
+  }
+  if (isLocalDemoPayment(payment)) {
+    return { canApprove: true, mode: 'LOCAL_DEMO', blockReason: null };
+  }
+
+  const raw = payment.rawResponse && typeof payment.rawResponse === 'object'
+    ? payment.rawResponse
+    : {};
+  const hasTransactionNo = Boolean(String(raw.vnp_TransactionNo || '').trim());
+  const hasCreateDate = /^\d{14}$/.test(String(raw.vnp_CreateDate || '').trim());
+  if (!payment.transactionId || !hasTransactionNo || !hasCreateDate) {
+    return {
+      canApprove: false,
+      mode: 'BLOCKED',
+      blockReason: 'Thiếu dữ liệu giao dịch VNPay gốc. Cần đối soát thanh toán trước khi phê duyệt hoàn tiền.',
+    };
+  }
+  return { canApprove: true, mode: 'VNPAY', blockReason: null };
+}
+
 function getPaymentRefundBalance({ payment, transactions = [], currentRefundRequestId }) {
   const capturedAmount = toVndAmount(payment?.amount, 'Số tiền thanh toán gốc');
   let successfulAmount = 0;
@@ -279,8 +316,10 @@ module.exports = {
   classifyVnpayReconciliationResult,
   finalizeSuccessfulRefund,
   findRefundTargetPayment,
+  getRefundProcessingEligibility,
   getPaymentRefundBalance,
   httpError,
   isMandatoryRefundRequest,
+  isLocalDemoPayment,
   toVndAmount,
 };

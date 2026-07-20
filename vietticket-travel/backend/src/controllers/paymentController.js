@@ -23,6 +23,7 @@ const {
   publicAttractionWhere,
 } = require('../services/catalogVisibilityService');
 const { sendRefundRequestReceivedEmail } = require('../utils/mailer');
+const { formatBookingReference } = require('../utils/bookingReference');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const { getFrontendUrl } = require('../config/runtimeConfig');
 const {
@@ -657,8 +658,8 @@ async function reconcileVnpayPayment(query) {
         status: result.bookingStatus,
         message:
           result.bookingStatus === 'CONFIRMED'
-            ? `Đặt vé ${booking.id.slice(0, 8).toUpperCase()} của bạn đã được thanh toán và xác nhận thành công!`
-            : `Đơn hàng ${booking.id.slice(0, 8).toUpperCase()} đã thanh toán thành công và đang chờ đối tác phê duyệt.`,
+            ? `Đặt vé ${formatBookingReference(booking.id)} của bạn đã được thanh toán và xác nhận thành công!`
+            : `Đơn hàng ${formatBookingReference(booking.id)} đã thanh toán thành công và đang chờ đối tác phê duyệt.`,
       });
 
       // Nếu địa điểm không cần duyệt thủ công -> CONFIRMED ngay: gửi email vé PDF luôn

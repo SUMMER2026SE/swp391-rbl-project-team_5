@@ -5,6 +5,8 @@ import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
 import bookingService from '../services/bookingService.js'
 import { getFavorites, getFavoriteItems } from '../services/favoriteApi.js'
+import { formatBookingReference } from '../utils/bookingReference.js'
+import { hasRole } from '../utils/userRoles.js'
 
 const fallbackImage =
   'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=900&q=80'
@@ -18,10 +20,7 @@ const formatDate = (value) => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('vi-VN')
 }
 
-const formatBookingCode = (value) => {
-  const code = String(value || '').slice(0, 8).toUpperCase()
-  return code || 'N/A'
-}
+const formatBookingCode = formatBookingReference
 
 const getGenderLabel = (value) => {
   const normalized = String(value || '').trim().toLowerCase()
@@ -49,6 +48,9 @@ function ProfilePage() {
   const { user, logout, getProfile } = useAuth()
   const [error, setError] = useState('')
   const currentUser = user || defaultUser
+  const isOperationalUser = hasRole(currentUser, 'ADMIN')
+    || hasRole(currentUser, 'STAFF')
+    || hasRole(currentUser, 'PARTNER')
 
   const [recentBookings, setRecentBookings] = useState([])
   const [savedAttractions, setSavedAttractions] = useState([])
@@ -112,9 +114,9 @@ function ProfilePage() {
     }
   }, [])
 
-  const handleLogout = () => {
-    logout()
-    navigate('/')
+  const handleLogout = async () => {
+    await logout()
+    navigate('/', { replace: true })
   }
 
   return (
@@ -123,7 +125,11 @@ function ProfilePage() {
         <div className="account-card__header">
           <div>
             <h1>Hồ sơ của tôi</h1>
-            <p>Xem thông tin tài khoản và tùy chọn đặt vé du lịch của bạn.</p>
+            <p>
+              {isOperationalUser
+                ? 'Xem thông tin tài khoản và thiết lập bảo mật của bạn.'
+                : 'Xem thông tin tài khoản và tùy chọn đặt vé du lịch của bạn.'}
+            </p>
           </div>
           <div className="profile-actions-row">
             <Link className="auth-secondary-button" to="/edit-profile">
@@ -195,6 +201,7 @@ function ProfilePage() {
         </div>
       </section>
 
+      {!isOperationalUser && <>
       <section className="account-card">
         <div className="account-card__header">
           <div>
@@ -307,6 +314,7 @@ function ProfilePage() {
           <p>Vé đủ điều kiện sẽ có mã QR trong mục Vé của tôi để sử dụng khi check-in.</p>
         </article>
       </section>
+      </>}
     </AccountLayout>
   )
 }

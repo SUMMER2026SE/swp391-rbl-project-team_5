@@ -6,6 +6,7 @@ const { emitBookingStatusUpdated } = require('../realtime/events');
 const { sendPendingApprovalExpiredEmail } = require('./mailer');
 const { releaseInventory } = require('./refundService');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
+const { formatBookingReference } = require('./bookingReference');
 const { acquireJobLock, releaseJobLock, INSTANCE_ID } = require('./cleanupWorker');
 const {
   MANUAL_APPROVAL_TIMEOUT_MS,
@@ -136,7 +137,7 @@ async function sweepExpiredPartnerApprovals({
         customerId: expired.userId,
         bookingId: expired.id,
         status: 'CANCELLED',
-        message: `Đơn ${expired.id.slice(0, 8).toUpperCase()} đã tự động hủy vì quá 24 giờ chưa được đối tác xác nhận. Yêu cầu hoàn tiền 100% đã được tạo.`,
+        message: `Đơn ${formatBookingReference(expired.id)} đã tự động hủy vì quá 24 giờ chưa được đối tác xác nhận. Yêu cầu hoàn tiền 100% đã được tạo.`,
       });
       sendPendingApprovalExpiredEmail({
         to: expired.email,

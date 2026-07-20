@@ -15,6 +15,8 @@ const {
   classifyVnpayReconciliationResult,
   finalizeSuccessfulRefund,
   findRefundTargetPayment,
+  getRefundProcessingEligibility,
+  isLocalDemoPayment,
   isMandatoryRefundRequest,
 } = require('../services/refundLifecycleService');
 const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
@@ -149,7 +151,15 @@ async function listRefundRequests(req, res, next) {
               payments: {
                 where: { status: 'SUCCESS' },
                 orderBy: { createdAt: 'desc' },
-                select: { id: true, paymentGateway: true, status: true },
+                select: {
+                  id: true,
+                  amount: true,
+                  paymentGateway: true,
+                  status: true,
+                  isDuplicate: true,
+                  transactionId: true,
+                  rawResponse: true,
+                },
               },
               reservation: {
                 include: {
@@ -187,7 +197,22 @@ async function listRefundRequests(req, res, next) {
 
     return res.json({
       success: true,
-      data: requests,
+      data: requests.map((request) => ({
+        ...request,
+        booking: {
+          ...request.booking,
+          payments: request.booking.payments.map((payment) => ({
+            id: payment.id,
+            amount: payment.amount,
+            paymentGateway: payment.paymentGateway,
+            status: payment.status,
+            isDuplicate: payment.isDuplicate,
+          })),
+        },
+        processingEligibility: getRefundProcessingEligibility(
+          findRefundTargetPayment(request),
+        ),
+      })),
       pagination: { page, limit, total, totalPages },
       stats,
     });
@@ -371,15 +396,36 @@ async function processRefundRequest(req, res, next) {
       });
 
       try {
-        gatewayResult = await refundViaVnpay({
-          payment,
-          amount: requestedAmount,
-          transactionType,
-          createBy: req.user.email,
-          ipAddr: getClientIp(req),
-          orderInfo,
-          requestId: refundTransaction.gatewayRequestId,
-        });
+        if (isLocalDemoPayment(payment)) {
+          // Deterministic local-only gateway adapter for the defense fixture.
+          // Production can never enter this branch; real payments still use VNPay.
+          gatewayResult = {
+            success: true,
+            responseCode: '00',
+            transactionStatus: '00',
+            message: 'Giao dịch hoàn tiền thành công.',
+            rawRequest: {
+              vnp_RequestId: refundTransaction.gatewayRequestId,
+              vnp_TxnRef: payment.transactionId,
+              vnp_Amount: requestedAmount * 100,
+            },
+            raw: {
+              vnp_ResponseCode: '00',
+              vnp_TransactionStatus: '00',
+              vnp_TransactionNo: String(Date.now()).slice(-12),
+            },
+          };
+        } else {
+          gatewayResult = await refundViaVnpay({
+            payment,
+            amount: requestedAmount,
+            transactionType,
+            createBy: req.user.email,
+            ipAddr: getClientIp(req),
+            orderInfo,
+            requestId: refundTransaction.gatewayRequestId,
+          });
+        }
       } catch (gatewayError) {
         if (gatewayError.gatewayAttempted !== true) {
           await prisma.$transaction(async (tx) => {
@@ -1164,6 +1210,115 @@ async function listTodayBookings(req, res, next) {
   }
 }
 
+// GET /api/staff/bookings — tra cứu các đơn còn hiệu lực trong 90 ngày tới để
+// hỗ trợ cấp lại vé trước ngày sử dụng. Phạm vi địa điểm vẫn bị khóa theo phân công.
+async function listOperationalBookings(req, res, next) {
+  try {
+    const today = todayInVietnam();
+    const defaultFrom = new Date(`${today}T00:00:00.000Z`);
+    const defaultTo = new Date(defaultFrom.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const dateFromRaw = String(req.query.dateFrom || '').trim();
+    const dateToRaw = String(req.query.dateTo || '').trim();
+    if ((dateFromRaw && !datePattern.test(dateFromRaw)) || (dateToRaw && !datePattern.test(dateToRaw))) {
+      throw httpError(400, 'Khoảng ngày tra cứu phải có định dạng YYYY-MM-DD.');
+    }
+
+    const dateFrom = dateFromRaw ? new Date(`${dateFromRaw}T00:00:00.000Z`) : defaultFrom;
+    const dateTo = dateToRaw ? new Date(`${dateToRaw}T00:00:00.000Z`) : defaultTo;
+    const maxTo = new Date(defaultFrom.getTime() + 90 * 24 * 60 * 60 * 1000);
+    if (
+      Number.isNaN(dateFrom.getTime())
+      || Number.isNaN(dateTo.getTime())
+      || dateFrom < defaultFrom
+      || dateTo < dateFrom
+      || dateTo > maxTo
+    ) {
+      throw httpError(400, 'Chỉ có thể tra cứu đơn từ hôm nay đến tối đa 90 ngày tới.');
+    }
+
+    let assignedAttractionIds = null;
+    if (!hasRole(req.user, 'ADMIN')) {
+      const assignments = await prisma.staffAttractionAssignment.findMany({
+        where: { staffId: req.user.id, revokedAt: null },
+        select: { attractionId: true },
+      });
+      assignedAttractionIds = assignments.map((assignment) => assignment.attractionId);
+    }
+
+    const search = String(req.query.search || '').trim();
+    const where = {
+      status: 'CONFIRMED',
+      reservation: {
+        date: { gte: dateFrom, lte: dateTo },
+        ...(assignedAttractionIds
+          ? { ticketProduct: { attractionId: { in: assignedAttractionIds } } }
+          : {}),
+      },
+      ...(search
+        ? {
+            OR: [
+              { id: { contains: search, mode: 'insensitive' } },
+              { fullName: { contains: search, mode: 'insensitive' } },
+              { phone: { contains: search, mode: 'insensitive' } },
+              { snapshotAttractionTitle: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const bookings = await prisma.booking.findMany({
+      where,
+      orderBy: [{ reservation: { date: 'asc' } }, { createdAt: 'asc' }],
+      take: 100,
+      include: {
+        ticketInstances: { where: { status: 'VALID' }, select: { status: true } },
+        reservation: {
+          include: {
+            timeSlot: true,
+            ticketProduct: {
+              include: { attraction: { select: { id: true, title: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    const data = bookings.map((booking) => {
+      const reservation = booking.reservation;
+      const timeSlot = reservation.timeSlot;
+      return {
+        bookingId: booking.id,
+        customer: booking.fullName,
+        phone: booking.phone,
+        visitDate: new Date(booking.snapshotVisitDate || reservation.date).toISOString().slice(0, 10),
+        attraction: booking.snapshotAttractionTitle || reservation.ticketProduct.attraction.title,
+        ticketName: booking.snapshotTicketName || reservation.ticketProduct.name,
+        quantity: reservation.quantity,
+        validCount: booking.ticketInstances.length,
+        bookingStatus: booking.status,
+        timeSlot: booking.snapshotTimeSlotLabel
+          || (timeSlot ? `${timeSlot.startTime} - ${timeSlot.endTime}` : null),
+      };
+    });
+
+    return res.json({
+      success: true,
+      data,
+      meta: {
+        dateFrom: dateFrom.toISOString().slice(0, 10),
+        dateTo: dateTo.toISOString().slice(0, 10),
+        total: data.length,
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ success: false, error: { message: error.message } });
+    }
+    return next(error);
+  }
+}
+
 async function listStaffAssignments(req, res, next) {
   try {
     const staff = await prisma.user.findUnique({
@@ -1303,6 +1458,7 @@ module.exports = {
   lookupTicketByQr,
   checkInTicket,
   listTodayBookings,
+  listOperationalBookings,
   listStaffAssignments,
   replaceStaffAssignments,
 };

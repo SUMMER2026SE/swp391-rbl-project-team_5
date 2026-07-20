@@ -79,7 +79,10 @@ function buildTicketData(body) {
 // GET /api/partners/attractions/:id/tickets
 async function listTickets(req, res, next) {
   try {
-    const attraction = await findOwnedAttraction(req.params.id, req.partner.id, {});
+    // Published attractions are edited through draftData.  When draftData has not
+    // been created yet, buildAttractionSnapshot needs the complete live relation
+    // graph; an empty include used to silently produce a draft with zero tickets.
+    const attraction = await findOwnedAttraction(req.params.id, req.partner.id, attractionInclude);
     if (!attraction) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }
@@ -110,7 +113,7 @@ async function listTickets(req, res, next) {
 // POST /api/partners/attractions/:id/tickets
 async function createTicket(req, res, next) {
   try {
-    const attraction = await findOwnedAttraction(req.params.id, req.partner.id, {});
+    const attraction = await findOwnedAttraction(req.params.id, req.partner.id, attractionInclude);
     if (!attraction) {
       return res.status(404).json({ message: 'Không tìm thấy điểm tham quan.' });
     }

@@ -17,10 +17,17 @@ function PartnerLayout({ children, pageTitle = 'Partner Dashboard' }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
 
   const handleLogout = async () => {
-    await logout()
-    navigate('/login')
+    if (isLoggingOut) return
+    setIsLoggingOut(true)
+    try {
+      await logout()
+      navigate('/login', { replace: true })
+    } finally {
+      setIsLoggingOut(false)
+    }
   }
 
   const initials = user?.fullName
@@ -34,17 +41,25 @@ function PartnerLayout({ children, pageTitle = 'Partner Dashboard' }) {
     >
       {/* ── Mobile Top Nav ── */}
       <nav className="md:hidden bg-white text-[#00474d] shadow-sm flex justify-between items-center w-full px-5 h-16 fixed top-0 z-50">
-        <Link to="/" className="font-bold text-lg text-[#00474d]" style={{ textDecoration: 'none' }} title="Về trang chủ khách hàng">
+        <Link to="/partner/dashboard" className="font-bold text-lg text-[#00474d]" style={{ textDecoration: 'none' }} title="Về tổng quan đối tác">
           VietTicket B2B
         </Link>
         <div className="flex items-center gap-4">
-          <span className="material-symbols-outlined cursor-pointer">notifications</span>
-          <span
-            className="material-symbols-outlined cursor-pointer"
+          <Link
+            to="/partner/bookings"
+            className="material-symbols-outlined text-[#3f484a]"
+            aria-label="Xem đơn đặt vé"
+          >
+            confirmation_number
+          </Link>
+          <button
+            type="button"
+            className="material-symbols-outlined"
+            aria-label={mobileMenuOpen ? 'Đóng trình đơn' : 'Mở trình đơn'}
             onClick={() => setMobileMenuOpen((v) => !v)}
           >
             {mobileMenuOpen ? 'close' : 'menu'}
-          </span>
+          </button>
         </div>
       </nav>
 
@@ -62,6 +77,7 @@ function PartnerLayout({ children, pageTitle = 'Partner Dashboard' }) {
               user={user}
               initials={initials}
               onLogout={handleLogout}
+              isLoggingOut={isLoggingOut}
               onNavClick={() => setMobileMenuOpen(false)}
             />
           </aside>
@@ -70,7 +86,7 @@ function PartnerLayout({ children, pageTitle = 'Partner Dashboard' }) {
 
       {/* ── Desktop Sidebar ── */}
       <aside className="hidden md:flex flex-col h-full border-r border-[#bec8ca] py-8 px-4 bg-white shadow-sm w-64 flex-shrink-0">
-        <SidebarContent user={user} initials={initials} onLogout={handleLogout} />
+        <SidebarContent user={user} initials={initials} onLogout={handleLogout} isLoggingOut={isLoggingOut} />
       </aside>
 
       {/* ── Main Canvas ── */}
@@ -79,12 +95,13 @@ function PartnerLayout({ children, pageTitle = 'Partner Dashboard' }) {
         <header className="hidden md:flex justify-between items-center w-full px-16 h-20 bg-white border-b border-[#e1e3e4] sticky top-0 z-40">
           <h1 className="text-2xl font-semibold text-[#191c1d]">{pageTitle}</h1>
           <div className="flex items-center gap-6">
-            <div className="relative">
-              <span className="material-symbols-outlined text-[#3f484a] cursor-pointer hover:text-[#00474d] transition-colors">
-                notifications
-              </span>
-              <span className="absolute top-0 right-0 w-2 h-2 bg-[#ba1a1a] rounded-full" />
-            </div>
+            <Link
+              to="/partner/bookings"
+              className="material-symbols-outlined text-[#3f484a] hover:text-[#00474d] transition-colors"
+              aria-label="Xem đơn đặt vé"
+            >
+              confirmation_number
+            </Link>
             <Link
               to="/profile"
               className="flex items-center gap-2 cursor-pointer hover:bg-[#f2f4f5] p-2 rounded-lg transition-colors"
@@ -106,15 +123,15 @@ function PartnerLayout({ children, pageTitle = 'Partner Dashboard' }) {
   )
 }
 
-function SidebarContent({ user, initials, onLogout, onNavClick }) {
+function SidebarContent({ user, initials, onLogout, isLoggingOut, onNavClick }) {
   return (
     <>
       {/* Brand */}
       <Link
-        to="/"
+        to="/partner/dashboard"
         className="mb-8 px-4 flex items-center gap-3 hover:opacity-90 transition-opacity"
         style={{ textDecoration: 'none' }}
-        title="Về trang chủ khách hàng"
+        title="Về tổng quan đối tác"
       >
         <div className="w-10 h-10 rounded-lg bg-[#00474d] text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
           {initials}
@@ -123,7 +140,7 @@ function SidebarContent({ user, initials, onLogout, onNavClick }) {
           <h2 className="text-sm font-bold text-[#00474d] truncate">
             {user?.fullName || 'Đối tác VietTicket'}
           </h2>
-          <p className="text-xs text-[#3f484a]">Premium Partner</p>
+          <p className="text-xs text-[#3f484a]">Cổng vận hành đối tác</p>
         </div>
       </Link>
 
@@ -167,11 +184,13 @@ function SidebarContent({ user, initials, onLogout, onNavClick }) {
           <span>Hỗ trợ</span>
         </a>
         <button
+          type="button"
           onClick={onLogout}
+          disabled={isLoggingOut}
           className="flex items-center gap-3 px-4 py-3 text-[#ba1a1a] hover:bg-[#ffdad6] hover:text-[#93000a] rounded-lg transition-colors text-sm font-medium w-full"
         >
           <span className="material-symbols-outlined">logout</span>
-          <span>Đăng xuất</span>
+          <span>{isLoggingOut ? 'Đang đăng xuất...' : 'Đăng xuất'}</span>
         </button>
       </div>
     </>

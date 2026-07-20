@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/useAuth.js';
 import '../../styles/admin.css';
@@ -35,6 +36,7 @@ const NAV_ITEMS_PLATFORM_STAFF = [
 export default function AdminSidebar({ isOpen, onClose }) {
   const { logout, user } = useAuth();
   const navigate = useNavigate();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isAdmin = hasRole(user, 'ADMIN');
   const isPartnerStaff = hasRole(user, 'STAFF') && Boolean(user?.employerPartnerId);
   const isPlatformStaff = hasRole(user, 'STAFF') && !user?.employerPartnerId;
@@ -50,10 +52,14 @@ export default function AdminSidebar({ isOpen, onClose }) {
       : 'CSKH nền tảng';
 
   const handleLogout = async () => {
-    const ok = window.confirm("Bạn có chắc chắn muốn đăng xuất khỏi cổng quản trị không?");
-    if (!ok) return;
-    await logout();
-    navigate('/login');
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      navigate('/login', { replace: true });
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   return (
@@ -129,12 +135,14 @@ export default function AdminSidebar({ isOpen, onClose }) {
           <span>Cài đặt</span>
         </Link>
         <button
+          type="button"
           className="admin-sidebar__logout"
           style={{ color: 'rgba(255,255,255,0.7)' }}
           onClick={handleLogout}
+          disabled={isLoggingOut}
         >
           <span className="material-symbols-outlined">logout</span>
-          <span>Đăng xuất</span>
+          <span>{isLoggingOut ? 'Đang đăng xuất…' : 'Đăng xuất'}</span>
         </button>
 
         <Link 

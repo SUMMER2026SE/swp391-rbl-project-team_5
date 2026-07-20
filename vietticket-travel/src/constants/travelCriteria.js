@@ -11,12 +11,12 @@
 // ============================================================
 
 export const CATEGORY_OPTIONS = [
-  { value: 'Nature & Sightseeing', label: 'Thiên nhiên & Ngắm cảnh' },
-  { value: 'Cultural Experience', label: 'Văn hóa' },
-  { value: 'Museum', label: 'Bảo tàng' },
-  { value: 'Adventure', label: 'Mạo hiểm' },
-  { value: 'Theme Park & Resort', label: 'Công viên & Nghỉ dưỡng' },
-  { value: 'Amusement Park', label: 'Khu vui chơi' },
+  { value: 'Thiên nhiên & Tham quan', label: 'Thiên nhiên & Ngắm cảnh' },
+  { value: 'Văn hóa & Trải nghiệm địa phương', label: 'Văn hóa' },
+  { value: 'Bảo tàng & Di sản', label: 'Bảo tàng' },
+  { value: 'Phiêu lưu & Đường thủy', label: 'Mạo hiểm' },
+  { value: 'Công viên giải trí & Nghỉ dưỡng', label: 'Công viên & Nghỉ dưỡng' },
+  { value: 'Khu vui chơi', label: 'Khu vui chơi' },
 ]
 
 export const PACE_OPTIONS = [

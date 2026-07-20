@@ -9,8 +9,41 @@ const {
   assertRefundCanBeSubmitted,
   classifyVnpayReconciliationResult,
   classifyVnpayRefundResult,
+  getRefundProcessingEligibility,
   getPaymentRefundBalance,
 } = require('../services/refundLifecycleService');
+
+describe('refund processing eligibility', () => {
+  test('blocks legacy payments that cannot be safely refunded through VNPay', () => {
+    expect(getRefundProcessingEligibility({
+      id: 'payment-1',
+      transactionId: 'txn-1',
+      rawResponse: {},
+    })).toEqual(expect.objectContaining({
+      canApprove: false,
+      mode: 'BLOCKED',
+    }));
+  });
+
+  test('allows a complete VNPay payment', () => {
+    expect(getRefundProcessingEligibility({
+      id: 'payment-1',
+      transactionId: 'txn-1',
+      rawResponse: {
+        vnp_TransactionNo: '14000001',
+        vnp_CreateDate: '20260720103000',
+      },
+    })).toEqual({ canApprove: true, mode: 'VNPAY', blockReason: null });
+  });
+
+  test('allows only the explicit local defense fixture to use the demo adapter', () => {
+    expect(getRefundProcessingEligibility({
+      id: 'defense-demo-v1-payment-refund-approve',
+      transactionId: 'DEFENSEDEMO-refund-approve',
+      rawResponse: { source: 'defense_demo_fixture' },
+    })).toEqual({ canApprove: true, mode: 'LOCAL_DEMO', blockReason: null });
+  });
+});
 
 describe('classifyVnpayRefundResult', () => {
   test.each([

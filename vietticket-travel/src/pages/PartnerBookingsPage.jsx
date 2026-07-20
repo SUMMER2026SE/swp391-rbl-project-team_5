@@ -4,6 +4,7 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import useSocket from '../context/useSocket.js'
 import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
+import { formatBookingReference } from '../utils/bookingReference.js'
 import { getTicketTypeLabel } from '../utils/ticketType.js'
 
 // Nhãn + màu trạng thái lấy từ nguồn dùng chung (utils/bookingStatus.js)
@@ -205,12 +206,14 @@ function PartnerBookingsPage() {
         <div className="relative flex-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] text-[#6f797a]">search</span>
           <input
+            aria-label="Tìm kiếm đơn đặt vé"
             type="text" placeholder="Tìm theo mã, khách hàng, địa điểm…"
             value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-[#bec8ca] text-sm outline-none focus:border-[#00474d]"
           />
         </div>
         <select
+          aria-label="Lọc đơn đặt vé theo trạng thái"
           value={statusFilter}
           onChange={(e) => {
             setStatusFilter(e.target.value)
@@ -219,8 +222,12 @@ function PartnerBookingsPage() {
           className="px-3 py-2.5 rounded-lg border border-[#bec8ca] text-sm outline-none focus:border-[#00474d] bg-white"
         >
           <option value="all">Tất cả trạng thái</option>
+          <option value="pending_payment">Chờ thanh toán</option>
           <option value="confirmed">Đã xác nhận</option>
           <option value="pending_partner">Chờ đối tác duyệt</option>
+          <option value="refund_requested">Chờ hoàn tiền</option>
+          <option value="refunded">Đã hoàn tiền</option>
+          <option value="no_show">Không đến sử dụng</option>
           <option value="cancelled">Đã hủy</option>
           <option value="completed">Đã hoàn thành</option>
         </select>
@@ -251,7 +258,7 @@ function PartnerBookingsPage() {
                     const isActing = actionLoading === b.id
                     return (
                       <tr key={b.id} className="border-t border-[#f2f4f5] hover:bg-[#f7f8f9] transition-colors">
-                        <td className="px-5 py-3.5 font-mono text-xs text-[#00629d] font-semibold">{b.id.slice(0, 8).toUpperCase()}</td>
+                        <td className="px-5 py-3.5 font-mono text-xs text-[#00629d] font-semibold">{formatBookingReference(b.id)}</td>
                         <td className="px-5 py-3.5">
                           <p className="font-medium text-[#191c1d]">{b.attraction}</p>
                           <p className="text-xs text-[#6f797a]">{b.ticket} · SL: {b.qty}</p>
@@ -619,7 +626,7 @@ function PartnerBookingsPage() {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl animate-fadeIn">
             <h3 className="text-lg font-bold text-[#191c1d]">Từ chối đơn đặt vé</h3>
             <p className="mt-1 text-sm text-[#3f484a]">
-              Đơn <span className="font-mono font-semibold text-[#00629d]">{rejectTarget.id.slice(0, 8).toUpperCase()}</span> của khách{' '}
+              Đơn <span className="font-mono font-semibold text-[#00629d]">{formatBookingReference(rejectTarget.id)}</span> của khách{' '}
               <span className="font-semibold">{rejectTarget.customer}</span>.
             </p>
             <p className="mt-2 rounded-lg bg-[#fff3e0] px-3 py-2 text-xs text-[#725000]">
@@ -643,7 +650,7 @@ function PartnerBookingsPage() {
                 disabled={actionLoading === rejectTarget.id}
                 className="px-4 py-2 rounded-lg border border-[#bec8ca] text-sm text-[#3f484a] hover:bg-[#f2f4f5] transition-colors disabled:opacity-50"
               >
-                Hủy bộ
+                Đóng
               </button>
               <button
                 onClick={handleCancel}
@@ -661,7 +668,7 @@ function PartnerBookingsPage() {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl animate-fadeIn">
             <h3 className="text-lg font-bold text-[#191c1d]">Hủy đơn đã xác nhận</h3>
             <p className="mt-1 text-sm text-[#3f484a]">
-              Đơn <span className="font-mono font-semibold text-[#00629d]">{cancelTarget.id.slice(0, 8).toUpperCase()}</span> của khách{' '}
+              Đơn <span className="font-mono font-semibold text-[#00629d]">{formatBookingReference(cancelTarget.id)}</span> của khách{' '}
               <span className="font-semibold">{cancelTarget.customer}</span>.
             </p>
             <p className="mt-2 rounded-lg bg-[#ffdad6]/50 px-3 py-2 text-xs text-[#93000a]">

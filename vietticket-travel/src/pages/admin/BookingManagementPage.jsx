@@ -4,6 +4,7 @@ import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import { getAdminBookings } from '../../services/adminApi.js'
 import { getBookingStatusMeta } from '../../utils/bookingStatus.js'
+import { formatBookingReference, formatTicketReference } from '../../utils/bookingReference.js'
 
 // Trang quản lý Booking & Payment toàn sàn cho Admin:
 // - Thẻ thống kê theo trạng thái + doanh thu gộp + số đơn cần hoàn tiền.
@@ -21,12 +22,21 @@ const STATUS_FILTERS = [
   { value: 'CANCELLED', label: 'Đã hủy' },
   { value: 'REFUND_REQUESTED', label: 'Chờ hoàn tiền' },
   { value: 'REFUNDED', label: 'Đã hoàn tiền' },
+  { value: 'NO_SHOW', label: 'Không đến sử dụng' },
 ]
 
 const PAYMENT_STATUS_LABELS = {
   SUCCESS: { label: 'Đã thu', className: 'text-primary' },
   PENDING: { label: 'Chưa thu', className: 'text-on-surface-variant' },
   FAILED: { label: 'Thất bại', className: 'text-error' },
+}
+
+const TICKET_STATUS_LABELS = {
+  VALID: 'Có hiệu lực',
+  USED: 'Đã sử dụng',
+  EXPIRED: 'Đã hết hạn',
+  CANCELLED: 'Đã hủy',
+  REFUNDED: 'Đã hoàn tiền',
 }
 
 function formatVND(value) {
@@ -168,6 +178,7 @@ export default function BookingManagementPage() {
             />
           </div>
           <select
+            aria-label="Lọc đơn đặt vé theo trạng thái"
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value)
@@ -236,7 +247,7 @@ export default function BookingManagementPage() {
                         return (
                           <tr key={b.id} className="border-b border-outline-variant/40 hover:bg-surface">
                             <td className="px-5 py-3.5 font-mono text-xs font-semibold text-primary">
-                              {b.id.slice(0, 8).toUpperCase()}
+                              {formatBookingReference(b.id)}
                             </td>
                             <td className="px-5 py-3.5">
                               <p className="font-medium text-on-surface">{b.customer}</p>
@@ -545,7 +556,7 @@ export default function BookingManagementPage() {
                         selectedBooking.ticketInstances.map((t) => (
                           <tr key={t.id} style={{ borderBottom: '1px solid #e1e3e4' }}>
                             <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: 12, fontWeight: 600, color: 'var(--adm-primary-dark)' }}>
-                              {t.id}
+                              {formatTicketReference(t.id)}
                             </td>
                             <td style={{ padding: '10px 16px' }}>
                               <span style={{
@@ -556,7 +567,7 @@ export default function BookingManagementPage() {
                                 background: t.status === 'USED' ? 'rgba(16,185,129,0.1)' : t.status === 'REFUNDED' ? 'rgba(186,26,26,0.1)' : 'rgba(0,96,104,0.1)',
                                 color: t.status === 'USED' ? '#10b981' : t.status === 'REFUNDED' ? 'var(--adm-error)' : 'var(--adm-primary-dark)',
                               }}>
-                                {t.status}
+                                {TICKET_STATUS_LABELS[t.status] || 'Chưa xác định'}
                               </span>
                             </td>
                             <td style={{ padding: '10px 16px', color: '#3f484a' }}>

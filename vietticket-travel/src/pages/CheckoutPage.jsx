@@ -4,6 +4,7 @@ import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
 import { markItineraryQueueItemReserved } from '../utils/aiItineraryBookingQueue.js'
+import { formatReservationReference } from '../utils/bookingReference.js'
 import { validateEmail, validateOptionalPhone } from '../utils/formValidators.js'
 
 const paymentMethods = [
@@ -375,7 +376,7 @@ function CheckoutPage() {
                 <BookingRow icon="calendar_month" label="Ngày tham quan" value={formatDate(booking.visitDate)} />
                 <BookingRow icon="schedule" label="Khung giờ" value={booking.timeSlotLabel} />
                 <BookingRow icon="confirmation_number" label="Loại vé" value={`${booking.ticketName} (${booking.quantity} vé)`} />
-                <BookingRow icon="tag" label="Mã giữ chỗ" value={booking.id} mono />
+                <BookingRow icon="tag" label="Mã giữ chỗ" value={formatReservationReference(booking.id)} mono />
               </div>
             </section>
 

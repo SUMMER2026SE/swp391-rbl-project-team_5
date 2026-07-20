@@ -5,10 +5,10 @@ import * as adminApi from '../../services/adminApi.js';
 import '../../styles/admin.css';
 
 const STATUS_LABEL = {
-  pending: 'PENDING',
-  approved: 'APPROVED',
-  rejected: 'REJECTED',
-  suspended: 'SUSPENDED',
+  pending: 'Chờ duyệt',
+  approved: 'Đã phê duyệt',
+  rejected: 'Đã từ chối',
+  suspended: 'Đã đình chỉ',
 };
 const PAGE_SIZE = 10;
 
@@ -401,9 +401,7 @@ export default function KycApprovalPage() {
                         {partner.status === 'approved' ? 'Đình chỉ' : 'Khôi phục'}
                       </button>
                     ) : (
-                      <span className={`badge badge--${partner.status}`}>
-                        {STATUS_LABEL[partner.status] || partner.status.toUpperCase()}
-                      </span>
+                      <span aria-label="Không có thao tác khả dụng">—</span>
                     )}
                   </td>
                 </tr>

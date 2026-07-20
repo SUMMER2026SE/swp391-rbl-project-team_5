@@ -6,6 +6,7 @@ import {
   getFinancialReport,
   getFinancialTransactions,
 } from '../../services/adminApi'
+import { formatBookingReference } from '../../utils/bookingReference'
 import '../../styles/admin.css'
 
 const PERIODS = [
@@ -422,7 +423,7 @@ export default function FinancialReportPage() {
                   </td>
                   <td className="financial-reference" title={transaction.reference}>{transaction.reference}</td>
                   <td>
-                    <div className="financial-primary-text">{transaction.bookingId}</div>
+                    <div className="financial-primary-text">{formatBookingReference(transaction.bookingId)}</div>
                     <div className="financial-secondary-text">{transaction.customer} · {transaction.customerEmail}</div>
                   </td>
                   <td>

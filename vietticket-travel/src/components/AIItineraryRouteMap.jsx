@@ -48,7 +48,7 @@ export default function AIItineraryRouteMap({ activities, height = 220 }) {
   const baseLayer = getBaseLayerProps()
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#dbe4e8] bg-white shadow-sm">
+    <div className="overflow-hidden rounded-2xl border border-[#dbe4e8] bg-white shadow-sm" role="region" aria-label="Bản đồ tuyến đường của lịch trình">
       <MapContainer
         center={positions[0]}
         scrollWheelZoom={false}
@@ -60,7 +60,7 @@ export default function AIItineraryRouteMap({ activities, height = 220 }) {
           <Polyline color="#006068" opacity={0.75} positions={positions} weight={4} />
         )}
         {points.map((point, index) => (
-          <Marker icon={defaultIcon} key={point.id} position={point.position}>
+          <Marker icon={defaultIcon} key={point.id} position={point.position} alt={`Điểm ${index + 1}: ${point.title}`} title={point.title}>
             <Popup>
               <strong>{index + 1}. {point.title}</strong>
               {point.time ? <div>{point.time}</div> : null}

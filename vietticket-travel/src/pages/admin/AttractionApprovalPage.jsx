@@ -2,17 +2,18 @@ import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import AdminLayout from '../../layouts/AdminLayout';
 import * as adminApi from '../../services/adminApi.js';
+import { formatAttractionLocation } from '../../utils/location.js';
 import '../../styles/admin.css';
 
 const FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=400&q=80';
 
 const STATUS_LABEL = {
-  draft: 'DRAFT',
-  pending: 'PENDING',
-  approved: 'APPROVED',
-  rejected: 'REJECTED',
-  suspended: 'SUSPENDED',
+  draft: 'Bản nháp',
+  pending: 'Chờ duyệt',
+  approved: 'Đã duyệt',
+  rejected: 'Đã từ chối',
+  suspended: 'Đình chỉ',
 };
 const PAGE_SIZE = 10;
 
@@ -31,7 +32,7 @@ function mapAttraction(attraction) {
   return {
     id: attraction.id,
     name: attraction.title,
-    location: [attraction.address, attraction.city].filter(Boolean).join(', '),
+    location: formatAttractionLocation(attraction),
     partner: attraction.partner?.businessName || 'Không rõ đối tác',
     partnerId: attraction.partner?.id || '—',
     category: attraction.category?.name || 'Chưa phân loại',
@@ -258,7 +259,6 @@ export default function AttractionApprovalPage() {
                   </td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{attraction.partner}</div>
-                    <div style={{ fontSize: 12, color: 'var(--adm-on-surface-variant)' }}>ID: {attraction.partnerId}</div>
                   </td>
                   <td>
                     <span style={{ background: 'rgba(0,96,104,0.1)', color: 'var(--adm-primary-dark)', padding: '4px 12px', borderRadius: 9999, fontSize: 12, fontWeight: 600 }}>
@@ -472,7 +472,7 @@ export default function AttractionApprovalPage() {
                 <div>
                   <p style={{ fontSize: 12, color: '#6f797a', margin: '0 0 4px' }}>Đối tác sở hữu</p>
                   <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
-                    {selectedAttraction.partner} (ID: {selectedAttraction.partnerId})
+                    {selectedAttraction.partner}
                   </p>
                 </div>
                 <div>

@@ -144,6 +144,7 @@ export default function SupportTicketsPage() {
       setTickets((current) =>
         current.map((t) => (isSameId(t.id, payload.ticketId) ? { ...t, status: payload.status } : t)),
       )
+      void loadTickets()
     }
 
     socket.on('SUPPORT_MESSAGE', handleMessage)
@@ -152,7 +153,7 @@ export default function SupportTicketsPage() {
       socket.off('SUPPORT_MESSAGE', handleMessage)
       socket.off('SUPPORT_TICKET_UPDATED', handleStatus)
     }
-  }, [socket, activeId])
+  }, [socket, activeId, loadTickets])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -191,6 +192,7 @@ export default function SupportTicketsPage() {
       setDetail((current) => (current ? { ...current, ...updated } : current))
       setShowResolve(false)
       setResolutionNote('')
+      await loadTickets()
       toast.success('Đã đánh dấu yêu cầu là đã giải quyết.')
     } catch (error) {
       toast.error(error.message)

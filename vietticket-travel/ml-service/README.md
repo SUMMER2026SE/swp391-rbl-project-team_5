@@ -38,8 +38,10 @@ Backend chỉ đưa vào lịch sử:
 - zero-fill ngày không có doanh thu và bỏ ngày hiện tại chưa chốt.
 
 Model không được gọi nếu một điểm chưa có ít nhất 14 ngày phát sinh doanh thu
-và 30 booking hoàn tất. Khi đó backend hiển thị rõ `HISTORICAL_BASELINE`, không
-gắn nhãn kết quả AI.
+và 30 booking hoàn tất. Nếu đã có lịch sử nhưng chưa đạt ngưỡng, backend hiển
+thị rõ `HISTORICAL_BASELINE`, không gắn nhãn kết quả AI. Nếu chưa có booking
+hoàn tất phát sinh doanh thu, backend trả `INSUFFICIENT_DATA`, không cộng dự báo
+0 đồng vào tổng doanh thu và không tính điểm đó là dự báo thành công.
 
 ## Chạy pipeline demo local
 

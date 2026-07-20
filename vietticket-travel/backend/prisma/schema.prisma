@@ -332,6 +332,8 @@ model Attraction {
   address                 String
   city                    String
   district                String?
+  searchTextNormalized    String                      @default("") @db.Text
+  locationTextNormalized  String                      @default("") @db.Text
   openTime                String? // Giờ mở cửa, định dạng "HH:MM"
   closeTime               String? // Giờ đóng cửa, định dạng "HH:MM"
   openDays                String? // 7 ngày trong tuần dạng CSV bool, vd "1,1,1,1,1,0,0"
@@ -382,6 +384,8 @@ model Attraction {
   @@index([operationalStatus])
   @@index([archivedAt])
   @@index([minTicketPrice])
+  @@index([searchTextNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "Attraction_searchTextNormalized_trgm_idx")
+  @@index([locationTextNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "Attraction_locationTextNormalized_trgm_idx")
 }
 
 model AttractionImage {

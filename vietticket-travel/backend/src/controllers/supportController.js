@@ -129,6 +129,18 @@ async function createTicket(req, res, next) {
       include: { messages: { orderBy: { createdAt: 'asc' } } },
     });
 
+    emitSupportTicketUpdated(ticket);
+    await writeAuditLog({
+      req,
+      actorId: req.user.id,
+      action: 'SUPPORT_TICKET_CREATED',
+      entityType: 'SupportTicket',
+      entityId: ticket.id,
+      metadata: { bookingId, priority: ticket.priority },
+    }).catch((auditError) => {
+      console.error('[support] Không thể ghi audit log tạo yêu cầu:', auditError.message);
+    });
+
     return res.status(201).json({ success: true, data: ticket });
   } catch (error) {
     return sendError(res, error, next);

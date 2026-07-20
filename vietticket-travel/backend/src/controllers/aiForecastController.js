@@ -75,7 +75,7 @@ async function mapWithConcurrency(items, concurrency, mapper) {
 function buildForecastTimeline(results) {
   const byDate = new Map();
   for (const result of results) {
-    if (result.error) continue;
+    if (result.error || result.forecastAvailable === false) continue;
     for (const point of result.forecast || []) {
       const current = byDate.get(point.date) || {
         date: point.date,
@@ -99,8 +99,12 @@ function buildForecastTimeline(results) {
 }
 
 function summarizeOverview(results, forecastDays) {
-  const successful = results.filter((result) => !result.error);
-  const timeline = buildForecastTimeline(successful);
+  const processed = results.filter((result) => !result.error);
+  const available = processed.filter((result) => result.forecastAvailable !== false);
+  const insufficientData = processed.filter(
+    (result) => result.forecastAvailable === false,
+  );
+  const timeline = buildForecastTimeline(available);
   const totalPredictedRevenue = timeline.reduce(
     (sum, point) => sum + point.predictedRevenue,
     0,
@@ -108,20 +112,29 @@ function summarizeOverview(results, forecastDays) {
   return {
     forecastDays,
     totalAttractions: results.length,
-    successfulAttractions: successful.length,
-    failedAttractions: results.length - successful.length,
+    processedAttractions: processed.length,
+    successfulAttractions: available.length,
+    insufficientDataAttractions: insufficientData.length,
+    failedAttractions: results.length - processed.length,
     totalPredictedRevenue,
     timeline,
     methodSummary: {
-      ai: successful.filter((result) => result.method === 'AI_ENSEMBLE').length,
-      demoAi: successful.filter((result) => result.method === 'AI_DEMO_ENSEMBLE').length,
-      baseline: successful.filter((result) => result.usedFallback).length,
+      ai: available.filter((result) => result.method === 'AI_ENSEMBLE').length,
+      demoAi: available.filter((result) => result.method === 'AI_DEMO_ENSEMBLE').length,
+      baseline: available.filter(
+        (result) => result.method === 'HISTORICAL_BASELINE',
+      ).length,
+      insufficientData: insufficientData.length,
     },
     dataBasis: forecastService.FORECAST_DATA_BASIS,
   };
 }
 
-async function forecastAttractions(attractions, forecastDays) {
+async function forecastAttractions(
+  attractions,
+  forecastDays,
+  { forceRefresh = false } = {},
+) {
   return mapWithConcurrency(
     attractions,
     OVERVIEW_CONCURRENCY,
@@ -129,7 +142,7 @@ async function forecastAttractions(attractions, forecastDays) {
       try {
         const result = await forecastService.getForecastForAttraction(
           attraction.id,
-          { forecastDays },
+          { forecastDays, forceRefresh },
         );
         const totalPredictedRevenue = result.forecast.reduce(
           (sum, point) => sum + Number(point.predictedRevenue || 0),
@@ -144,6 +157,7 @@ async function forecastAttractions(attractions, forecastDays) {
           trainingSource: result.trainingSource,
           method: result.method,
           usedFallback: result.usedFallback,
+          forecastAvailable: result.forecastAvailable !== false,
           warning: result.warning || null,
           dataQuality: result.dataQuality,
           totalPredictedRevenue,
@@ -194,6 +208,13 @@ async function getAttractionForecast(req, res, next) {
 async function getPartnerForecastOverview(req, res, next) {
   try {
     const forecastDays = parseForecastDays(req.query.days);
+    if (req.query.refresh === 'true') {
+      const error = new Error(
+        'Chỉ quản trị viên được phép tạo lại toàn bộ dự báo, Partner chỉ tải dữ liệu dự báo đã được kiểm soát.',
+      );
+      error.statusCode = 403;
+      throw error;
+    }
     const attractions = await prisma.attraction.findMany({
       where: {
         partnerId: req.partner.id,
@@ -201,6 +222,7 @@ async function getPartnerForecastOverview(req, res, next) {
         publicationStatus: 'ACTIVE',
         operationalStatus: 'ACTIVE',
         archivedAt: null,
+        publishedAt: { not: null },
         ticketProducts: { some: { status: 'ACTIVE', archivedAt: null } },
       },
       select: { id: true, title: true, city: true, partnerId: true },
@@ -226,6 +248,7 @@ async function getAdminForecastOverview(req, res, next) {
     const forecastDays = parseForecastDays(req.query.days);
     const city = parseOptionalFilter(req.query.city);
     const partnerId = parseOptionalFilter(req.query.partnerId);
+    const forceRefresh = req.query.refresh === 'true';
 
     const attractions = await prisma.attraction.findMany({
       where: {
@@ -233,6 +256,7 @@ async function getAdminForecastOverview(req, res, next) {
         publicationStatus: 'ACTIVE',
         operationalStatus: 'ACTIVE',
         archivedAt: null,
+        publishedAt: { not: null },
         partner: { status: 'APPROVED' },
         ticketProducts: { some: { status: 'ACTIVE', archivedAt: null } },
         ...(city ? { city } : {}),
@@ -243,9 +267,11 @@ async function getAdminForecastOverview(req, res, next) {
       take: 200,
     });
 
-    const results = await forecastAttractions(attractions, forecastDays);
+    const results = await forecastAttractions(attractions, forecastDays, {
+      forceRefresh,
+    });
     const topAttractions = [...results]
-      .filter((result) => !result.error)
+      .filter((result) => !result.error && result.forecastAvailable !== false)
       .sort((left, right) => (
         right.totalPredictedRevenue - left.totalPredictedRevenue
         || left.attractionTitle.localeCompare(right.attractionTitle, 'vi')

@@ -9,11 +9,11 @@ describe('getSafeLoginRedirect', () => {
     })).toBe('/admin')
   })
 
-  it('allows a secondary partner membership to return to a partner route', () => {
+  it('always sends a partner to the partner dashboard after login', () => {
     expect(getSafeLoginRedirect(
       { role: 'CUSTOMER', roles: ['CUSTOMER', 'PARTNER'] },
       { pathname: '/partner/bookings', search: '?status=pending' },
-    )).toBe('/partner/bookings?status=pending')
+    )).toBe('/partner/dashboard')
   })
 
   it('keeps partner staff away from platform support queues', () => {
@@ -25,5 +25,12 @@ describe('getSafeLoginRedirect', () => {
       },
       { pathname: '/staff/refunds' },
     )).toBe('/staff/checkin')
+  })
+
+  it('does not send an operational role back to a customer-facing page', () => {
+    expect(getSafeLoginRedirect(
+      { role: 'ADMIN', roles: ['CUSTOMER', 'ADMIN'] },
+      { pathname: '/favorites' },
+    )).toBe('/admin')
   })
 })

@@ -21,6 +21,7 @@ function activeAttraction(overrides = {}) {
     publicationStatus: 'ACTIVE',
     operationalStatus: 'ACTIVE',
     archivedAt: null,
+    partner: { status: 'APPROVED' },
     ticketProducts: [{ sellingPrice: 450000 }, { sellingPrice: 350000 }],
     ...overrides,
   };
@@ -112,7 +113,7 @@ describe('forecastService', () => {
     );
   });
 
-  test('không gọi AI khi dữ liệu thực chưa đủ và công khai phương pháp baseline', async () => {
+  test('không biến điểm chưa có giao dịch thành dự báo baseline 0 đồng', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue(activeAttraction());
     mockPrisma.booking.findMany.mockResolvedValue([]);
     global.fetch = jest.fn();
@@ -123,11 +124,37 @@ describe('forecastService', () => {
       forceRefresh: true,
     });
 
-    expect(result.method).toBe('HISTORICAL_BASELINE');
+    expect(result.method).toBe('INSUFFICIENT_DATA');
     expect(result.usedFallback).toBe(true);
-    expect(result.warning).toMatch(/chưa đủ dữ liệu thực/i);
+    expect(result.forecastAvailable).toBe(false);
+    expect(result.warning).toMatch(/chưa có booking hoàn tất/i);
     expect(result.dataQuality.sufficientForAi).toBe(false);
     expect(result.forecast).toHaveLength(3);
+    expect(result.forecast.every((point) => point.predictedRevenue === 0)).toBe(true);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('không coi một booking mẫu là đủ dữ liệu dự báo', async () => {
+    const { vietnamDateKey } = require('../services/forecastService');
+    const today = vietnamDateKey();
+    const yesterday = new Date(`${today}T00:00:00.000Z`);
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    mockPrisma.attraction.findUnique.mockResolvedValue(activeAttraction());
+    mockPrisma.booking.findMany.mockResolvedValue([
+      completedBooking(yesterday.toISOString().slice(0, 10)),
+    ]);
+    global.fetch = jest.fn();
+
+    const { getForecastForAttraction } = require('../services/forecastService');
+    const result = await getForecastForAttraction('attraction-1', {
+      forecastDays: 3,
+      forceRefresh: true,
+    });
+
+    expect(result.method).toBe('INSUFFICIENT_DATA');
+    expect(result.forecastAvailable).toBe(false);
+    expect(result.dataQuality.completedBookings).toBe(1);
+    expect(result.warning).toMatch(/tối thiểu 7 ngày.+10 booking/i);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -185,7 +212,7 @@ describe('forecastService', () => {
     );
   });
 
-  test('dùng cache liên tục theo ngày và không gọi lại DB attraction/AI', async () => {
+  test('dùng cache đồng nhất, vẫn kiểm tra điều kiện mở bán và giữ tên attraction', async () => {
     const { vietnamDateKey } = require('../services/forecastService');
     const today = vietnamDateKey();
     mockPrisma.revenueForecast.findMany.mockResolvedValue([{
@@ -202,19 +229,95 @@ describe('forecastService', () => {
       sampleBookings: 120,
       generatedAt: new Date(),
     }]);
+    mockPrisma.attraction.findUnique.mockResolvedValue(activeAttraction());
     global.fetch = jest.fn();
 
     const { getForecastForAttraction } = require('../services/forecastService');
     const result = await getForecastForAttraction('attraction-1', { forecastDays: 1 });
 
     expect(result.fromCache).toBe(true);
+    expect(result.attractionTitle).toBe('Bà Nà Hills');
     expect(result.forecast[0].predictedRevenue).toBe(2000000);
     expect(result.forecast[0].predictedTickets).toBe(10);
     expect(global.fetch).not.toHaveBeenCalled();
-    expect(mockPrisma.attraction.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.attraction.findUnique).toHaveBeenCalled();
+  });
+
+  test('bỏ cache bị trộn từ hai lần sinh dự báo khác nhau', async () => {
+    const { getFreshStoredForecast, vietnamDateKey } = require('../services/forecastService');
+    const today = vietnamDateKey();
+    const tomorrow = new Date(`${today}T00:00:00.000Z`);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const common = {
+      predictedRevenue: 1000000,
+      predictedTickets: 3,
+      confidenceLower: 700000,
+      confidenceUpper: 1300000,
+      modelVersion: 'real-v1',
+      trainingSource: 'real_booking_history',
+      usedFallback: false,
+      historyDays: 180,
+      observedDays: 50,
+      sampleBookings: 80,
+    };
+    mockPrisma.revenueForecast.findMany.mockResolvedValue([
+      {
+        ...common,
+        forecastDate: new Date(`${today}T00:00:00.000Z`),
+        generatedAt: new Date('2026-07-19T01:00:00.000Z'),
+      },
+      {
+        ...common,
+        forecastDate: tomorrow,
+        generatedAt: new Date('2026-07-19T02:00:00.000Z'),
+      },
+    ]);
+
+    const result = await getFreshStoredForecast(
+      'attraction-1',
+      2,
+      { title: 'Bà Nà Hills' },
+    );
+
+    expect(result).toBeNull();
+  });
+
+  test('đổi cache baseline cũ không có booking thành trạng thái chưa đủ dữ liệu', async () => {
+    const { vietnamDateKey } = require('../services/forecastService');
+    const today = vietnamDateKey();
+    mockPrisma.attraction.findUnique.mockResolvedValue(activeAttraction());
+    mockPrisma.revenueForecast.findMany.mockResolvedValue([{
+      forecastDate: new Date(`${today}T00:00:00.000Z`),
+      predictedRevenue: 0,
+      predictedTickets: 0,
+      confidenceLower: 0,
+      confidenceUpper: 0,
+      modelVersion: 'seasonal_baseline_v2',
+      trainingSource: 'historical_baseline',
+      usedFallback: true,
+      historyDays: 180,
+      observedDays: 0,
+      sampleBookings: 0,
+      generatedAt: new Date(),
+    }]);
+
+    const { getForecastForAttraction } = require('../services/forecastService');
+    const result = await getForecastForAttraction('attraction-1', { forecastDays: 1 });
+
+    expect(result.fromCache).toBe(true);
+    expect(result.method).toBe('INSUFFICIENT_DATA');
+    expect(result.forecastAvailable).toBe(false);
+    expect(result.attractionTitle).toBe('Bà Nà Hills');
+    expect(mockPrisma.booking.findMany).not.toHaveBeenCalled();
   });
 
   test('từ chối dự báo cho điểm chưa mở bán', async () => {
+    const { vietnamDateKey } = require('../services/forecastService');
+    const today = vietnamDateKey();
+    mockPrisma.revenueForecast.findMany.mockResolvedValue([{
+      forecastDate: new Date(`${today}T00:00:00.000Z`),
+      generatedAt: new Date(),
+    }]);
     mockPrisma.attraction.findUnique.mockResolvedValue(activeAttraction({
       publicationStatus: 'PAUSED',
     }));
@@ -223,9 +326,21 @@ describe('forecastService', () => {
     await expect(
       getForecastForAttraction('attraction-1', {
         forecastDays: 1,
-        forceRefresh: true,
       }),
     ).rejects.toMatchObject({ statusCode: 422 });
+    expect(mockPrisma.revenueForecast.findMany).not.toHaveBeenCalled();
+  });
+
+  test('từ chối điểm chưa công bố hoặc thuộc Partner chưa được duyệt', async () => {
+    const { getAttractionForecastFeatures } = require('../services/forecastService');
+    mockPrisma.attraction.findUnique
+      .mockResolvedValueOnce(activeAttraction({ publishedAt: null }))
+      .mockResolvedValueOnce(activeAttraction({ partner: { status: 'PENDING' } }));
+
+    await expect(getAttractionForecastFeatures('unpublished'))
+      .resolves.toMatchObject({ isForecastable: false });
+    await expect(getAttractionForecastFeatures('pending-partner'))
+      .resolves.toMatchObject({ isForecastable: false });
   });
 
   test('ném lỗi 404 khi attraction không tồn tại', async () => {

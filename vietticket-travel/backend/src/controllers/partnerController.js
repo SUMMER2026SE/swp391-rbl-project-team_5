@@ -22,6 +22,7 @@ const {
 const { expirePendingPartnerBooking } = require('../utils/pendingPartnerWorker');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
+const { formatBookingReference } = require('../utils/bookingReference');
 const {
   isDocumentOwnedByUser,
   removeUnreferencedDocumentsForUser,
@@ -843,10 +844,14 @@ async function getPartnerBookings(req, res, next) {
 
     // Map status filter từ FE sang DB enum
     const STATUS_MAP = {
+      pending_payment: 'PENDING_PAYMENT',
       confirmed: 'CONFIRMED',
       pending_partner: 'PENDING_PARTNER',
       cancelled: 'CANCELLED',
       completed: 'COMPLETED',
+      refund_requested: 'REFUND_REQUESTED',
+      refunded: 'REFUNDED',
+      no_show: 'NO_SHOW',
     };
 
     const paidPartnerBookingWhere = {
@@ -966,7 +971,7 @@ async function getPartnerBookings(req, res, next) {
         discountAmount: Number(b.discountAmount),
         snapshotTicketType: b.snapshotTicketType,
         snapshotUnitPrice: Number(b.snapshotUnitPrice),
-        status: b.status.toLowerCase().replace('pending_payment', 'pending_partner'),
+        status: b.status.toLowerCase(),
         refundRequired: b.refundRequired,
         refundStatus: b.refundRequests?.[0]?.status || null,
         paymentGateway: latestPayment?.paymentGateway || null,
@@ -1150,7 +1155,7 @@ async function approveBooking(req, res, next) {
       customerId: booking.userId,
       bookingId,
       status: 'CONFIRMED',
-      message: `Đặt vé ${bookingId.slice(0, 8).toUpperCase()} của bạn đã được đối tác phê duyệt thành công!`,
+      message: `Đặt vé ${formatBookingReference(bookingId)} của bạn đã được đối tác phê duyệt thành công!`,
     });
     queueConfirmedTicketEmail(bookingId);
 
@@ -1349,7 +1354,7 @@ async function rejectBooking(req, res, next) {
       bookingId,
       status: 'CANCELLED',
       message:
-        `Rất tiếc, yêu cầu đặt vé ${bookingId.slice(0, 8).toUpperCase()} đã bị từ chối. Lý do: ${reason}.` +
+        `Rất tiếc, yêu cầu đặt vé ${formatBookingReference(bookingId)} đã bị từ chối. Lý do: ${reason}.` +
         (hasPaid ? ' Số tiền bạn đã thanh toán sẽ được hoàn lại đầy đủ trong thời gian sớm nhất.' : ''),
     });
 
@@ -1505,7 +1510,7 @@ async function cancelConfirmedBooking(req, res, next) {
       customerId: booking.userId,
       bookingId,
       status: 'CANCELLED',
-      message: `Đơn ${bookingId.slice(0, 8).toUpperCase()} đã bị đối tác hủy. Yêu cầu hoàn tiền 100% đang được xử lý tự động.`,
+      message: `Đơn ${formatBookingReference(bookingId)} đã bị đối tác hủy. Yêu cầu hoàn tiền 100% đang được xử lý tự động.`,
     });
     sendBookingCancelledByPartnerEmail({
       to: booking.email,

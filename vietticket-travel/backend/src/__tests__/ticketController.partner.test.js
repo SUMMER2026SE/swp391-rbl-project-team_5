@@ -38,6 +38,43 @@ describe('listTickets (Partner Portal)', () => {
     await listTickets(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(404);
   });
+
+  test('keeps live ticket packages visible when a published attraction has no draft yet', async () => {
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      ...OWNED_ATTRACTION,
+      publishedAt: new Date('2026-06-01T00:00:00.000Z'),
+      draftData: null,
+      images: [],
+      categories: [],
+      timeSlots: [],
+      specialDates: [],
+      ticketProducts: [{
+        id: 'ticket-live',
+        name: 'Vé người lớn',
+        type: 'ADULT',
+        description: '',
+        originalPrice: 150000,
+        sellingPrice: 120000,
+        status: 'ACTIVE',
+        refundPolicy: 'NON_REFUNDABLE',
+        refundFeeRate: 0,
+        refundCutoffHours: 24,
+        archivedAt: null,
+      }],
+    });
+    const req = { partner: PARTNER, params: { id: 'attr-001' } };
+    const res = createRes();
+
+    await listTickets(req, res, jest.fn());
+
+    expect(mockPrisma.attraction.findUnique).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({ ticketProducts: expect.any(Object) }),
+    }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      tickets: [expect.objectContaining({ id: 'ticket-live', name: 'Vé người lớn' })],
+    }));
+    expect(mockPrisma.ticketProduct.findMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('createTicket (Partner Portal)', () => {

@@ -381,6 +381,7 @@ async function getPlatformFinancialReport(period) {
       },
     }),
     prisma.partnerProfile.findMany({
+      where: { status: 'APPROVED' },
       orderBy: { businessName: 'asc' },
       select: {
         id: true,
@@ -397,8 +398,16 @@ async function getPlatformFinancialReport(period) {
       _count: { _all: true },
       _sum: { amount: true },
     }),
-    prisma.refundTransaction.aggregate({
-      where: { status: 'NEEDS_RECONCILIATION' },
+    // Count unresolved requests, not raw attempts. A request may have several
+    // failed attempts and must disappear from this KPI once any attempt succeeds.
+    prisma.refundRequest.aggregate({
+      where: {
+        status: { in: ['PENDING', 'PROCESSING'] },
+        refundTransactions: {
+          some: { status: { in: ['FAILED', 'NEEDS_RECONCILIATION'] } },
+          none: { status: 'SUCCESS' },
+        },
+      },
       _count: { _all: true },
       _sum: { amount: true },
     }),

@@ -73,5 +73,22 @@ describe('llmClient', () => {
     expect(body.systemInstruction.parts[0].text).toBe('trusted policy');
     expect(body.contents[0].parts[0].text).toBe('customer input');
     expect(body.contents[0].parts[0].text).not.toContain('trusted policy');
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
+
+  test('does not send a Gemini 2.5 thinking option to other model families', async () => {
+    process.env.GEMINI_MODEL = 'gemini-2.0-flash';
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: 'ok' }] } }],
+      }),
+    });
+
+    const { generateText } = require('../services/llmClient');
+    await generateText('trusted policy', 'customer input');
+
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body);
+    expect(body.generationConfig.thinkingConfig).toBeUndefined();
   });
 });

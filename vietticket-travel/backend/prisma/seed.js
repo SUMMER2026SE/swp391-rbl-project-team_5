@@ -12,12 +12,12 @@ const PARTNER_EMAIL = String(process.env.SEED_PARTNER_EMAIL || '').trim().toLowe
 const PARTNER_PASSWORD = String(process.env.SEED_PARTNER_PASSWORD || '');
 
 const CATEGORIES = [
-  'Theme Park & Resort',
-  'Nature & Sightseeing',
-  'Amusement Park',
-  'Cultural Experience',
-  'Museum',
-  'Adventure',
+  { name: 'Công viên giải trí & Nghỉ dưỡng', description: 'Công viên chủ đề, khu vui chơi và trải nghiệm nghỉ dưỡng dành cho gia đình.', icon: 'attractions' },
+  { name: 'Thiên nhiên & Tham quan', description: 'Điểm đến sinh thái, cảnh quan và chương trình khám phá thiên nhiên.', icon: 'park' },
+  { name: 'Khu vui chơi', description: 'Hoạt động vui chơi và giải trí phù hợp cho gia đình, trẻ em và nhóm bạn.', icon: 'mood' },
+  { name: 'Văn hóa & Trải nghiệm địa phương', description: 'Hoạt động văn hóa, nghệ thuật và trải nghiệm đời sống bản địa.', icon: 'theater_comedy' },
+  { name: 'Bảo tàng & Di sản', description: 'Không gian bảo tàng, di tích lịch sử và trải nghiệm tìm hiểu di sản.', icon: 'museum' },
+  { name: 'Phiêu lưu & Đường thủy', description: 'Trải nghiệm vận động, khám phá ngoài trời và hoạt động đường thủy có kiểm soát an toàn.', icon: 'sailing' },
 ];
 
 const VOUCHERS = [
@@ -38,8 +38,12 @@ const VOUCHERS = [
 ];
 
 async function seedCategories() {
-  for (const name of CATEGORIES) {
-    await prisma.category.upsert({ where: { name }, update: {}, create: { name } });
+  for (const category of CATEGORIES) {
+    await prisma.category.upsert({
+      where: { name: category.name },
+      update: { description: category.description, icon: category.icon, isActive: true },
+      create: { ...category, isActive: true },
+    });
   }
   console.log(`✓ Đã seed ${CATEGORIES.length} danh mục.`);
 }
@@ -91,15 +95,15 @@ async function seedPartner() {
   });
 
   const kycData = {
-    businessName: 'Lộc Premium Partner',
+    businessName: 'Công ty Du lịch Lộc Việt',
     taxCode: '0312345678',
     registrationDate: new Date('2020-01-15T00:00:00.000Z'),
     representativeName: 'Nguyễn Văn Lộc',
     representativePhone: '0901234567',
-    businessAddress: '123 Đường Demo, TP. Hồ Chí Minh',
+    businessAddress: '123 Nguyễn Huệ, Phường Bến Nghé, Quận 1, Thành phố Hồ Chí Minh',
     businessLicenseUrl,
     bankName: 'Vietcombank',
-    branchName: 'Chi nhánh Demo TP. Hồ Chí Minh',
+    branchName: 'Chi nhánh Thành phố Hồ Chí Minh',
     bankAccountNumber: '0123456789',
     bankAccountName: 'NGUYEN VAN LOC',
     payoutCurrency: 'VND',
@@ -128,7 +132,7 @@ async function seedAttractions(partner) {
     return;
   }
 
-  const themePark = await prisma.category.findUnique({ where: { name: 'Theme Park & Resort' } });
+  const themePark = await prisma.category.findUnique({ where: { name: 'Công viên giải trí & Nghỉ dưỡng' } });
 
   const banaHills = await prisma.attraction.create({
     data: {

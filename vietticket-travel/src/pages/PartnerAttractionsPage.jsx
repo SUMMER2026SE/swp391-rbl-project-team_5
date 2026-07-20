@@ -75,6 +75,7 @@ function PartnerAttractionsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [cityFilter, setCityFilter] = useState('')
+  const [availableCities, setAvailableCities] = useState([])
   const [currentPage, setCurrentPage] = useState(1)
   const [pagination, setPagination] = useState({
     total: 0,
@@ -111,6 +112,7 @@ function PartnerAttractionsPage() {
         }
 
         setAttractions(data.attractions || [])
+        setAvailableCities(data.filters?.cities || [])
         setPagination({
           total: Number(nextPagination.total) || 0,
           totalPages,
@@ -207,6 +209,7 @@ function PartnerAttractionsPage() {
           {/* Status Filter */}
           <div className="flex gap-2 w-full sm:w-auto">
             <select
+              aria-label="Lọc địa điểm theo trạng thái"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setCurrentPage(1) }}
               className="px-4 py-2 bg-[#f8fafb] border border-[#bec8ca] rounded-lg focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] focus:outline-none transition-shadow text-sm text-[#191c1d] w-full sm:w-auto bg-white"
@@ -221,15 +224,15 @@ function PartnerAttractionsPage() {
 
             {/* City Filter */}
             <select
+              aria-label="Lọc địa điểm theo thành phố"
               value={cityFilter}
               onChange={(e) => { setCityFilter(e.target.value); setCurrentPage(1) }}
               className="px-4 py-2 bg-[#f8fafb] border border-[#bec8ca] rounded-lg focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d] focus:outline-none transition-shadow text-sm text-[#191c1d] w-full sm:w-auto bg-white"
             >
               <option value="">Thành phố: Tất cả</option>
-              <option value="Đà Nẵng">Đà Nẵng</option>
-              <option value="Quảng Ninh">Quảng Ninh</option>
-              <option value="Khánh Hòa">Khánh Hòa</option>
-              <option value="Quảng Nam">Quảng Nam</option>
+              {availableCities.map((city) => (
+                <option key={city} value={city}>{city}</option>
+              ))}
             </select>
           </div>
         </div>

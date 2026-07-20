@@ -47,23 +47,23 @@ const CITY_ALIASES = [
 const CATEGORY_ALIASES = [
   {
     aliases: ['nature', 'sightseeing', 'thien nhien', 'canh quan', 'ngam canh', 'bien', 'nui'],
-    terms: ['Nature & Sightseeing'],
+    terms: ['Thiên nhiên & Tham quan', 'Nature & Sightseeing'],
   },
   {
     aliases: ['culture', 'cultural', 'van hoa', 'lich su', 'di tich', 'truyen thong'],
-    terms: ['Cultural Experience'],
+    terms: ['Văn hóa & Trải nghiệm địa phương', 'Cultural Experience'],
   },
   {
     aliases: ['museum', 'bao tang'],
-    terms: ['Museum'],
+    terms: ['Bảo tàng & Di sản', 'Museum'],
   },
   {
     aliases: ['adventure', 'mao hiem', 'phieu luu'],
-    terms: ['Adventure'],
+    terms: ['Phiêu lưu & Đường thủy', 'Adventure'],
   },
   {
     aliases: ['theme park', 'resort', 'amusement', 'cong vien', 'giai tri', 'khu vui choi'],
-    terms: ['Theme Park & Resort', 'Amusement Park'],
+    terms: ['Công viên giải trí & Nghỉ dưỡng', 'Khu vui chơi', 'Theme Park & Resort', 'Amusement Park'],
   },
 ];
 

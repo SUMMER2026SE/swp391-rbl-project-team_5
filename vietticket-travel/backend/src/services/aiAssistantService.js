@@ -253,9 +253,9 @@ function haversineKm(a, b) {
 
 // Loại hình ưu tiên theo nhóm đi cùng (đặt đúng gu để khách dễ chịu).
 const COMPANION_CATEGORY_PREF = {
-  family: ['Theme Park & Resort', 'Amusement Park', 'Nature & Sightseeing'],
-  couple: ['Nature & Sightseeing', 'Cultural Experience'],
-  friends: ['Adventure', 'Theme Park & Resort', 'Amusement Park'],
+  family: ['Công viên giải trí & Nghỉ dưỡng', 'Khu vui chơi', 'Thiên nhiên & Tham quan', 'Theme Park & Resort', 'Amusement Park', 'Nature & Sightseeing'],
+  couple: ['Thiên nhiên & Tham quan', 'Văn hóa & Trải nghiệm địa phương', 'Nature & Sightseeing', 'Cultural Experience'],
+  friends: ['Phiêu lưu & Đường thủy', 'Công viên giải trí & Nghỉ dưỡng', 'Khu vui chơi', 'Adventure', 'Theme Park & Resort', 'Amusement Park'],
   solo: [],
 };
 

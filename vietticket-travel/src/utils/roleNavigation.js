@@ -8,6 +8,12 @@ export function getSafeLoginRedirect(user, redirectFrom) {
       ? staffHome
       : hasRole(user, 'PARTNER') ? '/partner/dashboard' : '/'
 
+  // Các vai trò vận hành luôn bắt đầu tại dashboard đúng quyền. Điều này tránh
+  // đưa admin/partner/staff về một trang khách hàng hoặc màn hình portal cũ sau đăng nhập.
+  if (hasRole(user, 'ADMIN') || hasRole(user, 'STAFF') || hasRole(user, 'PARTNER')) {
+    return defaultPath
+  }
+
   if (!redirectFrom) return defaultPath
 
   const targetPath = redirectFrom.pathname || '/'

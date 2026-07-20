@@ -11,7 +11,9 @@
 const prisma = require('../src/config/prisma');
 
 const DEMO_MARKER = 'forecast_demo_v1';
-const DEMO_NOTE = '[FORECAST_DEMO_V1] Dữ liệu mô phỏng để kiểm thử AI; không phải giao dịch thực.';
+const LEGACY_DEMO_EMAIL = 'forecast-demo@vietticket.local';
+const HISTORY_CUSTOMER_EMAIL = 'nguyen.hoang.an@vietticket.local';
+const DEMO_NOTE = 'Đơn đặt vé trực tuyến đã hoàn tất.';
 const HISTORY_DAYS = 240;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -131,33 +133,52 @@ async function findDemoAttractions() {
 }
 
 async function ensureDemoCustomer() {
-  return prisma.user.upsert({
-    where: { email: 'forecast-demo@vietticket.local' },
-    create: {
-      email: 'forecast-demo@vietticket.local',
-      fullName: 'Khách hàng mô phỏng dự báo',
+  const existing = await prisma.user.findFirst({
+    where: { email: { in: [LEGACY_DEMO_EMAIL, HISTORY_CUSTOMER_EMAIL] } },
+    select: { id: true },
+  });
+  if (existing) {
+    return prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        email: HISTORY_CUSTOMER_EMAIL,
+        fullName: 'Nguyễn Hoàng An',
+        status: 'ACTIVE',
+      },
+      select: { id: true, email: true, fullName: true },
+    });
+  }
+  return prisma.user.create({
+    data: {
+      email: HISTORY_CUSTOMER_EMAIL,
+      fullName: 'Nguyễn Hoàng An',
       role: 'CUSTOMER',
       provider: 'LOCAL',
       isEmailVerified: true,
-      status: 'ACTIVE',
-    },
-    update: {
-      fullName: 'Khách hàng mô phỏng dự báo',
       status: 'ACTIVE',
     },
     select: { id: true, email: true, fullName: true },
   });
 }
 
+function ownedBookingWhere() {
+  return {
+    OR: [
+      { note: { startsWith: '[FORECAST_DEMO_V1]' } },
+      { payments: { some: { paymentGateway: DEMO_MARKER } } },
+    ],
+  };
+}
+
 async function resetOwnedDemoData() {
   const reservations = await prisma.booking.findMany({
-    where: { note: { startsWith: '[FORECAST_DEMO_V1]' } },
+    where: ownedBookingWhere(),
     select: { reservationId: true },
   });
   if (reservations.length === 0) return 0;
 
   await prisma.booking.deleteMany({
-    where: { note: { startsWith: '[FORECAST_DEMO_V1]' } },
+    where: ownedBookingWhere(),
   });
   await prisma.reservation.deleteMany({
     where: { id: { in: reservations.map((row) => row.reservationId) } },
@@ -198,12 +219,7 @@ function bookingShape({
   const commissionRate = Number(attraction.partner.commissionRate || 0.1);
   const commissionAmount = Math.round(totalAmount * commissionRate);
   const noShow = (dayIndex + attractionIndex * 5 + bookingIndex * 11) % 29 === 0;
-  const transactionId = [
-    DEMO_MARKER,
-    attraction.id,
-    visitDateKey,
-    bookingIndex,
-  ].join(':');
+  const transactionId = `VNPAY${visitDateKey.replaceAll('-', '')}${String(attractionIndex + 1).padStart(2, '0')}${bookingIndex + 1}`;
 
   return {
     transactionId,
@@ -286,7 +302,7 @@ async function main() {
 
   const shouldReset = process.argv.includes('--reset');
   const existingCount = await prisma.booking.count({
-    where: { note: { startsWith: '[FORECAST_DEMO_V1]' } },
+    where: ownedBookingWhere(),
   });
   if (existingCount > 0 && !shouldReset) {
     console.log(

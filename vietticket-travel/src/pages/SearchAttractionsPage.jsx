@@ -20,12 +20,12 @@ const AttractionsMap = lazy(() => import('../components/AttractionsMap.jsx'))
 
 const categoryFilters = [
   { value: 'All', text: 'Tất cả', icon: 'auto_awesome' },
-  { value: 'Theme Park & Resort', text: 'Công viên chủ đề', icon: 'fort' },
-  { value: 'Amusement Park', text: 'Khu vui chơi', icon: 'mood' },
-  { value: 'Museum', text: 'Bảo tàng', icon: 'museum' },
-  { value: 'Nature & Sightseeing', text: 'Thiên nhiên', icon: 'forest' },
-  { value: 'Cultural Experience', text: 'Văn hóa & Lịch sử', icon: 'theater_comedy' },
-  { value: 'Adventure', text: 'Mạo hiểm', icon: 'sailing' },
+  { value: 'Công viên giải trí & Nghỉ dưỡng', text: 'Công viên chủ đề', icon: 'fort' },
+  { value: 'Khu vui chơi', text: 'Khu vui chơi', icon: 'mood' },
+  { value: 'Bảo tàng & Di sản', text: 'Bảo tàng', icon: 'museum' },
+  { value: 'Thiên nhiên & Tham quan', text: 'Thiên nhiên', icon: 'forest' },
+  { value: 'Văn hóa & Trải nghiệm địa phương', text: 'Văn hóa & Lịch sử', icon: 'theater_comedy' },
+  { value: 'Phiêu lưu & Đường thủy', text: 'Mạo hiểm', icon: 'sailing' },
 ]
 
 const starFilters = [
@@ -50,13 +50,13 @@ const smartSearchPresets = [
   {
     label: 'Gia đình cuối tuần',
     icon: 'family_restroom',
-    category: 'Theme Park & Resort',
+    category: 'Công viên giải trí & Nghỉ dưỡng',
     sort: 'popular',
   },
   {
     label: 'Thiên nhiên thư giãn',
     icon: 'forest',
-    category: 'Nature & Sightseeing',
+    category: 'Thiên nhiên & Tham quan',
     sort: 'rating',
   },
   {
@@ -673,6 +673,7 @@ export default function SearchAttractionsPage() {
 
                 <FilterSection icon="location_on" title="Điểm đến">
                   <select
+                    aria-label="Lọc theo điểm đến"
                     className="w-full rounded-lg border border-[#bec8ca] bg-[#f8fafb] p-3 text-base text-[#191c1d] outline-none transition focus:border-[#00629d] focus:ring-2 focus:ring-[#00629d]/20"
                     onChange={handleCityChange}
                     value={selectedCity}
@@ -698,6 +699,8 @@ export default function SearchAttractionsPage() {
 
                 <FilterSection icon="payments" title="Khoảng giá">
                   <input
+                    aria-label="Giá vé tối đa"
+                    aria-valuetext={priceRange >= DEFAULT_PRICE_RANGE ? 'Từ 5 triệu đồng trở lên' : formatCurrency(priceRange)}
                     className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-[#e6e8e9] accent-[#00629d]"
                     max="5000000"
                     min="0"
@@ -739,9 +742,9 @@ export default function SearchAttractionsPage() {
                 <FilterSection icon="sailing" title="Loại hình du lịch">
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { label: 'Gia đình', category: 'Theme Park & Resort' },
-                      { label: 'Cặp đôi', category: 'Nature & Sightseeing' },
-                      { label: 'Mạo hiểm', category: 'Adventure' },
+                      { label: 'Gia đình', category: 'Công viên giải trí & Nghỉ dưỡng' },
+                      { label: 'Cặp đôi', category: 'Thiên nhiên & Tham quan' },
+                      { label: 'Mạo hiểm', category: 'Phiêu lưu & Đường thủy' },
                     ].map((type) => {
                       const isActive = selectedCategory === type.category
                       return (
@@ -795,6 +798,7 @@ export default function SearchAttractionsPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-[#3f484a]">Sắp xếp:</span>
                     <select
+                      aria-label="Sắp xếp kết quả"
                       className="rounded-lg border border-[#bec8ca] bg-[#f8fafb] px-3 py-1.5 text-xs font-bold text-[#3f484a] outline-none focus:border-[#00629d] transition cursor-pointer"
                       value={selectedSort}
                       onChange={(e) => {

@@ -18,9 +18,7 @@ import {
   PRIORITY_OPTIONS,
   interestsToParam,
 } from '../constants/travelCriteria.js'
-import { buildAiBookingUrl } from '../utils/aiBookingPrefill.js'
 import {
-  buildItineraryQueueBookingUrl,
   createItineraryBookingQueue,
   saveItineraryBookingQueue,
 } from '../utils/aiItineraryBookingQueue.js'
@@ -36,6 +34,7 @@ import {
   syncItineraryToServer,
 } from '../utils/aiItineraryStorage.js'
 import { getItineraryMapPoints } from '../utils/aiItineraryMap.js'
+import { getVietnamTodayInput, getVietnamTomorrowInput } from '../utils/businessDate.js'
 
 function formatCurrency(value) {
   const amount = Number(value)
@@ -51,12 +50,6 @@ function toTitleCase(str) {
     .split(' ')
     .map((w) => (w.charAt(0) || '').toUpperCase() + (w.slice(1) || '').toLowerCase())
     .join(' ')
-}
-
-function todayInputValue() {
-  const date = new Date()
-  const timezoneOffset = date.getTimezoneOffset() * 60000
-  return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 10)
 }
 
 function formatSavedDate(value) {
@@ -118,7 +111,7 @@ function AIItineraryPlanner() {
   const [step, setStep] = useState(1)
   const [city, setCity] = useState('')
   const [days, setDays] = useState(3)
-  const [startDate, setStartDate] = useState(todayInputValue)
+  const [startDate, setStartDate] = useState(getVietnamTomorrowInput)
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
   const [categories, setCategories] = useState([])
@@ -458,15 +451,13 @@ function AIItineraryPlanner() {
     }
 
     const savedQueue = saveItineraryBookingQueue(bookingQueue)
-    const firstUrl = buildItineraryQueueBookingUrl(savedQueue, savedQueue?.items?.[0])
-
-    if (!savedQueue || !firstUrl) {
+    if (!savedQueue) {
       toast.error('Không thể tạo danh sách đặt vé từ lịch trình lúc này.')
       return
     }
 
-    toast.success(`Đã tạo danh sách ${savedQueue.items.length} lượt đặt vé từ lịch trình.`)
-    navigate(firstUrl)
+    toast.success(`Đã tổng hợp ${savedQueue.items.length} dòng vé để bạn kiểm tra.`)
+    navigate(`/itinerary-checkout/${savedQueue.id}`)
   }, [bookableQueueItems.length, bookingQueue, navigate])
 
   return (
@@ -622,7 +613,7 @@ function AIItineraryPlanner() {
                     <span className="mb-2 block text-sm font-semibold text-[#334155]">Ngày bắt đầu</span>
                     <input
                       className={inputClass}
-                      min={todayInputValue()}
+                      min={getVietnamTodayInput()}
                       onChange={(event) => setStartDate(event.target.value)}
                       type="date"
                       value={startDate}
@@ -783,7 +774,7 @@ function AIItineraryPlanner() {
                         <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
                           shopping_cart_checkout
                         </span>
-                        Đặt theo lịch trình ({bookableQueueItems.length})
+                        Kiểm tra & đặt toàn lịch trình ({bookableQueueItems.length})
                       </button>
                     )}
                     <button
@@ -947,8 +938,6 @@ function AIItineraryPlanner() {
                                 const ticketItems = Array.isArray(activity.ticketItems)
                                   ? activity.ticketItems
                                   : []
-                                const fallbackBookingDate =
-                                  activity.visitDate || dayItem.visitDate || plan.startDate || startDate
                                 const bookableTicketLines = ticketItems.filter((ticket) => ticket?.ticketId)
                                 const eligibilityNotes = ticketItems
                                   .map((ticket) => ticket?.eligibility?.note)
@@ -998,27 +987,13 @@ function AIItineraryPlanner() {
                                       {attractionId && (
                                         <div className="flex min-w-[150px] flex-col items-stretch gap-2">
                                           {bookableTicketLines.length > 0 ? (
-                                            bookableTicketLines.map((ticket, ticketIndex) => {
-                                              const ticketName =
-                                                ticket.ticketName || ticket.name || ticket.title || 'vé'
-                                              const quantity = Number(ticket.quantity) || 1
-                                              const bookingUrl = buildAiBookingUrl({
-                                                attractionId,
-                                                fallbackDate: fallbackBookingDate,
-                                                ticketLine: ticket,
-                                              })
-
-                                              return (
-                                                <button
-                                                  className="rounded-2xl bg-[#00474d] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#00629d] active:scale-95"
-                                                  key={`${ticket.ticketId || ticketName}-${ticketIndex}`}
-                                                  onClick={() => navigate(bookingUrl || `/attractions/${attractionId}`)}
-                                                  type="button"
-                                                >
-                                                  Đặt {ticketName} ({quantity} vé)
-                                                </button>
-                                              )
-                                            })
+                                            <button
+                                              className="rounded-2xl bg-[#00474d] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#00629d] active:scale-95"
+                                              onClick={handleStartPlanBooking}
+                                              type="button"
+                                            >
+                                              Xem trong quy trình đặt vé
+                                            </button>
                                           ) : (
                                             <button
                                               className="rounded-2xl bg-[#00474d] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#00629d] active:scale-95"
@@ -1030,7 +1005,7 @@ function AIItineraryPlanner() {
                                           )}
                                           {bookableTicketLines.length > 1 && (
                                             <p className="text-center text-[11px] font-semibold text-[#64748b]">
-                                              Đặt riêng từng loại vé để giữ đúng số lượng.
+                                              Đã gộp {bookableTicketLines.length} loại vé của hoạt động này.
                                             </p>
                                           )}
                                         </div>

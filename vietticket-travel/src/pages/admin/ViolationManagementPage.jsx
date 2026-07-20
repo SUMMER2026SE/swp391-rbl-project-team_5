@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import AdminLayout from '../../layouts/AdminLayout';
 import * as adminApi from '../../services/adminApi.js';
+import { formatAttractionLocation } from '../../utils/location.js';
 import '../../styles/admin.css';
 
 const FALLBACK_IMAGE =
@@ -25,7 +26,7 @@ function mapLocation(attraction) {
   return {
     id: attraction.id,
     name: attraction.title,
-    location: [attraction.address, attraction.city].filter(Boolean).join(', '),
+    location: formatAttractionLocation(attraction),
     partner: attraction.partner?.businessName || 'Không rõ đối tác',
     category: attraction.category?.name || 'Chưa phân loại',
     rating: Number(attraction.averageRating || 0),
@@ -112,12 +113,15 @@ export default function ViolationManagementPage() {
     async function loadLocations() {
       setLoading(true);
       try {
-        const params = { page, limit: PAGE_SIZE, published: true };
+        const params = { page, limit: PAGE_SIZE };
         if (filterStatus === 'hidden') {
           params.operationalStatus = 'SUSPENDED';
         } else if (filterStatus === 'active' || filterStatus === 'paused') {
+          params.published = true;
           params.operationalStatus = 'ACTIVE';
           params.publicationStatus = filterStatus === 'active' ? 'ACTIVE' : 'PAUSED';
+        } else {
+          params.published = true;
         }
         const result = await adminApi.listAttractions(params);
         if (active) {

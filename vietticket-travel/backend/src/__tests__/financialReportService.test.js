@@ -158,11 +158,11 @@ describe('financial report calculations', () => {
       status: 'APPROVED',
       commissionRate: 0.1,
     }]);
-    prisma.refundRequest.aggregate.mockResolvedValue({
+    prisma.refundRequest.aggregate.mockResolvedValueOnce({
       _count: { _all: 2 },
       _sum: { amount: 70000 },
     });
-    prisma.refundTransaction.aggregate.mockResolvedValue({
+    prisma.refundRequest.aggregate.mockResolvedValueOnce({
       _count: { _all: 1 },
       _sum: { amount: 50000 },
     });
@@ -188,6 +188,16 @@ describe('financial report calculations', () => {
       commissionRevenueAmount: 30000,
     }));
     expect(prisma.payment.findMany.mock.calls[0][0].where).not.toHaveProperty('isDuplicate');
+    expect(prisma.partnerProfile.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { status: 'APPROVED' },
+    }));
+    expect(prisma.refundRequest.aggregate.mock.calls[1][0].where).toEqual({
+      status: { in: ['PENDING', 'PROCESSING'] },
+      refundTransactions: {
+        some: { status: { in: ['FAILED', 'NEEDS_RECONCILIATION'] } },
+        none: { status: 'SUCCESS' },
+      },
+    });
   });
 
   test('queries only refund ledger for reconciliation status', async () => {

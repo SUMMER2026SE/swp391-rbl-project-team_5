@@ -16,6 +16,16 @@ const EMPTY_FORM = {
   isActive: true,
 }
 
+const CATEGORY_ICON_OPTIONS = [
+  { value: 'category', label: 'Danh mục chung' },
+  { value: 'museum', label: 'Bảo tàng và di sản' },
+  { value: 'theater_comedy', label: 'Văn hóa và nghệ thuật' },
+  { value: 'sailing', label: 'Phiêu lưu và đường thủy' },
+  { value: 'park', label: 'Thiên nhiên' },
+  { value: 'attractions', label: 'Công viên giải trí' },
+  { value: 'mood', label: 'Vui chơi' },
+]
+
 export default function CategoryManagementPage() {
   const [categories, setCategories] = useState([])
   const [form, setForm] = useState(EMPTY_FORM)
@@ -140,7 +150,7 @@ export default function CategoryManagementPage() {
           ['map', 'Lượt gắn địa điểm', attractionCount],
         ].map(([icon, label, value]) => (
           <div className="admin-page-section" key={label} style={{ padding: 20 }}>
-            <span className="material-symbols-outlined" style={{ color: 'var(--adm-primary-dark)' }}>
+            <span aria-hidden="true" className="material-symbols-outlined" style={{ color: 'var(--adm-primary-dark)' }}>
               {icon}
             </span>
             <p style={{ color: 'var(--adm-on-surface-variant)', marginTop: 10 }}>{label}</p>
@@ -188,14 +198,17 @@ export default function CategoryManagementPage() {
             />
           </label>
           <label>
-            <span className="sr-only">Biểu tượng Material Symbol</span>
-            <input
+            <span className="sr-only">Biểu tượng danh mục</span>
+            <select
+              aria-label="Biểu tượng danh mục"
               className="admin-form-input"
-              maxLength={50}
-              placeholder="category"
               value={form.icon}
               onChange={(event) => setForm({ ...form, icon: event.target.value })}
-            />
+            >
+              {CATEGORY_ICON_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </label>
         </div>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 16 }}>
@@ -207,14 +220,14 @@ export default function CategoryManagementPage() {
           Hiển thị danh mục
         </label>
         <button className="admin-export-btn" type="submit" disabled={saving} style={{ marginTop: 18 }}>
-          <span className="material-symbols-outlined">{editingId ? 'save' : 'add'}</span>
+          <span aria-hidden="true" className="material-symbols-outlined">{editingId ? 'save' : 'add'}</span>
           {saving ? 'Đang lưu...' : editingId ? 'Lưu thay đổi' : 'Thêm danh mục'}
         </button>
       </form>
 
       <section className="admin-page-section">
         <div style={{ padding: '16px 24px', borderBottom: '1px solid #e1e3e4' }}>
-          <select value={filter} onChange={(event) => setFilter(event.target.value)}>
+          <select aria-label="Lọc danh mục theo trạng thái" value={filter} onChange={(event) => setFilter(event.target.value)}>
             <option value="all">Tất cả trạng thái</option>
             <option value="active">Đang hiển thị</option>
             <option value="hidden">Đang ẩn</option>
@@ -241,12 +254,12 @@ export default function CategoryManagementPage() {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <div className="admin-cat-icon">
-                        <span className="material-symbols-outlined">{category.icon}</span>
+                        <span aria-hidden="true" className="material-symbols-outlined">{category.icon}</span>
                       </div>
                       <strong>{category.name}</strong>
                     </div>
                   </td>
-                  <td>{category.description || 'Chưa có mô tả'}</td>
+                  <td>{category.description || 'Mô tả đang chờ quản trị viên cập nhật.'}</td>
                   <td>{category.attractionCount}</td>
                   <td>
                     <button
@@ -260,17 +273,18 @@ export default function CategoryManagementPage() {
                     </button>
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="admin-pagination__btn" type="button" onClick={() => startEdit(category)}>
-                      <span className="material-symbols-outlined">edit</span>
+                    <button aria-label={`Chỉnh sửa ${category.name}`} className="admin-pagination__btn" type="button" onClick={() => startEdit(category)}>
+                      <span aria-hidden="true" className="material-symbols-outlined">edit</span>
                     </button>
                     <button
                       className="admin-pagination__btn"
                       type="button"
                       disabled={category.attractionCount > 0}
                       title={category.attractionCount > 0 ? 'Danh mục đang được sử dụng' : 'Xóa danh mục'}
+                      aria-label={`Xóa ${category.name}`}
                       onClick={() => removeCategory(category)}
                     >
-                      <span className="material-symbols-outlined">delete</span>
+                      <span aria-hidden="true" className="material-symbols-outlined">delete</span>
                     </button>
                   </td>
                 </tr>

@@ -35,10 +35,14 @@ function AccountLayout({ active = 'profile', children }) {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const currentUser = user || defaultUser
-  const visibleNavItems =
-    currentUser.provider === 'GOOGLE'
-      ? navItems.filter((item) => item.active !== 'password')
-      : navItems
+  const isOperationalUser = hasRole(currentUser, 'ADMIN')
+    || hasRole(currentUser, 'STAFF')
+    || hasRole(currentUser, 'PARTNER')
+  const visibleNavItems = navItems.filter((item) => {
+    if (currentUser.provider === 'GOOGLE' && item.active === 'password') return false
+    if (isOperationalUser && ['bookings', 'saved', 'support'].includes(item.active)) return false
+    return true
+  })
 
   const handleLogout = async () => {
     await logout()
@@ -66,14 +70,17 @@ function AccountLayout({ active = 'profile', children }) {
                 Cổng nhân viên
               </Link>
             )}
+            {hasRole(currentUser, 'STAFF') && currentUser?.employerPartnerId && (
+              <Link className="text-button" to="/staff/checkin">
+                Cổng check-in
+              </Link>
+            )}
             {hasRole(currentUser, 'PARTNER') && (
               <Link className="text-button" to="/partner/dashboard">
                 Cổng đối tác
               </Link>
             )}
-            <Link className="text-button" to="/">
-              Trang chủ
-            </Link>
+            {!isOperationalUser && <Link className="text-button" to="/">Trang chủ</Link>}
             <button className="text-button" type="button" onClick={handleLogout}>
               Đăng xuất
             </button>
@@ -117,6 +124,12 @@ function AccountLayout({ active = 'profile', children }) {
                   support_agent
                 </span>
                 Cổng nhân viên
+              </Link>
+            )}
+            {hasRole(currentUser, 'STAFF') && currentUser?.employerPartnerId && (
+              <Link to="/staff/checkin">
+                <span className="material-symbols-outlined" aria-hidden="true">qr_code_scanner</span>
+                Cổng check-in
               </Link>
             )}
             {hasRole(currentUser, 'PARTNER') && (

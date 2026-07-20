@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
+import { formatBookingReference } from '../utils/bookingReference.js'
 import {
   buildItineraryQueueBookingUrl,
   completeItineraryQueueItemByBookingId,
@@ -237,6 +238,7 @@ function BookingSuccessPage() {
 
       const nextItem = getNextItineraryQueueStep(updatedQueue)
       setAiQueueResult({
+        queueId: updatedQueue.id,
         nextItem,
         nextUrl: nextItem ? buildItineraryQueueBookingUrl(updatedQueue, nextItem) : '',
         planTitle: updatedQueue.planTitle,
@@ -334,7 +336,7 @@ function BookingSuccessPage() {
 
           {booking && (
             <div className="mt-7 rounded-2xl border border-outline-variant/20 bg-surface-container-low p-6 text-left">
-              <SummaryRow icon="tag" label="Mã đặt chỗ" value={booking.id} mono />
+              <SummaryRow icon="tag" label="Mã đặt chỗ" value={formatBookingReference(booking.id)} mono />
               <SummaryRow icon="location_on" label="Địa điểm" value={booking.attractionTitle} />
               <SummaryRow icon="calendar_month" label="Ngày tham quan" value={formatDate(booking.visitDate)} />
             </div>
@@ -361,12 +363,12 @@ function BookingSuccessPage() {
                       {nextAiBookingUrl && (
                         <Link
                           className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-[#00474d] px-4 py-2 text-xs font-bold text-white"
-                          to={nextAiBookingUrl}
+                          to={`/itinerary-checkout/${aiQueueResult.queueId}`}
                         >
                           <span className="material-symbols-outlined text-[17px]" aria-hidden="true">
                             shopping_cart_checkout
                           </span>
-                          Đặt vé tiếp theo
+                          Trở lại danh sách lịch trình
                         </Link>
                       )}
                     </div>

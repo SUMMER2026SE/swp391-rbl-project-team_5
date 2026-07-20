@@ -78,7 +78,64 @@ describe('searchAttractions', () => {
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
     const next = jest.fn();
     await searchAttractions(req, res, next);
+    expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            { locationTextNormalized: { contains: ' ha ' } },
+            { locationTextNormalized: { contains: ' noi' } },
+          ]),
+        }),
+      }),
+    );
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test('tìm không dấu trên tên, địa chỉ, quận và thành phố', async () => {
+    mockPrisma.$transaction
+      .mockResolvedValueOnce([0, 0])
+      .mockResolvedValueOnce([[], 0]);
+    const req = { query: { search: 'bao tang q1 ho chi minh' } };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    const next = jest.fn();
+
+    await searchAttractions(req, res, next);
+
+    expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            { searchTextNormalized: { contains: ' bao ' } },
+            { searchTextNormalized: { contains: ' tang ' } },
+            { searchTextNormalized: { contains: ' quan ' } },
+            { searchTextNormalized: { contains: ' 1 ' } },
+            { searchTextNormalized: { contains: ' ho ' } },
+            { searchTextNormalized: { contains: ' chi ' } },
+            { searchTextNormalized: { contains: ' minh' } },
+          ]),
+        }),
+      }),
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test('ưu tiên cụm vị trí chính xác thay vì nội dung mô tả nhắc thoáng qua', async () => {
+    mockPrisma.$transaction
+      .mockResolvedValueOnce([10, 15])
+      .mockResolvedValueOnce([[], 0]);
+    const req = { query: { search: 'ho chi minh' } };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    const next = jest.fn();
+
+    await searchAttractions(req, res, next);
+
+    expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: [{ locationTextNormalized: { contains: ' ho chi minh ' } }],
+        }),
+      }),
+    );
   });
 });
 

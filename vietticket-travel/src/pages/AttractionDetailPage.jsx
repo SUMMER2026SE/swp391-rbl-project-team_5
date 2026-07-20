@@ -15,6 +15,7 @@ import reviewService from '../services/reviewService.js'
 import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
 import { loadItineraryBookingQueue } from '../utils/aiItineraryBookingQueue.js'
 import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
+import { formatAttractionLocation } from '../utils/location.js'
 import { saveRecentlyViewedAttraction } from '../utils/recentlyViewedAttractions.js'
 import fallbackDetailImage from '../assets/halong_bay.webp'
 
@@ -107,11 +108,41 @@ const handleImageFallback = (event) => {
 }
 
 const getAddress = (attraction) => {
-  if (attraction.address && attraction.city) {
-    return `${attraction.address}, ${attraction.city}, Việt Nam`
-  }
+  return formatAttractionLocation(attraction, { includeCountry: true })
+}
 
-  return attraction.address || (attraction.city ? `${attraction.city}, Việt Nam` : 'Việt Nam')
+const getOpenDaysLabel = (openDays) => {
+  const values = Array.isArray(openDays)
+    ? openDays
+    : String(openDays || '').split(',')
+  const flags = values.map((value) => value === true || value === 1 || String(value).trim() === '1')
+  if (flags.length !== 7) return ''
+  if (flags.every(Boolean)) return 'hằng ngày'
+  if (flags.slice(0, 5).every(Boolean) && flags.slice(5).every((value) => !value)) return 'Thứ Hai–Thứ Sáu'
+
+  const dayNames = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật']
+  const activeDays = dayNames.filter((_, index) => flags[index])
+  return activeDays.length > 0 ? activeDays.join(', ') : ''
+}
+
+const getOpeningSchedule = (attraction) => {
+  const openTime = String(attraction?.openTime || '').trim()
+  const closeTime = String(attraction?.closeTime || '').trim()
+  const days = getOpenDaysLabel(attraction?.openDays)
+  const slots = Array.isArray(attraction?.timeSlots) ? attraction.timeSlots : []
+  const distinctSlots = slots.filter(
+    (slot) => !(slots.length === 1 && slot.startTime === openTime && slot.endTime === closeTime),
+  )
+  const slotLabel = distinctSlots
+    .map((slot) => `${slot.startTime}–${slot.endTime}`)
+    .join(', ')
+
+  if (openTime && closeTime) {
+    const base = `${openTime}–${closeTime}${days ? `, ${days}` : ''}`
+    return slotLabel ? `${base}. Khung vé: ${slotLabel}` : base
+  }
+  if (slotLabel) return `Các khung vé: ${slotLabel}`
+  return 'Xem lịch khả dụng khi chọn ngày tham quan'
 }
 
 export default function AttractionDetailPage() {
@@ -900,9 +931,9 @@ function IntroTab({ attraction }) {
           title={attraction.requiresManualApproval ? 'Đối tác xác nhận' : 'Xác nhận tức thì'}
         />
         <FeatureBox
-          description="Chọn ngày và khung giờ phù hợp"
-          icon="event_available"
-          title="Linh hoạt thời gian"
+          description={getOpeningSchedule(attraction)}
+          icon="schedule"
+          title="Giờ hoạt động"
         />
       </div>
     </div>

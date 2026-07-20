@@ -29,10 +29,10 @@ export default function LocationMap({ latitude, longitude, title, height = 240 }
   const baseLayer = getBaseLayerProps()
 
   return (
-    <div className="overflow-hidden rounded-xl shadow-[0_4px_20px_rgba(0,96,104,0.04)]">
+    <div className="overflow-hidden rounded-xl shadow-[0_4px_20px_rgba(0,96,104,0.04)]" role="region" aria-label={`Bản đồ vị trí ${title || 'điểm tham quan'}`}>
       <MapContainer center={pos} zoom={15} scrollWheelZoom={false} style={{ height, width: '100%' }}>
         <TileLayer attribution={baseLayer.attribution} url={baseLayer.url} />
-        <Marker position={pos} icon={defaultIcon}>
+        <Marker position={pos} icon={defaultIcon} alt={`Vị trí ${title || 'điểm tham quan'}`} title={title || 'Vị trí điểm tham quan'}>
           <Popup>{title || 'Vị trí điểm tham quan'}</Popup>
         </Marker>
       </MapContainer>

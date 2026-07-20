@@ -62,6 +62,8 @@ function PartnerKycPage() {
   const [uploadedFile, setUploadedFile] = useState(null)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [partnerProfile, setPartnerProfile] = useState(null)
+  const [isProfileLoading, setIsProfileLoading] = useState(true)
 
   // Đóng dropdown ngân hàng khi click ra ngoài
   useEffect(() => {
@@ -92,6 +94,7 @@ function PartnerKycPage() {
         if (!active) return
         const p = res.partner
         if (p) {
+          setPartnerProfile(p)
           setFormData({
             businessName: p.businessName || '',
             taxCode: p.taxCode || '',
@@ -120,6 +123,9 @@ function PartnerKycPage() {
       })
       .catch(() => {
         // Ignored: profile not created yet is normal
+      })
+      .finally(() => {
+        if (active) setIsProfileLoading(false)
       })
 
     return () => {
@@ -280,6 +286,10 @@ function PartnerKycPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (['PENDING', 'APPROVED', 'SUSPENDED'].includes(partnerProfile?.status)) {
+      toast.info('Hồ sơ này đang bị khóa. Vui lòng liên hệ hỗ trợ nếu cần thay đổi thông tin pháp lý.')
+      return
+    }
     
     // Đánh dấu tất cả là touched
     setTouched({
@@ -335,6 +345,85 @@ function PartnerKycPage() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  if (isProfileLoading) {
+    return (
+      <main className="min-h-screen bg-[#f8fafb] flex items-center justify-center" aria-live="polite">
+        <div className="flex items-center gap-3 text-[#3f484a]">
+          <span className="material-symbols-outlined animate-spin" aria-hidden="true">progress_activity</span>
+          Đang kiểm tra trạng thái hồ sơ…
+        </div>
+      </main>
+    )
+  }
+
+  const lockedStatuses = ['PENDING', 'APPROVED', 'SUSPENDED']
+  if (lockedStatuses.includes(partnerProfile?.status)) {
+    const statusContent = {
+      PENDING: {
+        icon: 'hourglass_top',
+        title: 'Hồ sơ đang được xét duyệt',
+        description: 'Thông tin pháp lý đã được khóa để tránh thay đổi trong quá trình thẩm định.',
+      },
+      APPROVED: {
+        icon: 'verified',
+        title: 'Hồ sơ KYC đã được xác minh',
+        description: 'Các trường pháp lý và tài chính không thể sửa trực tiếp sau khi phê duyệt.',
+      },
+      SUSPENDED: {
+        icon: 'policy',
+        title: 'Hồ sơ đang bị tạm khóa',
+        description: 'Chỉ quản trị viên nền tảng có thể xử lý hồ sơ trong thời gian tạm khóa.',
+      },
+    }[partnerProfile.status]
+
+    return (
+      <main className="min-h-screen bg-[#f8fafb]" style={{ fontFamily: "'Be Vietnam Pro', 'Inter', sans-serif" }}>
+        <header className="bg-white border-b border-[#e1e3e4] h-16 flex items-center justify-between px-6 md:px-12">
+          <Link to="/partner/dashboard" className="flex items-center gap-2 font-bold text-lg text-[#00474d] no-underline">
+            <span className="material-symbols-outlined" aria-hidden="true">travel</span>
+            VietTicket B2B
+          </Link>
+          <button
+            type="button"
+            onClick={async () => { await logout(); navigate('/login', { replace: true }) }}
+            className="flex items-center gap-2 text-sm font-medium text-[#ba1a1a]"
+          >
+            <span className="material-symbols-outlined text-[18px]" aria-hidden="true">logout</span>
+            Đăng xuất
+          </button>
+        </header>
+        <div className="mx-auto max-w-3xl px-4 py-12 md:py-20">
+          <section className="rounded-2xl border border-[#d7e4e5] bg-white p-6 shadow-sm md:p-10" aria-labelledby="kyc-locked-title">
+            <div className="mb-7 flex items-start gap-4">
+              <span className="material-symbols-outlined rounded-full bg-[#d9f1f2] p-3 text-3xl text-[#00474d]" aria-hidden="true">
+                {statusContent.icon}
+              </span>
+              <div>
+                <p className="mb-1 text-sm font-semibold uppercase tracking-wide text-[#006068]">Trạng thái hồ sơ</p>
+                <h1 id="kyc-locked-title" className="text-2xl font-bold text-[#191c1d]">{statusContent.title}</h1>
+                <p className="mt-2 text-sm leading-6 text-[#3f484a]">{statusContent.description}</p>
+              </div>
+            </div>
+            <dl className="grid gap-4 rounded-xl bg-[#f6f8f9] p-5 sm:grid-cols-2">
+              <div><dt className="text-xs text-[#6f797a]">Tên doanh nghiệp</dt><dd className="mt-1 font-semibold text-[#191c1d]">{partnerProfile.businessName || 'Chưa cập nhật'}</dd></div>
+              <div><dt className="text-xs text-[#6f797a]">Mã số thuế</dt><dd className="mt-1 font-semibold text-[#191c1d]">{partnerProfile.taxCode || 'Chưa cập nhật'}</dd></div>
+              <div><dt className="text-xs text-[#6f797a]">Người đại diện</dt><dd className="mt-1 font-semibold text-[#191c1d]">{partnerProfile.representativeName || 'Chưa cập nhật'}</dd></div>
+              <div><dt className="text-xs text-[#6f797a]">Ngân hàng nhận đối soát</dt><dd className="mt-1 font-semibold text-[#191c1d]">{partnerProfile.bankName || 'Chưa cập nhật'}</dd></div>
+            </dl>
+            <div className="mt-7 rounded-xl border border-[#f2d394] bg-[#fff7e6] p-4 text-sm leading-6 text-[#5d4300]">
+              Cần điều chỉnh tên pháp lý, mã số thuế, tài khoản ngân hàng hoặc giấy phép? Hãy gửi yêu cầu qua Trung tâm hỗ trợ để nền tảng xác minh và lưu vết thay đổi.
+            </div>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <Link to="/partner/dashboard" className="rounded-lg bg-[#006068] px-5 py-2.5 text-sm font-semibold text-white no-underline">Về tổng quan đối tác</Link>
+              <Link to="/partner/settings" className="rounded-lg border border-[#9aa5a7] px-5 py-2.5 text-sm font-semibold text-[#00474d] no-underline">Xem cài đặt</Link>
+              <a href="mailto:partners@vietticket.com" className="rounded-lg border border-[#9aa5a7] px-5 py-2.5 text-sm font-semibold text-[#00474d] no-underline">Liên hệ hỗ trợ đối tác</a>
+            </div>
+          </section>
+        </div>
+      </main>
+    )
   }
 
   return (

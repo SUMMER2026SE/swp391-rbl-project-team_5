@@ -5,6 +5,7 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import { useAuth } from '../context/useAuth.js'
 import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
+import { formatBookingReference } from '../utils/bookingReference.js'
 import { getTicketTypeLabel } from '../utils/ticketType.js'
 
 function formatVND(n) {
@@ -207,7 +208,7 @@ function PartnerDashboardPage() {
                         onClick={() => setSelectedBooking(b)}
                         className={`border-t border-[#f2f4f5] hover:bg-[#f7f8f9] transition-colors cursor-pointer ${i % 2 === 0 ? '' : ''}`}
                       >
-                        <td className="px-5 py-3.5 font-mono text-xs text-[#00629d] font-semibold">{b.id.slice(0, 8).toUpperCase()}</td>
+                        <td className="px-5 py-3.5 font-mono text-xs text-[#00629d] font-semibold">{formatBookingReference(b.id)}</td>
                         <td className="px-5 py-3.5">
                           <p className="font-medium text-[#191c1d] truncate max-w-[160px]">{b.attraction}</p>
                           <p className="text-xs text-[#6f797a]">{b.ticket}</p>
@@ -467,7 +468,7 @@ function PartnerDashboardPage() {
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl animate-fadeIn">
             <h3 className="text-lg font-bold text-[#191c1d]">Từ chối đơn đặt vé</h3>
             <p className="mt-1 text-sm text-[#3f484a]">
-              Đơn <span className="font-mono font-semibold text-[#00629d]">{rejectTarget.id.slice(0, 8).toUpperCase()}</span> của khách{' '}
+              Đơn <span className="font-mono font-semibold text-[#00629d]">{formatBookingReference(rejectTarget.id)}</span> của khách{' '}
               <span className="font-semibold">{rejectTarget.customer}</span>.
             </p>
             <p className="mt-2 rounded-lg bg-[#fff3e0] px-3 py-2 text-xs text-[#725000]">
@@ -491,7 +492,7 @@ function PartnerDashboardPage() {
                 disabled={actionLoading === rejectTarget.id}
                 className="px-4 py-2 rounded-lg border border-[#bec8ca] text-sm text-[#3f484a] hover:bg-[#f2f4f5] transition-colors disabled:opacity-50"
               >
-                Hủy bộ
+                Đóng
               </button>
               <button
                 onClick={handleCancel}

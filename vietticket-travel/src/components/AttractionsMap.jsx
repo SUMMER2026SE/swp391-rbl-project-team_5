@@ -63,7 +63,7 @@ export default function AttractionsMap({ attractions = [], navigate, height = 48
   const baseLayer = getBaseLayerProps()
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[#bec8ca]/60 shadow-[0_4px_20px_rgba(0,40,50,0.06)]">
+    <div className="overflow-hidden rounded-xl border border-[#bec8ca]/60 shadow-[0_4px_20px_rgba(0,40,50,0.06)]" role="region" aria-label="Bản đồ các điểm tham quan">
       <MapContainer
         center={center}
         zoom={6}
@@ -73,7 +73,7 @@ export default function AttractionsMap({ attractions = [], navigate, height = 48
         <TileLayer attribution={baseLayer.attribution} url={baseLayer.url} />
         <FitBounds points={points} />
         {points.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]} icon={defaultIcon}>
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={defaultIcon} alt={`Vị trí ${p.title}`} title={p.title} riseOnHover>
             <Popup>
               <div style={{ width: 200 }}>
                 {p.image ? (

@@ -3,10 +3,12 @@ import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import {
   checkInTicket,
+  listOperationalBookings,
   listTodayBookings,
   lookupTicketByQr,
   reissueTicket,
 } from '../../services/staffApi.js'
+import { formatBookingReference } from '../../utils/bookingReference.js'
 
 const REISSUE_REASON_OPTIONS = [
   { value: 'LOST_BY_CUSTOMER', label: 'Khách làm mất vé' },
@@ -46,7 +48,7 @@ function TicketResultCard({ ticket, onCheckin, isChecking }) {
       </div>
 
       <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <InfoRow label="Mã đơn" value={(ticket.bookingId || '').slice(0, 8).toUpperCase() || '—'} mono />
+        <InfoRow label="Mã đơn" value={formatBookingReference(ticket.bookingId)} mono />
         <InfoRow label="Khách hàng" value={ticket.customer} />
         <InfoRow label="Số điện thoại" value={ticket.phone || '—'} />
         <InfoRow label="Địa điểm" value={ticket.attraction} />
@@ -92,6 +94,9 @@ export default function CheckinPage() {
   const [todayBookings, setTodayBookings] = useState([])
   const [todayMeta, setTodayMeta] = useState({ date: '', total: 0, checkedIn: 0 })
   const [todaySearch, setTodaySearch] = useState('')
+  const [operationalBookings, setOperationalBookings] = useState([])
+  const [operationalSearch, setOperationalSearch] = useState('')
+  const [isLoadingOperational, setIsLoadingOperational] = useState(false)
   const [reissueTarget, setReissueTarget] = useState(null)
   const [reissueReasonCode, setReissueReasonCode] = useState('LOST_BY_CUSTOMER')
   const [reissueReason, setReissueReason] = useState('')
@@ -113,10 +118,27 @@ export default function CheckinPage() {
     }
   }, [])
 
+  const fetchOperational = useCallback(async (search = '') => {
+    setIsLoadingOperational(true)
+    try {
+      const response = await listOperationalBookings({ search: search.trim() || undefined })
+      setOperationalBookings(response.data || [])
+    } catch (error) {
+      toast.error(error.message || 'Không tải được danh sách đơn có thể cấp lại vé.')
+    } finally {
+      setIsLoadingOperational(false)
+    }
+  }, [])
+
   useEffect(() => {
     const timer = window.setTimeout(() => void fetchToday(), 0)
     return () => window.clearTimeout(timer)
   }, [fetchToday])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void fetchOperational(), 0)
+    return () => window.clearTimeout(timer)
+  }, [fetchOperational])
 
   async function handleLookup(event) {
     event?.preventDefault()
@@ -146,6 +168,7 @@ export default function CheckinPage() {
       setTokenInput('')
       toast.success(response.message || 'Check-in thành công.')
       void fetchToday()
+      void fetchOperational(operationalSearch)
       inputRef.current?.focus()
     } catch (error) {
       toast.error(error.message || 'Check-in thất bại.')
@@ -181,6 +204,7 @@ export default function CheckinPage() {
       setReissueReason('')
       setReissueReasonCode('LOST_BY_CUSTOMER')
       void fetchToday()
+      void fetchOperational(operationalSearch)
     } catch (error) {
       toast.error(error.message || 'Không thể cấp lại vé.')
     } finally {
@@ -275,6 +299,79 @@ export default function CheckinPage() {
           </div>
         )}
 
+        <section className="mb-6 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
+          <div className="border-b border-outline-variant bg-surface-container-low px-5 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-base font-semibold text-on-surface">Tra cứu và cấp lại vé</h4>
+                <p className="mt-1 text-xs text-on-surface-variant">
+                  Tìm đơn đã xác nhận từ hôm nay đến 30 ngày tới trong các địa điểm được phân công.
+                </p>
+              </div>
+              <form
+                className="flex gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void fetchOperational(operationalSearch)
+                }}
+              >
+                <input
+                  value={operationalSearch}
+                  onChange={(event) => setOperationalSearch(event.target.value)}
+                  type="search"
+                  placeholder="Mã đơn, tên hoặc SĐT"
+                  className="min-w-0 rounded-full border border-outline-variant bg-surface px-4 py-2 text-sm outline-none focus:border-primary sm:w-64"
+                />
+                <button
+                  type="submit"
+                  disabled={isLoadingOperational}
+                  className="rounded-full border-0 bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:opacity-50"
+                >
+                  {isLoadingOperational ? 'Đang tìm…' : 'Tìm'}
+                </button>
+              </form>
+            </div>
+          </div>
+          <div className="divide-y divide-outline-variant/40">
+            {operationalBookings.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-on-surface-variant">
+                {isLoadingOperational ? 'Đang tải danh sách…' : 'Không có đơn phù hợp để cấp lại vé.'}
+              </p>
+            ) : (
+              operationalBookings.map((booking) => (
+                <div key={booking.bookingId} className="grid gap-3 px-5 py-4 lg:grid-cols-[150px_1fr_180px_auto] lg:items-center">
+                  <div>
+                    <p className="font-mono text-xs font-bold text-primary">{formatBookingReference(booking.bookingId)}</p>
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      {String(booking.visitDate || '').split('-').reverse().join('/')}
+                    </p>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-on-surface">{booking.customer}</p>
+                    <p className="truncate text-xs text-on-surface-variant">{booking.attraction} · {booking.ticketName}</p>
+                  </div>
+                  <p className="text-xs text-on-surface-variant">
+                    {booking.validCount}/{booking.quantity} vé còn hiệu lực
+                  </p>
+                  <button
+                    type="button"
+                    disabled={booking.validCount < 1}
+                    onClick={() => {
+                      setReissueTarget(booking)
+                      setReissueReason('')
+                      setReissueReasonCode('LOST_BY_CUSTOMER')
+                    }}
+                    className="flex items-center justify-center gap-1 rounded-lg border border-primary px-3 py-2 text-xs font-bold text-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <span className="material-symbols-outlined text-[16px]" aria-hidden="true">autorenew</span>
+                    Cấp lại vé
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
         {/* Danh sách đơn hôm nay */}
         <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
           <div className="flex flex-col gap-3 border-b border-outline-variant bg-surface-container-low px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -328,7 +425,7 @@ export default function CheckinPage() {
                   filteredToday.map((b) => (
                     <tr key={b.bookingId} className="border-b border-outline-variant/40 hover:bg-surface">
                       <td className="px-5 py-3 font-mono text-xs font-semibold text-primary">
-                        {(b.bookingId || '').slice(0, 8).toUpperCase() || '—'}
+                        {formatBookingReference(b.bookingId)}
                       </td>
                       <td className="px-5 py-3">
                         <p className="font-medium text-on-surface">{b.customer}</p>
@@ -398,7 +495,7 @@ export default function CheckinPage() {
                 Cấp lại vé điện tử
               </h3>
               <p className="mt-2 text-sm text-on-surface-variant">
-                Đơn <strong>#{reissueTarget.bookingId.slice(0, 8).toUpperCase()}</strong> ·{' '}
+                Đơn <strong>{formatBookingReference(reissueTarget.bookingId)}</strong> ·{' '}
                 {reissueTarget.customer}. Toàn bộ mã QR còn hiệu lực sẽ bị thu hồi và thay bằng mã mới.
               </p>
 

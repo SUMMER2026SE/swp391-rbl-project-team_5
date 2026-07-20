@@ -10,6 +10,7 @@ const prisma = require('./helpers/mockPrisma');
 const forecastService = require('../services/forecastService');
 const {
   getAdminForecastOverview,
+  getAttractionForecast,
   getPartnerForecastOverview,
   parseForecastDays,
 } = require('../controllers/aiForecastController');
@@ -26,6 +27,7 @@ function forecastResult(overrides = {}) {
     modelVersion: 'real-v1',
     method: 'AI_ENSEMBLE',
     usedFallback: false,
+    forecastAvailable: true,
     warning: null,
     dataQuality: {
       lookbackDays: 180,
@@ -87,6 +89,7 @@ describe('aiForecastController', () => {
           publicationStatus: 'ACTIVE',
           operationalStatus: 'ACTIVE',
           archivedAt: null,
+          publishedAt: { not: null },
         }),
       }),
     );
@@ -95,7 +98,9 @@ describe('aiForecastController', () => {
       data: expect.objectContaining({
         totalPredictedRevenue: 1000000,
         successfulAttractions: 1,
-          methodSummary: { ai: 1, demoAi: 0, baseline: 0 },
+        methodSummary: {
+          ai: 1, demoAi: 0, baseline: 0, insufficientData: 0,
+        },
       }),
     });
   });
@@ -132,7 +137,9 @@ describe('aiForecastController', () => {
       success: true,
       data: expect.objectContaining({
         totalPredictedRevenue: 1500000,
-          methodSummary: { ai: 1, demoAi: 0, baseline: 1 },
+        methodSummary: {
+          ai: 1, demoAi: 0, baseline: 1, insufficientData: 0,
+        },
         timeline: [{
           date: '2026-07-20',
           predictedRevenue: 1500000,
@@ -142,5 +149,108 @@ describe('aiForecastController', () => {
         }],
       }),
     });
+  });
+
+  test('không cộng điểm thiếu dữ liệu vào doanh thu hoặc số dự báo thành công', async () => {
+    prisma.attraction.findMany.mockResolvedValue([
+      { id: 'attr-1', title: 'Điểm có dữ liệu', city: 'Huế', partnerId: 'partner-1' },
+      { id: 'attr-2', title: 'Điểm mới', city: 'Huế', partnerId: 'partner-1' },
+    ]);
+    forecastService.getForecastForAttraction
+      .mockResolvedValueOnce(forecastResult())
+      .mockResolvedValueOnce(forecastResult({
+        modelVersion: 'insufficient_data_v1',
+        method: 'INSUFFICIENT_DATA',
+        usedFallback: true,
+        forecastAvailable: false,
+        forecast: [{
+          date: '2026-07-20',
+          predictedRevenue: 0,
+          predictedTickets: 0,
+          confidenceLower: 0,
+          confidenceUpper: 0,
+        }],
+      }));
+    const req = { query: { days: '7' }, partner: { id: 'partner-1' } };
+    const res = createRes();
+    const next = jest.fn();
+
+    await getPartnerForecastOverview(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({
+        totalAttractions: 2,
+        processedAttractions: 2,
+        successfulAttractions: 1,
+        insufficientDataAttractions: 1,
+        failedAttractions: 0,
+        totalPredictedRevenue: 1000000,
+        methodSummary: {
+          ai: 1, demoAi: 0, baseline: 0, insufficientData: 1,
+        },
+      }),
+    });
+  });
+
+  test('admin refresh truyền forceRefresh xuống service cho toàn bộ overview', async () => {
+    prisma.attraction.findMany.mockResolvedValue([
+      { id: 'attr-1', title: 'Điểm A', city: 'Huế', partnerId: 'partner-1' },
+    ]);
+    forecastService.getForecastForAttraction.mockResolvedValue(forecastResult());
+    const req = { query: { days: '14', refresh: 'true' } };
+    const res = createRes();
+    const next = jest.fn();
+
+    await getAdminForecastOverview(req, res, next);
+
+    expect(forecastService.getForecastForAttraction).toHaveBeenCalledWith(
+      'attr-1',
+      { forecastDays: 14, forceRefresh: true },
+    );
+  });
+
+  test('Partner không thể dò hoặc xem dự báo attraction của đối tác khác', async () => {
+    prisma.attraction.findUnique.mockResolvedValue({
+      partnerId: 'partner-other',
+      archivedAt: null,
+    });
+    const req = {
+      params: { attractionId: 'attr-private' },
+      query: { days: '7' },
+      user: { id: 'partner-user', role: 'PARTNER' },
+      partner: { id: 'partner-1', status: 'APPROVED' },
+    };
+    const res = createRes();
+    const next = jest.fn();
+
+    await getAttractionForecast(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 404 }),
+    );
+    expect(forecastService.getForecastForAttraction).not.toHaveBeenCalled();
+  });
+
+  test('Partner sở hữu attraction vẫn không được bỏ qua cache', async () => {
+    prisma.attraction.findUnique.mockResolvedValue({
+      partnerId: 'partner-1',
+      archivedAt: null,
+    });
+    const req = {
+      params: { attractionId: 'attr-1' },
+      query: { days: '7', refresh: 'true' },
+      user: { id: 'partner-user', role: 'PARTNER' },
+      partner: { id: 'partner-1', status: 'APPROVED' },
+    };
+    const res = createRes();
+    const next = jest.fn();
+
+    await getAttractionForecast(req, res, next);
+
+    expect(next).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 403 }),
+    );
+    expect(forecastService.getForecastForAttraction).not.toHaveBeenCalled();
   });
 });

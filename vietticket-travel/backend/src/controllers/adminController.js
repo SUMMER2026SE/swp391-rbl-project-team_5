@@ -1735,6 +1735,7 @@ async function changePartnerCommissionRate(req, res, next) {
       select: {
         id: true,
         businessName: true,
+        status: true,
         commissionRate: true,
       },
     });
@@ -1742,6 +1743,15 @@ async function changePartnerCommissionRate(req, res, next) {
       return res.status(404).json({
         success: false,
         error: { code: 'PARTNER_NOT_FOUND', message: 'Không tìm thấy đối tác.' },
+      });
+    }
+    if (partner.status !== 'APPROVED') {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'PARTNER_NOT_APPROVED',
+          message: 'Chỉ có thể thiết lập hoa hồng cho đối tác đang hoạt động.',
+        },
       });
     }
 

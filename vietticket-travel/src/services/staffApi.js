@@ -1,4 +1,5 @@
 import { apiRequest } from './api.js'
+import { bookingReferenceSearchTerm } from '../utils/bookingReference.js'
 
 // Lớp gọi API cho cổng Nhân viên (Staff) & Admin.
 // Gom các lời gọi vốn nằm rải rác trong CheckinPage / RefundManagementPage
@@ -9,7 +10,7 @@ import { apiRequest } from './api.js'
 export function listRefundRequests({ status, search, page, limit } = {}) {
   const params = new URLSearchParams()
   if (status) params.set('status', status)
-  if (search) params.set('search', search)
+  if (search) params.set('search', bookingReferenceSearchTerm(search))
   if (page) params.set('page', String(page))
   if (limit) params.set('limit', String(limit))
   const query = params.toString()
@@ -41,6 +42,15 @@ export function listTodayBookings() {
   return apiRequest('/staff/bookings/today', { method: 'GET' })
 }
 
+export function listOperationalBookings({ search, dateFrom, dateTo } = {}) {
+  const params = new URLSearchParams()
+  if (search) params.set('search', bookingReferenceSearchTerm(search))
+  if (dateFrom) params.set('dateFrom', dateFrom)
+  if (dateTo) params.set('dateTo', dateTo)
+  const query = params.toString()
+  return apiRequest(`/staff/bookings${query ? `?${query}` : ''}`, { method: 'GET' })
+}
+
 // Tra cứu vé theo mã QR (chỉ xem, không ghi DB).
 export function lookupTicketByQr(token) {
   return apiRequest(`/staff/checkin/${encodeURIComponent(token)}`, { method: 'GET' })
@@ -69,6 +79,7 @@ const staffApi = {
   reconcileRefundRequest,
   reissueTicket,
   listTodayBookings,
+  listOperationalBookings,
   lookupTicketByQr,
   checkInTicket,
   getStaffAssignments,
