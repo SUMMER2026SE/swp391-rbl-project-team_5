@@ -1,0 +1,34 @@
+@startuml
+title 3.3.4 Favorite Attractions (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Customer|
+start
+:Open /favorites from the account menu;
+|System|
+:Load favorites\nGET /api/favorites;
+if (Any favorites?) then (No)
+  |System|
+  :Show empty state;
+else (Yes)
+  |System|
+  :Render favorite cards (image, name, price);
+  |Customer|
+  if (Action?) then (Open detail)
+    |System|
+    :Navigate to attraction detail page;
+  else (Remove)
+    |Customer|
+    :Click Remove;
+    |System|
+    :POST /api/attractions/:id/favorite (toggle off);
+    :Update the list;
+  endif
+endif
+|System|
+stop
+@enduml

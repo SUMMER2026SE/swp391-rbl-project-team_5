@@ -24,10 +24,11 @@ function Test-HttpEndpoint([string]$Label, [string]$Uri) {
 
 $branch = (& git branch --show-current).Trim()
 Assert-CommandSucceeded 'Read Git branch'
-if ($branch -ne 'HAnh') {
-  throw "Current branch is '$branch'. Checkout 'HAnh' before the demo."
+$allowedBranches = @('Karma', 'HAnh')
+if ($allowedBranches -notcontains $branch) {
+  throw "Current branch is '$branch'. Checkout one of: $($allowedBranches -join ', ') before the demo."
 }
-Write-Host '[PASS] Current branch is HAnh' -ForegroundColor Green
+Write-Host "[PASS] Current branch is $branch" -ForegroundColor Green
 
 Test-HttpEndpoint 'ML forecast service' 'http://127.0.0.1:8000/health'
 Test-HttpEndpoint 'Backend API' 'http://localhost:5000/api/health'

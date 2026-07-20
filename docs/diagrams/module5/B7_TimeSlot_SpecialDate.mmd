@@ -1,0 +1,17 @@
+stateDiagram-v2
+    state "TimeSlot (isActive)" as TS {
+        direction LR
+        [*] --> Active_TS : Create slot
+        Active_TS --> Inactive_TS : Deactivate
+        Inactive_TS --> Active_TS : Reactivate
+        Active_TS --> [*] : Remove
+    }
+    state "SpecialDate (closed)" as SD {
+        direction LR
+        [*] --> OpenOverride : Override capacity
+        [*] --> Closed : Close the day
+        OpenOverride --> Closed : Switch to closed
+        Closed --> OpenOverride : Reopen with capacity
+        OpenOverride --> [*] : Delete
+        Closed --> [*] : Delete
+    }

@@ -1,0 +1,36 @@
+@startuml
+title 3.3.2 Search and Filter Attractions (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Visitor|
+start
+:Open /attractions (menu / hero search / category);
+repeat :Browse results;
+  |Visitor|
+  :Set keyword, city, category, price/rating, sort;
+  |System|
+  :Load results GET /api/attractions (query params)\n+ map markers GET /api/attractions/map-points;
+  if (Load ok?) then (No)
+    |Visitor|
+    :Show error toast (data / map load failed);
+  else (Yes)
+    |System|
+    :Render card grid + interactive map (Leaflet);
+    |Visitor|
+    if (Select an attraction?) then (Yes)
+      |System|
+      :Navigate to attraction detail page;
+    else (No)
+      |Visitor|
+      :Keep refining filters;
+    endif
+  endif
+repeat while (Refine search?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

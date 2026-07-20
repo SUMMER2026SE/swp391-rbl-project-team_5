@@ -1,0 +1,17 @@
+stateDiagram-v2
+    [*] --> Live
+    state Live {
+        direction TB
+        [*] --> DRAFT
+        DRAFT --> PENDING : submit
+        REJECTED --> PENDING : resubmit
+        PENDING --> APPROVED : approve
+        PENDING --> REJECTED : reject
+        APPROVED --> SUSPENDED : suspend
+        SUSPENDED --> APPROVED : restore
+        --
+        [*] --> PAUSED
+        PAUSED --> ACTIVE : publish
+        ACTIVE --> PAUSED : pause / suspend
+    }
+    Live --> [*] : Partner deletes (archived)

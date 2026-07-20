@@ -1,0 +1,33 @@
+@startuml
+title 3.9.8 Violation Management (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin/violations;
+|System|
+:Load attractions (attraction, partner, status);
+|Admin|
+if (Hide a violating attraction?) then (Yes)
+  :Enter reason to hide;
+  |System|
+  if (Reason provided?) then (No)
+    |Admin|
+    :Show "Vui long nhap ly do tam an.";
+  else (Yes)
+    |System|
+    :PUT /api/admin/attractions/:id/hide (BR-24)\nsuspend + hide from public view;
+    |Notification Service|
+    :Notify partner of suspension;
+  endif
+else (No)
+  |Admin|
+  :Monitor the attraction list;
+endif
+|System|
+stop
+@enduml

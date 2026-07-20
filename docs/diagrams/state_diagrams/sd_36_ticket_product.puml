@@ -1,0 +1,21 @@
+@startuml
+title Ticket Product Lifecycle - 3.6 (TicketStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> ACTIVE : Partner creates ticket (default)
+ACTIVE --> INACTIVE : Partner deactivates
+INACTIVE --> ACTIVE : Partner activates
+ACTIVE --> ARCHIVED : Partner deletes
+INACTIVE --> ARCHIVED : Partner deletes
+ARCHIVED --> [*]
+
+ARCHIVED : Soft-deleted (archivedAt set)
+@enduml

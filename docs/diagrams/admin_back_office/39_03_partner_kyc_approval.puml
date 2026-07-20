@@ -1,0 +1,38 @@
+@startuml
+title 3.9.3 Partner KYC Approval (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin/kyc-approval;
+|System|
+:Load pending KYC profiles;
+|Admin|
+:Select a profile + review business documents;
+if (Decision?) then (Approve)
+  |System|
+  :PUT /api/admin/partners/:id/review (APPROVED) - BR-24;
+  :Toast "Da phe duyet ho so thanh cong!";
+  |Notification Service|
+  :Notify partner (approved);
+else (Reject)
+  |Admin|
+  :Enter rejection reason;
+  |System|
+  if (Reason provided?) then (No)
+    |Admin|
+    :Show "Vui long nhap ly do tu choi.";
+  else (Yes)
+    |System|
+    :PUT /api/admin/partners/:id/review (REJECTED);
+    |Notification Service|
+    :Notify partner (rejected + reason);
+  endif
+endif
+|System|
+stop
+@enduml

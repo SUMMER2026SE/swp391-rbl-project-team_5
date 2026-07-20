@@ -1,0 +1,67 @@
+@startuml
+title 3.5.1 AI Itinerary Planner (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+skinparam noteBackgroundColor #EEF6FF
+
+|Customer|
+start
+:Open itinerary planner;
+repeat :Enter trip parameters;
+  :City, number of days (1-14),\nparty size (>= 1), start date, budget (optional);
+  :Click Generate;
+  |System|
+  :Validate input (city, days 1-14,\nparty >= 1, start date) - BR-14;
+  if (Input valid?) then (No)
+    |Customer|
+    :Warning toast (invalid input);
+  else (Yes)
+    |System|
+    :POST /api/ai/itinerary (rate-limited);
+    |AI Service (Gemini)|
+    :Generate day-by-day plan\ngrounded in catalogue attractions/tickets;
+    |System|
+    if (Generation ok?) then (No)
+      |Customer|
+      :Toast "Khong the tao ke hoach.\nVui long thu lai sau.";
+    else (Yes)
+      |System|
+      :Render plan timeline\n(per-day stops, weather, route map);
+      |Customer|
+      switch (Plan action?)
+      case (Save)
+        |System|
+        if (Signed in?) then (Yes)
+          :POST /api/ai/itinerary/save;
+          if (Account sync ok?) then (No)
+            :Keep plan on device (fallback);
+          else (Yes)
+            :Saved to account;
+          endif
+        else (No)
+          |Customer|
+          :Prompt to sign in;
+        endif
+      case (Share)
+        |Customer|
+        :Copy share link;
+      case (Book)
+        |System|
+        :Check availability + build booking queue\n(pre-fills booking modal per stop);
+      case (Feedback)
+        |Customer|
+        :Rate plan (thumbs up/down);
+      case (Done)
+        |Customer|
+        :Just review the plan;
+      endswitch
+    endif
+  endif
+repeat while (Adjust and regenerate?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

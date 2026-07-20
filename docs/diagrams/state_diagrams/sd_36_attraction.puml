@@ -1,0 +1,26 @@
+@startuml
+title Attraction Lifecycle - 3.6 (AttractionStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> DRAFT : Partner creates attraction
+DRAFT --> PENDING : Partner submits for review
+REJECTED --> PENDING : Partner fixes & resubmits
+PENDING --> APPROVED : Admin approves\n(publishedAt set)
+PENDING --> REJECTED : Admin rejects (+ reason)
+APPROVED --> DRAFT : Partner edits\n(significant change)
+APPROVED --> SUSPENDED : Admin hides (violation)
+SUSPENDED --> APPROVED : Admin restores
+DRAFT --> [*] : Partner archives
+REJECTED --> [*] : Partner archives
+APPROVED --> [*] : Partner archives
+
+APPROVED : Publicly available\n(see Publication state)
+@enduml

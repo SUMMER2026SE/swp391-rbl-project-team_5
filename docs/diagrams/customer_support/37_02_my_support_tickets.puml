@@ -1,0 +1,36 @@
+@startuml
+title 3.7.2 My Support Tickets (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Customer|
+start
+:Open /my-support;
+|System|
+:Load tickets\nGET /api/support/tickets/my-tickets;
+:Render list (subject, status\nopen / in progress / resolved, last update);
+|Customer|
+if (Open a ticket?) then (Yes)
+  :Select a ticket;
+  |System|
+  :Load conversation\nGET /api/support/tickets/:ticketId;
+  |Customer|
+  if (Send a message?) then (Yes)
+    :Type and send message;
+    |System|
+    :POST /api/support/tickets/:ticketId/messages;
+    :Append message to thread;
+  else (No)
+    |Customer|
+    :Read conversation;
+  endif
+else (No)
+  |Customer|
+  :Browse ticket list;
+endif
+|System|
+stop
+@enduml

@@ -1,0 +1,8 @@
+stateDiagram-v2
+    direction LR
+    [*] --> PENDING : Register
+    PENDING --> APPROVED : Admin approves
+    PENDING --> REJECTED : Admin rejects
+    REJECTED --> PENDING : Partner resubmits
+    APPROVED --> SUSPENDED : Admin suspends
+    SUSPENDED --> APPROVED : Admin restores

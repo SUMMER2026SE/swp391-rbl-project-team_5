@@ -1,0 +1,5 @@
+stateDiagram-v2
+    direction LR
+    [*] --> Active : Partner assigns
+    Active --> Revoked : Partner revokes / staff removed
+    Revoked --> Active : Partner reassigns

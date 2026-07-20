@@ -1,0 +1,54 @@
+@startuml
+title 3.2.1 Sign In (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|User|
+start
+:Open /login (or redirected from a protected page);
+repeat :Choose sign-in method;
+  if (Method?) then (Google)
+    |Google Identity|
+    :Authenticate with Google account (OAuth2);
+    |System|
+    :POST /api/auth/google (verify credential);
+    if (Google auth ok?) then (Yes)
+      :Return JWT + profile;
+      :Toast "Dang nhap thanh cong.";
+      :Redirect by role\n(Admin->/admin, Staff->desk, Partner->/partner, Customer->home) - BR-07;
+    else (No)
+      |User|
+      :Show error toast;
+    endif
+  else (Email / password)
+    |User|
+    :Enter email + password;
+    |System|
+    :Validate format\n(email valid, password >= 8, letter + digit) - BR-01, BR-02;
+    if (Format valid?) then (No)
+      |User|
+      :Show inline field errors;
+    else (Yes)
+      |System|
+      :POST /api/auth/login;
+      if (Login result?) then (Success)
+        :Return JWT + profile;
+        :Toast "Dang nhap thanh cong.";
+        :Redirect by role\n(Admin/Staff/Partner/Customer) - BR-07;
+      elseif (Email not verified) then (Unverified)
+        |User|
+        :Show "Email chua duoc xac minh." + verify link;
+      else (Wrong credentials)
+        |User|
+        :Show error toast;
+      endif
+    endif
+  endif
+repeat while (Signed in?) is (No) not (Yes)
+
+|System|
+stop
+@enduml

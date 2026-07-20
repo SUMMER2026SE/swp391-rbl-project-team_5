@@ -1,0 +1,22 @@
+@startuml
+title PartnerProfile Lifecycle - 3.6 (PartnerStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> PENDING : Customer submits KYC\n(POST /api/partners/register)
+PENDING --> APPROVED : Admin approves\n(grant PARTNER role)
+PENDING --> REJECTED : Admin rejects (+ reason)
+REJECTED --> PENDING : Partner resubmits KYC
+APPROVED --> SUSPENDED : Admin suspends
+SUSPENDED --> APPROVED : Admin restores
+
+APPROVED : Partner workspace unlocked
+SUSPENDED : Operational sanction\n(admin-only to lift)
+@enduml

@@ -1,0 +1,32 @@
+@startuml
+title 3.9.6 Booking Management (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin/bookings;
+|System|
+:Load bookings with filters\nGET /api/admin/bookings;
+if (Load ok?) then (No)
+  |Admin|
+  :Show "Khong tai duoc danh sach dat ve.";
+else (Yes)
+  |System|
+  :Render platform-wide booking list;
+  |Admin|
+  :Filter by status / period;
+  if (Inspect a booking?) then (Yes)
+    |System|
+    :Show full booking + payment detail;
+  else (No)
+    |Admin|
+    :Monitor the list;
+  endif
+endif
+|System|
+stop
+@enduml

@@ -1,0 +1,41 @@
+@startuml
+title 3.2.2 Register Account (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Guest|
+start
+:Open /register;
+if (Sign up with Google?) then (Yes)
+  |Google Identity|
+  :Authenticate (auto-verified account);
+  |System|
+  :Create/sign in user via POST /api/auth/google;
+else (Email form)
+  |Guest|
+  repeat :Fill registration form;
+    :Full name (2-50 letters), email, phone (VN),\npassword (>= 8, letter + digit) + confirm,\ntick terms;
+    :Click "Create account";
+    |System|
+    :Validate fields\n(BR-01..05, BR-07);
+    if (Valid & email available?) then (No)
+      |Guest|
+      :Show error\n(HTTP 409 duplicate email / HTTP 400 field);
+    else (Yes)
+      |System|
+      :Hash password (bcrypt) + create User + UserProfile (tx);
+      :Issue EmailVerificationToken (30 min);
+      |Notification Service|
+      :Send verification email;
+      |System|
+      :Redirect to /verify-email;
+    endif
+  repeat while (Retry after error?) is (Yes) not (No)
+endif
+
+|System|
+stop
+@enduml

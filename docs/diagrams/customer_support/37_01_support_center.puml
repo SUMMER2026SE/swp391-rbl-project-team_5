@@ -1,0 +1,29 @@
+@startuml
+title 3.7.1 Support Center (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Customer|
+start
+:Sign in and open /support;
+repeat :Fill support request;
+  :Enter subject (required),\nrelated booking (optional),\ndescription (>= 10 chars);
+  :Click Submit;
+  |System|
+  :Validate subject + description;
+  if (Input valid?) then (No)
+    |Customer|
+    :Warning toast\n(missing subject / too-short description);
+  else (Yes)
+    |System|
+    :POST /api/support/tickets;
+    :Toast "Da gui yeu cau ho tro thanh cong!";
+  endif
+repeat while (Retry after error?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

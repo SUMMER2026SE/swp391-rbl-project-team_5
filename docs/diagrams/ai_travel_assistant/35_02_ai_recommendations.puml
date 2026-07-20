@@ -1,0 +1,40 @@
+@startuml
+title 3.5.2 AI Attraction Recommendations (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Guest / Customer|
+start
+:Open AI recommendation section (home page);
+repeat :Enter preferences;
+  :Budget (valid amount), visit date (required),\nparty size (>= 1);
+  :Click Recommend;
+  |System|
+  :Validate preferences;
+  if (Input valid?) then (No)
+    |Guest / Customer|
+    :Warning toast (invalid input);
+  else (Yes)
+    |System|
+    :POST /api/ai/recommend\n(optional auth, rate-limited);
+    |AI Service (Gemini)|
+    :Rank suitable attractions\n+ attach availability;
+    |System|
+    if (Load ok?) then (No)
+      |Guest / Customer|
+      :Toast "Khong the tai goi y.\nVui long thu lai sau.";
+    else (Yes)
+      |System|
+      :Render suggestion cards\n(price + availability);
+      |Guest / Customer|
+      :Jump straight into booking (optional);
+    endif
+  endif
+repeat while (Refine preferences?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

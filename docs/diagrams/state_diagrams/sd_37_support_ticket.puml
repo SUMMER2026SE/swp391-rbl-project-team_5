@@ -1,0 +1,23 @@
+@startuml
+title Support Ticket Lifecycle - 3.7 (SupportStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> OPEN : Customer creates support ticket
+OPEN --> IN_PROGRESS : Staff claims /\nfirst staff reply
+IN_PROGRESS --> RESOLVED : Staff marks resolved
+OPEN --> RESOLVED : Staff resolves directly
+RESOLVED --> [*]
+
+note right of IN_PROGRESS
+  Messages (customer & staff)
+  do not change the status
+end note
+@enduml

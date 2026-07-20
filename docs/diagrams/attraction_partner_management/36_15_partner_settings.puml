@@ -1,0 +1,28 @@
+@startuml
+title 3.6.15 Partner Settings (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/settings;
+|System|
+:Load profile\nGET /api/partners/me;
+|Partner|
+:Update business profile + payout settings\n(business details, bank info, description, website);
+:Click Save;
+|System|
+:Save settings\nPUT /api/partners/settings;
+if (Save ok?) then (No)
+  |Partner|
+  :Show error toast;
+else (Yes)
+  |System|
+  :Toast "Da luu cai dat thanh cong!";
+endif
+|System|
+stop
+@enduml

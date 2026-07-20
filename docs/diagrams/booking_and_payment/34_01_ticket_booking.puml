@@ -1,0 +1,42 @@
+@startuml
+title 3.4.1 Ticket Booking (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+skinparam noteBackgroundColor #EEF6FF
+
+|Customer|
+start
+:On attraction detail, click "Dat ve"\n(booking modal opens);
+repeat :Choose booking options;
+  :Pick visit date (today or later);
+  |System|
+  :Load available slots for the date\n(availability API);
+  |Customer|
+  :Pick time slot + set quantity (1..remaining);
+  note right: Sold-out slot is disabled ("Het ve")
+  :Click "Tiep tuc thanh toan";
+  |System|
+  if (Signed in?) then (No)
+    |Customer|
+    :Redirect to /login\n(booking params preserved);
+    :Sign in;
+    |System|
+  else (Yes)
+  endif
+  :Validate date / slot / quantity + stock\n(BR-14, BR-15, BR-16, BR-17);
+  if (Slot available & stock ok?) then (No)
+    |Customer|
+    :Show inline error\n(HTTP 409: sold out / expired hold);
+  else (Yes)
+    |System|
+    :POST /api/bookings\nReservation = HELD (expiresAt = now + 10 min);
+    :Navigate to /checkout/:reservationId;
+  endif
+repeat while (Retry after error?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

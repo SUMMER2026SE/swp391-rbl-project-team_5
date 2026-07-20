@@ -14,11 +14,11 @@ const SEED_SCRIPT = path.join(__dirname, 'seed_defense_demo.js');
 const { scenarioBookingId, scenarioRefundRequestId } = require('./seed_defense_demo');
 
 const ACCOUNTS = {
-  customer: 'demo.customer@vietticket.local',
-  partner: 'demo.partner@vietticket.local',
-  gateStaff: 'demo.gate@vietticket.local',
-  platformStaff: 'demo.support@vietticket.local',
-  admin: 'demo.admin@vietticket.local',
+  customer: 'minh.anh.nguyen@vietticket.local',
+  partner: 'hoang.nam.tran@vietticket.local',
+  gateStaff: 'quoc.bao.pham@vietticket.local',
+  platformStaff: 'thu.ha.le@vietticket.local',
+  admin: 'ngoc.lan.vu@vietticket.local',
 };
 
 function resetDemoData() {

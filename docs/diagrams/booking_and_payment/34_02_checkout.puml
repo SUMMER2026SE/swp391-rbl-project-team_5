@@ -1,0 +1,54 @@
+@startuml
+title 3.4.2 Checkout (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+skinparam noteBackgroundColor #EEF6FF
+
+|Customer|
+start
+:Land on /checkout/:reservationId;
+|System|
+:Load held reservation + start 10-min countdown;
+|Customer|
+if (Hold still valid?) then (Expired)
+  |System|
+  :Reservation expires + release tickets;
+  |Customer|
+  :Show "hold expired" inline message;
+else (Valid)
+  |Customer|
+  :Fill full name + valid email (required),\nphone (optional);
+  if (Apply voucher?) then (Yes)
+    :Enter voucher code + Apply;
+    |System|
+    :POST /api/bookings/apply-voucher\n(validate active, in-date, min-spend, usage) - BR-18;
+    if (Voucher valid?) then (No)
+      |Customer|
+      :Show inline voucher error;
+    else (Yes)
+      |System|
+      :Update discount + total;
+    endif
+  else (No)
+  endif
+  |Customer|
+  :Choose payment method (VNPay) + optional note;
+  :Click Pay;
+  |System|
+  :Validate contact details (BR-14, BR-21);
+  if (Contact valid?) then (No)
+    |Customer|
+    :Show inline validation error;
+  else (Yes)
+    |System|
+    :Create booking + POST /api/payments/create-vnpay-url;
+    :Redirect to VNPay gateway;
+  endif
+endif
+
+|System|
+stop
+@enduml

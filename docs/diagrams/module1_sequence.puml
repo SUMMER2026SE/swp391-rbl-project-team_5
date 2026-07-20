@@ -1,0 +1,1350 @@
+@startuml
+title Sequence Diagram - Auth Middleware (protect)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "protect\n<<Auth Middleware>>" as Protect
+control "AuthCookie\n<<Utility>>" as AuthCookie
+control "JwtUtils\n<<External Library>>" as Jwt
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+== Authentication Middleware ==
+Browser -> Protect : (cookie token / Bearer header)
+activate Protect
+
+Protect -> Protect : token = cookies[AUTH_COOKIE_NAME] || readBearerToken(req)
+activate Protect
+Protect --> Protect : token
+deactivate Protect
+
+alt No token
+  Protect --> Browser : 401 Unauthorized
+else Token present
+  Protect -> Protect : continue processing
+end
+
+Protect -> Jwt : verify(token, JWT_SECRET)
+activate Jwt
+Jwt --> Protect : decoded
+deactivate Jwt
+
+alt Missing userId or sessionId
+  Protect --> Browser : 401 Unauthorized (phien khong hop le)
+else Payload valid
+  Protect -> Protect : continue processing
+end
+
+group Promise.all
+  Protect -> Prisma : user.findUnique({ where:{ id: userId }, include:{ profile:true } })
+  activate Prisma
+  Prisma -> DB : SELECT User (+ profile) by id
+  activate DB
+  DB --> Prisma : user
+  deactivate DB
+  Prisma --> Protect : user
+  deactivate Prisma
+
+  Protect -> Prisma : authSession.findUnique({ where:{ id: sessionId } })
+  activate Prisma
+  Prisma -> DB : SELECT AuthSession by id
+  activate DB
+  DB --> Prisma : session
+  deactivate DB
+  Prisma --> Protect : session
+  deactivate Prisma
+end
+
+alt User missing or status != ACTIVE
+  Protect --> Browser : 401 Unauthorized (tai khoan bi khoa)
+else User active
+  Protect -> Protect : continue processing
+end
+
+alt Session invalid / revoked / expired / tokenVersion mismatch
+  Protect --> Browser : 401 Unauthorized (phien bi thu hoi hoac het han)
+else Session valid
+  Protect -> Protect : req.user = user; req.authSession = session
+end
+
+opt Now - session.lastSeenAt > 5 minutes
+  Protect -> Prisma : authSession.updateMany({ where:{ id, revokedAt:null }, data:{ lastSeenAt } })
+  activate Prisma
+  Prisma -> DB : UPDATE AuthSession SET lastSeenAt
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Protect : result
+  deactivate Prisma
+end
+
+Protect -> Protect : next()
+deactivate Protect
+@enduml
+
+@startuml
+title Sequence Diagram - Register Account
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "authRateLimit\n<<Rate Limit Middleware>>" as RateLimit
+control "AuthController\n<<Controller>>" as Auth
+control "Validators\n<<Utility>>" as Validators
+control "Bcrypt\n<<External Library>>" as Bcrypt
+control "TokenUtils\n<<Utility>>" as TokenUtils
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/register\nbody: fullName, email, password, phoneNumber
+activate AuthRoutes
+AuthRoutes -> RateLimit : authRateLimit(req)
+activate RateLimit
+alt Rate limit exceeded
+  RateLimit --> Browser : 429 Too Many Requests
+else Within limit
+  RateLimit --> AuthRoutes : next()
+end
+deactivate RateLimit
+AuthRoutes -> Auth : register(req, res, next)
+activate Auth
+
+== Input Validation ==
+Auth -> Auth : normalize fullName / email / password / phoneNumber
+activate Auth
+Auth --> Auth : normalized inputs
+deactivate Auth
+
+Auth -> Validators : validateFullName(fullName)
+activate Validators
+Validators --> Auth : error message | ''
+deactivate Validators
+alt Invalid fullName
+  Auth --> Browser : 400 Bad Request
+else fullName valid
+  Auth -> Auth : continue processing
+end
+
+alt Missing email or password
+  Auth --> Browser : 400 Bad Request
+else Present
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : isValidEmail(email)
+activate Validators
+Validators --> Auth : boolean
+deactivate Validators
+alt Invalid email
+  Auth --> Browser : 400 Bad Request
+else Valid email
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : isValidPhoneNumber(phoneNumber)
+activate Validators
+Validators --> Auth : boolean
+deactivate Validators
+alt Invalid phone number
+  Auth --> Browser : 400 Bad Request
+else Valid phone
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : validatePassword(password)
+activate Validators
+Validators --> Auth : error message | ''
+deactivate Validators
+alt Weak password
+  Auth --> Browser : 400 Bad Request
+else Password valid
+  Auth -> Auth : continue processing
+end
+
+== Business Logic ==
+Auth -> Prisma : user.findUnique({ where:{ email } })
+activate Prisma
+Prisma -> DB : SELECT User by email
+activate DB
+DB --> Prisma : existingUser | null
+deactivate DB
+Prisma --> Auth : existingUser
+deactivate Prisma
+alt Email already used
+  Auth --> Browser : 409 Conflict
+else Email available
+  Auth -> Auth : continue processing
+end
+
+Auth -> Bcrypt : hash(password, SALT_ROUNDS)
+activate Bcrypt
+Bcrypt --> Auth : passwordHash
+deactivate Bcrypt
+
+== Database Operation ==
+group Prisma transaction
+  Auth -> Prisma : tx.user.create({ data: {...user, profile:{create:{phoneNumber}} } })
+  activate Prisma
+  Prisma -> DB : INSERT User + UserProfile
+  activate DB
+  DB --> Prisma : createdUser
+  deactivate DB
+  Prisma --> Auth : createdUser
+  deactivate Prisma
+
+  Auth -> Prisma : tx.emailVerificationToken.deleteMany({ where:{ userId } })
+  activate Prisma
+  Prisma -> DB : DELETE old EmailVerificationToken
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+
+  Auth -> TokenUtils : createRandomToken()
+  activate TokenUtils
+  TokenUtils --> Auth : verificationToken
+  deactivate TokenUtils
+  Auth -> TokenUtils : hashToken(verificationToken)
+  activate TokenUtils
+  TokenUtils --> Auth : tokenHash
+  deactivate TokenUtils
+  Auth -> TokenUtils : addMinutes(TOKEN_EXPIRY_MINUTES)
+  activate TokenUtils
+  TokenUtils --> Auth : expiresAt
+  deactivate TokenUtils
+
+  Auth -> Prisma : tx.emailVerificationToken.create({ data:{ userId, token, expiresAt } })
+  activate Prisma
+  Prisma -> DB : INSERT EmailVerificationToken
+  activate DB
+  DB --> Prisma : token row
+  deactivate DB
+  Prisma --> Auth : verificationToken row
+  deactivate Prisma
+end
+
+== External Service ==
+Auth -> Mailer : sendVerificationEmail({ to: email, token })
+activate Mailer
+Mailer --> Auth : send result
+deactivate Mailer
+
+== Response ==
+Auth -> Auth : sanitizeUser(user)
+Auth --> Browser : 201 Created { message, user }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Verify Email
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "authRateLimit\n<<Rate Limit Middleware>>" as RateLimit
+control "AuthController\n<<Controller>>" as Auth
+control "TokenUtils\n<<Utility>>" as TokenUtils
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/verify-email\nbody: token
+activate AuthRoutes
+AuthRoutes -> RateLimit : authRateLimit(req)
+activate RateLimit
+RateLimit --> AuthRoutes : next()
+deactivate RateLimit
+AuthRoutes -> Auth : verifyEmail(req, res, next)
+activate Auth
+
+alt Missing token
+  Auth --> Browser : 400 Bad Request
+else Token present
+  Auth -> Auth : continue processing
+end
+
+Auth -> TokenUtils : hashToken(token)
+activate TokenUtils
+TokenUtils --> Auth : tokenHash
+deactivate TokenUtils
+
+Auth -> Prisma : emailVerificationToken.findUnique({ where:{ token: tokenHash }, include:{ user:true } })
+activate Prisma
+Prisma -> DB : SELECT EmailVerificationToken (+ user)
+activate DB
+DB --> Prisma : verificationToken | null
+deactivate DB
+Prisma --> Auth : verificationToken
+deactivate Prisma
+
+alt Token not found
+  Auth --> Browser : 400 Bad Request (khong hop le hoac da dung)
+else Token found
+  Auth -> Auth : continue processing
+end
+
+Auth -> TokenUtils : isExpired(verificationToken.expiresAt)
+activate TokenUtils
+TokenUtils --> Auth : boolean
+deactivate TokenUtils
+alt Token expired
+  Auth -> Prisma : emailVerificationToken.delete({ where:{ id } })
+  activate Prisma
+  Prisma -> DB : DELETE EmailVerificationToken
+  activate DB
+  DB --> Prisma : result
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+  Auth --> Browser : 400 Bad Request (da het han)
+else Token valid
+  Auth -> Auth : continue processing
+end
+
+group Prisma transaction
+  Auth -> Prisma : tx.user.update({ where:{ id: userId }, data:{ isEmailVerified:true }, include:{ profile:true } })
+  activate Prisma
+  Prisma -> DB : UPDATE User SET isEmailVerified = true
+  activate DB
+  DB --> Prisma : updatedUser
+  deactivate DB
+  Prisma --> Auth : updatedUser
+  deactivate Prisma
+
+  Auth -> Prisma : tx.emailVerificationToken.deleteMany({ where:{ userId } })
+  activate Prisma
+  Prisma -> DB : DELETE EmailVerificationToken by userId
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+end
+
+Auth -> Auth : sanitizeUser(updatedUser)
+Auth --> Browser : 200 OK { message, user }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Resend Verification
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "authRateLimit\n<<Rate Limit Middleware>>" as RateLimit
+control "AuthController\n<<Controller>>" as Auth
+control "Validators\n<<Utility>>" as Validators
+control "TokenUtils\n<<Utility>>" as TokenUtils
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/resend-verification\nbody: email
+activate AuthRoutes
+AuthRoutes -> RateLimit : authRateLimit(req)
+activate RateLimit
+RateLimit --> AuthRoutes : next()
+deactivate RateLimit
+AuthRoutes -> Auth : resendVerification(req, res, next)
+activate Auth
+
+alt Missing email
+  Auth --> Browser : 400 Bad Request
+else Email present
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : isValidEmail(email)
+activate Validators
+Validators --> Auth : boolean
+deactivate Validators
+alt Invalid email
+  Auth --> Browser : 400 Bad Request
+else Valid email
+  Auth -> Auth : continue processing
+end
+
+Auth -> Prisma : user.findUnique({ where:{ email } })
+activate Prisma
+Prisma -> DB : SELECT User by email
+activate DB
+DB --> Prisma : user | null
+deactivate DB
+Prisma --> Auth : user
+deactivate Prisma
+
+alt User not found
+  Auth --> Browser : 200 OK (thong bao an toan)
+else User exists
+  Auth -> Auth : continue processing
+end
+
+alt Email already verified
+  Auth --> Browser : 400 Bad Request (da xac minh)
+else Not verified yet
+  Auth -> Auth : continue processing
+end
+
+group Prisma transaction
+  Auth -> Prisma : tx.emailVerificationToken.deleteMany({ where:{ userId } })
+  activate Prisma
+  Prisma -> DB : DELETE old EmailVerificationToken
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+
+  Auth -> TokenUtils : createRandomToken() / hashToken() / addMinutes()
+  activate TokenUtils
+  TokenUtils --> Auth : verificationToken, tokenHash, expiresAt
+  deactivate TokenUtils
+
+  Auth -> Prisma : tx.emailVerificationToken.create({ data:{ userId, token, expiresAt } })
+  activate Prisma
+  Prisma -> DB : INSERT EmailVerificationToken
+  activate DB
+  DB --> Prisma : token row
+  deactivate DB
+  Prisma --> Auth : verificationToken
+  deactivate Prisma
+end
+
+Auth -> Mailer : sendVerificationEmail({ to: email, token })
+activate Mailer
+Mailer --> Auth : send result
+deactivate Mailer
+
+Auth --> Browser : 200 OK { message }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Login (email + password)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "authRateLimit\n<<Rate Limit Middleware>>" as RateLimit
+control "AuthController\n<<Controller>>" as Auth
+control "Validators\n<<Utility>>" as Validators
+control "Bcrypt\n<<External Library>>" as Bcrypt
+control "AuthSessionUtil\n<<Utility>>" as SessionUtil
+control "GenerateToken\n<<Utility>>" as GenToken
+control "JwtUtils\n<<External Library>>" as Jwt
+control "TokenUtils\n<<Utility>>" as TokenUtils
+control "AuthCookie\n<<Utility>>" as AuthCookie
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/login\nbody: email, password
+activate AuthRoutes
+AuthRoutes -> RateLimit : authRateLimit(req)
+activate RateLimit
+RateLimit --> AuthRoutes : next()
+deactivate RateLimit
+AuthRoutes -> Auth : login(req, res, next)
+activate Auth
+
+== Input Validation ==
+alt Missing email or password
+  Auth --> Browser : 400 Bad Request
+else Present
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : isValidEmail(email)
+activate Validators
+Validators --> Auth : boolean
+deactivate Validators
+alt Invalid email
+  Auth --> Browser : 400 Bad Request
+else Valid email
+  Auth -> Auth : continue processing
+end
+
+== Business Logic ==
+Auth -> Prisma : user.findUnique({ where:{ email }, include:{ profile:true } })
+activate Prisma
+Prisma -> DB : SELECT User (+ profile) by email
+activate DB
+DB --> Prisma : user | null
+deactivate DB
+Prisma --> Auth : user
+deactivate Prisma
+
+alt User missing or no passwordHash
+  Auth --> Browser : 401 Unauthorized
+else User has password
+  Auth -> Auth : continue processing
+end
+
+alt status != ACTIVE
+  Auth --> Browser : 403 Forbidden (tai khoan bi khoa)
+else Active
+  Auth -> Auth : continue processing
+end
+
+Auth -> Bcrypt : compare(password, user.passwordHash)
+activate Bcrypt
+Bcrypt --> Auth : passwordMatches
+deactivate Bcrypt
+alt Password does not match
+  Auth --> Browser : 401 Unauthorized
+else Password matches
+  Auth -> Auth : continue processing
+end
+
+alt Email not verified
+  Auth --> Browser : 403 Forbidden { message, code: EMAIL_NOT_VERIFIED }
+else Email verified
+  Auth -> Auth : continue processing
+end
+
+== Session Creation ==
+Auth -> SessionUtil : createAuthSession(req, user)
+activate SessionUtil
+SessionUtil -> GenToken : generateToken(user, sessionId)
+activate GenToken
+GenToken -> Jwt : sign({ userId, sessionId, tokenVersion }, JWT_SECRET)
+activate Jwt
+Jwt --> GenToken : token
+deactivate Jwt
+GenToken --> SessionUtil : token
+deactivate GenToken
+SessionUtil -> Jwt : decode(token)
+activate Jwt
+Jwt --> SessionUtil : decoded (exp)
+deactivate Jwt
+SessionUtil -> TokenUtils : hashToken(token)
+activate TokenUtils
+TokenUtils --> SessionUtil : tokenHash
+deactivate TokenUtils
+SessionUtil -> Prisma : authSession.create({ data:{ id, userId, tokenHash, userAgent, ipAddress, expiresAt, lastSeenAt } })
+activate Prisma
+Prisma -> DB : INSERT AuthSession
+activate DB
+DB --> Prisma : session
+deactivate DB
+Prisma --> SessionUtil : session
+deactivate Prisma
+SessionUtil --> Auth : { session, token }
+deactivate SessionUtil
+
+Auth -> AuthCookie : setAuthCookie(res, token)
+activate AuthCookie
+AuthCookie --> Auth : Set-Cookie(token)
+deactivate AuthCookie
+
+== Response ==
+Auth -> Auth : sanitizeUser(user)
+Auth --> Browser : 200 OK { message, user }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Google Login
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "authRateLimit\n<<Rate Limit Middleware>>" as RateLimit
+control "AuthController\n<<Controller>>" as Auth
+control "Validators\n<<Utility>>" as Validators
+control "AuthSessionUtil\n<<Utility>>" as SessionUtil
+control "AuthCookie\n<<Utility>>" as AuthCookie
+participant "Google OAuth\n<<External Provider>>" as GoogleOAuth
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/google\nbody: credential
+activate AuthRoutes
+AuthRoutes -> RateLimit : authRateLimit(req)
+activate RateLimit
+RateLimit --> AuthRoutes : next()
+deactivate RateLimit
+AuthRoutes -> Auth : googleLogin(req, res, next)
+activate Auth
+
+alt Missing credential
+  Auth --> Browser : 400 Bad Request
+else Credential present
+  Auth -> Auth : continue processing
+end
+
+Auth -> Auth : verifyGoogleCredential(credential)
+activate Auth
+alt GOOGLE_CLIENT_ID not configured
+  Auth --> Browser : 500 Internal Server Error
+else Configured
+  Auth -> GoogleOAuth : verifyIdToken({ idToken, audience })
+  activate GoogleOAuth
+  GoogleOAuth --> Auth : ticket payload (email, name, picture, sub)
+  deactivate GoogleOAuth
+end
+Auth --> Auth : { email, fullName, avatarUrl, providerAccountId }
+deactivate Auth
+
+Auth -> Validators : isValidEmail(email)
+activate Validators
+Validators --> Auth : boolean
+deactivate Validators
+alt Invalid Google email
+  Auth --> Browser : 400 Bad Request
+else Valid email
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : isValidAvatarUrl(avatarUrl)
+activate Validators
+Validators --> Auth : boolean
+deactivate Validators
+alt Invalid avatar URL
+  Auth --> Browser : 400 Bad Request
+else Valid avatar
+  Auth -> Auth : continue processing
+end
+
+Auth -> Prisma : user.findUnique({ where:{ email }, include:{ profile:true } })
+activate Prisma
+Prisma -> DB : SELECT User (+ profile) by email
+activate DB
+DB --> Prisma : user | null
+deactivate DB
+Prisma --> Auth : user
+deactivate Prisma
+
+alt User not found
+  Auth -> Prisma : user.create({ data:{ email, fullName, provider:GOOGLE, isEmailVerified:true, profile:{create}, oauthAccounts:{create} } })
+  activate Prisma
+  Prisma -> DB : INSERT User + UserProfile + OAuthAccount
+  activate DB
+  DB --> Prisma : user
+  deactivate DB
+  Prisma --> Auth : user
+  deactivate Prisma
+else Existing user
+  alt status != ACTIVE
+    Auth --> Browser : 403 Forbidden (tai khoan bi khoa)
+  else Active
+    Auth -> Prisma : user.update({ where:{ id }, data:{ isEmailVerified:true, provider, profile:{upsert} }, include:{ profile:true } })
+    activate Prisma
+    Prisma -> DB : UPDATE User + upsert UserProfile
+    activate DB
+    DB --> Prisma : user
+    deactivate DB
+    Prisma --> Auth : user
+    deactivate Prisma
+
+    Auth -> Prisma : oAuthAccount.upsert({ where:{ provider_providerAccountId }, create:{...} })
+    activate Prisma
+    Prisma -> DB : UPSERT OAuthAccount
+    activate DB
+    DB --> Prisma : oauthAccount
+    deactivate DB
+    Prisma --> Auth : result
+    deactivate Prisma
+  end
+end
+
+ref over Auth, DB : createAuthSession(req, user) + setAuthCookie(res, token)\n(see Login diagram - Session Creation)
+
+Auth -> Auth : sanitizeUser(user)
+Auth --> Browser : 200 OK { message, user }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Forgot Password
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "authRateLimit\n<<Rate Limit Middleware>>" as RateLimit
+control "AuthController\n<<Controller>>" as Auth
+control "Validators\n<<Utility>>" as Validators
+control "TokenUtils\n<<Utility>>" as TokenUtils
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/forgot-password\nbody: email
+activate AuthRoutes
+AuthRoutes -> RateLimit : authRateLimit(req)
+activate RateLimit
+RateLimit --> AuthRoutes : next()
+deactivate RateLimit
+AuthRoutes -> Auth : forgotPassword(req, res, next)
+activate Auth
+
+alt Missing email
+  Auth --> Browser : 400 Bad Request
+else Email present
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : isValidEmail(email)
+activate Validators
+Validators --> Auth : boolean
+deactivate Validators
+alt Invalid email
+  Auth --> Browser : 400 Bad Request
+else Valid email
+  Auth -> Auth : continue processing
+end
+
+Auth -> Prisma : user.findUnique({ where:{ email } })
+activate Prisma
+Prisma -> DB : SELECT User by email
+activate DB
+DB --> Prisma : user | null
+deactivate DB
+Prisma --> Auth : user
+deactivate Prisma
+
+opt user exists AND provider == LOCAL
+  Auth -> TokenUtils : createRandomToken()
+  activate TokenUtils
+  TokenUtils --> Auth : resetToken
+  deactivate TokenUtils
+  group Prisma transaction
+    Auth -> Prisma : tx.passwordResetToken.deleteMany({ where:{ userId } })
+    activate Prisma
+    Prisma -> DB : DELETE old PasswordResetToken
+    activate DB
+    DB --> Prisma : count
+    deactivate DB
+    Prisma --> Auth : result
+    deactivate Prisma
+    Auth -> Prisma : tx.passwordResetToken.create({ data:{ userId, token: hashToken, expiresAt } })
+    activate Prisma
+    Prisma -> DB : INSERT PasswordResetToken
+    activate DB
+    DB --> Prisma : token row
+    deactivate DB
+    Prisma --> Auth : result
+    deactivate Prisma
+  end
+  Auth -> Mailer : sendPasswordResetEmail({ to: email, token: resetToken })
+  activate Mailer
+  Mailer --> Auth : send result
+  deactivate Mailer
+end
+
+note right of Auth
+  Always returns the same safe message
+  regardless of whether email exists.
+end note
+Auth --> Browser : 200 OK { safe message }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Reset Password
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "authRateLimit\n<<Rate Limit Middleware>>" as RateLimit
+control "AuthController\n<<Controller>>" as Auth
+control "Validators\n<<Utility>>" as Validators
+control "TokenUtils\n<<Utility>>" as TokenUtils
+control "Bcrypt\n<<External Library>>" as Bcrypt
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/reset-password\nbody: token, newPassword
+activate AuthRoutes
+AuthRoutes -> RateLimit : authRateLimit(req)
+activate RateLimit
+RateLimit --> AuthRoutes : next()
+deactivate RateLimit
+AuthRoutes -> Auth : resetPassword(req, res, next)
+activate Auth
+
+alt Missing token or newPassword
+  Auth --> Browser : 400 Bad Request
+else Present
+  Auth -> Auth : continue processing
+end
+
+Auth -> Validators : validatePassword(newPassword)
+activate Validators
+Validators --> Auth : error message | ''
+deactivate Validators
+alt Weak password
+  Auth --> Browser : 400 Bad Request
+else Password valid
+  Auth -> Auth : continue processing
+end
+
+Auth -> TokenUtils : hashToken(token)
+activate TokenUtils
+TokenUtils --> Auth : tokenHash
+deactivate TokenUtils
+Auth -> Prisma : passwordResetToken.findUnique({ where:{ token: tokenHash } })
+activate Prisma
+Prisma -> DB : SELECT PasswordResetToken
+activate DB
+DB --> Prisma : resetToken | null
+deactivate DB
+Prisma --> Auth : resetToken
+deactivate Prisma
+
+alt Reset token not found
+  Auth --> Browser : 400 Bad Request
+else Token found
+  Auth -> Auth : continue processing
+end
+
+Auth -> TokenUtils : isExpired(resetToken.expiresAt)
+activate TokenUtils
+TokenUtils --> Auth : boolean
+deactivate TokenUtils
+alt Token expired
+  Auth -> Prisma : passwordResetToken.delete({ where:{ id } })
+  activate Prisma
+  Prisma -> DB : DELETE PasswordResetToken
+  activate DB
+  DB --> Prisma : result
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+  Auth --> Browser : 400 Bad Request (da het han)
+else Token valid
+  Auth -> Auth : continue processing
+end
+
+Auth -> Bcrypt : hash(newPassword, SALT_ROUNDS)
+activate Bcrypt
+Bcrypt --> Auth : passwordHash
+deactivate Bcrypt
+
+group Prisma transaction
+  Auth -> Prisma : tx.user.update({ where:{ id: userId }, data:{ passwordHash, tokenVersion:{ increment:1 } } })
+  activate Prisma
+  Prisma -> DB : UPDATE User (passwordHash, tokenVersion++)
+  activate DB
+  DB --> Prisma : result
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+
+  Auth -> Prisma : tx.passwordResetToken.deleteMany({ where:{ userId } })
+  activate Prisma
+  Prisma -> DB : DELETE PasswordResetToken by userId
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+
+  Auth -> Prisma : tx.authSession.updateMany({ where:{ userId, revokedAt:null }, data:{ revokedAt } })
+  activate Prisma
+  Prisma -> DB : UPDATE AuthSession SET revokedAt (revoke all)
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+end
+
+Auth --> Browser : 200 OK { message }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Get Me (GET /api/auth/me)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "protect\n<<Auth Middleware>>" as Protect
+control "AuthController\n<<Controller>>" as Auth
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : GET /api/auth/me\ncookie: token / Bearer header
+activate AuthRoutes
+
+== Authentication Middleware ==
+AuthRoutes -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Auth Middleware diagram)
+Protect --> AuthRoutes : next() (req.user set)
+deactivate Protect
+
+AuthRoutes -> Auth : getMe(req, res, next)
+activate Auth
+Auth -> Prisma : user.findUnique({ where:{ id: req.user.id }, include:{ profile:true } })
+activate Prisma
+Prisma -> DB : SELECT User (+ profile) by id
+activate DB
+DB --> Prisma : user
+deactivate DB
+Prisma --> Auth : user
+deactivate Prisma
+
+Auth -> Auth : sanitizeUser(user)
+Auth --> Browser : 200 OK { user }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Logout (POST /api/auth/logout)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AuthRoutes\n<<Express Router>>" as AuthRoutes
+control "protect\n<<Auth Middleware>>" as Protect
+control "AuthController\n<<Controller>>" as Auth
+control "AuthCookie\n<<Utility>>" as AuthCookie
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> AuthRoutes : POST /api/auth/logout\ncookie: token
+activate AuthRoutes
+AuthRoutes -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Auth Middleware diagram)
+Protect --> AuthRoutes : next() (req.authSession set)
+deactivate Protect
+
+AuthRoutes -> Auth : logout(req, res, next)
+activate Auth
+opt req.authSession?.id exists
+  Auth -> Prisma : authSession.updateMany({ where:{ id, revokedAt:null }, data:{ revokedAt } })
+  activate Prisma
+  Prisma -> DB : UPDATE AuthSession SET revokedAt
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Auth : result
+  deactivate Prisma
+end
+
+Auth -> AuthCookie : clearAuthCookie(res)
+activate AuthCookie
+AuthCookie --> Auth : clear Set-Cookie
+deactivate AuthCookie
+
+Auth --> Browser : 200 OK { message }
+deactivate Auth
+deactivate AuthRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Get Profile (GET /api/users/profile)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "UserRoutes\n<<Express Router>>" as UserRoutes
+control "protect\n<<Auth Middleware>>" as Protect
+control "UserController\n<<Controller>>" as User
+control "AuthController\n<<Controller>>" as Auth
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> UserRoutes : GET /api/users/profile\ncookie: token
+activate UserRoutes
+UserRoutes -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Auth Middleware diagram)
+Protect --> UserRoutes : next() (req.user set)
+deactivate Protect
+
+UserRoutes -> User : getProfile(req, res, next)
+activate User
+User -> Prisma : user.findUnique({ where:{ id: req.user.id }, include:{ profile:true } })
+activate Prisma
+Prisma -> DB : SELECT User (+ profile) by id
+activate DB
+DB --> Prisma : user
+deactivate DB
+Prisma --> User : user
+deactivate Prisma
+
+User -> Auth : sanitizeUser(user)
+activate Auth
+Auth --> User : sanitized user
+deactivate Auth
+User --> Browser : 200 OK { user }
+deactivate User
+deactivate UserRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Update Profile (PUT /api/users/profile)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "UserRoutes\n<<Express Router>>" as UserRoutes
+control "protect\n<<Auth Middleware>>" as Protect
+control "UserController\n<<Controller>>" as User
+control "Validators\n<<Utility>>" as Validators
+control "AuthController\n<<Controller>>" as Auth
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> UserRoutes : PUT /api/users/profile\nbody: fullName?, phoneNumber?, avatarUrl?, gender?, address?, dateOfBirth?
+activate UserRoutes
+UserRoutes -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Auth Middleware diagram)
+Protect --> UserRoutes : next() (req.user set)
+deactivate Protect
+
+UserRoutes -> User : updateProfile(req, res, next)
+activate User
+
+opt fullName provided
+  User -> Validators : validateFullName(fullName)
+  activate Validators
+  Validators --> User : error | ''
+  deactivate Validators
+  alt Invalid fullName
+    User --> Browser : 400 Bad Request
+  else Valid
+    User -> User : userUpdate.fullName = fullName
+  end
+end
+
+opt phoneNumber provided
+  User -> Validators : isValidPhoneNumber(phoneNumber)
+  activate Validators
+  Validators --> User : boolean
+  deactivate Validators
+  alt Invalid phone
+    User --> Browser : 400 Bad Request
+  else Valid
+    User -> User : profileUpdate.phoneNumber = value
+  end
+end
+
+opt avatarUrl provided
+  User -> Validators : isValidAvatarUrl(avatarUrl)
+  activate Validators
+  Validators --> User : boolean
+  deactivate Validators
+  alt Invalid avatar URL
+    User --> Browser : 400 Bad Request
+  else Valid
+    User -> User : profileUpdate.avatarUrl = value
+  end
+end
+
+opt gender provided
+  User -> Validators : isValidGender(gender)
+  activate Validators
+  Validators --> User : boolean
+  deactivate Validators
+  alt Invalid gender
+    User --> Browser : 400 Bad Request
+  else Valid
+    User -> User : profileUpdate.gender = value
+  end
+end
+
+opt dateOfBirth provided
+  User -> Validators : validateDateOfBirth(value)
+  activate Validators
+  Validators --> User : error | ''
+  deactivate Validators
+  alt Invalid date of birth
+    User --> Browser : 400 Bad Request (thrown error statusCode 400)
+  else Valid
+    User -> User : profileUpdate.dateOfBirth = new Date(value)
+  end
+end
+
+User -> Prisma : user.update({ where:{ id }, data:{ ...userUpdate, profile:{ upsert:{ create, update } } }, include:{ profile:true } })
+activate Prisma
+Prisma -> DB : UPDATE User + upsert UserProfile
+activate DB
+DB --> Prisma : updatedUser
+deactivate DB
+Prisma --> User : updatedUser
+deactivate Prisma
+
+User -> Auth : sanitizeUser(updatedUser)
+activate Auth
+Auth --> User : sanitized user
+deactivate Auth
+User --> Browser : 200 OK { message, user }
+deactivate User
+deactivate UserRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Upload Avatar (POST /api/users/upload-avatar)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "UserRoutes\n<<Express Router>>" as UserRoutes
+control "protect\n<<Auth Middleware>>" as Protect
+control "uploadAvatar.single\n<<Multer Middleware>>" as Multer
+control "validateUploadedFiles\n<<Upload Middleware>>" as UploadValidate
+control "UserController\n<<Controller>>" as User
+control "AuthController\n<<Controller>>" as Auth
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> UserRoutes : POST /api/users/upload-avatar\nmultipart: avatar
+activate UserRoutes
+UserRoutes -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Auth Middleware diagram)
+Protect --> UserRoutes : next() (req.user set)
+deactivate Protect
+
+UserRoutes -> Multer : uploadAvatar.single('avatar')
+activate Multer
+alt Invalid mimetype / size
+  Multer --> Browser : 400 Bad Request (chi ho tro JPEG/PNG)
+else File accepted
+  Multer --> UserRoutes : req.file set
+end
+deactivate Multer
+
+UserRoutes -> UploadValidate : validateUploadedFiles(req, res, next)
+activate UploadValidate
+alt File signature mismatch
+  UploadValidate -> UploadValidate : removeFiles(files)
+  UploadValidate --> Browser : 400 Bad Request (noi dung file khong dung dinh dang)
+else Signature valid
+  UploadValidate --> UserRoutes : next()
+end
+deactivate UploadValidate
+
+UserRoutes -> User : uploadAvatar(req, res, next)
+activate User
+alt No req.file
+  User --> Browser : 400 Bad Request
+else File present
+  User -> User : continue processing
+end
+
+User -> Prisma : user.findUnique({ where:{ id }, include:{ profile:true } })
+activate Prisma
+Prisma -> DB : SELECT User (+ profile) by id
+activate DB
+DB --> Prisma : existingUser
+deactivate DB
+Prisma --> User : existingUser
+deactivate Prisma
+
+opt old avatar stored under /uploads/
+  User -> User : fs.unlink(oldAvatarPath) (non-critical)
+end
+
+User -> User : build avatarUrl = baseUrl + /uploads/ + filename
+User -> Prisma : user.update({ where:{ id }, data:{ profile:{ upsert:{ create:{avatarUrl}, update:{avatarUrl} } } }, include:{ profile:true } })
+activate Prisma
+Prisma -> DB : UPDATE User + upsert UserProfile.avatarUrl
+activate DB
+DB --> Prisma : updatedUser
+deactivate DB
+Prisma --> User : updatedUser
+deactivate Prisma
+
+User -> Auth : sanitizeUser(updatedUser)
+activate Auth
+Auth --> User : sanitized user
+deactivate Auth
+User --> Browser : 200 OK { avatarUrl, message, user }
+deactivate User
+deactivate UserRoutes
+@enduml
+
+@startuml
+title Sequence Diagram - Change Password (PUT /api/users/change-password)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "UserRoutes\n<<Express Router>>" as UserRoutes
+control "protect\n<<Auth Middleware>>" as Protect
+control "UserController\n<<Controller>>" as User
+control "Validators\n<<Utility>>" as Validators
+control "Bcrypt\n<<External Library>>" as Bcrypt
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> UserRoutes : PUT /api/users/change-password\nbody: currentPassword, newPassword
+activate UserRoutes
+UserRoutes -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Auth Middleware diagram)
+Protect --> UserRoutes : next() (req.user set)
+deactivate Protect
+
+UserRoutes -> User : changePassword(req, res, next)
+activate User
+
+alt Missing currentPassword or newPassword
+  User --> Browser : 400 Bad Request
+else Present
+  User -> User : continue processing
+end
+
+User -> Validators : validatePassword(newPassword)
+activate Validators
+Validators --> User : error | ''
+deactivate Validators
+alt Weak new password
+  User --> Browser : 400 Bad Request
+else Valid
+  User -> User : continue processing
+end
+
+User -> Prisma : user.findUnique({ where:{ id: req.user.id } })
+activate Prisma
+Prisma -> DB : SELECT User by id
+activate DB
+DB --> Prisma : user
+deactivate DB
+Prisma --> User : user
+deactivate Prisma
+
+alt Not LOCAL provider or no passwordHash
+  User --> Browser : 400 Bad Request (tai khoan Google khong doi mat khau tai day)
+else LOCAL account
+  User -> User : continue processing
+end
+
+User -> Bcrypt : compare(currentPassword, user.passwordHash)
+activate Bcrypt
+Bcrypt --> User : passwordMatches
+deactivate Bcrypt
+alt Current password incorrect
+  User --> Browser : 400 Bad Request
+else Correct
+  User -> User : continue processing
+end
+
+User -> Bcrypt : compare(newPassword, user.passwordHash)
+activate Bcrypt
+Bcrypt --> User : isSamePassword
+deactivate Bcrypt
+alt New password equals current
+  User --> Browser : 400 Bad Request
+else Different
+  User -> User : continue processing
+end
+
+User -> Bcrypt : hash(newPassword, SALT_ROUNDS)
+activate Bcrypt
+Bcrypt --> User : passwordHash
+deactivate Bcrypt
+
+User -> Prisma : user.update({ where:{ id }, data:{ passwordHash } })
+activate Prisma
+Prisma -> DB : UPDATE User SET passwordHash
+activate DB
+DB --> Prisma : result
+deactivate DB
+Prisma --> User : result
+deactivate Prisma
+
+note right of User
+  Source only updates User.passwordHash.
+  It does NOT increment tokenVersion
+  and does NOT revoke AuthSession.
+end note
+User --> Browser : 200 OK { message }
+deactivate User
+deactivate UserRoutes
+@enduml

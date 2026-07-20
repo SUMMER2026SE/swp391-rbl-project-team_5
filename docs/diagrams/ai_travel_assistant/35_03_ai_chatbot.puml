@@ -1,0 +1,44 @@
+@startuml
+title 3.5.3 AI Chatbot (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Visitor|
+start
+:Open floating chatbot widget;
+repeat :Chat session;
+  |Visitor|
+  if (Clear history?) then (Yes)
+    :Clear local conversation history;
+  else (No)
+    :Type a message;
+    :Click Send;
+    |System|
+    :Validate message (required, not too long);
+    if (Message valid?) then (No)
+      |Visitor|
+      :Show "Noi dung chat qua dai.\nVui long rut gon cau hoi.";
+    else (Yes)
+      |System|
+      :POST /api/ai/chat\n(optional auth, rate-limited);
+      if (Request ok & within rate limit?) then (No)
+        |Visitor|
+        :Show error toast;
+      else (Yes)
+        |AI Service (Gemini)|
+        :Answer grounded in catalogue\n(+ links to relevant attractions);
+        |System|
+        :Render JSON reply in widget;
+        |Visitor|
+        :Read reply / follow attraction links;
+      endif
+    endif
+  endif
+repeat while (Continue chatting?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

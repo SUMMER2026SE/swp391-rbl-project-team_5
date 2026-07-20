@@ -1,0 +1,39 @@
+@startuml
+title 3.9.5 Category Management (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin/categories;
+|System|
+:Load categories\nGET /api/admin/categories;
+|Admin|
+switch (Action?)
+case (Create)
+  :Fill name, description, icon;
+  |System|
+  :POST /api/admin/categories (BR-24);
+  :Toast "Da tao danh muc.";
+case (Edit)
+  |Admin|
+  :Update category fields;
+  |System|
+  :PUT /api/admin/categories/:id;
+  :Toast "Da cap nhat danh muc.";
+case (Show / Hide)
+  |System|
+  :Toggle isActive flag;
+case (Delete)
+  |Admin|
+  :Confirm delete;
+  |System|
+  :DELETE /api/admin/categories/:id;
+  :Toast "Da xoa danh muc.";
+endswitch
+|System|
+stop
+@enduml

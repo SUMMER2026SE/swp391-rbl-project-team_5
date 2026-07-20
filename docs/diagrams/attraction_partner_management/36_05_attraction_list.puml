@@ -1,0 +1,41 @@
+@startuml
+title 3.6.5 Attraction List - Partner (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/attractions;
+|System|
+:Load owned attractions\nGET /api/partners/attractions;
+:Render list (name, city, status,\npublication state) - BR-12, BR-13;
+|Partner|
+switch (Row / page action?)
+case (New attraction)
+  :Open add-attraction form;
+case (Edit)
+  :Open edit-attraction form;
+case (Tickets)
+  :Open ticket management;
+case (Schedule)
+  :Open schedule editor;
+case (Submit for review)
+  :Click "Submit for review";
+  |System|
+  :Send draft to Admin (status = PENDING);
+case (Archive)
+  |Partner|
+  :Confirm archive;
+  |System|
+  if (Confirmed?) then (Yes)
+    :Soft-remove attraction (archivedAt);
+  else (No)
+    :Keep attraction;
+  endif
+endswitch
+|System|
+stop
+@enduml

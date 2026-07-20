@@ -1,0 +1,39 @@
+@startuml
+title 3.9.4 Attraction Approval (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin/attraction-approval;
+|System|
+:Load attractions submitted for review;
+|Admin|
+:Select a submission + inspect content/images;
+if (Decision?) then (Approve)
+  |System|
+  :PUT /api/admin/attractions/:id/review (APPROVED) - BR-13, BR-24;
+  :Toast "Da phe duyet dia diem: ...";
+  :Attraction becomes publishable by partner;
+  |Notification Service|
+  :Notify partner (approved);
+else (Reject)
+  |Admin|
+  :Enter rejection reason;
+  |System|
+  if (Reason provided?) then (No)
+    |Admin|
+    :Show "Vui long nhap ly do tu choi.";
+  else (Yes)
+    |System|
+    :PUT /api/admin/attractions/:id/review (REJECTED);
+    |Notification Service|
+    :Notify partner (rejected + reason);
+  endif
+endif
+|System|
+stop
+@enduml

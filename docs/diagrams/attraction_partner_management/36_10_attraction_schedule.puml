@@ -1,0 +1,32 @@
+@startuml
+title 3.6.10 Attraction Schedule (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/attractions/:id/schedule;
+|System|
+:Load schedule\nGET /api/partners/attractions/:id/schedule;
+|Partner|
+repeat :Edit schedule;
+  :Edit time slots (start/end + capacity),\ndefault capacity, special dates;
+  :Click Save;
+  |System|
+  :Validate capacities (> 0) - BR-15;
+  if (Capacity valid?) then (No)
+    |Partner|
+    :Toast "Suc chua phai lon hon 0.";
+  else (Yes)
+    |System|
+    :Save schedule (PUT) + inline special dates;
+    :Toast "Da cap nhat ngay dac biet." /\n"Da luu cau hinh lich thanh cong!";
+  endif
+repeat while (Retry after error?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

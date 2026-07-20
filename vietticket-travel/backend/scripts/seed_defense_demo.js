@@ -70,21 +70,21 @@ const IDS = Object.freeze({
 const ACCOUNTS = Object.freeze({
   customer: {
     id: IDS.users.customer,
-    email: 'demo.customer@vietticket.local',
+    email: 'minh.anh.nguyen@vietticket.local',
     fullName: 'Nguyễn Minh Anh',
     role: 'CUSTOMER',
     phone: '0901000001',
   },
   partner: {
     id: IDS.users.partner,
-    email: 'demo.partner@vietticket.local',
+    email: 'hoang.nam.tran@vietticket.local',
     fullName: 'Trần Hoàng Nam',
     role: 'PARTNER',
     phone: '0901000002',
   },
   gateStaff: {
     id: IDS.users.gateStaff,
-    email: 'demo.gate@vietticket.local',
+    email: 'quoc.bao.pham@vietticket.local',
     fullName: 'Phạm Quốc Bảo',
     role: 'STAFF',
     phone: '0901000003',
@@ -92,14 +92,14 @@ const ACCOUNTS = Object.freeze({
   },
   platformStaff: {
     id: IDS.users.platformStaff,
-    email: 'demo.support@vietticket.local',
+    email: 'thu.ha.le@vietticket.local',
     fullName: 'Lê Thu Hà',
     role: 'STAFF',
     phone: '0901000004',
   },
   admin: {
     id: IDS.users.admin,
-    email: 'demo.admin@vietticket.local',
+    email: 'ngoc.lan.vu@vietticket.local',
     fullName: 'Vũ Ngọc Lan',
     role: 'ADMIN',
     phone: '0901000005',

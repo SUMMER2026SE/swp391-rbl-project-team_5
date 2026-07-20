@@ -1,0 +1,33 @@
+@startuml
+title 3.9.7 Review Moderation (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin/reviews;
+|System|
+:Load reviews\nGET /api/admin/reviews;
+:Render list (attraction, customer, rating, visibility);
+|Admin|
+if (Moderate a review?) then (Yes)
+  :Click Hide / Unhide;
+  |System|
+  :Toggle review isHidden flag\n(review moderation endpoint) - BR-24;
+  if (Action ok?) then (No)
+    |Admin|
+    :Show "Khong the thuc hien kiem duyet.\nVui long thu lai.";
+  else (Yes)
+    |System|
+    :Update review visibility;
+  endif
+else (No)
+  |Admin|
+  :Browse reviews;
+endif
+|System|
+stop
+@enduml
