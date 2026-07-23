@@ -1,16 +1,14 @@
 {
-  "model_version": "demo-booking-v4",
-  "trained_at": "2026-07-19T07:43:06.676144+00:00",
+  "model_version": "operational-showcase-v2",
+  "trained_at": "2026-07-20T03:29:58.775720+00:00",
   "city_freq_map": {
-    "Ninh Bình": 0.3333333333333333,
-    "Kiên Giang": 0.3333333333333333,
-    "Bà Rịa - Vũng Tàu": 0.3333333333333333
+    "Hồ Chí Minh": 1.0
   },
-  "residual_std": 0.20737779789907387,
+  "residual_std": 0.8811584228465388,
   "metrics": {
-    "mape_observed_days": 17.516096447706346,
-    "wape": 14.768145859778054,
-    "mae": 328776.69013400865,
+    "mape_observed_days": 39.0184737952964,
+    "wape": 35.78129179124323,
+    "mae": 171112.9995112741,
     "num_train_samples": 876,
     "num_test_samples": 219,
     "training_source": "demo_booking_history"

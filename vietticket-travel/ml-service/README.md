@@ -115,6 +115,11 @@ Backend chỉ gắn nhãn `AI_ENSEMBLE` khi `training_source=real_booking_histor
 
 - `GET /health`
 - `POST /forecast` — yêu cầu header `x-ml-api-key` nếu đã cấu hình key.
+- `POST /live/predict-arrivals` — dự báo số khách đến trong horizon, p50/p90 + metric time-split + feature contributions.
+- `POST /live/predict-wait` — suy ra ETA theo p50/p90 arrival throughput và party phía trước.
+- `POST /live/optimize` — constrained local search; bảo vệ item đã khóa, giới hạn shift và cấm overlap.
+
+Live endpoints nhận observations từ Node backend, không tự truy cập PostgreSQL. Khi ít hơn 24 observation có actual target, service trả heuristic fallback với `used_fallback=true` và `training_source=operational_heuristic`.
 
 ## Cấu trúc
 
