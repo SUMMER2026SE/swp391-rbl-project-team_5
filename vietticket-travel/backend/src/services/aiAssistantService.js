@@ -552,9 +552,13 @@ function availabilitySlotSupportsStart(slot, slotIndex) {
   const window = slotWindow(slot);
   // Vé linh hoạt không khai báo giờ cụ thể vẫn có thể dùng trong ngày.
   if (!window) return true;
-  // Time slot là cửa sổ khách được phép đến/check-in, không phải thời lượng
-  // bắt buộc phải rời địa điểm. Hoạt động vẫn phải kết thúc trước giờ đóng cửa.
-  return window.start <= target.start && window.end > target.start;
+  // Vé theo giờ cố định có thể bắt đầu sau đầu khung tổng quát (ví dụ
+  // chuyến 16:30 vẫn thuộc khung Chiều 14:30-17:00). Chấp nhận khi cửa
+  // sổ bao phủ đầu khung hoặc thời điểm bắt đầu của vé nằm trong khung.
+  return (
+    (window.start <= target.start && window.end > target.start)
+    || (window.start >= target.start && window.start < target.end)
+  );
 }
 
 function slotsShareVisitWindow(first, second, slotIndex) {
@@ -1557,10 +1561,23 @@ function buildRankedEntries(catalog, party, priorityKey, companionKey, budget, p
 
 function buildActivity(entry, party, slotIndex, visitDateKey) {
   const ticketItems = buildTicketPackageItems(entry.pricing, party, slotIndex);
+  const ticketEntryWindow = sharedVisitTimeFromItems(ticketItems);
   const visitRange = visitRangeForSlot(entry.attraction, slotIndex);
-  const suggestedTime = visitRange
+  let suggestedTime = visitRange
     ? `${formatClockMinutes(visitRange.start)} - ${formatClockMinutes(visitRange.end)}`
     : DAY_TIMES[slotIndex] || 'Thời gian linh hoạt';
+  const entryStart = timeToMinutes(ticketEntryWindow?.startTime);
+  const entryEnd = timeToMinutes(ticketEntryWindow?.endTime);
+  const fixedWindowMinutes =
+    Number.isFinite(entryStart) && Number.isFinite(entryEnd)
+      ? entryEnd - entryStart
+      : null;
+  if (
+    fixedWindowMinutes > 0
+    && fixedWindowMinutes <= visitDurationMinutes(entry.attraction) + 15
+  ) {
+    suggestedTime = ticketEntryWindow.label;
+  }
   return {
     attractionId: entry.attraction.id,
     title: entry.attraction.title,
@@ -1577,7 +1594,7 @@ function buildActivity(entry, party, slotIndex, visitDateKey) {
     isFullDay: Boolean(entry.attraction.isFullDay),
     estimatedCost: entry.groupPrice,
     ticketItems,
-    ticketEntryWindow: sharedVisitTimeFromItems(ticketItems),
+    ticketEntryWindow,
     scheduleBasis: 'availability_and_travel_estimate',
     notes: entry.attraction.openTime
       ? `Mở cửa ${entry.attraction.openTime} - ${entry.attraction.closeTime || '17:00'}`
@@ -1800,6 +1817,8 @@ async function generateItinerary({
   visitDate,
   date,
   userId,
+  allowedAttractionIds,
+  skipLlmCopy = false,
 }) {
   if (!city || !city.trim()) throw new Error('Vui lòng cung cấp khu vực/thành phố (city)');
   if (!days || days <= 0) throw new Error('Vui lòng cung cấp số ngày (days) hợp lệ');
@@ -1811,11 +1830,15 @@ async function generateItinerary({
   const itineraryStartDate = parseDateOnly(startDate || visitDate || date);
   const itineraryStartDateKey = dateOnlyKey(itineraryStartDate);
 
-  const { catalog, filterMeta } = await getCatalogSummaryWithMeta({
+  let { catalog, filterMeta } = await getCatalogSummaryWithMeta({
     city,
     category: interests,
     limit: 30,
   });
+  if (Array.isArray(allowedAttractionIds)) {
+    const allowed = new Set(allowedAttractionIds.filter(Boolean).map(String));
+    catalog = catalog.filter((attraction) => allowed.has(String(attraction.id)));
+  }
 
   if (catalog.length === 0) {
     return {
@@ -1864,13 +1887,19 @@ async function generateItinerary({
       }
     });
 
-    const aiCopy = await generateItineraryTitleAndTips({
-      city,
-      days,
-      party,
-      paceKey,
-      interests,
-    });
+    const aiCopy = skipLlmCopy
+      ? {
+          title: `Lịch trình nhóm tại ${city}`,
+          tips: [],
+          provider: 'party-consensus',
+        }
+      : await generateItineraryTitleAndTips({
+          city,
+          days,
+          party,
+          paceKey,
+          interests,
+        });
 
     const result = {
       data: {
@@ -2005,13 +2034,19 @@ async function generateItinerary({
   }
   const generationWarning = warningParts.join(' ') || null;
 
-  const aiCopy = await generateItineraryTitleAndTips({
-    city,
-    days,
-    party,
-    paceKey,
-    interests,
-  });
+  const aiCopy = skipLlmCopy
+    ? {
+        title: `Lịch trình nhóm tại ${city}`,
+        tips: [],
+        provider: 'party-consensus',
+      }
+    : await generateItineraryTitleAndTips({
+        city,
+        days,
+        party,
+        paceKey,
+        interests,
+      });
 
   // Cập nhật theme cho từng ngày bằng tên attraction nổi bật.
   dayPlans.forEach((d) => {

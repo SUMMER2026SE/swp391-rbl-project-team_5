@@ -22,7 +22,7 @@ function disconnectMatchingSockets(predicate) {
   if (!socketServer) return 0;
   let disconnected = 0;
   for (const socket of socketServer.sockets.sockets.values()) {
-    if (!predicate(socket.user || {})) continue;
+    if (!predicate(socket.user || {}, socket)) continue;
     socket.emit('AUTHORIZATION_REVOKED', {
       message: 'Quyền truy cập của tài khoản vừa thay đổi. Vui lòng đăng nhập lại.',
     });
@@ -102,6 +102,34 @@ function emitLiveTripUpdated({
   return true;
 }
 
+function disconnectPartyMemberSockets(memberId) {
+  if (!memberId) return 0;
+  return disconnectMatchingSockets(
+    (_user, socket) => socket.partyGuest?.memberId === memberId,
+  );
+}
+
+function emitPartyRoomUpdated({
+  roomId,
+  eventName = 'PARTY_ROOM_UPDATED',
+  reason,
+  version,
+  memberId = null,
+  candidateId = null,
+}) {
+  if (!socketServer || !roomId) return false;
+
+  socketServer.to(`party:${roomId}`).emit(eventName, {
+    roomId,
+    reason,
+    version,
+    memberId,
+    candidateId,
+    occurredAt: new Date().toISOString(),
+  });
+  return true;
+}
+
 // --- Support ticket (Module 5) ---
 // Phát tin nhắn mới tới phòng chat của ticket. Quyền vào phòng được kiểm soát
 // ở socketServer.js (handler JOIN_SUPPORT_TICKET), nên ở đây chỉ cần broadcast.
@@ -143,10 +171,12 @@ function queueNewBookingNotification(bookingId) {
 
 module.exports = {
   disconnectPartnerSockets,
+  disconnectPartyMemberSockets,
   disconnectUserSockets,
   emitBookingStatusUpdated,
   emitLiveTripUpdated,
   emitNewBooking,
+  emitPartyRoomUpdated,
   emitSupportMessage,
   emitSupportTicketUpdated,
   publishNewBookingById,

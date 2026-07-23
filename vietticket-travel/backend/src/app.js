@@ -24,6 +24,7 @@ const aiRoutes = require('./routes/aiRoutes');
 const weatherRoutes = require('./routes/weatherRoutes');
 const forecastRoutes = require('./routes/forecastRoutes');
 const liveTripRoutes = require('./routes/liveTripRoutes');
+const partyRoomRoutes = require('./routes/partyRoomRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -111,6 +112,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/forecast', forecastRoutes);
 app.use('/api/live', liveTripRoutes);
+app.use('/api/party', partyRoomRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

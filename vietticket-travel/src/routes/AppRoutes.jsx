@@ -32,6 +32,9 @@ const PartnerSettingsPage = lazy(() => import('../pages/PartnerSettingsPage.jsx'
 const PartnerSmartQueuePage = lazy(() => import('../pages/PartnerSmartQueuePage.jsx'))
 const PartnerTicketFormPage = lazy(() => import('../pages/PartnerTicketFormPage.jsx'))
 const PartnerTicketsPage = lazy(() => import('../pages/PartnerTicketsPage.jsx'))
+const PartyJoinPage = lazy(() => import('../pages/PartyJoinPage.jsx'))
+const PartyRoomPage = lazy(() => import('../pages/PartyRoomPage.jsx'))
+const PartyRoomsPage = lazy(() => import('../pages/PartyRoomsPage.jsx'))
 const ProfilePage = lazy(() => import('../pages/ProfilePage.jsx'))
 const RegisterPage = lazy(() => import('../pages/RegisterPage.jsx'))
 const ResetPasswordPage = lazy(() => import('../pages/ResetPasswordPage.jsx'))
@@ -81,6 +84,16 @@ function AppRoutes() {
       <Route path="/attractions/:id" element={<AttractionDetailPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/party/join/:roomId" element={<PartyJoinPage />} />
+      <Route path="/party/:roomId" element={<PartyRoomPage />} />
+      <Route
+        path="/party"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <PartyRoomsPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/partner" element={<Navigate to="/partner/dashboard" replace />} />
       <Route path="/partner/register" element={<PartnerRegisterPage />} />
       <Route

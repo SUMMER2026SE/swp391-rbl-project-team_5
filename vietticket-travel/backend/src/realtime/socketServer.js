@@ -5,6 +5,7 @@ const { corsOptions } = require('../config/cors');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { AUTH_COOKIE_NAME } = require('../utils/authCookie');
 const { getEffectiveRoles, hasRole } = require('../utils/userRoles');
+const { hashPartyToken } = require('../utils/partyToken');
 const { setSocketServer } = require('./events');
 
 let io = null;
@@ -55,6 +56,43 @@ function readSocketToken(socket) {
   );
 }
 
+function readPartySocketToken(socket) {
+  return String(
+    socket.handshake.auth?.partyToken
+    || socket.handshake.headers['x-party-token']
+    || '',
+  ).trim();
+}
+
+async function loadPartyGuest(rawToken) {
+  const token = String(rawToken || '').trim();
+  if (!token) return null;
+  const member = await prisma.partyMember.findFirst({
+    where: {
+      sessionTokenHash: hashPartyToken(token),
+      removedAt: null,
+      sessionExpiresAt: { gt: new Date() },
+      room: { status: { in: ['OPEN', 'FINALIZED'] } },
+    },
+    select: {
+      id: true,
+      roomId: true,
+      displayName: true,
+      role: true,
+      sessionExpiresAt: true,
+    },
+  });
+  return member
+    ? {
+        memberId: member.id,
+        roomId: member.roomId,
+        displayName: member.displayName,
+        role: member.role,
+        sessionExpiresAt: member.sessionExpiresAt,
+      }
+    : null;
+}
+
 async function loadSocketPrincipal({ userId, sessionId, tokenVersion }) {
   const [user, session] = await Promise.all([
     prisma.user.findUnique({
@@ -95,23 +133,31 @@ async function loadSocketPrincipal({ userId, sessionId, tokenVersion }) {
 async function authenticateSocket(socket, next) {
   try {
     const token = readSocketToken(socket);
-    if (!token) return next(new Error('Unauthorized'));
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const userId = decoded.userId || decoded.id;
+        if (userId && decoded.sessionId) {
+          const authContext = {
+            userId,
+            sessionId: decoded.sessionId,
+            tokenVersion: Number(decoded.tokenVersion || 0),
+          };
+          const principal = await loadSocketPrincipal(authContext);
+          if (principal) {
+            socket.authContext = authContext;
+            socket.user = principal;
+            return next();
+          }
+        }
+      } catch {
+        // A scoped PartySync guest token may still be valid.
+      }
+    }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const userId = decoded.userId || decoded.id;
-    if (!userId || !decoded.sessionId) return next(new Error('Unauthorized'));
-
-    const authContext = {
-      userId,
-      sessionId: decoded.sessionId,
-      tokenVersion: Number(decoded.tokenVersion || 0),
-    };
-    const principal = await loadSocketPrincipal(authContext);
-    if (!principal) return next(new Error('Unauthorized'));
-
-    socket.authContext = authContext;
-    socket.user = principal;
-
+    const partyGuest = await loadPartyGuest(readPartySocketToken(socket));
+    if (!partyGuest) return next(new Error('Unauthorized'));
+    socket.partyGuest = partyGuest;
     return next();
   } catch {
     return next(new Error('Unauthorized'));
@@ -163,6 +209,16 @@ function initializeSocketServer(httpServer) {
 
   io.use(authenticateSocket);
   io.on('connection', (socket) => {
+    if (socket.partyGuest) {
+      socket.join(`party:${socket.partyGuest.roomId}`);
+      socket.on('LEAVE_PARTY_ROOM', (roomId) => {
+        if (roomId === socket.partyGuest.roomId) {
+          socket.leave(`party:${roomId}`);
+        }
+      });
+      return;
+    }
+
     socket.join(`user:${socket.user.id}`);
 
     if (hasRole(socket.user, 'PARTNER') && socket.user.partnerProfileId) {
@@ -195,6 +251,30 @@ function initializeSocketServer(httpServer) {
         socket.leave(`ticket:${ticketId}`);
       }
     });
+
+    socket.on('JOIN_PARTY_ROOM', async (roomId) => {
+      try {
+        const freshUser = await revalidateSocket(socket);
+        if (!freshUser || typeof roomId !== 'string' || !roomId) return;
+        const membership = await prisma.partyMember.findFirst({
+          where: {
+            roomId,
+            userId: freshUser.id,
+            removedAt: null,
+          },
+          select: { id: true },
+        });
+        if (membership) socket.join(`party:${roomId}`);
+      } catch (error) {
+        console.error('[socket] JOIN_PARTY_ROOM error:', error.message);
+      }
+    });
+
+    socket.on('LEAVE_PARTY_ROOM', (roomId) => {
+      if (typeof roomId === 'string' && roomId) {
+        socket.leave(`party:${roomId}`);
+      }
+    });
   });
 
   setSocketServer(io);
@@ -219,8 +299,10 @@ module.exports = {
   consumeSupportJoinAttempt,
   closeSocketServer,
   initializeSocketServer,
+  loadPartyGuest,
   loadSocketPrincipal,
   parseCookies,
   readSocketToken,
+  readPartySocketToken,
   revalidateSocket,
 };
