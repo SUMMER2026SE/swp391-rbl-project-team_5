@@ -106,9 +106,9 @@ async function createTicket(req, res, next) {
     if (bookingId) {
       const booking = await prisma.booking.findUnique({
         where: { id: bookingId },
-        select: { userId: true },
+        select: { userId: true, isForecastTrainingSample: true },
       });
-      if (!booking || booking.userId !== req.user.id) {
+      if (!booking || booking.isForecastTrainingSample || booking.userId !== req.user.id) {
         throw httpError(404, 'Không tìm thấy đơn hàng liên quan.');
       }
     }

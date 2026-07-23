@@ -28,6 +28,7 @@ async function sweepCompletedBookings({ now = new Date() } = {}) {
   // chỉ cần có vé USED là dịch vụ đã được thực hiện và booking được coi là hoàn tất.
   const completed = await prisma.booking.findMany({
     where: {
+      isForecastTrainingSample: false,
       status: 'CONFIRMED',
       reservation: { date: { lt: cutoff } },
       ticketInstances: {
@@ -40,6 +41,7 @@ async function sweepCompletedBookings({ now = new Date() } = {}) {
   // Đơn hàng không có bất kỳ vé nào được check-in sẽ được coi là NO_SHOW.
   const noShows = await prisma.booking.findMany({
     where: {
+      isForecastTrainingSample: false,
       status: 'CONFIRMED',
       reservation: { date: { lt: cutoff } },
       ticketInstances: {

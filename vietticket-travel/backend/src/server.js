@@ -15,6 +15,7 @@ const { startCleanupWorker } = require('./utils/cleanupWorker');
 const { startCompletionWorker } = require('./utils/completionWorker');
 const { startRefundWorker } = require('./utils/refundWorker');
 const { startPendingPartnerWorker } = require('./utils/pendingPartnerWorker');
+const { startLiveTripWorker } = require('./utils/liveTripWorker');
 
 const PORT = process.env.PORT || 5000;
 
@@ -37,6 +38,9 @@ const refundHandle = startRefundWorker();
 // Worker tự hủy và tạo yêu cầu hoàn tiền cho đơn đã chờ đối tác quá 24 giờ.
 const pendingPartnerHandle = startPendingPartnerWorker();
 
+// Worker điều phối SmartQueue và tạo đề xuất Autopilot có kiểm soát.
+const liveTripHandle = startLiveTripWorker();
+
 let shutdownPromise = null;
 
 async function closeHttpServer() {
@@ -57,6 +61,7 @@ function shutdown({ exit = true } = {}) {
   clearInterval(completionHandle);
   clearInterval(refundHandle);
   clearInterval(pendingPartnerHandle);
+  clearInterval(liveTripHandle);
 
   shutdownPromise = (async () => {
     await closeSocketServer();

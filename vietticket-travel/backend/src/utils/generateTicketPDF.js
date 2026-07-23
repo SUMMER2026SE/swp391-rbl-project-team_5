@@ -1,5 +1,6 @@
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
+const { formatBookingReference } = require('./bookingReference');
 
 const COLORS = {
   primary: '#00474d',
@@ -111,7 +112,7 @@ function drawTicketPage(doc, booking, ticket, qrDataUrl, index, totalTickets) {
     285,
     220,
   );
-  drawLabelValue(doc, 'Mã đặt chỗ', booking.id.toUpperCase(), margin + 260, 285, 245);
+  drawLabelValue(doc, 'Mã đặt chỗ', formatBookingReference(booking.id), margin + 260, 285, 245);
 
   doc
     .font('NotoSansBold')

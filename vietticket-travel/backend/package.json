@@ -18,6 +18,7 @@
     "db:seed:real": "node prisma/seed-real.js",
     "db:seed:images": "node prisma/seed-images.js",
     "db:seed:forecast-demo": "node scripts/seed_forecast_demo_history.js",
+    "db:seed:live-autopilot-demo": "node scripts/seed_live_autopilot_demo.js --confirm-local-demo",
     "demo:prepare": "node scripts/seed_defense_demo.js --reset --confirm-local-demo",
     "demo:check": "node scripts/seed_defense_demo.js --check",
     "demo:smoke": "node scripts/smoke_defense_demo.js",

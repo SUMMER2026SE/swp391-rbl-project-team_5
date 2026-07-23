@@ -402,6 +402,7 @@ async function deleteAttraction(req, res, next) {
     const bookingCount = await prisma.booking.count({
       where: {
         snapshotAttractionId: existing.id,
+        isForecastTrainingSample: false,
         snapshotVisitDate: { gte: today },
         status: { in: ['CONFIRMED', 'PENDING_PARTNER'] },
       },

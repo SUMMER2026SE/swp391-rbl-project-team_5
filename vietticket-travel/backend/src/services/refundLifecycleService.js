@@ -114,11 +114,10 @@ function findRefundTargetPayment(refundRequest) {
 function isLocalDemoPayment(payment) {
   const raw = payment?.rawResponse;
   return process.env.NODE_ENV !== 'production'
-    && String(payment?.id || '').startsWith('defense-demo-v1-payment-')
     && raw
     && typeof raw === 'object'
     && !Array.isArray(raw)
-    && raw.source === 'defense_demo_fixture';
+    && ['defense_demo_fixture', 'operational_fixture_v2'].includes(raw.source);
 }
 
 function getRefundProcessingEligibility(payment) {

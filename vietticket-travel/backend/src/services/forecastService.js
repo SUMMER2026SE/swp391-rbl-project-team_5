@@ -401,6 +401,54 @@ function normalizeMlForecast(rawForecast, history, forecastDays, features) {
 }
 
 /**
+ * Chặn các dự báo ML lệch cực đoan khỏi quy mô bán thực tế gần nhất.
+ * Model vẫn quyết định xu hướng, còn baseline theo thứ trong tuần chỉ đóng vai
+ * trò biên an toàn. Đây là guardrail nghiệp vụ, không thay thế kết quả bằng số
+ * cố định và cũng không cho phép vượt sức chứa của điểm tham quan.
+ */
+function applyHistoricalRangeGuardrail(forecast, history, forecastDays, features) {
+  const referenceForecast = buildFallbackForecast(
+    history,
+    forecastDays,
+    features,
+    'historical-range-reference',
+  ).forecast;
+  const avgPrice = Math.max(1, features.effectiveAvgTicketPrice);
+  const inventoryRevenueCeiling = features.capacity * avgPrice;
+  let adjusted = false;
+
+  const guardedForecast = forecast.map((point, index) => {
+    const referenceRevenue = referenceForecast[index]?.predictedRevenue || 0;
+    if (referenceRevenue <= 0) return point;
+
+    const lowerBound = Math.min(
+      inventoryRevenueCeiling,
+      Math.max(avgPrice, finiteMoney(referenceRevenue * 0.5)),
+    );
+    const predictedRevenue = Math.max(point.predictedRevenue, lowerBound);
+
+    if (predictedRevenue === point.predictedRevenue) return point;
+    adjusted = true;
+
+    return {
+      ...point,
+      predictedRevenue,
+      predictedTickets: Math.min(
+        features.capacity,
+        Math.max(0, Math.round(predictedRevenue / avgPrice)),
+      ),
+      confidenceLower: Math.min(predictedRevenue, point.confidenceLower),
+      confidenceUpper: Math.min(
+        inventoryRevenueCeiling,
+        Math.max(point.confidenceUpper, finiteMoney(predictedRevenue * 1.35)),
+      ),
+    };
+  });
+
+  return { forecast: guardedForecast, adjusted };
+}
+
+/**
  * Baseline dự phòng có mùa vụ theo thứ trong tuần và xu hướng giảm chấn.
  * Đây không được gắn nhãn AI; khoảng dự báo được cố ý để rộng hơn.
  */
@@ -730,19 +778,32 @@ async function getForecastForAttraction(
           'Model hiện tại chưa được huấn luyện bằng lịch sử booking thật. Đang hiển thị baseline mùa vụ để không biến kết quả bootstrap thành dự báo AI trong vận hành.',
         );
       } else {
+        const normalizedForecast = normalizeMlForecast(
+          mlResult.forecast,
+          history,
+          normalizedDays,
+          features,
+        );
+        const guarded = applyHistoricalRangeGuardrail(
+          normalizedForecast,
+          history,
+          normalizedDays,
+          features,
+        );
         result = {
-          forecast: normalizeMlForecast(
-            mlResult.forecast,
-            history,
-            normalizedDays,
-            features,
-          ),
+          forecast: guarded.forecast,
           modelVersion: String(mlResult.model_version || 'unknown'),
           trainingSource: mlResult.training_source,
           usedFallback: false,
           forecastAvailable: true,
           method: modelMode.method,
-          warning: modelMode.warning || mlResult.warning || null,
+          warning: [
+            modelMode.warning,
+            mlResult.warning,
+            guarded.adjusted
+              ? 'Kết quả đã được giới hạn trong biên hợp lý so với xu hướng mùa vụ gần nhất.'
+              : null,
+          ].filter(Boolean).join(' ') || null,
         };
       }
     } catch (error) {
@@ -779,6 +840,7 @@ async function getForecastForAttraction(
 
 module.exports = {
   FORECAST_DATA_BASIS,
+  applyHistoricalRangeGuardrail,
   buildFallbackForecast,
   buildInsufficientDataForecast,
   derivePriceTier,

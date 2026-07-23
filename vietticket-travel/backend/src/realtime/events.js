@@ -80,6 +80,28 @@ function emitBookingStatusUpdated({ customerId, bookingId, status, message }) {
   return true;
 }
 
+function emitLiveTripUpdated({
+  customerId,
+  tripId,
+  reason,
+  itemId = null,
+  queueStatus = null,
+  proposalId = null,
+}) {
+  if (!socketServer || !customerId || !tripId) return false;
+
+  socketServer.to(`user:${customerId}`).emit('LIVE_TRIP_UPDATED', {
+    tripId,
+    reason,
+    itemId,
+    queueStatus,
+    proposalId,
+    occurredAt: new Date().toISOString(),
+  });
+
+  return true;
+}
+
 // --- Support ticket (Module 5) ---
 // Phát tin nhắn mới tới phòng chat của ticket. Quyền vào phòng được kiểm soát
 // ở socketServer.js (handler JOIN_SUPPORT_TICKET), nên ở đây chỉ cần broadcast.
@@ -123,6 +145,7 @@ module.exports = {
   disconnectPartnerSockets,
   disconnectUserSockets,
   emitBookingStatusUpdated,
+  emitLiveTripUpdated,
   emitNewBooking,
   emitSupportMessage,
   emitSupportTicketUpdated,

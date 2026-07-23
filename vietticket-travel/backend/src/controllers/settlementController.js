@@ -237,6 +237,7 @@ async function createSettlement(req, res, next) {
     const settlement = await prisma.$transaction(async (tx) => {
       const bookings = await tx.booking.findMany({
         where: {
+          isForecastTrainingSample: false,
           snapshotVisitDate: {
             gte: period.periodStart,
             lte: period.periodEnd,

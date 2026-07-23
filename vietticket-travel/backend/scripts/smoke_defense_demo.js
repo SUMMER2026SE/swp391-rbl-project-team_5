@@ -8,17 +8,23 @@ const request = require('supertest');
 // seeded KYC URLs and the approval security check evaluate against the same host.
 process.env.BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
 
-const PREFIX = 'defense-demo-v1-';
 const PASSWORD = String(process.env.DEMO_PASSWORD || 'Demo@VietTicket2026');
 const SEED_SCRIPT = path.join(__dirname, 'seed_defense_demo.js');
-const { scenarioBookingId, scenarioRefundRequestId } = require('./seed_defense_demo');
+const {
+  ACCOUNTS: SEED_ACCOUNTS,
+  IDS,
+  OPERATIONAL_VALUES,
+  fixtureId,
+  scenarioBookingId,
+  scenarioRefundRequestId,
+} = require('./seed_defense_demo');
 
 const ACCOUNTS = {
-  customer: 'demo.customer@vietticket.local',
-  partner: 'demo.partner@vietticket.local',
-  gateStaff: 'demo.gate@vietticket.local',
-  platformStaff: 'demo.support@vietticket.local',
-  admin: 'demo.admin@vietticket.local',
+  customer: SEED_ACCOUNTS.customer.email,
+  partner: SEED_ACCOUNTS.partner.email,
+  gateStaff: SEED_ACCOUNTS.gateStaff.email,
+  platformStaff: SEED_ACCOUNTS.platformStaff.email,
+  admin: SEED_ACCOUNTS.admin.email,
 };
 
 function resetDemoData() {
@@ -76,7 +82,7 @@ async function assertFinalState(prisma) {
   ] = await Promise.all([
     prisma.booking.findUnique({ where: { id: scenarioBookingId('partner-approve') } }),
     prisma.booking.findUnique({ where: { id: scenarioBookingId('partner-reject') } }),
-    prisma.ticketInstance.findFirst({ where: { qrCodeToken: 'DEMOQR-CHECKIN-01' } }),
+    prisma.ticketInstance.findFirst({ where: { qrCodeToken: OPERATIONAL_VALUES.checkinQrPrimary } }),
     prisma.booking.findUnique({
       where: { id: scenarioBookingId('reissue') },
       include: { ticketInstances: true },
@@ -86,17 +92,17 @@ async function assertFinalState(prisma) {
       include: { booking: { select: { status: true } } },
     }),
     prisma.refundRequest.findUnique({ where: { id: scenarioRefundRequestId('reject') } }),
-    prisma.review.findUnique({ where: { id: `${PREFIX}review-awaiting-partner` } }),
-    prisma.review.findUnique({ where: { id: `${PREFIX}review-awaiting-moderation` } }),
-    prisma.partnerProfile.findUnique({ where: { id: `${PREFIX}partner-kyc-approve` } }),
-    prisma.partnerProfile.findUnique({ where: { id: `${PREFIX}partner-kyc-reject` } }),
-    prisma.attraction.findUnique({ where: { id: `${PREFIX}attraction-pending-approve` } }),
-    prisma.attraction.findUnique({ where: { id: `${PREFIX}attraction-pending-reject` } }),
-    prisma.attraction.findUnique({ where: { id: `${PREFIX}attraction-museum` } }),
-    prisma.attraction.findUnique({ where: { id: `${PREFIX}attraction-suspended` } }),
-    prisma.partnerSettlement.findUnique({ where: { id: `${PREFIX}settlement-draft` } }),
-    prisma.partnerSettlement.findUnique({ where: { id: `${PREFIX}settlement-approved` } }),
-    prisma.supportTicket.findUnique({ where: { id: `${PREFIX}support-open` } }),
+    prisma.review.findUnique({ where: { id: fixtureId('review', 'awaiting-partner') } }),
+    prisma.review.findUnique({ where: { id: fixtureId('review', 'awaiting-moderation') } }),
+    prisma.partnerProfile.findUnique({ where: { id: IDS.partners.kycApprove } }),
+    prisma.partnerProfile.findUnique({ where: { id: IDS.partners.kycReject } }),
+    prisma.attraction.findUnique({ where: { id: IDS.attractions.pendingApprove } }),
+    prisma.attraction.findUnique({ where: { id: IDS.attractions.pendingReject } }),
+    prisma.attraction.findUnique({ where: { id: IDS.attractions.museum } }),
+    prisma.attraction.findUnique({ where: { id: IDS.attractions.suspended } }),
+    prisma.partnerSettlement.findUnique({ where: { id: fixtureId('settlement', 'draft') } }),
+    prisma.partnerSettlement.findUnique({ where: { id: fixtureId('settlement', 'approved') } }),
+    prisma.supportTicket.findUnique({ where: { id: fixtureId('support', 'open') } }),
   ]);
 
   const assertions = [
@@ -144,7 +150,7 @@ async function assertFinalState(prisma) {
 
 async function run() {
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('Không được chạy smoke test dữ liệu demo trong production.');
+    throw new Error('Không được chạy bộ kiểm tra dữ liệu trình diễn trong production.');
   }
 
   console.log('Đang tạo lại dữ liệu sạch trước smoke test...');
@@ -182,7 +188,7 @@ async function run() {
     );
     await call(
       'Khách bổ sung tin nhắn vào yêu cầu hỗ trợ',
-      customer.post(`/api/support/tickets/${PREFIX}support-open/messages`).send({
+      customer.post(`/api/support/tickets/${fixtureId('support', 'open')}/messages`).send({
         message: 'Tôi gửi thêm mã đơn để nhân viên kiểm tra giúp trước giờ tham quan.',
       }),
       [201],
@@ -200,7 +206,7 @@ async function run() {
     );
     await call(
       'Partner phản hồi đánh giá của khách',
-      partner.post(`/api/reviews/${PREFIX}review-awaiting-partner/reply`).send({
+      partner.post(`/api/reviews/${fixtureId('review', 'awaiting-partner')}/reply`).send({
         replyComment: 'Cảm ơn góp ý của bạn. Chúng tôi đã bổ sung biển hướng dẫn tại quầy đón khách.',
       }),
     );
@@ -208,11 +214,15 @@ async function run() {
     // Smoke test có thể chạy ban đêm; chỉ trong transaction kiểm thử này mở
     // cửa sổ check-in toàn ngày. Khối finally seed lại lịch công khai 08:00–17:00.
     await prisma.attraction.update({
-      where: { id: `${PREFIX}attraction-museum` },
+      where: { id: IDS.attractions.museum },
       data: { openTime: '00:00', closeTime: '23:59' },
     });
-    await call('Nhân viên cổng tra cứu QR hợp lệ', gateStaff.get('/api/staff/checkin/DEMOQR-CHECKIN-01'));
-    await call('Nhân viên cổng check-in QR', gateStaff.post('/api/staff/checkin/DEMOQR-CHECKIN-01'));
+    await prisma.timeSlot.update({
+      where: { id: `${IDS.attractions.museum}-slot-all-day` },
+      data: { startTime: '00:00', endTime: '23:59' },
+    });
+    await call('Nhân viên cổng tra cứu QR hợp lệ', gateStaff.get(`/api/staff/checkin/${OPERATIONAL_VALUES.checkinQrPrimary}`));
+    await call('Nhân viên cổng check-in QR', gateStaff.post(`/api/staff/checkin/${OPERATIONAL_VALUES.checkinQrPrimary}`));
     await call(
       'Nhân viên cổng thu hồi QR cũ và cấp lại vé',
       gateStaff.post(`/api/staff/bookings/${scenarioBookingId('reissue')}/reissue`).send({
@@ -237,14 +247,14 @@ async function run() {
     );
     await call(
       'Nhân viên hỗ trợ nhận và trả lời yêu cầu mở',
-      platformStaff.post(`/api/support/tickets/${PREFIX}support-open/messages`).send({
+      platformStaff.post(`/api/support/tickets/${fixtureId('support', 'open')}/messages`).send({
         message: 'Chúng tôi đã kiểm tra mã đơn và xác nhận vé vẫn còn hiệu lực để sử dụng.',
       }),
       [201],
     );
     await call(
       'Nhân viên hỗ trợ đóng yêu cầu với kết luận nghiệp vụ',
-      platformStaff.patch(`/api/support/tickets/${PREFIX}support-open/status`).send({
+      platformStaff.patch(`/api/support/tickets/${fixtureId('support', 'open')}/status`).send({
         status: 'RESOLVED',
         resolutionCode: 'RESOLVED_INFORMATION',
         resolutionNote: 'Đã xác nhận vé còn hiệu lực và hướng dẫn khách thời gian có mặt tại cổng.',
@@ -253,57 +263,57 @@ async function run() {
 
     await call(
       'Admin duyệt hồ sơ KYC đủ giấy tờ',
-      admin.put(`/api/admin/partners/${PREFIX}partner-kyc-approve/review`).send({ action: 'APPROVED' }),
+      admin.put(`/api/admin/partners/${IDS.partners.kycApprove}/review`).send({ action: 'APPROVED' }),
     );
     await call(
       'Admin từ chối hồ sơ KYC thiếu nhất quán',
-      admin.put(`/api/admin/partners/${PREFIX}partner-kyc-reject/review`).send({
+      admin.put(`/api/admin/partners/${IDS.partners.kycReject}/review`).send({
         action: 'REJECTED',
         rejectionReason: 'Tên chủ tài khoản ngân hàng chưa trùng với tên pháp lý trên giấy phép kinh doanh.',
       }),
     );
     await call(
       'Admin duyệt địa điểm có snapshot hợp lệ',
-      admin.put(`/api/admin/attractions/${PREFIX}attraction-pending-approve/review`).send({ action: 'APPROVED' }),
+      admin.put(`/api/admin/attractions/${IDS.attractions.pendingApprove}/review`).send({ action: 'APPROVED' }),
     );
     await call(
       'Admin từ chối địa điểm cần bổ sung hồ sơ',
-      admin.put(`/api/admin/attractions/${PREFIX}attraction-pending-reject/review`).send({
+      admin.put(`/api/admin/attractions/${IDS.attractions.pendingReject}/review`).send({
         action: 'REJECTED',
         rejectionReason: 'Cần bổ sung phương án an toàn đường thủy và ảnh rõ khu vực trang bị áo phao.',
       }),
     );
     await call(
       'Admin tạm ẩn địa điểm đang kinh doanh',
-      admin.put(`/api/admin/attractions/${PREFIX}attraction-museum/hide`).send({
+      admin.put(`/api/admin/attractions/${IDS.attractions.museum}/hide`).send({
         reason: 'Tạm ẩn để kiểm tra phản ánh về thời gian mở cửa trong ngày lễ.',
       }),
     );
     await call(
       'Admin khôi phục địa điểm đã khắc phục',
-      admin.put(`/api/admin/attractions/${PREFIX}attraction-suspended/restore`),
+      admin.put(`/api/admin/attractions/${IDS.attractions.suspended}/restore`),
     );
     await call(
       'Admin ẩn đánh giá vi phạm và ghi lý do',
-      admin.patch(`/api/reviews/${PREFIX}review-awaiting-moderation/moderate`).send({
+      admin.patch(`/api/reviews/${fixtureId('review', 'awaiting-moderation')}/moderate`).send({
         isHidden: true,
         reason: 'Nội dung chứa công kích cá nhân, không phản ánh chất lượng dịch vụ du lịch.',
       }),
     );
     await call(
       'Admin duyệt kỳ đối soát nháp',
-      admin.patch(`/api/admin/settlements/${PREFIX}settlement-draft/status`).send({ status: 'APPROVED' }),
+      admin.patch(`/api/admin/settlements/${fixtureId('settlement', 'draft')}/status`).send({ status: 'APPROVED' }),
     );
     await call(
       'Admin ghi nhận đã chuyển khoản kỳ đối soát',
-      admin.patch(`/api/admin/settlements/${PREFIX}settlement-approved/status`).send({
+      admin.patch(`/api/admin/settlements/${fixtureId('settlement', 'approved')}/status`).send({
         status: 'PAID',
-        bankReference: 'DEMO-SMOKE-TRANSFER-001',
+        bankReference: OPERATIONAL_VALUES.settlementBankReference,
       }),
     );
 
     await assertFinalState(prisma);
-    console.log('\nSMOKE TEST THÀNH CÔNG: các chuỗi nghiệp vụ demo chính đều qua kiểm tra.');
+    console.log('\nSMOKE TEST THÀNH CÔNG: các chuỗi nghiệp vụ trọng yếu đều qua kiểm tra.');
   } finally {
     await prisma.$disconnect();
   }
@@ -318,11 +328,11 @@ run()
   })
   .finally(() => {
     try {
-      console.log('\nĐang reset lại dữ liệu chuẩn dành cho buổi demo...');
+      console.log('\nĐang phục hồi bộ dữ liệu vận hành chuẩn...');
       resetDemoData();
-      if (!smokeError) console.log('Dữ liệu demo đã được phục hồi nguyên trạng.');
+      if (!smokeError) console.log('Bộ dữ liệu vận hành đã được phục hồi nguyên trạng.');
     } catch (resetError) {
-      console.error(`Không thể phục hồi dữ liệu demo: ${resetError.message}`);
+      console.error(`Không thể phục hồi bộ dữ liệu vận hành: ${resetError.message}`);
       process.exitCode = 1;
     }
   });

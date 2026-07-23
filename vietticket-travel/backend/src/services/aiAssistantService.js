@@ -326,6 +326,7 @@ async function loadUserTravelPreferences(userId) {
       prisma.booking.findMany({
         where: {
           userId,
+          isForecastTrainingSample: false,
           status: { in: ['CONFIRMED', 'COMPLETED'] },
         },
         orderBy: { createdAt: 'desc' },
@@ -1063,7 +1064,10 @@ async function buildChatPersonalContext(message, userContext) {
   try {
     const [bookings, supportTickets] = await Promise.all([
       prisma.booking.findMany({
-        where: { userId: userContext.userId },
+        where: {
+          userId: userContext.userId,
+          isForecastTrainingSample: false,
+        },
         orderBy: { createdAt: 'desc' },
         take: 5,
         select: {

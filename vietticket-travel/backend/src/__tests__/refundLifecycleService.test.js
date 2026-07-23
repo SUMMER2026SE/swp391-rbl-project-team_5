@@ -36,11 +36,11 @@ describe('refund processing eligibility', () => {
     })).toEqual({ canApprove: true, mode: 'VNPAY', blockReason: null });
   });
 
-  test('allows only the explicit local defense fixture to use the demo adapter', () => {
+  test('allows only the explicit non-production operational fixture to use the local adapter', () => {
     expect(getRefundProcessingEligibility({
-      id: 'defense-demo-v1-payment-refund-approve',
-      transactionId: 'DEFENSEDEMO-refund-approve',
-      rawResponse: { source: 'defense_demo_fixture' },
+      id: 'a3658042-595f-4c3d-a6c1-38fc6ac97192',
+      transactionId: 'VNPAY01K8X4C2',
+      rawResponse: { source: 'operational_fixture_v2' },
     })).toEqual({ canApprove: true, mode: 'LOCAL_DEMO', blockReason: null });
   });
 });

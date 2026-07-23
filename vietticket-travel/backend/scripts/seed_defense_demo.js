@@ -6,7 +6,7 @@
  * Mục tiêu:
  * - Tạo dữ liệu xuyên suốt cho Customer, Partner, Partner Staff, Platform Staff và Admin.
  * - Tự dịch ngày theo ngày chạy để check-in, hoàn tiền và duyệt đơn không bị hết hạn.
- * - Chạy lại an toàn: chỉ xóa dữ liệu mang prefix DEFENSE_DEMO_V1 do script sở hữu.
+ * - Chạy lại an toàn: chỉ xóa dữ liệu thuộc bộ fixture hiện tại và marker cũ do script sở hữu.
  * - Không bao giờ chạy trong production.
  *
  * Chạy:
@@ -17,152 +17,242 @@
 require('dotenv').config({ quiet: true });
 
 const bcrypt = require('bcrypt');
+const { createHash } = require('crypto');
 const prisma = require('../src/config/prisma');
 const { ensureSeedPartnerKycDocument } = require('../prisma/seedPartnerIdentity');
+const { activateLiveTrip } = require('../src/services/liveTripService');
+const { refreshTripAutopilot } = require('../src/services/liveTripAutopilotService');
+const { predictLiveArrivals } = require('../src/services/livePredictionService');
+const { joinQueue } = require('../src/services/smartQueueService');
+const {
+  LIVE_AUTOPILOT_DEMO_MARKER,
+  seedLiveAutopilotSignals,
+} = require('./seed_live_autopilot_demo');
 
-const PREFIX = 'defense-demo-v1-';
-const MARKER = '[DEFENSE_DEMO_V1]';
+const LEGACY_PREFIX = 'defense-demo-v1-';
+const PREFIX = 'defense-demo-v2-';
+const MARKER = '[DEFENSE_DEMO_V2]';
 const DEMO_PASSWORD = String(process.env.DEMO_PASSWORD || 'Demo@VietTicket2026');
 const DAY_MS = 24 * 60 * 60 * 1000;
 const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
 const HISTORY_DAYS = 90;
 
+function stableUuid(scope, key) {
+  const hex = createHash('sha256')
+    .update(`vietticket-operational-v2:${scope}:${key}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20)}`;
+}
+
+function fixtureId(scope, key) {
+  return stableUuid(scope, key);
+}
+
+function assertLocalDemoDatabase() {
+  let databaseUrl;
+  try {
+    databaseUrl = new URL(String(process.env.DATABASE_URL || ''));
+  } catch {
+    throw new Error('DATABASE_URL không hợp lệ; từ chối reset dữ liệu demo.');
+  }
+  const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
+  if (!localHosts.has(databaseUrl.hostname)) {
+    throw new Error('demo:prepare chỉ được phép reset database chạy trên localhost.');
+  }
+}
+
 const IDS = Object.freeze({
   users: {
-    customer: `${PREFIX}user-customer`,
-    partner: `${PREFIX}user-partner`,
-    gateStaff: `${PREFIX}user-gate-staff`,
-    platformStaff: `${PREFIX}user-platform-staff`,
-    admin: `${PREFIX}user-admin`,
-    forecastCustomer: `${PREFIX}user-forecast-history`,
-    kycApprove: `${PREFIX}user-kyc-approve`,
-    kycReject: `${PREFIX}user-kyc-reject`,
+    customer: fixtureId('user', 'customer'),
+    partner: fixtureId('user', 'partner'),
+    gateStaff: fixtureId('user', 'gate-staff'),
+    platformStaff: fixtureId('user', 'platform-staff'),
+    admin: fixtureId('user', 'admin'),
+    forecastCustomer: fixtureId('user', 'forecast-history'),
+    kycApprove: fixtureId('user', 'kyc-approve'),
+    kycReject: fixtureId('user', 'kyc-reject'),
   },
   partners: {
-    owner: `${PREFIX}partner-owner`,
-    kycApprove: `${PREFIX}partner-kyc-approve`,
-    kycReject: `${PREFIX}partner-kyc-reject`,
+    owner: fixtureId('partner', 'owner'),
+    kycApprove: fixtureId('partner', 'kyc-approve'),
+    kycReject: fixtureId('partner', 'kyc-reject'),
   },
   attractions: {
-    museum: `${PREFIX}attraction-museum`,
-    cruise: `${PREFIX}attraction-cruise`,
-    eco: `${PREFIX}attraction-eco`,
-    pendingApprove: `${PREFIX}attraction-pending-approve`,
-    pendingReject: `${PREFIX}attraction-pending-reject`,
-    suspended: `${PREFIX}attraction-suspended`,
-    draft: `${PREFIX}attraction-draft`,
+    museum: fixtureId('attraction', 'museum'),
+    cruise: fixtureId('attraction', 'cruise'),
+    eco: fixtureId('attraction', 'eco'),
+    pendingApprove: fixtureId('attraction', 'pending-approve'),
+    pendingReject: fixtureId('attraction', 'pending-reject'),
+    suspended: fixtureId('attraction', 'suspended'),
+    draft: fixtureId('attraction', 'draft'),
   },
   tickets: {
-    museumAdult: `${PREFIX}ticket-museum-adult`,
-    museumChild: `${PREFIX}ticket-museum-child`,
-    museumStudent: `${PREFIX}ticket-museum-student`,
-    cruiseAdult: `${PREFIX}ticket-cruise-adult`,
-    cruiseFamily: `${PREFIX}ticket-cruise-family`,
-    ecoAdult: `${PREFIX}ticket-eco-adult`,
-    ecoChild: `${PREFIX}ticket-eco-child`,
-    pendingApprove: `${PREFIX}ticket-pending-approve`,
-    pendingReject: `${PREFIX}ticket-pending-reject`,
-    suspended: `${PREFIX}ticket-suspended`,
-    draft: `${PREFIX}ticket-draft`,
+    museumAdult: fixtureId('ticket', 'museum-adult'),
+    museumChild: fixtureId('ticket', 'museum-child'),
+    museumStudent: fixtureId('ticket', 'museum-student'),
+    cruiseAdult: fixtureId('ticket', 'cruise-adult'),
+    cruiseFamily: fixtureId('ticket', 'cruise-family'),
+    ecoAdult: fixtureId('ticket', 'eco-adult'),
+    ecoChild: fixtureId('ticket', 'eco-child'),
+    pendingApprove: fixtureId('ticket', 'pending-approve'),
+    pendingReject: fixtureId('ticket', 'pending-reject'),
+    suspended: fixtureId('ticket', 'suspended'),
+    draft: fixtureId('ticket', 'draft'),
   },
 });
 
 const ACCOUNTS = Object.freeze({
   customer: {
     id: IDS.users.customer,
-    email: 'demo.customer@vietticket.local',
+    email: 'minh.anh.nguyen@vietticket.local',
     fullName: 'Nguyễn Minh Anh',
     role: 'CUSTOMER',
-    phone: '0901000001',
+    phone: '0903482715',
   },
   partner: {
     id: IDS.users.partner,
-    email: 'demo.partner@vietticket.local',
+    email: 'hoang.nam.tran@vietticket.local',
     fullName: 'Trần Hoàng Nam',
     role: 'PARTNER',
-    phone: '0901000002',
+    phone: '0917624380',
   },
   gateStaff: {
     id: IDS.users.gateStaff,
-    email: 'demo.gate@vietticket.local',
+    email: 'quoc.bao.pham@vietticket.local',
     fullName: 'Phạm Quốc Bảo',
     role: 'STAFF',
-    phone: '0901000003',
+    phone: '0938246715',
     employerPartnerId: IDS.partners.owner,
   },
   platformStaff: {
     id: IDS.users.platformStaff,
-    email: 'demo.support@vietticket.local',
+    email: 'thu.ha.le@vietticket.local',
     fullName: 'Lê Thu Hà',
     role: 'STAFF',
-    phone: '0901000004',
+    phone: '0982716435',
   },
   admin: {
     id: IDS.users.admin,
-    email: 'demo.admin@vietticket.local',
+    email: 'ngoc.lan.vu@vietticket.local',
     fullName: 'Vũ Ngọc Lan',
     role: 'ADMIN',
-    phone: '0901000005',
+    phone: '0963158274',
   },
   forecastCustomer: {
     id: IDS.users.forecastCustomer,
     email: 'nguyen.gia.han@vietticket.local',
     fullName: 'Nguyễn Gia Hân',
     role: 'CUSTOMER',
-    phone: '0901000008',
+    phone: '0974526813',
   },
   kycApprove: {
     id: IDS.users.kycApprove,
     email: 'gia.han.do@vietticket.local',
     fullName: 'Đỗ Gia Hân',
     role: 'CUSTOMER',
-    phone: '0901000006',
+    phone: '0906724158',
   },
   kycReject: {
     id: IDS.users.kycReject,
     email: 'thanh.tung.bui@vietticket.local',
     fullName: 'Bùi Thanh Tùng',
     role: 'CUSTOMER',
-    phone: '0901000007',
+    phone: '0948315276',
   },
+});
+
+const BACKGROUND_CUSTOMERS = Object.freeze([
+  ACCOUNTS.forecastCustomer,
+  ['hoang.gia.bao', 'Hoàng Gia Bảo', '0926417385'],
+  ['le.khanh.linh', 'Lê Khánh Linh', '0908361724'],
+  ['phan.nhat.minh', 'Phan Nhật Minh', '0935172846'],
+  ['vo.thao.nguyen', 'Võ Thảo Nguyên', '0972615834'],
+  ['dang.quoc.huy', 'Đặng Quốc Huy', '0914837265'],
+  ['bui.mai.phuong', 'Bùi Mai Phương', '0983542176'],
+  ['do.anh.khoa', 'Đỗ Anh Khoa', '0967214385'],
+  ['nguyen.ngoc.tram', 'Nguyễn Ngọc Trâm', '0942683517'],
+  ['tran.duc.thanh', 'Trần Đức Thành', '0907128436'],
+  ['lam.bao.chau', 'Lâm Bảo Châu', '0938462157'],
+  ['huynh.tuan.kiet', 'Huỳnh Tuấn Kiệt', '0971358264'],
+].map((entry) => {
+  if (!Array.isArray(entry)) return entry;
+  const [slug, fullName, phone] = entry;
+  return Object.freeze({
+    id: fixtureId('user', `customer-${slug}`),
+    email: `${slug}@vietticket.local`,
+    fullName,
+    role: 'CUSTOMER',
+    phone,
+  });
+}));
+
+const OPERATIONAL_VALUES = Object.freeze({
+  voucherCode: 'KHAMPHA15',
+  checkinQrPrimary: 'VTQ-A74C-91D2-E8B5-01',
+  checkinQrBackup: 'VTQ-A74C-91D2-E8B5-02',
+  settlementBankReference: 'FT262010845731',
 });
 
 // Public-looking suffixes keep customer-facing references neutral. Scenario
 // keys remain internal to the seed/smoke scripts and are never rendered by UI.
 const SCENARIO_BOOKING_REFERENCES = Object.freeze({
-  'checkin-today': '260720000001',
-  'already-checked-today': '260720000002',
-  'partner-approve': '260720000003',
-  'partner-reject': '260720000004',
-  'review-create': '260720000005',
-  'review-reply': '260720000006',
-  'review-moderate': '260720000007',
-  'refund-customer-create': '260720000008',
-  'refund-approve': '260720000009',
-  'refund-reject': '260720000010',
-  'pending-payment': '260720000011',
-  reissue: '260720000012',
-  refunded: '260720000013',
-  'no-show': '260720000014',
-  cancelled: '260720000015',
+  'checkin-today': 'A74C91D2E8B5',
+  'already-checked-today': '6F20B8CA4D91',
+  'museum-school-group-today': '814CB96E20F7',
+  'cruise-group-today': 'E29A61D4C870',
+  'partner-approve': 'C3E71A9B520F',
+  'partner-reject': '9D42F6A10C8E',
+  'review-create': 'E8B15C730A4D',
+  'review-reply': '4A90D2F68BC1',
+  'review-moderate': 'B7C35E194A02',
+  'cruise-review-1': '7E42A90C1D53',
+  'cruise-review-2': 'A51D7C209E84',
+  'cruise-review-3': 'D90B42E75C16',
+  'cruise-review-4': '2C68F1A9D437',
+  'refund-customer-create': '1F8D60C3B7A4',
+  'refund-approve': 'D2A7F9406E1C',
+  'refund-reject': '5C19B8E24A70',
+  'pending-payment': '8E43A1C7D2F5',
+  reissue: 'F6B20D9A4C81',
+  refunded: '3A7E51C8B920',
+  'no-show': 'C1D84A7F2E56',
+  cancelled: '7B2F90D4A61C',
 });
 
 const SCENARIO_REFUND_REFERENCES = Object.freeze({
-  approve: '260720000101',
-  reject: '260720000102',
-  completed: '260720000103',
+  approve: '2E9A61C4B7D0',
+  reject: '8C35F1A90D62',
+  completed: '4B70D2E8A51C',
 });
 
 function scenarioBookingId(key) {
   const reference = SCENARIO_BOOKING_REFERENCES[key];
   if (!reference) throw new Error(`Không có mã tham chiếu cho booking ${key}.`);
-  return `${PREFIX}booking-${reference}`;
+  const base = fixtureId('booking', key);
+  return `${base.slice(0, -12)}${reference.toLowerCase()}`;
 }
 
 function scenarioRefundRequestId(key) {
   const reference = SCENARIO_REFUND_REFERENCES[key];
   if (!reference) throw new Error(`Không có mã tham chiếu cho yêu cầu hoàn tiền ${key}.`);
-  return `${PREFIX}refund-${reference}`;
+  const base = fixtureId('refund-request', key);
+  return `${base.slice(0, -12)}${reference.toLowerCase()}`;
+}
+
+function qrTokenForBooking(key, index) {
+  const reference = SCENARIO_BOOKING_REFERENCES[key];
+  if (!reference) throw new Error(`Không có mã QR cho booking ${key}.`);
+  return `VTQ-${reference.slice(0, 4)}-${reference.slice(4, 8)}-${reference.slice(8, 12)}-${String(index + 1).padStart(2, '0')}`;
+}
+
+function qrTokenForHistory(key, index) {
+  const token = createHash('sha256')
+    .update(`vietticket-history-qr:${key}:${index}`)
+    .digest('hex')
+    .slice(0, 16)
+    .toUpperCase();
+  return `VTQ-${token.slice(0, 4)}-${token.slice(4, 8)}-${token.slice(8, 12)}-${token.slice(12, 16)}`;
 }
 
 function vietnamDateKey(date = new Date()) {
@@ -182,6 +272,34 @@ function dateOnly(dateKey) {
 function atVietnamTime(dateKey, hours = 9, minutes = 0) {
   const [year, month, day] = dateKey.split('-').map(Number);
   return new Date(Date.UTC(year, month - 1, day, hours - 7, minutes));
+}
+
+function timeKeyFromMinutes(totalMinutes) {
+  const normalized = Math.max(0, Math.min(23 * 60 + 59, Number(totalMinutes) || 0));
+  return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
+}
+
+function liveShowcaseWindow(now = new Date()) {
+  const vietnamNow = new Date(now.getTime() + VN_OFFSET_MS);
+  const currentMinute = vietnamNow.getUTCHours() * 60 + vietnamNow.getUTCMinutes();
+  const opensAt = 8 * 60;
+  const closesAt = 17 * 60;
+  const latestStart = closesAt - 15;
+  if (currentMinute >= latestStart) {
+    throw new Error(
+      'Live-AutoPilot showcase chỉ chuẩn bị được trước 16:45 giờ Việt Nam vì SmartQueue cần tối thiểu 15 phút vận hành hợp lệ.',
+    );
+  }
+  const proposedStart = currentMinute < opensAt - 15
+    ? opensAt
+    : Math.max(opensAt, Math.ceil((currentMinute + 5) / 5) * 5);
+  const startMinute = Math.min(proposedStart, latestStart);
+  const endMinute = Math.min(closesAt, startMinute + 90);
+  return {
+    startTime: timeKeyFromMinutes(startMinute),
+    endTime: timeKeyFromMinutes(endMinute),
+    callWindowOpen: currentMinute >= startMinute - 15,
+  };
 }
 
 function money(value) {
@@ -271,6 +389,13 @@ function buildSubmittedSnapshot({
 }
 
 async function resetOwnedDemoData() {
+  const ownedUserIds = [...new Set([
+    ...Object.values(IDS.users),
+    ...BACKGROUND_CUSTOMERS.map(({ id }) => id),
+  ])];
+  const ownedPartnerIds = Object.values(IDS.partners);
+  const ownedAttractionIds = Object.values(IDS.attractions);
+
   await prisma.$transaction(async (tx) => {
     const legacyForecastReservations = await tx.booking.findMany({
       where: {
@@ -317,30 +442,120 @@ async function resetOwnedDemoData() {
       await tx.user.deleteMany({ where: { id: { in: legacyChecklistUserIds } } });
     }
 
-    await tx.partnerSettlement.deleteMany({ where: { id: { startsWith: PREFIX } } });
-    await tx.supportTicket.deleteMany({ where: { id: { startsWith: PREFIX } } });
-    await tx.auditLog.deleteMany({
+    await tx.partnerSettlement.deleteMany({
       where: {
         OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
           { id: { startsWith: PREFIX } },
-          { entityId: { startsWith: PREFIX } },
-          { actorId: { startsWith: PREFIX } },
+          { partnerId: { in: ownedPartnerIds } },
         ],
       },
     });
-    await tx.savedItinerary.deleteMany({ where: { planId: { startsWith: PREFIX } } });
+    await tx.supportTicket.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { userId: { in: ownedUserIds } },
+        ],
+      },
+    });
+    await tx.auditLog.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { entityId: { startsWith: LEGACY_PREFIX } },
+          { entityId: { startsWith: PREFIX } },
+          { actorId: { startsWith: LEGACY_PREFIX } },
+          { actorId: { startsWith: PREFIX } },
+          { actorId: { in: ownedUserIds } },
+          { entityId: { in: [...ownedUserIds, ...ownedPartnerIds, ...ownedAttractionIds] } },
+        ],
+      },
+    });
+    await tx.savedItinerary.deleteMany({
+      where: {
+        OR: [
+          { planId: { startsWith: LEGACY_PREFIX } },
+          { planId: { startsWith: PREFIX } },
+          { userId: { in: ownedUserIds } },
+        ],
+      },
+    });
     await tx.newsletterSubscription.deleteMany({
-      where: { email: 'demo.newsletter@vietticket.local' },
+      where: {
+        email: {
+          in: ['demo.newsletter@vietticket.local', 'minh.anh.nguyen@vietticket.local'],
+        },
+      },
     });
-    await tx.booking.deleteMany({ where: { id: { startsWith: PREFIX } } });
-    await tx.reservation.deleteMany({ where: { id: { startsWith: PREFIX } } });
-    await tx.attraction.deleteMany({ where: { id: { startsWith: PREFIX } } });
+    await tx.booking.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { userId: { in: ownedUserIds } },
+        ],
+      },
+    });
+    await tx.reservation.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { userId: { in: ownedUserIds } },
+        ],
+      },
+    });
+    await tx.attraction.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { id: { in: ownedAttractionIds } },
+          { partnerId: { in: ownedPartnerIds } },
+        ],
+      },
+    });
     await tx.category.deleteMany({
-      where: { description: { contains: MARKER }, attractions: { none: {} } },
+      where: {
+        OR: [
+          { description: { contains: '[DEFENSE_DEMO_V1]' } },
+          { description: { contains: MARKER } },
+        ],
+        attractions: { none: {} },
+      },
     });
-    await tx.partnerProfile.deleteMany({ where: { id: { startsWith: PREFIX } } });
-    await tx.voucher.deleteMany({ where: { code: 'DEMO15' } });
-    await tx.user.deleteMany({ where: { id: { startsWith: PREFIX } } });
+    await tx.partnerProfile.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { id: { in: ownedPartnerIds } },
+          { userId: { in: ownedUserIds } },
+        ],
+      },
+    });
+    await tx.voucher.deleteMany({
+      where: {
+        OR: [
+          { id: { in: [fixtureId('voucher', 'khampha15')] } },
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { code: { in: ['DEMO15', OPERATIONAL_VALUES.voucherCode] } },
+        ],
+      },
+    });
+    await tx.user.deleteMany({
+      where: {
+        OR: [
+          { id: { startsWith: LEGACY_PREFIX } },
+          { id: { startsWith: PREFIX } },
+          { id: { in: ownedUserIds } },
+        ],
+      },
+    });
 
     // Remove records left by the old manual/API test run. These titles and
     // categories were generated specifically by the test checklist and must
@@ -481,8 +696,8 @@ async function createIdentity(account, passwordHash) {
       status: 'ACTIVE',
       employerPartnerId: account.employerPartnerId || null,
       termsAcceptedAt: new Date(),
-      termsVersion: '2026-07-demo',
-      privacyVersion: '2026-07-demo',
+      termsVersion: '2026-01',
+      privacyVersion: '2026-01',
       consentIpAddress: '127.0.0.1',
       profile: {
         create: {
@@ -513,22 +728,22 @@ async function seedIdentitiesAndPartners() {
     data: {
       id: IDS.partners.owner,
       userId: IDS.users.partner,
-      businessName: 'Công ty Du lịch Trải nghiệm Việt',
+      businessName: 'Công ty TNHH Du lịch Trải nghiệm Việt',
       businessLicenseUrl: ownerLicense,
-      taxCode: '0319900001',
+      taxCode: '0318472916',
       registrationDate: new Date('2020-03-12T00:00:00.000Z'),
       representativeName: ACCOUNTS.partner.fullName,
       representativePhone: ACCOUNTS.partner.phone,
       businessAddress: '02 Công trường Mê Linh, Quận 1, TP. Hồ Chí Minh',
       bankName: 'Vietcombank',
       branchName: 'Chi nhánh TP. Hồ Chí Minh',
-      bankAccountNumber: '012345678901',
+      bankAccountNumber: '102874563910',
       bankAccountName: 'CONG TY DU LICH TRAI NGHIEM VIET',
       payoutCurrency: 'VND',
-      website: 'https://vietticket.local/doi-tac/trai-nghiem-viet',
+      website: null,
       description: 'Đơn vị vận hành các trải nghiệm văn hóa, sinh thái và du lịch đường thủy tại Thành phố Hồ Chí Minh.',
       kycConsentAccepted: true,
-      kycConsentVersion: '2026-07-demo',
+      kycConsentVersion: '2026-01',
       kycConsentAcceptedAt: new Date(),
       kycConsentIpAddress: '127.0.0.1',
       commissionRate: 0.1,
@@ -539,13 +754,15 @@ async function seedIdentitiesAndPartners() {
   await createIdentity(ACCOUNTS.gateStaff, passwordHash);
   await createIdentity(ACCOUNTS.platformStaff, passwordHash);
   await createIdentity(ACCOUNTS.admin, passwordHash);
-  await createIdentity(ACCOUNTS.forecastCustomer, passwordHash);
+  for (const account of BACKGROUND_CUSTOMERS) {
+    await createIdentity(account, passwordHash);
+  }
   await createIdentity(ACCOUNTS.kycApprove, passwordHash);
   await createIdentity(ACCOUNTS.kycReject, passwordHash);
 
   for (const [key, profileId, taxCode, businessName] of [
-    ['kycApprove', IDS.partners.kycApprove, '0319900002', 'Công ty TNHH Hành trình Xanh'],
-    ['kycReject', IDS.partners.kycReject, '0319900003', 'Hộ kinh doanh Du lịch Bình Minh'],
+    ['kycApprove', IDS.partners.kycApprove, '0319257481', 'Công ty TNHH Hành trình Xanh'],
+    ['kycReject', IDS.partners.kycReject, '0317648205', 'Hộ kinh doanh Du lịch Bình Minh'],
   ]) {
     const account = ACCOUNTS[key];
     const licenseUrl = await ensureSeedPartnerKycDocument({ userId: account.id });
@@ -559,15 +776,17 @@ async function seedIdentitiesAndPartners() {
         registrationDate: new Date('2024-01-10T00:00:00.000Z'),
         representativeName: account.fullName,
         representativePhone: account.phone,
-        businessAddress: 'Quận 1, Thành phố Hồ Chí Minh',
+        businessAddress: key === 'kycApprove'
+          ? '18 Nguyễn Thị Minh Khai, Quận 1, Thành phố Hồ Chí Minh'
+          : '42 Trần Hưng Đạo, Quận 5, Thành phố Hồ Chí Minh',
         bankName: 'Vietcombank',
         branchName: 'Chi nhánh TP. Hồ Chí Minh',
-        bankAccountNumber: key === 'kycApprove' ? '012345678902' : '012345678903',
+        bankAccountNumber: key === 'kycApprove' ? '104826391570' : '107352864190',
         bankAccountName: account.fullName.toLocaleUpperCase('vi-VN'),
         payoutCurrency: 'VND',
         description: 'Đơn vị lữ hành chuyên tổ chức các hành trình trải nghiệm trong nước.',
         kycConsentAccepted: true,
-        kycConsentVersion: '2026-07-demo',
+        kycConsentVersion: '2026-01',
         kycConsentAcceptedAt: new Date(),
         kycConsentIpAddress: '127.0.0.1',
         status: 'PENDING',
@@ -635,8 +854,8 @@ async function seedCatalog() {
   const tomorrowPlusThirty = dateOnly(addDateKeyDays(vietnamDateKey(), 30));
   await prisma.voucher.create({
     data: {
-      id: `${PREFIX}voucher-demo15`,
-      code: 'DEMO15',
+      id: fixtureId('voucher', 'khampha15'),
+      code: OPERATIONAL_VALUES.voucherCode,
       discountType: 'PERCENTAGE',
       discountValue: 15,
       maxDiscount: 100000,
@@ -651,32 +870,32 @@ async function seedCatalog() {
   const attractionDefinitions = [
     {
       id: IDS.attractions.museum,
-      title: 'Bảo tàng Thành phố Hồ Chí Minh',
-      description: 'Không gian trưng bày lịch sử, văn hóa và quá trình hình thành đô thị Sài Gòn – Thành phố Hồ Chí Minh; phù hợp cho gia đình, học sinh và khách yêu di sản.',
-      address: '65 Lý Tự Trọng, Quận 1', city: 'Hồ Chí Minh', district: 'Quận 1',
-      latitude: 10.7765, longitude: 106.6994,
+      title: 'Bảo tàng Mỹ thuật Thành phố Hồ Chí Minh',
+      description: 'Bảo tàng tại 97A Phó Đức Chính, trưng bày mỹ thuật cổ, cận đại và hiện đại trong quần thể kiến trúc kết hợp phong cách Đông – Tây. Thời gian tham quan công bố: 08:00–17:00 hằng ngày.',
+      address: '97A Phó Đức Chính, Quận 1', city: 'Hồ Chí Minh', district: 'Quận 1',
+      latitude: 10.7683, longitude: 106.6992,
       openTime: '08:00', closeTime: '17:00', defaultCapacity: 180,
-      recommendedVisitMinutes: 150, environment: 'INDOOR', isFullDay: false,
+      recommendedVisitMinutes: 120, environment: 'INDOOR', isFullDay: false,
       requiresManualApproval: false,
       category: categories.Museum,
-      imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/5/5f/Independence_Palace%2C_Ho_Chi_Minh_%28LRM_20230823_093633%29.jpg/1280px-Independence_Palace%2C_Ho_Chi_Minh_%28LRM_20230823_093633%29.jpg',
+      imageUrl: 'https://commons.wikimedia.org/wiki/Special:Redirect/file/B%E1%BA%A3o%20t%C3%A0ng%20M%E1%BB%B9%20thu%E1%BA%ADt%20Tp%20%28ki%E1%BA%BFn%20tr%C3%BAc%20t%C3%B2a%20nh%C3%A0%2C%20b%E1%BA%ADc%20tam%20c%E1%BA%A5p%29%20%281%29.jpg?width=1280',
       tickets: [
-        { id: IDS.tickets.museumAdult, name: 'Vé người lớn', type: 'ADULT', originalPrice: 150000, sellingPrice: 120000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 18 },
-        { id: IDS.tickets.museumChild, name: 'Vé trẻ em', type: 'CHILD', originalPrice: 90000, sellingPrice: 60000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 6, maxAgeYears: 11, requiresAdult: true },
-        { id: IDS.tickets.museumStudent, name: 'Vé học sinh – sinh viên', type: 'STUDENT', originalPrice: 120000, sellingPrice: 80000, refundPolicy: 'REFUND_WITH_FEE', refundFeeRate: 0.2, minAgeYears: 12 },
+        { id: IDS.tickets.museumAdult, name: 'Vé tham quan tiêu chuẩn', type: 'ADULT', originalPrice: 30000, sellingPrice: 30000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 16 },
+        { id: IDS.tickets.museumChild, name: 'Vé tham quan trẻ em', type: 'CHILD', originalPrice: 15000, sellingPrice: 15000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 6, maxAgeYears: 15, requiresAdult: true },
+        { id: IDS.tickets.museumStudent, name: 'Vé học sinh – sinh viên', type: 'STUDENT', originalPrice: 15000, sellingPrice: 15000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 16 },
       ],
     },
     {
       id: IDS.attractions.cruise,
-      title: 'Du thuyền Ngắm Hoàng hôn Sài Gòn',
-      description: 'Hành trình ngắm hoàng hôn trên sông Sài Gòn, có hướng dẫn viên, nước uống và khu vực ngồi an toàn; booking cần đối tác xác nhận để bảo đảm tải trọng tàu.',
+      title: 'Tour Hoàng hôn trên sông Sài Gòn',
+      description: 'Chương trình đường thủy do đối tác vận hành, khởi hành tại Bến Bạch Đằng; gồm 90 phút ngắm cảnh, hướng dẫn viên và nước uống. Đơn đặt chỗ được xác nhận theo tải trọng thực tế của chuyến.',
       address: 'Bến Bạch Đằng, Quận 1', city: 'Hồ Chí Minh', district: 'Quận 1',
       latitude: 10.7736, longitude: 106.7066,
       openTime: '08:00', closeTime: '22:00', defaultCapacity: 90,
       recommendedVisitMinutes: 120, environment: 'OUTDOOR', isFullDay: false,
       requiresManualApproval: true,
       category: categories.Adventure,
-      imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cb/Ho_Chi_Minh_City_Skyline_%28night%29.jpg/1280px-Ho_Chi_Minh_City_Skyline_%28night%29.jpg',
+      imageUrl: 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Bach%20Dang%20Station%20-%20Sai%20Gon%20Water%20Bus.jpg?width=1280',
       tickets: [
         { id: IDS.tickets.cruiseAdult, name: 'Vé du thuyền người lớn', type: 'ADULT', originalPrice: 350000, sellingPrice: 280000, refundPolicy: 'REFUND_WITH_FEE', refundFeeRate: 0.3, minAgeYears: 12 },
         { id: IDS.tickets.cruiseFamily, name: 'Gói gia đình 2 người lớn + 2 trẻ em', type: 'FAMILY', originalPrice: 1050000, sellingPrice: 920000, refundPolicy: 'REFUND_WITH_FEE', refundFeeRate: 0.3, requiresAdult: true },
@@ -684,18 +903,18 @@ async function seedCatalog() {
     },
     {
       id: IDS.attractions.eco,
-      title: 'Khu Dự trữ Sinh quyển Cần Giờ',
-      description: 'Chương trình sinh thái trọn ngày khám phá rừng ngập mặn Cần Giờ, giáo dục bảo tồn thiên nhiên và trải nghiệm tuyến tham quan có kiểm soát sức chứa.',
-      address: 'Huyện Cần Giờ, Thành phố Hồ Chí Minh', city: 'Hồ Chí Minh', district: 'Cần Giờ',
+      title: 'Khu du lịch sinh thái Vàm Sát – Cần Giờ',
+      description: 'Gói trải nghiệm trọn ngày tại vùng sinh thái Vàm Sát, gồm xe trung chuyển, tuyến tham quan rừng ngập mặn và hướng dẫn viên của đối tác. Vé vào cổng tiêu chuẩn được tách rõ trong mô tả gói dịch vụ.',
+      address: 'Tiểu khu 15A, xã An Thới Đông, Cần Giờ', city: 'Hồ Chí Minh', district: 'Cần Giờ',
       latitude: 10.4114, longitude: 106.9547,
-      openTime: '07:00', closeTime: '18:00', defaultCapacity: 120,
+      openTime: '08:00', closeTime: '17:00', defaultCapacity: 120,
       recommendedVisitMinutes: 480, environment: 'OUTDOOR', isFullDay: true,
       requiresManualApproval: false,
       category: categories['Nature & Sightseeing'],
       imageUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/81/Can_Gio_Mangrove_Forest.jpg/1280px-Can_Gio_Mangrove_Forest.jpg',
       tickets: [
-        { id: IDS.tickets.ecoAdult, name: 'Tour sinh thái người lớn', type: 'ADULT', originalPrice: 600000, sellingPrice: 520000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 12 },
-        { id: IDS.tickets.ecoChild, name: 'Tour sinh thái trẻ em', type: 'CHILD', originalPrice: 420000, sellingPrice: 360000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 6, maxAgeYears: 11, requiresAdult: true },
+        { id: IDS.tickets.ecoAdult, name: 'Gói khám phá Vàm Sát trọn ngày', type: 'ADULT', originalPrice: 560000, sellingPrice: 520000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 12 },
+        { id: IDS.tickets.ecoChild, name: 'Gói Vàm Sát dành cho trẻ em', type: 'CHILD', originalPrice: 390000, sellingPrice: 360000, refundPolicy: 'FREE_CANCELLATION', minAgeYears: 6, maxAgeYears: 11, requiresAdult: true },
       ],
     },
   ];
@@ -736,7 +955,7 @@ async function seedCatalog() {
         ticketProducts: {
           create: attraction.tickets.map((ticket) => ({
             ...ticket,
-            description: `${ticket.name}, sử dụng đúng ngày đã chọn.`,
+            description: `${ticket.name}; sử dụng đúng ngày, khung giờ và điều kiện độ tuổi đã chọn.`,
             status: 'ACTIVE',
             refundFeeRate: ticket.refundFeeRate || 0,
             refundCutoffHours: 24,
@@ -760,7 +979,7 @@ async function seedCatalog() {
 
   await prisma.specialDate.create({
     data: {
-      id: `${PREFIX}special-date-cruise`,
+      id: fixtureId('special-date', 'cruise-maintenance'),
       attractionId: IDS.attractions.cruise,
       date: dateOnly(addDateKeyDays(vietnamDateKey(), 14)),
       closed: true,
@@ -894,7 +1113,7 @@ async function seedCatalog() {
 
   await prisma.staffAttractionAssignment.createMany({
     data: [IDS.attractions.museum, IDS.attractions.cruise, IDS.attractions.eco].map((attractionId) => ({
-      id: `${PREFIX}assignment-${attractionId.slice(PREFIX.length)}`,
+      id: fixtureId('staff-assignment', attractionId),
       staffId: IDS.users.gateStaff,
       attractionId,
       createdById: IDS.users.partner,
@@ -906,7 +1125,7 @@ async function seedCatalog() {
 
 async function loadTicketCatalog() {
   const rows = await prisma.ticketProduct.findMany({
-    where: { id: { startsWith: PREFIX } },
+    where: { id: { in: Object.values(IDS.tickets) } },
     include: {
       attraction: {
         include: {
@@ -921,18 +1140,53 @@ async function loadTicketCatalog() {
 }
 
 function scenarioBookingDefinitions(todayKey) {
+  const customerAssignments = {
+    'already-checked-today': BACKGROUND_CUSTOMERS[0],
+    'museum-school-group-today': BACKGROUND_CUSTOMERS[10],
+    'cruise-group-today': BACKGROUND_CUSTOMERS[11],
+    'partner-approve': BACKGROUND_CUSTOMERS[1],
+    'partner-reject': BACKGROUND_CUSTOMERS[2],
+    'review-reply': BACKGROUND_CUSTOMERS[3],
+    'review-moderate': BACKGROUND_CUSTOMERS[4],
+    'cruise-review-1': BACKGROUND_CUSTOMERS[0],
+    'cruise-review-2': BACKGROUND_CUSTOMERS[5],
+    'cruise-review-3': BACKGROUND_CUSTOMERS[8],
+    'cruise-review-4': BACKGROUND_CUSTOMERS[10],
+    'refund-approve': BACKGROUND_CUSTOMERS[5],
+    'refund-reject': BACKGROUND_CUSTOMERS[6],
+    reissue: BACKGROUND_CUSTOMERS[7],
+    refunded: BACKGROUND_CUSTOMERS[8],
+    'no-show': BACKGROUND_CUSTOMERS[9],
+    cancelled: BACKGROUND_CUSTOMERS[10],
+  };
   return [
     {
       key: 'checkin-today', ticketId: IDS.tickets.museumAdult, offset: 0,
+      timeSlotIndex: 0,
       quantity: 2, status: 'CONFIRMED', reservationStatus: 'CONFIRMED',
       ticketStatuses: ['VALID', 'VALID'],
       note: 'Đoàn gồm hai khách và có thể đến cổng vào ở hai thời điểm khác nhau.',
     },
     {
       key: 'already-checked-today', ticketId: IDS.tickets.museumStudent, offset: 0,
+      timeSlotIndex: 0,
       quantity: 1, status: 'COMPLETED', reservationStatus: 'CONFIRMED',
       ticketStatuses: ['USED'], checkedIn: true,
       note: 'Khách đã hoàn tất lượt tham quan.',
+    },
+    {
+      key: 'museum-school-group-today', ticketId: IDS.tickets.museumStudent, offset: 0,
+      timeSlotIndex: 0,
+      quantity: 150, status: 'CONFIRMED', reservationStatus: 'CONFIRMED',
+      ticketStatuses: Array.from({ length: 150 }, () => 'VALID'),
+      note: 'Đoàn trường học 150 khách đã xác nhận trước; nhân viên cổng tổ chức làn vào riêng theo danh sách.',
+    },
+    {
+      key: 'cruise-group-today', ticketId: IDS.tickets.cruiseAdult, offset: 0,
+      timeSlotIndex: 0,
+      quantity: 39, status: 'CONFIRMED', reservationStatus: 'CONFIRMED',
+      ticketStatuses: Array.from({ length: 39 }, () => 'VALID'),
+      note: 'Đoàn doanh nghiệp 39 khách đã được Partner xác nhận cho chuyến 16:30.',
     },
     {
       key: 'partner-approve', ticketId: IDS.tickets.cruiseAdult, offset: 2,
@@ -966,6 +1220,34 @@ function scenarioBookingDefinitions(todayKey) {
       quantity: 1, status: 'COMPLETED', reservationStatus: 'CONFIRMED',
       ticketStatuses: ['USED'], checkedIn: true,
       note: 'Khách đã hoàn tất chuyến đi.',
+    },
+    {
+      key: 'cruise-review-1', ticketId: IDS.tickets.cruiseAdult, offset: -12,
+      timeSlotIndex: 0,
+      quantity: 2, status: 'COMPLETED', reservationStatus: 'CONFIRMED',
+      ticketStatuses: ['USED', 'USED'], checkedIn: true,
+      note: 'Hai khách đã hoàn tất chuyến ngắm hoàng hôn.',
+    },
+    {
+      key: 'cruise-review-2', ticketId: IDS.tickets.cruiseAdult, offset: -15,
+      timeSlotIndex: 1,
+      quantity: 1, status: 'COMPLETED', reservationStatus: 'CONFIRMED',
+      ticketStatuses: ['USED'], checkedIn: true,
+      note: 'Khách đã hoàn tất chuyến buổi tối.',
+    },
+    {
+      key: 'cruise-review-3', ticketId: IDS.tickets.cruiseFamily, offset: -20,
+      timeSlotIndex: 0,
+      quantity: 1, status: 'COMPLETED', reservationStatus: 'CONFIRMED',
+      ticketStatuses: ['USED'], checkedIn: true,
+      note: 'Gia đình đã sử dụng trọn gói bốn khách.',
+    },
+    {
+      key: 'cruise-review-4', ticketId: IDS.tickets.cruiseAdult, offset: -25,
+      timeSlotIndex: 1,
+      quantity: 2, status: 'COMPLETED', reservationStatus: 'CONFIRMED',
+      ticketStatuses: ['USED', 'USED'], checkedIn: true,
+      note: 'Hai khách đã hoàn tất chuyến buổi tối.',
     },
     {
       key: 'refund-customer-create', ticketId: IDS.tickets.museumAdult, offset: 5,
@@ -1018,18 +1300,20 @@ function scenarioBookingDefinitions(todayKey) {
     },
   ].map((definition) => ({
     ...definition,
+    customer: customerAssignments[definition.key] || ACCOUNTS.customer,
     visitDateKey: addDateKeyDays(todayKey, definition.offset),
   }));
 }
 
 async function createScenarioBooking(definition, ticket) {
-  const publicReference = SCENARIO_BOOKING_REFERENCES[definition.key];
   const id = scenarioBookingId(definition.key);
-  const reservationId = `${PREFIX}reservation-${publicReference}`;
-  const paymentId = `${PREFIX}payment-${publicReference}`;
+  const reservationId = fixtureId('reservation', definition.key);
+  const paymentId = fixtureId('payment', definition.key);
   const unitPrice = money(ticket.sellingPrice);
   const subtotal = unitPrice * definition.quantity;
-  const discount = definition.key === 'pending-payment' ? 100000 : 0;
+  const discount = definition.key === 'pending-payment'
+    ? Math.min(money(subtotal * 0.15), 100000)
+    : 0;
   const total = Math.max(0, subtotal - discount);
   const commissionRate = Number(ticket.attraction.partner.commissionRate || 0.1);
   const { commission, partnerNet } = commissionAmounts(total, commissionRate);
@@ -1050,7 +1334,7 @@ async function createScenarioBooking(definition, ticket) {
   await prisma.reservation.create({
     data: {
       id: reservationId,
-      userId: IDS.users.customer,
+      userId: definition.customer.id,
       ticketProductId: ticket.id,
       timeSlotId: selectedTimeSlot?.id || null,
       date: visitDate,
@@ -1075,18 +1359,18 @@ async function createScenarioBooking(definition, ticket) {
   await prisma.booking.create({
     data: {
       id,
-      userId: IDS.users.customer,
+      userId: definition.customer.id,
       reservationId,
-      voucherId: definition.key === 'pending-payment' ? `${PREFIX}voucher-demo15` : null,
+      voucherId: definition.key === 'pending-payment' ? fixtureId('voucher', 'khampha15') : null,
       subtotalAmount: subtotal,
       discountAmount: discount,
       totalAmount: total,
       status: definition.status,
       refundRequired: definition.status === 'REFUND_REQUESTED',
       paymentMethod: 'vnpay',
-      fullName: ACCOUNTS.customer.fullName,
-      email: ACCOUNTS.customer.email,
-      phone: ACCOUNTS.customer.phone,
+      fullName: definition.customer.fullName,
+      email: definition.customer.email,
+      phone: definition.customer.phone,
       note: definition.note,
       snapshotAt: createdAt,
       snapshotAttractionId: ticket.attraction.id,
@@ -1113,8 +1397,9 @@ async function createScenarioBooking(definition, ticket) {
       cancellationReason: definition.status === 'CANCELLED'
         ? 'Thanh toán không hoàn tất trong thời hạn giữ chỗ.'
         : null,
-      cancellationSource: definition.status === 'CANCELLED' ? 'PAYMENT_TIMEOUT' : null,
-      createdAt,
+        cancellationSource: definition.status === 'CANCELLED' ? 'PAYMENT_TIMEOUT' : null,
+        isForecastTrainingSample: false,
+        createdAt,
     },
   });
 
@@ -1132,8 +1417,8 @@ async function createScenarioBooking(definition, ticket) {
       paidAt: paymentStatus === 'SUCCESS' ? paidAt : null,
       failureReason: paymentStatus === 'FAILED' ? 'Khách hàng không hoàn tất giao dịch trong thời hạn thanh toán.' : null,
       rawResponse: {
-        source: 'defense_demo_fixture',
-        disclaimer: 'Dữ liệu mô phỏng local, không phải giao dịch ngân hàng thật.',
+        source: 'operational_fixture_v2',
+        environment: 'VNPAY_SANDBOX',
       },
       createdAt,
     },
@@ -1142,14 +1427,18 @@ async function createScenarioBooking(definition, ticket) {
   if (definition.ticketStatuses.length > 0) {
     await prisma.ticketInstance.createMany({
       data: definition.ticketStatuses.map((status, index) => ({
-        id: `${PREFIX}ticket-instance-${publicReference}${String(index + 1).padStart(2, '0')}`,
+        id: fixtureId('ticket-instance', `${definition.key}-${index + 1}`),
         bookingId: id,
         ticketProductId: ticket.id,
-        qrCodeToken: definition.key === 'checkin-today'
-          ? `DEMOQR-CHECKIN-${String(index + 1).padStart(2, '0')}`
-          : `DEMOQR-${definition.key.toUpperCase()}-${index + 1}`,
+        qrCodeToken: qrTokenForBooking(definition.key, index),
         status,
-        checkedInAt: definition.checkedIn ? atVietnamTime(definition.visitDateKey, 10, 0) : null,
+        checkedInAt: definition.checkedIn
+          ? (
+              definition.offset === 0
+                ? new Date(now.getTime() - 15 * 60 * 1000)
+                : atVietnamTime(definition.visitDateKey, 10, 0)
+            )
+          : null,
         checkedInById: definition.checkedIn ? IDS.users.gateStaff : null,
         createdAt,
       })),
@@ -1167,6 +1456,7 @@ async function createScenarioBooking(definition, ticket) {
     commission,
     partnerNet,
     timeSlotId: selectedTimeSlot?.id || null,
+    customer: definition.customer,
   };
 }
 
@@ -1177,7 +1467,7 @@ async function seedScenarioBookings() {
   const created = [];
   for (const definition of definitions) {
     const ticket = tickets.get(definition.ticketId);
-    if (!ticket) throw new Error(`Không tìm thấy ticket demo ${definition.ticketId}.`);
+    if (!ticket) throw new Error(`Không tìm thấy gói vé vận hành ${definition.ticketId}.`);
     created.push(await createScenarioBooking(definition, ticket));
   }
 
@@ -1188,8 +1478,8 @@ async function seedScenarioBookings() {
       {
         id: scenarioRefundRequestId('approve'),
         bookingId: byKey.get('refund-approve').id,
-        requestKey: `${PREFIX}refund-request-key-approve`,
-        requestedById: IDS.users.customer,
+        requestKey: fixtureId('refund-request-key', 'approve'),
+        requestedById: byKey.get('refund-approve').customer.id,
         type: 'CUSTOMER_CANCELLATION',
         mandatory: false,
         reason: 'Gia đình thay đổi lịch trình và gửi yêu cầu trước thời hạn miễn phí.',
@@ -1204,8 +1494,8 @@ async function seedScenarioBookings() {
       {
         id: scenarioRefundRequestId('reject'),
         bookingId: byKey.get('refund-reject').id,
-        requestKey: `${PREFIX}refund-request-key-reject`,
-        requestedById: IDS.users.customer,
+        requestKey: fixtureId('refund-request-key', 'reject'),
+        requestedById: byKey.get('refund-reject').customer.id,
         type: 'CUSTOMER_CANCELLATION',
         mandatory: false,
         reason: 'Khách thay đổi kế hoạch nhưng chưa cung cấp đủ thông tin xác nhận.',
@@ -1220,8 +1510,8 @@ async function seedScenarioBookings() {
       {
         id: scenarioRefundRequestId('completed'),
         bookingId: byKey.get('refunded').id,
-        requestKey: `${PREFIX}refund-request-key-completed`,
-        requestedById: IDS.users.customer,
+        requestKey: fixtureId('refund-request-key', 'completed'),
+        requestedById: byKey.get('refunded').customer.id,
         type: 'CUSTOMER_CANCELLATION',
         mandatory: false,
         reason: 'Yêu cầu đã được xử lý hoàn tất trong lịch sử.',
@@ -1242,17 +1532,17 @@ async function seedScenarioBookings() {
   await prisma.refundTransaction.createMany({
     data: [
       {
-        id: `${PREFIX}refund-transaction-pre-reconciled`,
+        id: fixtureId('refund-transaction', 'pre-reconciled'),
         bookingId: byKey.get('refund-approve').id,
         paymentId: byKey.get('refund-approve').paymentId,
         refundRequestId: scenarioRefundRequestId('approve'),
         gateway: 'VNPAY',
-        gatewayRequestId: `${PREFIX}gateway-refund-approve`,
+        gatewayRequestId: gatewayReference('refund-request-approve'),
         transactionType: '02',
         amount: byKey.get('refund-approve').total,
         status: 'SUCCESS',
         reason: 'VNPay đã trả kết quả thành công; nhân viên hoàn tất bước ghi nhận trên hệ thống.',
-        rawResponse: { vnp_ResponseCode: '00', vnp_TransactionStatus: '00', demo: true },
+        rawResponse: { vnp_ResponseCode: '00', vnp_TransactionStatus: '00', environment: 'VNPAY_SANDBOX' },
         gatewayResponseCode: '00',
         gatewayTransactionStatus: '00',
         gatewayTransactionId: gatewayReference('refund-approved'),
@@ -1261,12 +1551,12 @@ async function seedScenarioBookings() {
         processedAt: new Date(),
       },
       {
-        id: `${PREFIX}refund-transaction-completed`,
+        id: fixtureId('refund-transaction', 'completed'),
         bookingId: byKey.get('refunded').id,
         paymentId: byKey.get('refunded').paymentId,
         refundRequestId: scenarioRefundRequestId('completed'),
         gateway: 'VNPAY',
-        gatewayRequestId: `${PREFIX}gateway-refund-completed`,
+        gatewayRequestId: gatewayReference('refund-request-completed'),
         transactionType: '02',
         amount: byKey.get('refunded').total,
         status: 'SUCCESS',
@@ -1282,8 +1572,8 @@ async function seedScenarioBookings() {
   await prisma.review.createMany({
     data: [
       {
-        id: `${PREFIX}review-awaiting-partner`,
-        userId: IDS.users.customer,
+        id: fixtureId('review', 'awaiting-partner'),
+        userId: byKey.get('review-reply').customer.id,
         attractionId: IDS.attractions.museum,
         bookingId: byKey.get('review-reply').id,
         rating: 5,
@@ -1291,12 +1581,48 @@ async function seedScenarioBookings() {
         isHidden: false,
       },
       {
-        id: `${PREFIX}review-awaiting-moderation`,
-        userId: IDS.users.customer,
+        id: fixtureId('review', 'awaiting-moderation'),
+        userId: byKey.get('review-moderate').customer.id,
         attractionId: IDS.attractions.cruise,
         bookingId: byKey.get('review-moderate').id,
         rating: 2,
-        comment: 'Bài đánh giá chứa lời lẽ công kích và thông tin liên hệ cá nhân của hướng dẫn viên.',
+        comment: 'Chuyến khởi hành chậm và hướng dẫn viên tên Minh trả lời thiếu tôn trọng. Đơn vị cần kiểm tra lại ca trực 16:30.',
+        isHidden: false,
+      },
+      {
+        id: fixtureId('review', 'cruise-1'),
+        userId: byKey.get('cruise-review-1').customer.id,
+        attractionId: IDS.attractions.cruise,
+        bookingId: byKey.get('cruise-review-1').id,
+        rating: 5,
+        comment: 'Hoàng hôn trên sông rất đẹp, tàu sạch và khởi hành đúng giờ. Nhân viên hỗ trợ chụp ảnh nhiệt tình.',
+        isHidden: false,
+      },
+      {
+        id: fixtureId('review', 'cruise-2'),
+        userId: byKey.get('cruise-review-2').customer.id,
+        attractionId: IDS.attractions.cruise,
+        bookingId: byKey.get('cruise-review-2').id,
+        rating: 5,
+        comment: 'Khung giờ buổi tối thoáng mát, hướng dẫn viên giới thiệu các công trình ven sông vừa đủ và dễ nghe.',
+        isHidden: false,
+      },
+      {
+        id: fixtureId('review', 'cruise-3'),
+        userId: byKey.get('cruise-review-3').customer.id,
+        attractionId: IDS.attractions.cruise,
+        bookingId: byKey.get('cruise-review-3').id,
+        rating: 5,
+        comment: 'Gói gia đình thuận tiện, các bé thích cảnh thành phố lên đèn. Quy trình lên tàu nhanh và rõ ràng.',
+        isHidden: false,
+      },
+      {
+        id: fixtureId('review', 'cruise-4'),
+        userId: byKey.get('cruise-review-4').customer.id,
+        attractionId: IDS.attractions.cruise,
+        bookingId: byKey.get('cruise-review-4').id,
+        rating: 4,
+        comment: 'Trải nghiệm thư giãn và đúng mô tả. Khu vực chờ hơi đông nhưng nhân viên điều phối khá tốt.',
         isHidden: false,
       },
     ],
@@ -1307,7 +1633,7 @@ async function seedScenarioBookings() {
   });
   await prisma.attraction.update({
     where: { id: IDS.attractions.cruise },
-    data: { averageRating: 2, totalReviews: 1 },
+    data: { averageRating: 4.2, totalReviews: 5 },
   });
 
   return created;
@@ -1384,7 +1710,7 @@ async function seedForecastHistory(attractionDefinitions) {
     IDS.tickets.ecoAdult,
   ];
   const ticketPrices = new Map([
-    [IDS.tickets.museumAdult, 120000],
+    [IDS.tickets.museumAdult, 30000],
     [IDS.tickets.cruiseAdult, 280000],
     [IDS.tickets.ecoAdult, 520000],
   ]);
@@ -1407,10 +1733,12 @@ async function seedForecastHistory(attractionDefinitions) {
       const demandWave = Math.sin((dayIndex + attractionIndex * 4) / 8) > 0 ? 1 : 0;
       const quantity = Math.min(4, 1 + (weekend ? 1 : 0) + demandWave);
       const suffix = `${attractionIndex + 1}-${visitDateKey.replaceAll('-', '')}`;
-      const publicReference = String(270000000001 + dayIndex * attractionDefinitions.length + attractionIndex);
-      const reservationId = `${PREFIX}history-reservation-${publicReference}`;
-      const bookingId = `${PREFIX}history-booking-${publicReference}`;
-      const paymentId = `${PREFIX}history-payment-${publicReference}`;
+      const reservationId = fixtureId('history-reservation', suffix);
+      const bookingId = fixtureId('history-booking', suffix);
+      const paymentId = fixtureId('history-payment', suffix);
+      const historyCustomer = BACKGROUND_CUSTOMERS[
+        (dayIndex * attractionDefinitions.length + attractionIndex) % BACKGROUND_CUSTOMERS.length
+      ];
       const createdAt = new Date(visitDate.getTime() - (7 + attractionIndex) * DAY_MS);
       const subtotal = price * quantity;
       const { commission, partnerNet } = commissionAmounts(subtotal, 0.1);
@@ -1418,7 +1746,7 @@ async function seedForecastHistory(attractionDefinitions) {
 
       reservations.push({
         id: reservationId,
-        userId: IDS.users.forecastCustomer,
+        userId: historyCustomer.id,
         ticketProductId: ticketId,
         date: visitDate,
         quantity,
@@ -1433,16 +1761,16 @@ async function seedForecastHistory(attractionDefinitions) {
       });
       bookings.push({
         id: bookingId,
-        userId: IDS.users.forecastCustomer,
+        userId: historyCustomer.id,
         reservationId,
         subtotalAmount: subtotal,
         discountAmount: 0,
         totalAmount: subtotal,
         status: noShow ? 'NO_SHOW' : 'COMPLETED',
         paymentMethod: 'vnpay',
-        fullName: ACCOUNTS.forecastCustomer.fullName,
-        email: ACCOUNTS.forecastCustomer.email,
-        phone: ACCOUNTS.forecastCustomer.phone,
+        fullName: historyCustomer.fullName,
+        email: historyCustomer.email,
+        phone: historyCustomer.phone,
         note: 'Đơn đặt vé trực tuyến.',
         snapshotAt: createdAt,
         snapshotAttractionId: attraction.id,
@@ -1462,6 +1790,7 @@ async function seedForecastHistory(attractionDefinitions) {
         commissionRateSnapshot: 0.1,
         commissionAmountSnapshot: commission,
         partnerNetAmountSnapshot: partnerNet,
+        isForecastTrainingSample: true,
         createdAt,
       });
       payments.push({
@@ -1477,10 +1806,10 @@ async function seedForecastHistory(attractionDefinitions) {
       });
       for (let index = 0; index < quantity; index += 1) {
         ticketInstances.push({
-          id: `${PREFIX}history-ticket-${publicReference}${String(index + 1).padStart(2, '0')}`,
+          id: fixtureId('history-ticket', `${suffix}-${index + 1}`),
           bookingId,
           ticketProductId: ticketId,
-          qrCodeToken: `DEFHISTQR-${suffix}-${index + 1}`,
+          qrCodeToken: qrTokenForHistory(suffix, index),
           status: noShow ? 'EXPIRED' : 'USED',
           checkedInAt: noShow ? null : atVietnamTime(visitDateKey, 10, 0),
           checkedInById: noShow ? null : IDS.users.gateStaff,
@@ -1498,8 +1827,13 @@ async function seedForecastHistory(attractionDefinitions) {
   return bookings;
 }
 
-async function seedSettlements(historyBookings) {
-  const selected = historyBookings.slice(-6);
+async function seedSettlements(scenarioBookings) {
+  const selected = scenarioBookings
+    .filter((booking) => ['COMPLETED', 'NO_SHOW'].includes(booking.status))
+    .slice(0, 6);
+  if (selected.length < 6) {
+    throw new Error('Cần ít nhất 6 booking vận hành đã ghi nhận để tạo đối soát.');
+  }
   const groups = [selected.slice(0, 2), selected.slice(2, 4), selected.slice(4, 6)];
   const statuses = ['DRAFT', 'APPROVED', 'PAID'];
   const now = new Date();
@@ -1507,23 +1841,24 @@ async function seedSettlements(historyBookings) {
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
     const rows = groups[groupIndex];
     const status = statuses[groupIndex];
-    const grossAmount = rows.reduce((sum, row) => sum + money(row.totalAmount), 0);
+    const grossAmount = rows.reduce((sum, row) => sum + money(row.total), 0);
     const commissionAmount = rows.reduce(
-      (sum, row) => sum + money(row.commissionAmountSnapshot),
+      (sum, row) => sum + money(row.commission),
       0,
     );
     const payableAmount = rows.reduce(
-      (sum, row) => sum + money(row.partnerNetAmountSnapshot),
+      (sum, row) => sum + money(row.partnerNet),
       0,
     );
-    const settlementId = `${PREFIX}settlement-${status.toLowerCase()}`;
+    const visitDateKeys = rows.map((row) => row.visitDateKey).sort();
+    const settlementId = fixtureId('settlement', status.toLowerCase());
 
     await prisma.partnerSettlement.create({
       data: {
         id: settlementId,
         partnerId: IDS.partners.owner,
-        periodStart: dateOnly(addDateKeyDays(vietnamDateKey(), -90 + groupIndex * 30)),
-        periodEnd: dateOnly(addDateKeyDays(vietnamDateKey(), -61 + groupIndex * 30)),
+        periodStart: dateOnly(visitDateKeys[0]),
+        periodEnd: dateOnly(visitDateKeys.at(-1)),
         status,
         currency: 'VND',
         grossAmount,
@@ -1534,7 +1869,7 @@ async function seedSettlements(historyBookings) {
         bookingCount: rows.length,
         bankNameSnapshot: 'Vietcombank',
         bankAccountNameSnapshot: 'CONG TY DU LICH TRAI NGHIEM VIET',
-        bankAccountLast4Snapshot: '8901',
+        bankAccountLast4Snapshot: '3910',
         createdById: IDS.users.admin,
         approvedById: status !== 'DRAFT' ? IDS.users.admin : null,
         approvedAt: status !== 'DRAFT' ? now : null,
@@ -1545,13 +1880,13 @@ async function seedSettlements(historyBookings) {
           : null,
         items: {
           create: rows.map((row, rowIndex) => ({
-            id: `${settlementId}-item-${rowIndex + 1}`,
+            id: fixtureId('settlement-item', `${status.toLowerCase()}-${rowIndex + 1}`),
             bookingId: row.id,
-            grossAmount: row.totalAmount,
+            grossAmount: row.total,
             refundAmount: 0,
-            netAmount: row.totalAmount,
-            commissionAmount: row.commissionAmountSnapshot,
-            payableAmount: row.partnerNetAmountSnapshot,
+            netAmount: row.total,
+            commissionAmount: row.commission,
+            payableAmount: row.partnerNet,
             releasedAt: status === 'PAID' ? now : null,
           })),
         },
@@ -1571,9 +1906,9 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
 
   await prisma.savedItinerary.create({
     data: {
-      id: `${PREFIX}saved-itinerary`,
+      id: fixtureId('saved-itinerary', 'saigon-2-days'),
       userId: IDS.users.customer,
-      planId: `${PREFIX}saigon-2-days`,
+      planId: fixtureId('itinerary-plan', 'saigon-2-days'),
       title: 'Hồ Chí Minh 2 ngày: di sản và sinh thái',
       criteria: {
         city: 'Hồ Chí Minh', days: 2, adults: 2, children: 1,
@@ -1581,16 +1916,16 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
         pace: 'normal', companion: 'family',
       },
       data: {
-        clientPlanId: `${PREFIX}saigon-2-days`,
+        clientPlanId: fixtureId('itinerary-plan', 'saigon-2-days'),
         title: 'Hồ Chí Minh 2 ngày: di sản và sinh thái',
         description: 'Lịch trình cân bằng giữa trải nghiệm văn hóa nội đô và khám phá hệ sinh thái Cần Giờ.',
         startDate: addDateKeyDays(vietnamDateKey(), 1),
         availabilityChecked: true,
         availabilityCheckedAt: new Date().toISOString(),
-        totalEstimatedCost: 2700000,
+        totalEstimatedCost: 2315000,
         estimatedCost: {
-          total: 2700000,
-          perPerson: 900000,
+          total: 2315000,
+          perPerson: 771667,
           note: 'Ước tính cho 2 người lớn và 1 trẻ em; giá và tồn vé được kiểm tra lại trước khi giữ chỗ.',
         },
         tips: [
@@ -1605,16 +1940,16 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
             activities: [
               {
                 attractionId: IDS.attractions.museum,
-                title: 'Bảo tàng Thành phố Hồ Chí Minh',
-                suggestedTime: '09:00', durationMinutes: 150,
-                latitude: 10.7765, longitude: 106.6994,
-                estimatedCost: 300000,
+                title: 'Bảo tàng Mỹ thuật Thành phố Hồ Chí Minh',
+                suggestedTime: '09:00', durationMinutes: 120,
+                latitude: 10.7683, longitude: 106.6992,
+                estimatedCost: 75000,
                 ticketItems: [
                   {
                     ticketId: IDS.tickets.museumAdult,
-                    ticketName: 'Vé người lớn',
+                    ticketName: 'Vé tham quan tiêu chuẩn',
                     quantity: 2,
-                    unitPrice: 120000,
+                    unitPrice: 30000,
                     suggestedTimeSlot: {
                       timeSlotId: `${IDS.attractions.museum}-slot-all-day`,
                       startTime: '08:00',
@@ -1623,9 +1958,9 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
                   },
                   {
                     ticketId: IDS.tickets.museumChild,
-                    ticketName: 'Vé trẻ em',
+                    ticketName: 'Vé tham quan trẻ em',
                     quantity: 1,
-                    unitPrice: 60000,
+                    unitPrice: 15000,
                     suggestedTimeSlot: {
                       timeSlotId: `${IDS.attractions.museum}-slot-all-day`,
                       startTime: '08:00',
@@ -1636,7 +1971,7 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
               },
               {
                 attractionId: IDS.attractions.cruise,
-                title: 'Du thuyền Ngắm Hoàng hôn Sài Gòn',
+                title: 'Tour Hoàng hôn trên sông Sài Gòn',
                 suggestedTime: '16:30', durationMinutes: 120,
                 latitude: 10.7736, longitude: 106.7066,
                 estimatedCost: 840000,
@@ -1662,21 +1997,34 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
             activities: [
               {
                 attractionId: IDS.attractions.eco,
-                title: 'Khu Dự trữ Sinh quyển Cần Giờ',
-                suggestedTime: '07:30', durationMinutes: 480,
+                title: 'Khu du lịch sinh thái Vàm Sát – Cần Giờ',
+                suggestedTime: '08:00', durationMinutes: 480,
                 latitude: 10.4114, longitude: 106.9547,
-                estimatedCost: 1560000,
-                ticketItems: [{
-                  ticketId: IDS.tickets.ecoAdult,
-                  ticketName: 'Tour sinh thái người lớn',
-                  quantity: 3,
-                  unitPrice: 520000,
-                  suggestedTimeSlot: {
-                    timeSlotId: `${IDS.attractions.eco}-slot-all-day`,
-                    startTime: '07:00',
-                    endTime: '18:00',
+                estimatedCost: 1400000,
+                ticketItems: [
+                  {
+                    ticketId: IDS.tickets.ecoAdult,
+                    ticketName: 'Gói khám phá Vàm Sát trọn ngày',
+                    quantity: 2,
+                    unitPrice: 520000,
+                    suggestedTimeSlot: {
+                      timeSlotId: `${IDS.attractions.eco}-slot-all-day`,
+                      startTime: '08:00',
+                      endTime: '17:00',
+                    },
                   },
-                }],
+                  {
+                    ticketId: IDS.tickets.ecoChild,
+                    ticketName: 'Gói Vàm Sát dành cho trẻ em',
+                    quantity: 1,
+                    unitPrice: 360000,
+                    suggestedTimeSlot: {
+                      timeSlotId: `${IDS.attractions.eco}-slot-all-day`,
+                      startTime: '08:00',
+                      endTime: '17:00',
+                    },
+                  },
+                ],
               },
             ],
             alternatives: [],
@@ -1688,15 +2036,15 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
 
   await prisma.newsletterSubscription.create({
     data: {
-      id: `${PREFIX}newsletter`,
-      email: 'demo.newsletter@vietticket.local',
+      id: fixtureId('newsletter', 'minh-anh'),
+      email: ACCOUNTS.customer.email,
       isActive: true,
     },
   });
 
   await prisma.supportTicket.create({
     data: {
-      id: `${PREFIX}support-open`,
+      id: fixtureId('support', 'open'),
       userId: IDS.users.customer,
       bookingId: byKey.get('checkin-today').id,
       subject: 'Cần hỗ trợ nhận diện mã QR tại cổng',
@@ -1705,7 +2053,7 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
       priority: 'URGENT',
       messages: {
         create: {
-          id: `${PREFIX}support-message-open-1`,
+          id: fixtureId('support-message', 'open-1'),
           senderId: IDS.users.customer,
           message: 'Nhờ bộ phận hỗ trợ xác nhận mỗi mã QR chỉ dùng cho một người và có thể quét tách lượt.',
         },
@@ -1715,7 +2063,7 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
 
   await prisma.supportTicket.create({
     data: {
-      id: `${PREFIX}support-in-progress`,
+      id: fixtureId('support', 'in-progress'),
       userId: IDS.users.customer,
       bookingId: byKey.get('refund-customer-create').id,
       subject: 'Hỏi về thời hạn hoàn tiền',
@@ -1728,13 +2076,13 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
       messages: {
         create: [
           {
-            id: `${PREFIX}support-message-progress-1`,
+            id: fixtureId('support-message', 'progress-1'),
             senderId: IDS.users.customer,
             message: 'Tôi muốn kiểm tra chính sách trước khi gửi yêu cầu hủy.',
             createdAt: new Date(Date.now() - 30 * 60 * 1000),
           },
           {
-            id: `${PREFIX}support-message-progress-2`,
+            id: fixtureId('support-message', 'progress-2'),
             senderId: IDS.users.platformStaff,
             message: 'Vé áp dụng hủy miễn phí trước hạn. Hệ thống sẽ hiển thị preview số tiền trước khi xác nhận.',
             createdAt: new Date(Date.now() - 20 * 60 * 1000),
@@ -1746,7 +2094,7 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
 
   await prisma.supportTicket.create({
     data: {
-      id: `${PREFIX}support-resolved`,
+      id: fixtureId('support', 'resolved'),
       userId: IDS.users.customer,
       subject: 'Cập nhật thông tin người nhận vé',
       description: 'Khách đã nhận được thư xác nhận và đồng ý đóng yêu cầu hỗ trợ.',
@@ -1760,7 +2108,7 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
       resolutionNote: 'Đã hướng dẫn khách sử dụng thông tin snapshot trên booking.',
       messages: {
         create: {
-          id: `${PREFIX}support-message-resolved-1`,
+          id: fixtureId('support-message', 'resolved-1'),
           senderId: IDS.users.platformStaff,
           message: 'Yêu cầu đã được giải quyết. Cảm ơn bạn đã sử dụng VietTicket Travel.',
         },
@@ -1769,25 +2117,194 @@ async function seedSupportAndCustomerFeatures(scenarioBookings) {
   });
 }
 
+async function seedLiveAutopilotShowcase(scenarioBookings, { now = new Date() } = {}) {
+  const byKey = new Map(scenarioBookings.map((booking) => [booking.key, booking]));
+  const checkinBooking = byKey.get('checkin-today');
+  if (!checkinBooking) throw new Error('Thiếu booking checkin-today cho Live-AutoPilot showcase.');
+
+  const todayKey = vietnamDateKey(now);
+  const showcaseWindow = liveShowcaseWindow(now);
+  const planId = fixtureId('itinerary-plan', 'live-autopilot-showcase');
+  await prisma.savedItinerary.create({
+    data: {
+      id: fixtureId('saved-itinerary', 'live-autopilot-showcase'),
+      userId: IDS.users.customer,
+      planId,
+      title: 'Live Trip hôm nay: bảo tàng và hoàng hôn Sài Gòn',
+      criteria: {
+        city: 'Hồ Chí Minh',
+        days: 1,
+        adults: 2,
+        children: 0,
+        startDate: todayKey,
+        pace: 'normal',
+        companion: 'friends',
+        demoMarker: LIVE_AUTOPILOT_DEMO_MARKER,
+      },
+      data: {
+        clientPlanId: planId,
+        title: 'Live Trip hôm nay: bảo tàng và hoàng hôn Sài Gòn',
+        description: 'Hành trình vận hành trong ngày để trình diễn cảnh báo áp lực, đề xuất đổi giờ có xác nhận và SmartQueue gắn booking.',
+        startDate: todayKey,
+        availabilityChecked: true,
+        availabilityCheckedAt: now.toISOString(),
+        totalEstimatedCost: 620000,
+        tips: [
+          'SmartQueue chỉ giữ thứ tự vào cổng; mã QR hợp lệ vẫn là điều kiện check-in.',
+          'Autopilot không tự ý thay đổi hoặc hủy booking đã thanh toán.',
+        ],
+        days: [{
+          day: 1,
+          visitDate: todayKey,
+          title: 'Di sản và sông Sài Gòn',
+          activities: [
+            {
+              attractionId: IDS.attractions.museum,
+              bookingId: checkinBooking.id,
+              title: 'Bảo tàng Mỹ thuật Thành phố Hồ Chí Minh',
+              suggestedTime: showcaseWindow.startTime,
+              durationMinutes: 90,
+              latitude: 10.7683,
+              longitude: 106.6992,
+              estimatedCost: 60000,
+              suggestedTimeSlot: {
+                timeSlotId: `${IDS.attractions.museum}-slot-all-day`,
+                startTime: showcaseWindow.startTime,
+                endTime: showcaseWindow.endTime,
+              },
+              ticketItems: [{
+                ticketId: IDS.tickets.museumAdult,
+                ticketName: 'Vé tham quan tiêu chuẩn',
+                quantity: 2,
+                unitPrice: 30000,
+                suggestedTimeSlot: {
+                  timeSlotId: `${IDS.attractions.museum}-slot-all-day`,
+                  startTime: showcaseWindow.startTime,
+                  endTime: showcaseWindow.endTime,
+                },
+              }],
+            },
+            {
+              attractionId: IDS.attractions.cruise,
+              title: 'Tour Hoàng hôn trên sông Sài Gòn',
+              suggestedTime: '16:30',
+              durationMinutes: 90,
+              latitude: 10.7736,
+              longitude: 106.7066,
+              estimatedCost: 560000,
+              suggestedTimeSlot: {
+                timeSlotId: `${IDS.attractions.cruise}-slot-1`,
+                startTime: '16:30',
+                endTime: '18:00',
+              },
+              ticketItems: [{
+                ticketId: IDS.tickets.cruiseAdult,
+                ticketName: 'Vé du thuyền người lớn',
+                quantity: 2,
+                unitPrice: 280000,
+                suggestedTimeSlot: {
+                  timeSlotId: `${IDS.attractions.cruise}-slot-1`,
+                  startTime: '16:30',
+                  endTime: '18:00',
+                },
+              }],
+            },
+          ],
+          alternatives: [],
+        }],
+      },
+    },
+  });
+
+  const activation = await activateLiveTrip({
+    userId: IDS.users.customer,
+    planId,
+    startDate: todayKey,
+    prismaClient: prisma,
+  });
+  const museumItem = activation.trip.items.find(
+    (item) => item.attractionId === IDS.attractions.museum,
+  );
+  if (!museumItem || museumItem.bookingId !== checkinBooking.id) {
+    throw new Error('LiveTrip showcase không liên kết đúng booking bảo tàng của Customer.');
+  }
+
+  await prisma.smartQueuePolicy.update({
+    where: { attractionId: IDS.attractions.museum },
+    data: {
+      enabled: true,
+      mode: 'STAFF_CONTROLLED',
+      openBeforeMinutes: 1440,
+      readyGraceMinutes: 10,
+      maxReadyParties: 3,
+      maxActiveParties: 100,
+      fallbackThroughput15m: 12,
+      pausedAt: null,
+      pausedById: null,
+      pauseReason: null,
+      updatedById: IDS.users.partner,
+    },
+  });
+
+  const prediction = await predictLiveArrivals({
+    attractionId: IDS.attractions.museum,
+    date: todayKey,
+    now,
+    horizonMinutes: 15,
+    publicOnly: false,
+    force: true,
+    prismaClient: prisma,
+  });
+  const queue = await joinQueue({
+    tripId: activation.trip.id,
+    itemId: museumItem.id,
+    userId: IDS.users.customer,
+    prismaClient: prisma,
+    now,
+  });
+  const autopilot = await refreshTripAutopilot(
+    activation.trip.id,
+    IDS.users.customer,
+    {
+      prismaClient: prisma,
+      now,
+    },
+  );
+
+  return {
+    tripId: activation.trip.id,
+    museumItemId: museumItem.id,
+    queueStatus: queue.queue.status,
+    queueCallWindowOpen: showcaseWindow.callWindowOpen,
+    prediction: {
+      modelVersion: prediction.model_version,
+      trainingSource: prediction.training_source,
+      confidence: prediction.confidence,
+      usedFallback: Boolean(prediction.used_fallback),
+    },
+    autopilot: autopilot.stats,
+  };
+}
+
 async function seedAuditLogs() {
   await prisma.auditLog.createMany({
     data: [
       {
-        id: `${PREFIX}audit-partner-approved`, actorId: IDS.users.admin,
+        id: fixtureId('audit', 'partner-approved'), actorId: IDS.users.admin,
         action: 'PARTNER_KYC_APPROVED', entityType: 'PartnerProfile', entityId: IDS.partners.owner,
         ipAddress: '127.0.0.1', userAgent: 'VietTicket Admin Portal',
         metadata: { businessName: 'Công ty Du lịch Trải nghiệm Việt' },
         createdAt: new Date(Date.now() - 3 * DAY_MS),
       },
       {
-        id: `${PREFIX}audit-attraction-published`, actorId: IDS.users.admin,
+        id: fixtureId('audit', 'attraction-published'), actorId: IDS.users.admin,
         action: 'ATTRACTION_PUBLISHED', entityType: 'Attraction', entityId: IDS.attractions.museum,
         ipAddress: '127.0.0.1', userAgent: 'VietTicket Admin Portal',
         metadata: { trangThaiPhatHanh: 'Đang mở bán' },
         createdAt: new Date(Date.now() - 2 * DAY_MS),
       },
       {
-        id: `${PREFIX}audit-ticket-checked-in`, actorId: IDS.users.gateStaff,
+        id: fixtureId('audit', 'ticket-checked-in'), actorId: IDS.users.gateStaff,
         action: 'TICKET_CHECKED_IN', entityType: 'Booking', entityId: scenarioBookingId('already-checked-today'),
         ipAddress: '127.0.0.1', userAgent: 'VietTicket Admin Portal',
         metadata: { soVeDaCheckIn: 1 },
@@ -1825,6 +2342,12 @@ async function prepareForecastCache() {
 
 async function collectDemoReadiness() {
   const today = dateOnly(vietnamDateKey());
+  const showcaseSavedItineraryId = fixtureId('saved-itinerary', 'live-autopilot-showcase');
+  const freshPredictionCutoff = new Date(Date.now() - 30 * 60 * 1000);
+  const expectedAccountIds = [...new Set([
+    ...Object.values(IDS.users),
+    ...BACKGROUND_CUSTOMERS.map(({ id }) => id),
+  ])];
   const [
     accounts,
     pendingKyc,
@@ -1837,11 +2360,25 @@ async function collectDemoReadiness() {
     settlements,
     partnerAssignments,
     forecasts,
+    showcaseTrips,
+    showcaseItems,
+    showcaseLinkedBookings,
+    pendingAutopilotProposals,
+    waitingQueueEntries,
+    showcaseQueuePolicies,
+    liveObservations,
+    nonFallbackPredictions,
+    liveEvents,
+    showcaseGroupBookings,
+    museumStock,
+    cruiseSlotStock,
   ] = await Promise.all([
-    prisma.user.count({ where: { id: { in: Object.values(IDS.users) } } }),
+    prisma.user.count({ where: { id: { in: expectedAccountIds } } }),
     prisma.partnerProfile.count({ where: { id: { in: [IDS.partners.kycApprove, IDS.partners.kycReject] }, status: 'PENDING' } }),
     prisma.attraction.count({ where: { id: { in: [IDS.attractions.pendingApprove, IDS.attractions.pendingReject] }, status: 'PENDING' } }),
-    prisma.booking.count({ where: { id: { startsWith: `${PREFIX}booking-` } } }),
+    prisma.booking.count({
+      where: { id: { in: Object.keys(SCENARIO_BOOKING_REFERENCES).map(scenarioBookingId) } },
+    }),
     prisma.ticketInstance.count({
       where: {
         status: 'VALID',
@@ -1849,17 +2386,111 @@ async function collectDemoReadiness() {
         ticketProduct: { attractionId: IDS.attractions.museum },
       },
     }),
-    prisma.refundRequest.count({ where: { id: { startsWith: PREFIX }, status: 'PENDING' } }),
-    prisma.supportTicket.count({ where: { id: { startsWith: PREFIX }, status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
-    prisma.review.count({ where: { id: { startsWith: PREFIX }, isHidden: false } }),
+    prisma.refundRequest.count({
+      where: {
+        id: { in: Object.keys(SCENARIO_REFUND_REFERENCES).map(scenarioRefundRequestId) },
+        status: 'PENDING',
+      },
+    }),
+    prisma.supportTicket.count({
+      where: {
+        id: { in: [fixtureId('support', 'open'), fixtureId('support', 'in-progress')] },
+        status: { in: ['OPEN', 'IN_PROGRESS'] },
+      },
+    }),
+    prisma.review.count({
+      where: {
+        id: { in: [fixtureId('review', 'awaiting-partner'), fixtureId('review', 'awaiting-moderation')] },
+        isHidden: false,
+      },
+    }),
     prisma.partnerSettlement.groupBy({
-      by: ['status'], where: { id: { startsWith: PREFIX } }, _count: { _all: true },
+      by: ['status'], where: { partnerId: IDS.partners.owner }, _count: { _all: true },
     }),
     prisma.staffAttractionAssignment.count({ where: { staffId: IDS.users.gateStaff, revokedAt: null } }),
     prisma.revenueForecast.groupBy({
       by: ['trainingSource'],
       where: { attractionId: { in: [IDS.attractions.museum, IDS.attractions.cruise, IDS.attractions.eco] }, forecastDate: { gte: today } },
       _count: { _all: true },
+    }),
+    prisma.liveTrip.count({
+      where: { savedItineraryId: showcaseSavedItineraryId, status: 'ACTIVE' },
+    }),
+    prisma.liveTripItem.count({
+      where: { liveTrip: { savedItineraryId: showcaseSavedItineraryId } },
+    }),
+    prisma.liveTripItem.count({
+      where: {
+        liveTrip: { savedItineraryId: showcaseSavedItineraryId },
+        bookingId: { not: null },
+      },
+    }),
+    prisma.liveTripProposal.count({
+      where: {
+        liveTrip: { savedItineraryId: showcaseSavedItineraryId },
+        status: 'PENDING',
+      },
+    }),
+    prisma.smartQueueEntry.count({
+      where: {
+        liveTrip: { savedItineraryId: showcaseSavedItineraryId },
+        status: 'WAITING',
+        expiresAt: { gt: new Date() },
+      },
+    }),
+    prisma.smartQueuePolicy.count({
+      where: {
+        attractionId: IDS.attractions.museum,
+        enabled: true,
+        mode: 'STAFF_CONTROLLED',
+        pausedAt: null,
+      },
+    }),
+    prisma.arrivalObservation.count({
+      where: {
+        attractionId: { in: [IDS.attractions.museum, IDS.attractions.cruise, IDS.attractions.eco] },
+        observationKey: { startsWith: `${LIVE_AUTOPILOT_DEMO_MARKER}:` },
+        actualArrivalsNext15m: { not: null },
+      },
+    }),
+    prisma.livePrediction.count({
+      where: {
+        attractionId: IDS.attractions.museum,
+        predictionType: 'ARRIVALS',
+        usedFallback: false,
+        confidence: { in: ['MEDIUM', 'HIGH'] },
+        predictedAt: { gte: freshPredictionCutoff },
+      },
+    }),
+    prisma.liveTripEvent.count({
+      where: {
+        liveTrip: { savedItineraryId: showcaseSavedItineraryId },
+        type: { in: ['QUEUE_JOINED', 'ITEM_AT_RISK', 'AUTOPILOT_PROPOSED'] },
+      },
+    }),
+    prisma.booking.count({
+      where: {
+        id: {
+          in: [
+            scenarioBookingId('museum-school-group-today'),
+            scenarioBookingId('cruise-group-today'),
+          ],
+        },
+        status: 'CONFIRMED',
+      },
+    }),
+    prisma.attractionDailyStock.findUnique({
+      where: { attractionId_date: { attractionId: IDS.attractions.museum, date: today } },
+      select: { capacity: true, bookedQty: true, heldQty: true },
+    }),
+    prisma.timeSlotStock.findUnique({
+      where: {
+        timeSlotId_date: {
+          timeSlotId: `${IDS.attractions.cruise}-slot-1`,
+          date: today,
+        },
+      },
+      select: { bookedQty: true, heldQty: true },
     }),
   ]);
 
@@ -1874,7 +2505,27 @@ async function collectDemoReadiness() {
     visibleReviews,
     settlements: Object.fromEntries(settlements.map((row) => [row.status, row._count._all])),
     partnerAssignments,
-    forecasts: Object.fromEntries(forecasts.map((row) => [row.trainingSource, row._count._all])),
+    forecasts: {
+      controlledHistoryPoints: forecasts.reduce((sum, row) => sum + row._count._all, 0),
+    },
+    liveAutopilot: {
+      showcaseTrips,
+      showcaseItems,
+      linkedBookings: showcaseLinkedBookings,
+      pendingProposals: pendingAutopilotProposals,
+      waitingQueueEntries,
+      staffControlledPolicies: showcaseQueuePolicies,
+      trainingObservations: liveObservations,
+      freshNonFallbackPredictions: nonFallbackPredictions,
+      explainabilityEvents: liveEvents,
+      pressureSourceBookings: showcaseGroupBookings,
+      museumInventoryRatio: museumStock?.capacity
+        ? (Number(museumStock.bookedQty || 0) + Number(museumStock.heldQty || 0))
+          / Number(museumStock.capacity)
+        : 0,
+      cruiseFirstSlotInventoryRatio:
+        (Number(cruiseSlotStock?.bookedQty || 0) + Number(cruiseSlotStock?.heldQty || 0)) / 45,
+    },
   };
 }
 
@@ -1885,10 +2536,14 @@ function assertDemoReady(readiness) {
       failures.push(`${label}: cần >= ${minimum}, hiện có ${readiness[field] || 0}`);
     }
   };
-  requireAtLeast('accounts', 8, 'Tài khoản theo vai trò và dữ liệu forecast');
+  requireAtLeast('accounts', 18, 'Tài khoản theo vai trò và khách hàng vận hành');
   requireAtLeast('pendingKyc', 2, 'Hồ sơ KYC chờ duyệt');
   requireAtLeast('pendingAttractions', 2, 'Địa điểm chờ duyệt');
-  requireAtLeast('scenarioBookings', 15, 'Booking theo trạng thái');
+  requireAtLeast(
+    'scenarioBookings',
+    Object.keys(SCENARIO_BOOKING_REFERENCES).length,
+    'Booking theo trạng thái',
+  );
   requireAtLeast('todayValidTickets', 2, 'QR hợp lệ hôm nay');
   requireAtLeast('pendingRefunds', 2, 'Yêu cầu hoàn tiền chờ xử lý');
   requireAtLeast('actionableSupport', 2, 'Support ticket đang xử lý');
@@ -1899,17 +2554,39 @@ function assertDemoReady(readiness) {
   }
   const forecastPoints = Object.values(readiness.forecasts).reduce((sum, value) => sum + value, 0);
   if (forecastPoints < 21) failures.push(`Forecast tương lai: cần 21 điểm, hiện có ${forecastPoints}`);
+  const live = readiness.liveAutopilot || {};
+  const requireLiveAtLeast = (field, minimum, label) => {
+    if (Number(live[field] || 0) < minimum) {
+      failures.push(`${label}: cần >= ${minimum}, hiện có ${live[field] || 0}`);
+    }
+  };
+  requireLiveAtLeast('showcaseTrips', 1, 'LiveTrip showcase đang hoạt động');
+  requireLiveAtLeast('showcaseItems', 2, 'Hoạt động trong LiveTrip showcase');
+  requireLiveAtLeast('linkedBookings', 1, 'Hoạt động liên kết booking thật');
+  requireLiveAtLeast('pendingProposals', 1, 'Đề xuất Autopilot chờ Customer xác nhận');
+  requireLiveAtLeast('waitingQueueEntries', 1, 'Lượt SmartQueue đang chờ');
+  requireLiveAtLeast('staffControlledPolicies', 1, 'Chính sách SmartQueue do nhân viên điều phối');
+  requireLiveAtLeast('trainingObservations', 288, 'Quan sát huấn luyện Live AI có nhãn');
+  requireLiveAtLeast('freshNonFallbackPredictions', 1, 'Dự báo ML thật, còn mới và không fallback');
+  requireLiveAtLeast('explainabilityEvents', 3, 'Event giải thích quyết định Live-AutoPilot');
+  requireLiveAtLeast('pressureSourceBookings', 2, 'Booking đoàn tạo áp lực tồn chỗ có kiểm chứng');
+  if (Number(live.museumInventoryRatio || 0) < 0.85) {
+    failures.push(`Tỷ lệ tồn chỗ bảo tàng cho SmartQueue: cần >= 0.85, hiện có ${live.museumInventoryRatio || 0}`);
+  }
+  if (Number(live.cruiseFirstSlotInventoryRatio || 0) < 0.85) {
+    failures.push(`Tỷ lệ tồn chỗ chuyến 16:30 cho Autopilot: cần >= 0.85, hiện có ${live.cruiseFirstSlotInventoryRatio || 0}`);
+  }
   if (failures.length > 0) {
-    const error = new Error(`Bộ dữ liệu demo chưa sẵn sàng:\n- ${failures.join('\n- ')}`);
+    const error = new Error(`Bộ dữ liệu vận hành chưa sẵn sàng:\n- ${failures.join('\n- ')}`);
     error.readiness = readiness;
     throw error;
   }
   return readiness;
 }
 
-function printHandoff(readiness, forecastResults = []) {
+function printHandoff(readiness, forecastResults = [], liveShowcase = null) {
   console.log('\n============================================================');
-  console.log('VIETTICKET DEFENSE DEMO — READY');
+  console.log('VIETTICKET OPERATIONAL SHOWCASE — READY');
   console.log('============================================================');
   console.log(`Ngày dữ liệu (Việt Nam): ${vietnamDateKey()}`);
   console.log(`Mật khẩu chung local: ${DEMO_PASSWORD}`);
@@ -1919,15 +2596,19 @@ function printHandoff(readiness, forecastResults = []) {
   console.log(`- Staff check-in: ${ACCOUNTS.gateStaff.email}`);
   console.log(`- Staff hỗ trợ:   ${ACCOUNTS.platformStaff.email}`);
   console.log(`- Admin:          ${ACCOUNTS.admin.email}`);
-  console.log('\nMã QR nhập tay: DEMOQR-CHECKIN-01');
-  console.log('Voucher: DEMO15 (giảm 15%, tối đa 100.000 VND, đơn từ 200.000 VND)');
+  console.log(`\nMã QR nhập tay: ${OPERATIONAL_VALUES.checkinQrPrimary}`);
+  console.log(`Voucher: ${OPERATIONAL_VALUES.voucherCode} (giảm 15%, tối đa 100.000 VND, đơn từ 200.000 VND)`);
   console.log('\nReadiness:');
   console.log(JSON.stringify(readiness, null, 2));
   if (forecastResults.length > 0) {
     console.log('\nForecast cache:');
     console.log(JSON.stringify(forecastResults, null, 2));
   }
-  console.log('\nTrước mỗi lần tập/demo: npm run demo:prepare');
+  if (liveShowcase) {
+    console.log('\nLive-AutoPilot showcase:');
+    console.log(JSON.stringify(liveShowcase, null, 2));
+  }
+  console.log('\nTrước mỗi lần tập/trình diễn: npm run demo:prepare');
   console.log('Kiểm tra không ghi DB:    npm run demo:check');
   console.log('Kịch bản: ../DEMO_RUNBOOK_4_MEMBERS.md');
   console.log('============================================================\n');
@@ -1953,26 +2634,35 @@ async function main() {
   if (!confirmedLocalDemo) {
     throw new Error('Thiếu cờ --confirm-local-demo. Hãy chạy npm run demo:prepare.');
   }
+  assertLocalDemoDatabase();
 
-  console.log('Đang reset dữ liệu demo do script sở hữu...');
+  console.log('Đang phục hồi bộ dữ liệu vận hành do script sở hữu...');
   await resetOwnedDemoData();
   console.log('Đang tạo tài khoản và hồ sơ KYC theo vai trò...');
   await seedIdentitiesAndPartners();
   console.log('Đang tạo catalog, ticket, lịch và hồ sơ moderation...');
   const attractions = await seedCatalog();
-  console.log(`Đang tạo ${HISTORY_DAYS} ngày lịch sử doanh thu cho ba điểm demo...`);
-  const historyBookings = await seedForecastHistory(attractions);
+  console.log(`Đang tạo ${HISTORY_DAYS} ngày lịch sử doanh thu cho ba điểm vận hành...`);
+  await seedForecastHistory(attractions);
   console.log('Đang tạo booking theo trạng thái, QR, refund và review...');
   const scenarioBookings = await seedScenarioBookings();
   await seedInventory(scenarioBookings);
+  console.log('Đang tạo 288 quan sát có nhãn cho Live AI và chính sách SmartQueue...');
+  const liveSignals = await seedLiveAutopilotSignals({
+    attractionIds: [IDS.attractions.museum, IDS.attractions.cruise, IDS.attractions.eco],
+    now: new Date(),
+    prismaClient: prisma,
+  });
   console.log('Đang tạo settlement, support, favorites, itinerary và audit log...');
-  await seedSettlements(historyBookings);
+  await seedSettlements(scenarioBookings);
   await seedSupportAndCustomerFeatures(scenarioBookings);
+  console.log('Đang dựng LiveTrip showcase, dự báo ML, SmartQueue và đề xuất Autopilot...');
+  const liveShowcase = await seedLiveAutopilotShowcase(scenarioBookings);
   await seedAuditLogs();
-  console.log('Đang làm nóng forecast cache cho ba điểm của Partner demo...');
+  console.log('Đang làm nóng forecast cache cho ba điểm của Partner...');
   const forecastResults = await prepareForecastCache();
   const readiness = assertDemoReady(await collectDemoReadiness());
-  printHandoff(readiness, forecastResults);
+  printHandoff(readiness, forecastResults, { ...liveShowcase, signals: liveSignals });
 }
 
 if (require.main === module) {
@@ -1989,12 +2679,15 @@ if (require.main === module) {
 
 module.exports = {
   ACCOUNTS,
+  BACKGROUND_CUSTOMERS,
   IDS,
   MARKER,
+  OPERATIONAL_VALUES,
   PREFIX,
   addDateKeyDays,
   assertDemoReady,
   buildSubmittedSnapshot,
+  fixtureId,
   scenarioBookingDefinitions,
   scenarioBookingId,
   scenarioRefundRequestId,

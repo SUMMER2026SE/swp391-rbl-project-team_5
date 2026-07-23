@@ -297,7 +297,11 @@ describe('approveBooking', () => {
     await approveBooking(req, res, next);
 
     expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: BOOKING_ID, status: 'PENDING_PARTNER' },
+      where: {
+        id: BOOKING_ID,
+        status: 'PENDING_PARTNER',
+        isForecastTrainingSample: false,
+      },
       data: { status: 'CONFIRMED' },
     });
     expect(capturedTx.dailyStock.updateMany).toHaveBeenCalledWith(
@@ -523,7 +527,11 @@ describe('rejectBooking', () => {
     await rejectBooking(req, res, jest.fn());
 
     expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: BOOKING_ID, status: 'PENDING_PARTNER' },
+      where: {
+        id: BOOKING_ID,
+        status: 'PENDING_PARTNER',
+        isForecastTrainingSample: false,
+      },
       data: expect.objectContaining({ status: 'CANCELLED', refundRequired: true }),
     });
     expect(capturedTx.refundRequest.upsert).toHaveBeenCalledWith(
@@ -569,7 +577,11 @@ describe('rejectBooking', () => {
     await rejectBooking(req, res, jest.fn());
 
     expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: BOOKING_ID, status: 'PENDING_PARTNER' },
+      where: {
+        id: BOOKING_ID,
+        status: 'PENDING_PARTNER',
+        isForecastTrainingSample: false,
+      },
       data: expect.objectContaining({ status: 'CANCELLED', refundRequired: false }),
     });
     expect(capturedTx.refundRequest.upsert).not.toHaveBeenCalled();
@@ -666,7 +678,11 @@ describe('rejectBooking', () => {
       expect.objectContaining({ data: { status: 'CANCELLED' } }),
     );
     expect(capturedTx.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: BOOKING_ID, status: 'PENDING_PARTNER' },
+      where: {
+        id: BOOKING_ID,
+        status: 'PENDING_PARTNER',
+        isForecastTrainingSample: false,
+      },
       data: expect.objectContaining({ status: 'CANCELLED', refundRequired: true }),
     });
   });
@@ -940,7 +956,11 @@ describe('cancelConfirmedBooking', () => {
     await cancelConfirmedBooking(req, res, next);
 
     expect(tx.booking.updateMany).toHaveBeenCalledWith({
-      where: { id: BOOKING_ID, status: 'CONFIRMED' },
+      where: {
+        id: BOOKING_ID,
+        status: 'CONFIRMED',
+        isForecastTrainingSample: false,
+      },
       data: expect.objectContaining({
         status: 'CANCELLED',
         refundRequired: true,

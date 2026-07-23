@@ -61,6 +61,12 @@ model User {
   checkedInTickets        TicketInstance[]            @relation("TicketCheckedInBy")
   auditLogs               AuditLog[]
   savedItineraries        SavedItinerary[]
+  liveTrips               LiveTrip[]
+  smartQueueEntries       SmartQueueEntry[]
+  liveTripEvents          LiveTripEvent[]
+  smartQueuePolicies      SmartQueuePolicy[]          @relation("SmartQueuePolicyUpdatedBy")
+  calledQueueEntries      SmartQueueEntry[]           @relation("SmartQueueCalledBy")
+  pausedQueuePolicies     SmartQueuePolicy[]          @relation("SmartQueuePolicyPausedBy")
 
   @@index([employerPartnerId])
 }
@@ -374,9 +380,14 @@ model Attraction {
   timeSlots      TimeSlot[] // Khung giờ cấp điểm tham quan (Module 2)
   specialDates   SpecialDate[] // Lịch đặc biệt (đóng cửa / đổi sức chứa)
 
-  dailyStocks      AttractionDailyStock[]
-  staffAssignments StaffAttractionAssignment[]
-  revenueForecasts RevenueForecast[]
+  dailyStocks         AttractionDailyStock[]
+  staffAssignments    StaffAttractionAssignment[]
+  revenueForecasts    RevenueForecast[]
+  liveTripItems       LiveTripItem[]
+  smartQueueEntries   SmartQueueEntry[]
+  smartQueuePolicy    SmartQueuePolicy?
+  arrivalObservations ArrivalObservation[]
+  livePredictions     LivePrediction[]
 
   @@index([city])
   @@index([status])
@@ -606,6 +617,9 @@ model Booking {
   cancelledAt                DateTime?
   cancellationReason         String?          @db.Text
   cancellationSource         String?
+  // Dữ liệu lịch sử có kiểm soát chỉ phục vụ mô hình dự báo. Không được xuất hiện
+  // trong booking, KPI, báo cáo tài chính, đối soát hay trợ lý khách hàng.
+  isForecastTrainingSample   Boolean          @default(false)
   createdAt                  DateTime         @default(now())
   updatedAt                  DateTime         @updatedAt
 
@@ -618,12 +632,15 @@ model Booking {
   refundTransactions RefundTransaction[]
   review             Review?
   settlementItems    PartnerSettlementItem[]
+  liveTripItems      LiveTripItem[]
+  smartQueueEntries  SmartQueueEntry[]
 
   @@index([userId])
   @@index([voucherId])
   @@index([status])
   @@index([snapshotAttractionId])
   @@index([snapshotVisitDate])
+  @@index([isForecastTrainingSample])
   @@index([cancelledAt])
 }
 
@@ -932,11 +949,324 @@ model SavedItinerary {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  liveTrip LiveTrip?
 
   @@unique([userId, planId])
   @@index([userId])
   @@index([createdAt])
+}
+
+enum LiveTripStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum LiveTripItemStatus {
+  PLANNED
+  AT_RISK
+  REVISION_PROPOSED
+  UPDATED
+  COMPLETED
+  SKIPPED
+}
+
+enum LiveTripProposalType {
+  TIME_SHIFT
+}
+
+enum LiveTripProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  SUPERSEDED
+}
+
+enum SmartQueueStatus {
+  WAITING
+  READY
+  ADMITTED
+  CANCELLED
+  EXPIRED
+  NO_SHOW
+}
+
+enum SmartQueueMode {
+  AUTO
+  STAFF_CONTROLLED
+}
+
+enum LiveTripEventType {
+  QUEUE_JOINED
+  QUEUE_READY
+  QUEUE_ADMITTED
+  QUEUE_CANCELLED
+  QUEUE_EXPIRED
+  QUEUE_CALLED
+  QUEUE_NO_SHOW
+  QUEUE_PAUSED
+  QUEUE_RESUMED
+  AUTOPILOT_PROPOSED
+  AUTOPILOT_ACCEPTED
+  AUTOPILOT_REJECTED
+  AUTOPILOT_EXPIRED
+  ITEM_AT_RISK
+  ITEM_RECOVERED
+  ITEM_COMPLETED
+  ITEM_SKIPPED
+}
+
+enum LiveTripEventSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  CRITICAL
+}
+
+// A materialized, operational version of a saved itinerary. The original
+// SavedItinerary.data remains the customer's editable snapshot; these rows are
+// used for safe, indexed live-trip queries and future revisions.
+model LiveTrip {
+  id               String         @id @default(uuid())
+  userId           String
+  savedItineraryId String         @unique
+  title            String
+  startDate        DateTime       @db.Date
+  endDate          DateTime       @db.Date
+  status           LiveTripStatus @default(ACTIVE)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  savedItinerary SavedItinerary        @relation(fields: [savedItineraryId], references: [id], onDelete: Cascade)
+  items          LiveTripItem[]
+  proposals      LiveTripProposal[]
+  queueEntries   SmartQueueEntry[]
+  events         LiveTripEvent[]
+  simulations    AutopilotSimulation[]
+
+  @@index([userId, status])
+  @@index([startDate, endDate, status])
+}
+
+model LiveTripItem {
+  id             String             @id @default(uuid())
+  liveTripId     String
+  attractionId   String?
+  bookingId      String?
+  dayIndex       Int
+  orderIndex     Int
+  scheduledStart DateTime
+  scheduledEnd   DateTime?
+  status         LiveTripItemStatus @default(PLANNED)
+  snapshot       Json
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  liveTrip        LiveTrip           @relation(fields: [liveTripId], references: [id], onDelete: Cascade)
+  attraction      Attraction?        @relation(fields: [attractionId], references: [id], onDelete: SetNull)
+  booking         Booking?           @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  proposals       LiveTripProposal[]
+  smartQueueEntry SmartQueueEntry?
+  events          LiveTripEvent[]
+
+  @@index([liveTripId, dayIndex, orderIndex])
+  @@index([attractionId, scheduledStart])
+  @@index([bookingId])
+}
+
+// Customer-confirmed operational revisions. activeKey is populated only while
+// a proposal is PENDING, which provides a database guarantee of at most one
+// active proposal per live-trip item while allowing complete history retention.
+model LiveTripProposal {
+  id             String                 @id @default(uuid())
+  liveTripId     String
+  liveTripItemId String
+  activeKey      String?                @unique
+  type           LiveTripProposalType
+  status         LiveTripProposalStatus @default(PENDING)
+  reasonCode     String
+  rationale      String                 @db.Text
+  originalStart  DateTime
+  originalEnd    DateTime?
+  proposedStart  DateTime
+  proposedEnd    DateTime?
+  snapshot       Json
+  expiresAt      DateTime
+  decidedAt      DateTime?
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  liveTrip     LiveTrip     @relation(fields: [liveTripId], references: [id], onDelete: Cascade)
+  liveTripItem LiveTripItem @relation(fields: [liveTripItemId], references: [id], onDelete: Cascade)
+
+  @@index([liveTripId, status, createdAt])
+  @@index([liveTripItemId, status])
+  @@index([expiresAt, status])
+}
+
+// One durable virtual-queue record per live-trip item. The record is never
+// deleted or reactivated, which enforces one enrolment per booked experience.
+model SmartQueueEntry {
+  id             String           @id @default(uuid())
+  liveTripId     String
+  liveTripItemId String           @unique
+  userId         String
+  attractionId   String
+  bookingId      String
+  visitDate      DateTime         @db.Date
+  partySize      Int
+  status         SmartQueueStatus @default(WAITING)
+  joinedAt       DateTime         @default(now())
+  readyAt        DateTime?
+  admittedAt     DateTime?
+  cancelledAt    DateTime?
+  expiresAt      DateTime
+  readyExpiresAt DateTime?
+  calledAt       DateTime?
+  noShowAt       DateTime?
+  calledById     String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  liveTrip     LiveTrip     @relation(fields: [liveTripId], references: [id], onDelete: Cascade)
+  liveTripItem LiveTripItem @relation(fields: [liveTripItemId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attraction   Attraction   @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  booking      Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  calledBy     User?        @relation("SmartQueueCalledBy", fields: [calledById], references: [id], onDelete: SetNull)
+
+  @@index([attractionId, visitDate, status, joinedAt])
+  @@index([userId, status, updatedAt])
+  @@index([bookingId, status])
+  @@index([expiresAt, status])
+}
+
+// Operational policy is deliberately separate from attraction catalogue data:
+// changing queue rules must not create a new product revision or affect ticket sales.
+model SmartQueuePolicy {
+  id                      String         @id @default(uuid())
+  attractionId            String         @unique
+  enabled                 Boolean        @default(true)
+  mode                    SmartQueueMode @default(AUTO)
+  openBeforeMinutes       Int            @default(120)
+  readyGraceMinutes       Int            @default(10)
+  maxReadyParties         Int            @default(3)
+  maxActiveParties        Int            @default(100)
+  fallbackThroughput15m   Int            @default(8)
+  snapshotIntervalMinutes Int            @default(15)
+  pausedAt                DateTime?
+  pausedById              String?
+  pauseReason             String?
+  updatedById             String?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+
+  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  pausedBy   User?      @relation("SmartQueuePolicyPausedBy", fields: [pausedById], references: [id], onDelete: SetNull)
+  updatedBy  User?      @relation("SmartQueuePolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([enabled, pausedAt])
+}
+
+// Immutable operational snapshots used for model training, backtesting and
+// defence-demo evidence. observationKey makes the 15-minute worker idempotent.
+model ArrivalObservation {
+  id                    String    @id @default(uuid())
+  observationKey        String    @unique
+  attractionId          String
+  bucketStart           DateTime
+  bucketMinutes         Int       @default(15)
+  capacity              Int       @default(0)
+  bookedGuests          Int       @default(0)
+  heldGuests            Int       @default(0)
+  queueGuests           Int       @default(0)
+  checkinsLast15Minutes Int       @default(0)
+  showRate              Float     @default(0.9)
+  pressureScore         Int       @default(0)
+  weatherCode           String?
+  calendarFeatures      Json?
+  actualArrivalsNext15m Int?
+  dataSource            String    @default("LIVE_OPERATIONAL")
+  createdAt             DateTime  @default(now())
+  evaluatedAt           DateTime?
+
+  attraction  Attraction       @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  predictions LivePrediction[]
+
+  @@index([attractionId, bucketStart])
+  @@index([dataSource, actualArrivalsNext15m])
+}
+
+// Every prediction is auditable: model provenance, fallback status, confidence
+// and feature contributions remain available after the UI has moved on.
+model LivePrediction {
+  id                   String    @id @default(uuid())
+  attractionId         String
+  observationId        String?
+  predictionType       String
+  horizonMinutes       Int       @default(15)
+  predictedP50         Float
+  predictedP90         Float
+  confidence           String    @default("LOW")
+  modelVersion         String
+  trainingSource       String    @default("unknown")
+  usedFallback         Boolean   @default(false)
+  featureContributions Json?
+  actualValue          Float?
+  predictedAt          DateTime  @default(now())
+  evaluatedAt          DateTime?
+
+  attraction  Attraction          @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  observation ArrivalObservation? @relation(fields: [observationId], references: [id], onDelete: SetNull)
+
+  @@index([attractionId, predictionType, predictedAt])
+  @@index([modelVersion, predictedAt])
+}
+
+// A simulation is never a silent itinerary mutation. It records baseline,
+// constraints and measurable impact before a customer accepts a proposal.
+model AutopilotSimulation {
+  id                    String   @id @default(uuid())
+  liveTripId            String
+  algorithmVersion      String
+  baselineScore         Float
+  optimizedScore        Float
+  predictedMinutesSaved Int      @default(0)
+  protectedBookingCount Int      @default(0)
+  proposalCount         Int      @default(0)
+  constraints           Json
+  result                Json
+  createdAt             DateTime @default(now())
+
+  liveTrip LiveTrip @relation(fields: [liveTripId], references: [id], onDelete: Cascade)
+
+  @@index([liveTripId, createdAt])
+}
+
+// Durable event history powers the in-app activity feed and makes every
+// Autopilot/SmartQueue decision explainable during operations and assessment.
+model LiveTripEvent {
+  id             String                @id @default(uuid())
+  liveTripId     String
+  liveTripItemId String?
+  userId         String
+  type           LiveTripEventType
+  severity       LiveTripEventSeverity @default(INFO)
+  title          String
+  message        String                @db.Text
+  data           Json?
+  createdAt      DateTime              @default(now())
+
+  liveTrip     LiveTrip      @relation(fields: [liveTripId], references: [id], onDelete: Cascade)
+  liveTripItem LiveTripItem? @relation(fields: [liveTripItemId], references: [id], onDelete: SetNull)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([liveTripId, createdAt])
+  @@index([userId, createdAt])
+  @@index([liveTripItemId, createdAt])
 }
 
 // ============================================================
