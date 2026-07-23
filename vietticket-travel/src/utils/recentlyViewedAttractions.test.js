@@ -15,6 +15,15 @@ function makeStorage(initialValue = null) {
   }
 }
 
+function makeStorageWithLegacyValue(legacyValue) {
+  const data = new Map([['vietticket_recently_viewed_attractions_v1', legacyValue]])
+
+  return {
+    getItem: (key) => data.get(key) || null,
+    setItem: (key, value) => data.set(key, value),
+  }
+}
+
 describe('recently viewed attractions', () => {
   it('stores newest attraction first without duplicating ids', () => {
     const storage = makeStorage()
@@ -52,5 +61,18 @@ describe('recently viewed attractions', () => {
 
     expect(getRecentlyViewedAttractions(storage)).toEqual([])
     expect(saveRecentlyViewedAttraction({ id: '', title: '' }, storage)).toEqual([])
+  })
+
+  it('does not surface stale snapshots from the retired catalog cache', () => {
+    const storage = makeStorageWithLegacyValue(
+      JSON.stringify([
+        {
+          id: 'defense-demo-v1-attraction-museum',
+          title: 'Bảo tàng Thành phố Hồ Chí Minh',
+        },
+      ]),
+    )
+
+    expect(getRecentlyViewedAttractions(storage)).toEqual([])
   })
 })

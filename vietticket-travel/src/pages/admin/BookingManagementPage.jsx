@@ -357,7 +357,7 @@ export default function BookingManagementPage() {
             {/* Modal Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, borderBottom: '1px solid #e1e3e4', paddingBottom: 16 }}>
               <div>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--adm-primary-dark)', letterSpacing: '0.05em' }}>MÃ ĐƠN HÀNG: {selectedBooking.id.toUpperCase()}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--adm-primary-dark)', letterSpacing: '0.05em' }}>MÃ ĐƠN HÀNG: {formatBookingReference(selectedBooking.id)}</span>
                 <h3 style={{ fontSize: 20, fontWeight: 700, color: '#1a1c1e', margin: '4px 0 0' }}>
                   Chi tiết hóa đơn &amp; Vé đặt
                 </h3>

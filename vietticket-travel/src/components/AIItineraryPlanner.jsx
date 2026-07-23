@@ -11,6 +11,7 @@ import {
   getSavedAiItineraryById,
   saveAiItinerary,
 } from '../services/aiApi.js'
+import { activateLiveTrip } from '../services/liveTripApi.js'
 import {
   CATEGORY_OPTIONS,
   COMPANION_OPTIONS,
@@ -120,6 +121,7 @@ function AIItineraryPlanner() {
   const [companion, setCompanion] = useState('couple')
   const [budget, setBudget] = useState('')
   const [loading, setLoading] = useState(false)
+  const [activatingLiveTrip, setActivatingLiveTrip] = useState(false)
   const [plan, setPlan] = useState(null)
   const [savedItineraries, setSavedItineraries] = useState(() =>
     loadSavedItineraries(undefined, ownerId),
@@ -345,6 +347,44 @@ function AIItineraryPlanner() {
       toast.error('Không thể lưu lịch trình lúc này.')
     }
   }, [currentCriteria, ownerId, plan])
+
+  const handleActivateLiveTrip = useCallback(async () => {
+    if (!plan || activatingLiveTrip) return
+    if (!ownerId) {
+      toast.warning('Vui lòng đăng nhập để kích hoạt chế độ chuyến đi.')
+      navigate('/login')
+      return
+    }
+
+    setActivatingLiveTrip(true)
+    try {
+      const snapshot = createItinerarySnapshot(plan, currentCriteria)
+      const saved = saveItinerarySnapshot(snapshot, undefined, ownerId)
+      if (!saved) {
+        toast.error('Không thể chuẩn bị lịch trình để theo dõi.')
+        return
+      }
+
+      setSavedPlanId(saved.id)
+      setSavedItineraries(loadSavedItineraries(undefined, ownerId))
+      const synced = await syncItineraryToServer(saved, saveAiItinerary)
+      if (!synced) {
+        toast.error('Không thể đồng bộ lịch trình lên tài khoản. Vui lòng thử lại khi mạng ổn định.')
+        return
+      }
+
+      const response = await activateLiveTrip(saved.id, {
+        startDate: plan.startDate || startDate,
+      })
+      toast.success(response.created ? 'Đã kích hoạt VietTicket Live.' : 'Đã mở lại chuyến đi đang theo dõi.')
+      navigate(`/trip-mode/${response.data.id}`)
+    } catch (error) {
+      console.error('Activate live trip error:', error)
+      toast.error(error.message || 'Không thể kích hoạt chế độ chuyến đi lúc này.')
+    } finally {
+      setActivatingLiveTrip(false)
+    }
+  }, [activatingLiveTrip, currentCriteria, navigate, ownerId, plan, startDate])
 
   const handleOpenSavedPlan = useCallback((snapshot) => {
     if (!snapshot?.plan) {
@@ -777,6 +817,17 @@ function AIItineraryPlanner() {
                         Kiểm tra & đặt toàn lịch trình ({bookableQueueItems.length})
                       </button>
                     )}
+                    <button
+                      className="inline-flex items-center gap-2 rounded-2xl bg-[#006b72] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#00474d] active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={activatingLiveTrip}
+                      onClick={handleActivateLiveTrip}
+                      type="button"
+                    >
+                      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                        route
+                      </span>
+                      {activatingLiveTrip ? 'Đang bật VietTicket Live...' : 'Bật VietTicket Live'}
+                    </button>
                     <button
                       className="inline-flex items-center gap-2 rounded-2xl border border-[#00474d] bg-white px-4 py-2 text-sm font-semibold text-[#00474d] transition hover:bg-[#e8f7f8] active:scale-95"
                       onClick={handleSavePlan}

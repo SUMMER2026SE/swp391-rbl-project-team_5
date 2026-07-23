@@ -35,12 +35,12 @@ const getMethodLabel = (item) =>
   METHOD_LABELS[item.method]
   || (item.usedFallback ? 'Xu hướng từ dữ liệu lịch sử' : 'Phương pháp chưa xác định')
 
-const getMethodSummaryLabel = (summary = {}) => {
+const getMethodSummaryLabel = (summary = {}, includeInsufficient = true) => {
   const parts = [
     [summary.ai, 'mô hình nâng cao'],
     [summary.demoAi, 'mô hình thử nghiệm'],
     [summary.baseline, 'theo dữ liệu lịch sử'],
-    [summary.insufficientData, 'chưa đủ dữ liệu'],
+    ...(includeInsufficient ? [[summary.insufficientData, 'chưa đủ dữ liệu']] : []),
   ]
     .filter(([count]) => Number(count || 0) > 0)
     .map(([count, label]) => `${count} ${label}`)
@@ -184,12 +184,16 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
             />
             <StatCard
               label="Điểm có đủ cơ sở dự báo"
-              value={`${data.successfulAttractions}/${data.totalAttractions}`}
-              note={`${data.insufficientDataAttractions || 0} điểm chưa có dữ liệu · ${data.failedAttractions || 0} lỗi xử lý`}
+              value={mode === 'admin'
+                ? `${data.successfulAttractions} địa điểm`
+                : `${data.successfulAttractions}/${data.totalAttractions}`}
+              note={mode === 'admin'
+                ? `Chỉ tính địa điểm đạt ngưỡng lịch sử${data.failedAttractions ? ` · ${data.failedAttractions} lỗi xử lý` : ''}`
+                : `${data.insufficientDataAttractions || 0} điểm chưa có dữ liệu · ${data.failedAttractions || 0} lỗi xử lý`}
             />
             <StatCard
               label="Phương pháp"
-              value={getMethodSummaryLabel(data.methodSummary)}
+              value={getMethodSummaryLabel(data.methodSummary, mode !== 'admin')}
               note="Chỉ tạo dự báo khi lịch sử có đủ số đơn và độ phủ theo ngày"
             />
           </div>
@@ -198,8 +202,9 @@ export default function RevenueForecastPanel({ mode = 'partner' }) {
             <div className="flex items-start gap-2 rounded-lg border border-[#d8dee0] bg-[#f7f9fa] px-4 py-3 text-xs leading-5 text-[#3f484a]">
               <span className="material-symbols-outlined mt-0.5 text-[18px]">database_off</span>
               <span>
-                Có {data.methodSummary.insufficientData} điểm chưa có đủ đơn hoàn tất phát sinh doanh thu.
-                Các điểm này không được cộng vào tổng doanh thu và không được ghi nhận là dự báo thành công.
+                {mode === 'admin'
+                  ? 'Các điểm chưa đủ lịch sử tự động được loại khỏi tổng dự báo và không được ghi nhận là dự báo thành công.'
+                  : `Có ${data.methodSummary.insufficientData} điểm chưa có đủ đơn hoàn tất phát sinh doanh thu. Các điểm này không được cộng vào tổng doanh thu và không được ghi nhận là dự báo thành công.`}
               </span>
             </div>
           )}

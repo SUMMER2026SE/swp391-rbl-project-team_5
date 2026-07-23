@@ -73,6 +73,40 @@ export function replaceStaffAssignments(staffId, attractionIds) {
   })
 }
 
+export function listSmartQueueAttractions() {
+  return apiRequest('/staff/smart-queue/attractions', { method: 'GET' })
+}
+
+export function getSmartQueueOverview(attractionId, date) {
+  const params = new URLSearchParams({ attractionId })
+  if (date) params.set('date', date)
+  return apiRequest(`/staff/smart-queue/overview?${params.toString()}`, { method: 'GET' })
+}
+
+export function getSmartQueuePolicy(attractionId) {
+  return apiRequest(`/staff/smart-queue/policy/${encodeURIComponent(attractionId)}`, { method: 'GET' })
+}
+
+export function updateSmartQueuePolicy(attractionId, payload) {
+  return apiRequest(`/staff/smart-queue/policy/${encodeURIComponent(attractionId)}`, { method: 'PUT', body: payload })
+}
+
+export function pauseSmartQueue(attractionId, reason) {
+  return apiRequest(`/staff/smart-queue/policy/${encodeURIComponent(attractionId)}/pause`, { method: 'POST', body: { reason } })
+}
+
+export function resumeSmartQueue(attractionId) {
+  return apiRequest(`/staff/smart-queue/policy/${encodeURIComponent(attractionId)}/resume`, { method: 'POST' })
+}
+
+export function callSmartQueueEntry(entryId) {
+  return apiRequest(`/staff/smart-queue/entries/${encodeURIComponent(entryId)}/call`, { method: 'POST' })
+}
+
+export function noShowSmartQueueEntry(entryId) {
+  return apiRequest(`/staff/smart-queue/entries/${encodeURIComponent(entryId)}/no-show`, { method: 'POST' })
+}
+
 const staffApi = {
   listRefundRequests,
   processRefundRequest,
@@ -84,6 +118,14 @@ const staffApi = {
   checkInTicket,
   getStaffAssignments,
   replaceStaffAssignments,
+  listSmartQueueAttractions,
+  getSmartQueueOverview,
+  getSmartQueuePolicy,
+  updateSmartQueuePolicy,
+  pauseSmartQueue,
+  resumeSmartQueue,
+  callSmartQueueEntry,
+  noShowSmartQueueEntry,
 }
 
 export default staffApi

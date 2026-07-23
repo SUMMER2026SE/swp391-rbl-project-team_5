@@ -24,6 +24,7 @@ const NAV_ITEMS_ADMIN = [
 
 const NAV_ITEMS_CHECKIN_STAFF = [
   { to: '/staff/checkin', icon: 'qr_code_scanner', label: 'Check-in vé' },
+  { to: '/staff/smart-queue', icon: 'queue', label: 'SmartQueue Control Tower' },
 ];
 
 const NAV_ITEMS_PLATFORM_STAFF = [

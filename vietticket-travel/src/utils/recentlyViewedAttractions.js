@@ -1,4 +1,6 @@
-export const RECENTLY_VIEWED_ATTRACTIONS_KEY = 'vietticket_recently_viewed_attractions_v1'
+// Version the snapshot format so retired catalog records never keep surfacing
+// after a catalog migration or a controlled database refresh.
+export const RECENTLY_VIEWED_ATTRACTIONS_KEY = 'vietticket_recently_viewed_attractions_v2'
 export const RECENTLY_VIEWED_ATTRACTIONS_LIMIT = 6
 
 const getDefaultStorage = () => {

@@ -171,6 +171,14 @@ export function saveSchedule(attractionId, payload) {
   })
 }
 
+export function getSmartQueuePolicy(attractionId) {
+  return apiRequest(`/partners/attractions/${encodeURIComponent(attractionId)}/smart-queue-policy`, { method: 'GET' })
+}
+
+export function updateSmartQueuePolicy(attractionId, payload) {
+  return apiRequest(`/partners/attractions/${encodeURIComponent(attractionId)}/smart-queue-policy`, { method: 'PUT', body: payload })
+}
+
 // ----- Đặt vé (quản lý phía đối tác) -----
 export function getPartnerBookings(params = {}) {
   const query = new URLSearchParams()
