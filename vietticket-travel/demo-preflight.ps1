@@ -24,10 +24,10 @@ function Test-HttpEndpoint([string]$Label, [string]$Uri) {
 
 $branch = (& git branch --show-current).Trim()
 Assert-CommandSucceeded 'Read Git branch'
-if ($branch -ne 'HAnh') {
-  throw "Current branch is '$branch'. Checkout 'HAnh' before the demo."
+if ($branch -notin @('HAnh', 'codex/vietticket-live-autopilot')) {
+  throw "Current branch is '$branch'. Checkout the prepared demo branch before the demo."
 }
-Write-Host '[PASS] Current branch is HAnh' -ForegroundColor Green
+Write-Host "[PASS] Prepared demo branch: $branch" -ForegroundColor Green
 
 Test-HttpEndpoint 'ML forecast service' 'http://127.0.0.1:8000/health'
 Test-HttpEndpoint 'Backend API' 'http://localhost:5000/api/health'
@@ -39,12 +39,12 @@ try {
   Assert-CommandSucceeded 'Demo data check'
 
   & npm.cmd run demo:llm-check
-  Assert-CommandSucceeded 'LLM provider check'
+  Assert-CommandSucceeded 'AI itinerary readiness check'
 }
 finally {
   Pop-Location
 }
 
 Write-Host ''
-Write-Host 'PRE-FLIGHT PASS: services, demo data, AI, and branch HAnh are ready.' -ForegroundColor Green
+Write-Host "PRE-FLIGHT PASS: services, operational data, AI itinerary, and branch $branch are ready." -ForegroundColor Green
 Write-Host 'Do not run demo:prepare/demo:smoke after signing in to the demo browser profiles.' -ForegroundColor Yellow
