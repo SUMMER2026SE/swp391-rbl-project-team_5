@@ -65,6 +65,8 @@ function validateProductionEnv() {
     'SMTP_USER',
     'SMTP_PASS',
     'MAIL_FROM',
+    'ML_SERVICE_URL',
+    'ML_SERVICE_API_KEY',
   ];
   const missing = required.filter((name) => !String(process.env[name] || '').trim());
 
@@ -78,7 +80,17 @@ function validateProductionEnv() {
     throw new Error('JWT_SECRET must be a strong random secret in production.');
   }
 
-  const localhostVars = ['FRONTEND_URL', 'BACKEND_URL', 'VNP_RETURNURL', 'VNP_IPNURL'];
+  if (String(process.env.ML_SERVICE_API_KEY || '').trim().length < 32) {
+    throw new Error('ML_SERVICE_API_KEY must be at least 32 characters in production.');
+  }
+
+  const localhostVars = [
+    'FRONTEND_URL',
+    'BACKEND_URL',
+    'VNP_RETURNURL',
+    'VNP_IPNURL',
+    'ML_SERVICE_URL',
+  ];
   const localOnly = localhostVars.filter((name) =>
     /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(String(process.env[name] || '')),
   );

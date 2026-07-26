@@ -5,6 +5,7 @@
     "Hồ Chí Minh": 1.0
   },
   "residual_std": 0.8811584228465388,
+  "artifact_sha256": "7BF21ACD71A26C0C745163568FDA6732D0428AD4F90F884F370BECEEFA1F16A3",
   "metrics": {
     "mape_observed_days": 39.0184737952964,
     "wape": 35.78129179124323,

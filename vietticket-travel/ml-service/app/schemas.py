@@ -13,7 +13,7 @@ ml-service chỉ làm feature engineering + inference/training thuần túy.
 from datetime import date, datetime
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Tier = Literal["BUDGET", "STANDARD", "PREMIUM", "LUXURY"]
 
@@ -69,19 +69,27 @@ class HealthResponse(BaseModel):
 
 
 class LiveObservation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     timestamp: datetime
-    data_source: str = Field(default="LIVE_OPERATIONAL", max_length=80)
-    capacity: int = Field(ge=0, default=0)
-    booked_guests: int = Field(ge=0, default=0)
-    held_guests: int = Field(ge=0, default=0)
-    queue_guests: int = Field(ge=0, default=0)
-    checkins_last_15m: int = Field(ge=0, default=0)
+    data_source: str = Field(default="LIVE_OPERATIONAL", min_length=1, max_length=80)
+    capacity: int = Field(ge=0, le=1_000_000, default=0)
+    booked_guests: int = Field(ge=0, le=1_000_000, default=0)
+    held_guests: int = Field(ge=0, le=1_000_000, default=0)
+    queue_guests: int = Field(ge=0, le=1_000_000, default=0)
+    checkins_last_15m: int = Field(ge=0, le=1_000_000, default=0)
     pressure_score: int = Field(ge=0, le=100, default=0)
-    show_rate: float = Field(ge=0, le=1, default=0.9)
-    actual_arrivals_next_15m: Optional[int] = Field(default=None, ge=0)
+    show_rate: float = Field(ge=0, le=1, allow_inf_nan=False, default=0.9)
+    actual_arrivals_next_15m: Optional[int] = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+    )
 
 
 class LivePredictionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     attraction_id: str = Field(min_length=1, max_length=120)
     observations: List[LiveObservation] = Field(default_factory=list, max_length=2000)
     current: LiveObservation
@@ -89,14 +97,14 @@ class LivePredictionRequest(BaseModel):
 
 
 class LivePredictionResponse(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = ConfigDict(protected_namespaces=(), extra="forbid")
 
     attraction_id: str
-    prediction_type: str
+    prediction_type: Literal["ARRIVALS", "WAIT_TIME"]
     horizon_minutes: int
     predicted_p50: float
     predicted_p90: float
-    confidence: str
+    confidence: Literal["LOW", "MEDIUM", "HIGH"]
     model_version: str
     training_source: str
     used_fallback: bool
@@ -111,26 +119,36 @@ class WaitPredictionRequest(LivePredictionRequest):
 
 
 class WaitPredictionResponse(LivePredictionResponse):
-    prediction_type: str = "WAIT_TIME"
+    prediction_type: Literal["WAIT_TIME"] = "WAIT_TIME"
 
 
 class OptimizerItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(min_length=1, max_length=120)
     day_index: int = Field(ge=0, le=13, default=0)
     start_minute: int = Field(ge=0, le=24 * 60)
     end_minute: int = Field(ge=1, le=24 * 60)
     locked: bool = False
-    risk_score: float = Field(ge=0, le=100, default=0)
+    risk_score: float = Field(ge=0, le=100, allow_inf_nan=False, default=0)
     flexibility_minutes: int = Field(ge=0, le=180, default=30)
     priority: int = Field(ge=0, le=100, default=50)
 
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.end_minute <= self.start_minute:
+            raise ValueError("end_minute phải lớn hơn start_minute.")
+        return self
+
 
 class OptimizeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     live_trip_id: str = Field(min_length=1, max_length=120)
     items: List[OptimizerItem] = Field(min_length=1, max_length=30)
     max_shift_minutes: int = Field(ge=0, le=180, default=45)
     travel_buffer_minutes: int = Field(ge=0, le=180, default=30)
-    timezone: str = Field(default="Asia/Ho_Chi_Minh", max_length=80)
+    timezone: Literal["Asia/Ho_Chi_Minh"] = "Asia/Ho_Chi_Minh"
 
 
 class OptimizeResponse(BaseModel):

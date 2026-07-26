@@ -18,6 +18,7 @@ const PROPOSAL_DECISION_BUFFER_MS = 30 * 60 * 1000;
 const SCHEDULE_TRAVEL_BUFFER_MS = 30 * 60 * 1000;
 const AUTOPILOT_SWEEP_LIMIT = 25;
 const LIVE_PREDICTION_MAX_AGE_MS = 30 * 60 * 1000;
+const AUTOPILOT_MAX_SHIFT_MINUTES = 8 * 60;
 
 const AUTOPILOT_TRIP_INCLUDE = {
   items: {
@@ -62,7 +63,13 @@ async function getApplicableArrivalPrediction(prismaClient, item, pressure, now)
     where: {
       attractionId: item.attractionId,
       predictionType: 'ARRIVALS',
-      predictedAt: { gte: new Date(now.getTime() - LIVE_PREDICTION_MAX_AGE_MS) },
+      usedFallback: false,
+      confidence: { in: ['MEDIUM', 'HIGH'] },
+      trainingSource: 'live_operational_history',
+      predictedAt: {
+        gte: new Date(now.getTime() - LIVE_PREDICTION_MAX_AGE_MS),
+        lte: now,
+      },
     },
     orderBy: { predictedAt: 'desc' },
     select: {
@@ -77,8 +84,6 @@ async function getApplicableArrivalPrediction(prismaClient, item, pressure, now)
   });
   if (
     !prediction
-    || prediction.usedFallback
-    || !['MEDIUM', 'HIGH'].includes(prediction.confidence)
   ) return null;
 
   const predictionEnd = new Date(
@@ -86,13 +91,17 @@ async function getApplicableArrivalPrediction(prismaClient, item, pressure, now)
       + Number(prediction.horizonMinutes || 15) * 60 * 1000,
   );
   const scheduledStart = new Date(item.scheduledStart);
-  if (scheduledStart > predictionEnd || itemEnd(item) <= now) return null;
+  const relevantAt = scheduledStart > now ? scheduledStart : now;
+  if (relevantAt > predictionEnd || itemEnd(item) <= now) return null;
 
   const capacity = Math.max(1, Number(pressure.summary?.capacity) || 1);
   const expectedArrivals = Math.max(1, capacity * 0.25);
-  const burstRatioP90 = Number(prediction.predictedP90 || 0) / expectedArrivals;
+  const horizonMinutes = Math.max(5, Number(prediction.horizonMinutes) || 15);
+  const p90Per15Minutes = Number(prediction.predictedP90 || 0) * 15 / horizonMinutes;
+  const burstRatioP90 = p90Per15Minutes / expectedArrivals;
   return {
     ...prediction,
+    p90Per15Minutes: Math.round(p90Per15Minutes * 100) / 100,
     burstRatioP90: Math.round(burstRatioP90 * 1000) / 1000,
     pressureEquivalent: Math.min(100, Math.round(burstRatioP90 * PRESSURE_RISK_THRESHOLD)),
   };
@@ -171,6 +180,7 @@ function chooseSaferSlot({ item, tripItems, pressure, now, currentScoreOverride 
   );
   const partySize = activityPartySize(item);
   const date = new Date(`${itemVisitDate(item)}T00:00:00.000Z`);
+  const originalStart = new Date(item.scheduledStart);
 
   const candidates = (pressure.slots || [])
     .filter((slot) => (
@@ -186,7 +196,15 @@ function chooseSaferSlot({ item, tripItems, pressure, now, currentScoreOverride 
         timeSlot: { startTime: slot.startTime, endTime: slot.endTime },
         attraction: item.attraction,
       });
-      return { slot, startsAt: window.startsAt, endsAt: window.endsAt };
+      const shiftMinutes = Math.round(
+        Math.abs(window.startsAt.getTime() - originalStart.getTime()) / 60000,
+      );
+      return {
+        slot,
+        startsAt: window.startsAt,
+        endsAt: window.endsAt,
+        shiftMinutes,
+      };
     })
     .filter((candidate) => (
       candidate.startsAt
@@ -195,6 +213,7 @@ function chooseSaferSlot({ item, tripItems, pressure, now, currentScoreOverride 
         now.getTime() + PROPOSAL_DECISION_BUFFER_MS + PROPOSAL_MIN_LIFETIME_MS,
       )
       && candidate.endsAt > candidate.startsAt
+      && candidate.shiftMinutes <= AUTOPILOT_MAX_SHIFT_MINUTES
       && !hasTripScheduleConflict(
         tripItems,
         item.id,
@@ -203,7 +222,8 @@ function chooseSaferSlot({ item, tripItems, pressure, now, currentScoreOverride 
       )
     ))
     .sort((left, right) => (
-      Number(left.slot.score) - Number(right.slot.score)
+      left.shiftMinutes - right.shiftMinutes
+      || Number(left.slot.score) - Number(right.slot.score)
       || left.startsAt - right.startsAt
     ));
 
@@ -781,6 +801,7 @@ async function refreshTripAutopilot(
       travelBufferMinutes: SCHEDULE_TRAVEL_BUFFER_MS / 60000,
       decisionEngine: 'HYBRID_RULES_AND_ML_QUANTILES',
       predictionFreshnessMinutes: LIVE_PREDICTION_MAX_AGE_MS / 60000,
+      maxSuggestedShiftMinutes: AUTOPILOT_MAX_SHIFT_MINUTES,
     },
     tripCompleted,
     stats,
@@ -1148,6 +1169,7 @@ async function sweepAutopilotTrips({ prismaClient = prisma, now = new Date() } =
 
 module.exports = {
   AUTOPILOT_LOOKAHEAD_MS,
+  AUTOPILOT_MAX_SHIFT_MINUTES,
   PRESSURE_RISK_THRESHOLD,
   SAFE_SLOT_MAX_PRESSURE,
   SCHEDULE_TRAVEL_BUFFER_MS,

@@ -17,6 +17,7 @@ model đang phục vụ giữa chừng. Quản trị viên export dữ liệu th
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import secrets
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
@@ -38,11 +39,42 @@ from .schemas import (
 _model: EnsembleForecastModel | None = None
 
 
+def validate_runtime_security():
+    if (
+        settings.environment == "production"
+        and len(settings.ml_service_api_key.strip()) < 32
+    ):
+        raise RuntimeError(
+            "ML_SERVICE_API_KEY phải có ít nhất 32 ký tự trong production."
+        )
+
+
+def validate_model_provenance():
+    if settings.environment != "production":
+        return
+    if _model is None:
+        raise RuntimeError(
+            "Production ML service không có revenue model đã load."
+        )
+    if not _model.artifact_integrity_verified:
+        raise RuntimeError(
+            "Production ML service yêu cầu model artifact có SHA-256 metadata."
+        )
+    training_source = str(_model.metrics.get("training_source", "")).strip()
+    if training_source != "real_booking_history":
+        raise RuntimeError(
+            "Production ML service chỉ được load model từ real_booking_history."
+        )
+
+
 def _load_model_if_available():
     global _model
     if EnsembleForecastModel.exists(settings.model_dir):
         try:
-            _model = EnsembleForecastModel.load(settings.model_dir)
+            _model = EnsembleForecastModel.load(
+                settings.model_dir,
+                require_integrity=settings.environment == "production",
+            )
         except Exception as exc:  # noqa: BLE001 - log và tiếp tục chạy không model
             print(f"[ml-service] Không load được model có sẵn: {exc}")
             _model = None
@@ -50,7 +82,9 @@ def _load_model_if_available():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    validate_runtime_security()
     _load_model_if_available()
+    validate_model_provenance()
     yield
 
 
@@ -59,11 +93,16 @@ app = FastAPI(
     version="1.0.0",
     description="Ensemble RandomForest + XGBoost cho dự báo doanh thu theo điểm tham quan.",
     lifespan=lifespan,
+    docs_url=None if settings.environment == "production" else "/docs",
+    redoc_url=None if settings.environment == "production" else "/redoc",
+    openapi_url=None if settings.environment == "production" else "/openapi.json",
 )
 
 
 def require_api_key(x_ml_api_key: str = Header(default="")):
-    if settings.ml_service_api_key and x_ml_api_key != settings.ml_service_api_key:
+    configured = settings.ml_service_api_key.strip()
+    supplied = str(x_ml_api_key or "")
+    if configured and not secrets.compare_digest(supplied, configured):
         raise HTTPException(status_code=401, detail="x-ml-api-key không hợp lệ.")
     return True
 

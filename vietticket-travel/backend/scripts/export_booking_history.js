@@ -130,6 +130,9 @@ async function main() {
   const bookings = await prisma.booking.findMany({
     where: {
       status: { in: ['COMPLETED', 'NO_SHOW'] },
+      // Demo forecast rows are intentionally retained in the local database
+      // for UI/defence flows, but they must never enter a production artifact.
+      isForecastTrainingSample: false,
       payments: { some: { status: 'SUCCESS', isDuplicate: false } },
       OR: [
         {

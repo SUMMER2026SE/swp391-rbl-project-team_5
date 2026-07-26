@@ -15,6 +15,7 @@ const QUEUE_OPEN_BEFORE_MS = 2 * 60 * 60 * 1000;
 const QUEUE_READY_MAX_PRESSURE = 84;
 const QUEUE_FALLBACK_THROUGHPUT_RATIO = 0.08;
 const ARRIVAL_PREDICTION_MAX_AGE_MS = 30 * 60 * 1000;
+const ARRIVAL_PREDICTION_HORIZON_MINUTES = 15;
 const MAX_ESTIMATED_WAIT_MINUTES = 240;
 const QUEUE_SWEEP_LIMIT = 100;
 const QUEUE_CALL_BEFORE_MS = 15 * 60 * 1000;
@@ -92,6 +93,7 @@ function getQueueVisitDate(item) {
 function getQueueCloseTime(item) {
   const start = normalizedDate(item.scheduledStart);
   const end = normalizedDate(item.scheduledEnd);
+  if (!start) return null;
   return end && start && end > start
     ? end
     : new Date(start.getTime() + 4 * 60 * 60 * 1000);
@@ -129,8 +131,15 @@ function assertQueueEligibility(item, now, policy = DEFAULT_QUEUE_POLICY) {
 
   const startsAt = normalizedDate(item.scheduledStart);
   const closesAt = getQueueCloseTime(item);
+  if (!startsAt || !closesAt) {
+    throw createHttpError(
+      409,
+      'QUEUE_SCHEDULE_UNAVAILABLE',
+      'Không xác định được khung giờ tham quan nên chưa thể mở SmartQueue an toàn.',
+    );
+  }
   const openBeforeMinutes = Math.min(24 * 60, Math.max(0, Number(policy.openBeforeMinutes) || 120));
-  if (!startsAt || now < new Date(startsAt.getTime() - openBeforeMinutes * 60 * 1000)) {
+  if (now < new Date(startsAt.getTime() - openBeforeMinutes * 60 * 1000)) {
     throw createHttpError(
       409,
       'QUEUE_NOT_OPEN',
@@ -307,8 +316,10 @@ async function getLatestArrivalPrediction(
     where: {
       attractionId,
       predictionType: 'ARRIVALS',
+      horizonMinutes: ARRIVAL_PREDICTION_HORIZON_MINUTES,
       usedFallback: false,
       confidence: { in: ['MEDIUM', 'HIGH'] },
+      trainingSource: 'live_operational_history',
       predictedAt: {
         gte: new Date(referenceNow.getTime() - ARRIVAL_PREDICTION_MAX_AGE_MS),
         lte: referenceNow,
@@ -428,6 +439,14 @@ async function findQueueEntryByItem(prismaClient, liveTripItemId) {
   });
 }
 
+async function findQueueEntryByBooking(prismaClient, bookingId) {
+  if (!bookingId || !prismaClient?.smartQueueEntry?.findUnique) return null;
+  return prismaClient.smartQueueEntry.findUnique({
+    where: { bookingId },
+    include: QUEUE_ENTRY_INCLUDE,
+  });
+}
+
 async function assertQueueHasCapacity({
   attractionId,
   visitDate,
@@ -453,6 +472,85 @@ async function assertQueueHasCapacity({
       'QUEUE_FULL',
       'SmartQueue đã hết suất cho thời điểm hiện tại. Vé vẫn còn hiệu lực theo điều kiện booking.',
     );
+  }
+}
+
+async function getQueueAvailabilityForItem(item, {
+  prismaClient = prisma,
+  now = new Date(),
+  pressure: providedPressure = null,
+} = {}) {
+  const referenceNow = normalizeNow(now);
+  try {
+    if (item?.smartQueueEntry) {
+      return {
+        eligible: false,
+        code: 'QUEUE_ALREADY_ENROLLED',
+        message: 'Hoạt động này đã có lịch sử SmartQueue.',
+      };
+    }
+    const policy = item?.attractionId
+      ? await getQueuePolicy(item.attractionId, { prismaClient })
+      : { ...DEFAULT_QUEUE_POLICY };
+    if (!policy.enabled) {
+      throw createHttpError(409, 'QUEUE_DISABLED', 'Điểm tham quan chưa bật SmartQueue.');
+    }
+    if (policy.pausedAt) {
+      throw createHttpError(
+        409,
+        'QUEUE_PAUSED',
+        `SmartQueue đang tạm dừng${policy.pauseReason ? `: ${policy.pauseReason}` : '.'}`,
+      );
+    }
+    const eligibility = assertQueueEligibility(item, referenceNow, policy);
+    const rawPressure = providedPressure || await getAttractionPressure(
+      item.attractionId,
+      eligibility.visitDateKey,
+      { prismaClient, now: referenceNow },
+    );
+    const pressure = selectQueuePressure(rawPressure, item);
+    if (!pressure) {
+      throw createHttpError(
+        503,
+        'QUEUE_PRESSURE_UNAVAILABLE',
+        'Hệ thống chưa đủ dữ liệu áp lực trực tiếp để mở SmartQueue. Vui lòng thử lại sau ít phút.',
+      );
+    }
+    if (pressure.isClosed) {
+      throw createHttpError(
+        409,
+        'QUEUE_ATTRACTION_CLOSED',
+        'Điểm tham quan đang đóng cửa, chưa thể tham gia SmartQueue.',
+      );
+    }
+    if (Number(pressure.summary?.score || 0) < 70) {
+      throw createHttpError(
+        409,
+        'QUEUE_NOT_NEEDED',
+        'Khung giờ hiện chưa đông; bạn có thể đến cổng check-in trực tiếp.',
+      );
+    }
+    await assertQueueHasCapacity({
+      attractionId: item.attractionId,
+      visitDate: eligibility.visitDate,
+      policy,
+      prismaClient,
+      now: referenceNow,
+    });
+    return {
+      eligible: true,
+      code: 'QUEUE_AVAILABLE',
+      message: 'SmartQueue đang nhận lượt cho booking này.',
+      pressureScope: pressure.pressureScope || 'ATTRACTION_DAY',
+      opensBeforeMinutes: policy.openBeforeMinutes,
+    };
+  } catch (error) {
+    if (!error?.statusCode) throw error;
+    return {
+      eligible: false,
+      code: error.code || 'QUEUE_UNAVAILABLE',
+      message: error.message,
+    };
   }
 }
 
@@ -543,33 +641,15 @@ async function refreshQueueRecord(entry, {
     now: referenceNow,
   });
   const ahead = await getAheadMetrics(entry, prismaClient, referenceNow);
-  const waitingAhead = entry.status === 'WAITING'
-    ? await getWaitingAheadCount(entry, prismaClient, referenceNow)
-    : 0;
   const hasRecentAdmission = Number(pressure.summary?.checkinsLast15Minutes || 0) > 0;
-  const readyCount = entry.status === 'WAITING' && prismaClient.smartQueueEntry?.count
-    ? await prismaClient.smartQueueEntry.count({
-      where: {
-        attractionId: entry.attractionId,
-        visitDate: entry.visitDate,
-        ...queueScopeWhere(entry),
-        status: 'READY',
-        expiresAt: { gt: referenceNow },
-      },
-    })
-    : 0;
-  const shouldBecomeReady = policy.enabled
+  const shouldAttemptReady = policy.enabled
     && !policy.pausedAt
     && policy.mode === 'AUTO'
     && entry.status === 'WAITING'
+    && normalizedDate(entry.liveTripItem?.scheduledStart)
     && referenceNow >= new Date(
-      new Date(entry.liveTripItem?.scheduledStart || entry.expiresAt).getTime()
-        - QUEUE_CALL_BEFORE_MS,
+      normalizedDate(entry.liveTripItem.scheduledStart).getTime() - QUEUE_CALL_BEFORE_MS,
     )
-    // READY parties have already left the virtual queue for the gate. They
-    // must not block the next FIFO party when the policy allows a batch.
-    && waitingAhead === 0
-    && readyCount < Math.max(1, Number(policy.maxReadyParties) || 3)
     && !pressure.isClosed
     && (
       Number(pressure.summary?.score || 0) <= QUEUE_READY_MAX_PRESSURE
@@ -577,42 +657,76 @@ async function refreshQueueRecord(entry, {
     );
 
   let current = entry;
-  if (shouldBecomeReady) {
+  if (shouldAttemptReady) {
     const readyAt = referenceNow;
-    const updated = await prismaClient.$transaction(async (tx) => {
-      const result = await tx.smartQueueEntry.updateMany({
-        where: { id: entry.id, status: 'WAITING', expiresAt: { gt: referenceNow } },
-        data: {
+    const graceExpiresAt = new Date(
+      readyAt.getTime() + Math.max(1, Number(policy.readyGraceMinutes) || 10) * 60 * 1000,
+    );
+    const readyExpiresAt = new Date(Math.min(
+      normalizedDate(entry.expiresAt).getTime(),
+      graceExpiresAt.getTime(),
+    ));
+    let updated = null;
+    try {
+      updated = await prismaClient.$transaction(async (tx) => {
+        // The FIFO and gate-capacity reads must live in the same serializable
+        // transaction as the transition. This prevents two app instances from
+        // calling different parties concurrently and overfilling the return window.
+        const [waitingAhead, readyCount] = await Promise.all([
+          getWaitingAheadCount(entry, tx, referenceNow),
+          tx.smartQueueEntry.count({
+            where: {
+              attractionId: entry.attractionId,
+              visitDate: entry.visitDate,
+              ...queueScopeWhere(entry),
+              status: 'READY',
+              expiresAt: { gt: referenceNow },
+              OR: [
+                { readyExpiresAt: null },
+                { readyExpiresAt: { gt: referenceNow } },
+              ],
+            },
+          }),
+        ]);
+        if (
+          Number(waitingAhead || 0) > 0
+          || Number(readyCount || 0) >= Math.max(1, Number(policy.maxReadyParties) || 3)
+        ) return null;
+
+        const result = await tx.smartQueueEntry.updateMany({
+          where: { id: entry.id, status: 'WAITING', expiresAt: { gt: referenceNow } },
+          data: {
+            status: 'READY',
+            readyAt,
+            calledAt: readyAt,
+            readyExpiresAt,
+          },
+        });
+        if (result.count !== 1) return null;
+        await recordLiveTripEvent({
+          client: tx,
+          liveTripId: entry.liveTripId,
+          liveTripItemId: entry.liveTripItemId,
+          userId: entry.userId,
+          type: 'QUEUE_READY',
+          severity: 'SUCCESS',
+          title: 'Đã đến lượt vào cổng',
+          message: 'Vui lòng di chuyển đến cổng và mở mã QR để nhân viên check-in.',
+          data: { queueEntryId: entry.id, pressureScore: pressure.summary?.score ?? null },
+        });
+        return {
+          ...entry,
           status: 'READY',
           readyAt,
           calledAt: readyAt,
-          readyExpiresAt: new Date(
-            readyAt.getTime() + Math.max(1, Number(policy.readyGraceMinutes) || 10) * 60 * 1000,
-          ),
-        },
-      });
-      if (result.count !== 1) return null;
-      await recordLiveTripEvent({
-        client: tx,
-        liveTripId: entry.liveTripId,
-        liveTripItemId: entry.liveTripItemId,
-        userId: entry.userId,
-        type: 'QUEUE_READY',
-        severity: 'SUCCESS',
-        title: 'Đã đến lượt vào cổng',
-        message: 'Vui lòng di chuyển đến cổng và mở mã QR để nhân viên check-in.',
-        data: { queueEntryId: entry.id, pressureScore: pressure.summary?.score ?? null },
-      });
-      return {
-        ...entry,
-        status: 'READY',
-        readyAt,
-        calledAt: readyAt,
-        readyExpiresAt: new Date(
-          readyAt.getTime() + Math.max(1, Number(policy.readyGraceMinutes) || 10) * 60 * 1000,
-        ),
-      };
-    });
+          readyExpiresAt,
+        };
+      }, { isolationLevel: 'Serializable' });
+    } catch (error) {
+      // A serialization conflict simply means another worker won the race.
+      // The next sweep will re-evaluate FIFO from committed state.
+      if (error?.code !== 'P2034') throw error;
+    }
     if (updated) {
       current = updated;
       emitLiveTripUpdated({
@@ -746,9 +860,19 @@ async function joinQueue({
 
   const data = queueJoinData(item, eligibility, userId, referenceNow);
   let entry;
+  let joinedExistingBooking = null;
 
   try {
-    entry = await prismaClient.$transaction(async (tx) => {
+    const outcome = await prismaClient.$transaction(async (tx) => {
+      const existingForBooking = tx.smartQueueEntry?.findUnique
+        ? await tx.smartQueueEntry.findUnique({
+          where: { bookingId: item.bookingId },
+          select: { id: true, liveTripItemId: true, status: true },
+        })
+        : null;
+      if (existingForBooking) {
+        return { entry: null, existingForBooking };
+      }
       await assertQueueHasCapacity({
         attractionId: item.attractionId,
         visitDate: eligibility.visitDate,
@@ -760,11 +884,13 @@ async function joinQueue({
         data,
       });
       await recordQueueJoined({ tx, item, userId, entry: saved, eligibility, pressure });
-      return saved;
+      return { entry: saved, existingForBooking: null };
     }, { isolationLevel: 'Serializable' });
+    entry = outcome.entry;
+    joinedExistingBooking = outcome.existingForBooking;
   } catch (error) {
-    // unique(liveTripItemId) enforces one enrolment; serializable isolation
-    // keeps the attraction-level capacity check correct under concurrent joins.
+    // unique(liveTripItemId) and unique(bookingId) enforce one enrolment;
+    // serializable isolation keeps the capacity check correct under concurrent joins.
     if (error?.code === 'P2034') {
       throw createHttpError(
         409,
@@ -776,8 +902,23 @@ async function joinQueue({
   }
 
   if (!entry) {
-    const concurrentEntry = await findQueueEntryByItem(prismaClient, item.id);
+    const concurrentEntry = await findQueueEntryByItem(prismaClient, item.id)
+      || await findQueueEntryByBooking(prismaClient, item.bookingId);
+    if (joinedExistingBooking && !concurrentEntry && joinedExistingBooking.liveTripItemId !== item.id) {
+      throw createHttpError(
+        409,
+        'QUEUE_BOOKING_ALREADY_ENROLLED',
+        'Booking này đã được dùng để tham gia SmartQueue trong một lịch trình khác.',
+      );
+    }
     if (concurrentEntry && ACTIVE_QUEUE_STATUSES.includes(concurrentEntry.status)) {
+      if (concurrentEntry.liveTripItemId !== item.id) {
+        throw createHttpError(
+          409,
+          'QUEUE_BOOKING_ALREADY_ENROLLED',
+          'Booking này đã có một lượt SmartQueue đang hoạt động trong lịch trình khác.',
+        );
+      }
       return {
         created: false,
         queue: await refreshQueueRecord(concurrentEntry, {
@@ -868,6 +1009,19 @@ async function cancelQueue({
   if (!ACTIVE_QUEUE_STATUSES.includes(entry.status)) {
     return serializeQueueEntry(entry);
   }
+  if ((entry.booking?.ticketInstances?.length || 0) > 0) {
+    await markQueueAdmittedForBooking(entry.bookingId, {
+      prismaClient,
+      admittedAt: referenceNow,
+    });
+    const admitted = await findQueueEntryByItem(prismaClient, entry.liveTripItemId);
+    if (admitted?.status === 'ADMITTED') return serializeQueueEntry(admitted);
+    throw createHttpError(
+      409,
+      'QUEUE_ALREADY_ADMITTED',
+      'Booking đã có vé check-in nên lượt SmartQueue không thể bị hủy.',
+    );
+  }
 
   const cancelledAt = referenceNow;
   const cancelled = await prismaClient.$transaction(async (tx) => {
@@ -949,40 +1103,94 @@ async function markQueueAdmittedForBooking(
 
 async function sweepSmartQueues({ prismaClient = prisma, now = new Date() } = {}) {
   const referenceNow = normalizeNow(now);
-  const entries = await prismaClient.smartQueueEntry.findMany({
-    where: { status: { in: ACTIVE_QUEUE_STATUSES } },
-    orderBy: { updatedAt: 'asc' },
-    take: QUEUE_SWEEP_LIMIT,
-    include: QUEUE_ENTRY_INCLUDE,
-  });
   let ready = 0;
   let expired = 0;
   let admitted = 0;
+  let cancelled = 0;
+  let scanned = 0;
+  let lastId = null;
 
-  for (const entry of entries || []) {
-    try {
-      const hasCheckedInTicket = (entry.booking?.ticketInstances?.length || 0) > 0;
-      if (entry.booking?.status === 'COMPLETED' || hasCheckedInTicket) {
-        const result = await markQueueAdmittedForBooking(entry.bookingId, {
-          prismaClient,
-          admittedAt: referenceNow,
-        });
-        admitted += result.count;
-        continue;
+  // Process every active entry in bounded pages. A single global `take` with
+  // updatedAt ordering can repeatedly select old waiting parties and starve
+  // newer attractions indefinitely.
+  while (true) {
+    const entries = await prismaClient.smartQueueEntry.findMany({
+      where: {
+        status: { in: ACTIVE_QUEUE_STATUSES },
+        ...(lastId ? { id: { gt: lastId } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: QUEUE_SWEEP_LIMIT,
+      include: QUEUE_ENTRY_INCLUDE,
+    });
+    if (!entries?.length) break;
+    scanned += entries.length;
+
+    for (const entry of entries) {
+      try {
+        const hasCheckedInTicket = (entry.booking?.ticketInstances?.length || 0) > 0;
+        if (entry.booking?.status === 'COMPLETED' || hasCheckedInTicket) {
+          const result = await markQueueAdmittedForBooking(entry.bookingId, {
+            prismaClient,
+            admittedAt: referenceNow,
+          });
+          admitted += result.count;
+          continue;
+        }
+        if (entry.booking?.status && entry.booking.status !== 'CONFIRMED') {
+          const cancelledAt = referenceNow;
+          const didCancel = await prismaClient.$transaction(async (tx) => {
+            const result = await tx.smartQueueEntry.updateMany({
+              where: { id: entry.id, status: { in: ACTIVE_QUEUE_STATUSES } },
+              data: { status: 'CANCELLED', cancelledAt },
+            });
+            if (result.count !== 1) return false;
+            await recordLiveTripEvent({
+              client: tx,
+              liveTripId: entry.liveTripId,
+              liveTripItemId: entry.liveTripItemId,
+              userId: entry.userId,
+              type: 'QUEUE_CANCELLED',
+              severity: 'WARNING',
+              title: 'SmartQueue đã kết thúc theo trạng thái booking',
+              message: 'Booking không còn ở trạng thái xác nhận nên lượt SmartQueue được đóng tự động; quyền lợi vé áp dụng theo trạng thái booking hiện tại.',
+              data: {
+                queueEntryId: entry.id,
+                bookingId: entry.bookingId,
+                bookingStatus: entry.booking.status,
+              },
+            });
+            return true;
+          });
+          if (didCancel) {
+            cancelled += 1;
+            emitLiveTripUpdated({
+              customerId: entry.userId,
+              tripId: entry.liveTripId,
+              itemId: entry.liveTripItemId,
+              queueStatus: 'CANCELLED',
+              reason: 'QUEUE_BOOKING_INVALIDATED',
+            });
+          }
+          continue;
+        }
+        const state = await refreshQueueRecord(entry, { prismaClient, now: referenceNow });
+        if (entry.status === 'WAITING' && state.status === 'READY') ready += 1;
+        if (ACTIVE_QUEUE_STATUSES.includes(entry.status) && state.status === 'EXPIRED') expired += 1;
+      } catch (error) {
+        console.error(`[smart-queue] Không thể làm mới ${entry.id}:`, error.message);
       }
-      const state = await refreshQueueRecord(entry, { prismaClient, now: referenceNow });
-      if (entry.status === 'WAITING' && state.status === 'READY') ready += 1;
-      if (ACTIVE_QUEUE_STATUSES.includes(entry.status) && state.status === 'EXPIRED') expired += 1;
-    } catch (error) {
-      console.error(`[smart-queue] Không thể làm mới ${entry.id}:`, error.message);
     }
+    lastId = entries[entries.length - 1].id;
+    if (entries.length < QUEUE_SWEEP_LIMIT) break;
   }
 
-  return { scanned: entries?.length || 0, ready, admitted, expired };
+  return { scanned, ready, admitted, expired, cancelled };
 }
 
 module.exports = {
   ACTIVE_QUEUE_STATUSES,
+  ARRIVAL_PREDICTION_HORIZON_MINUTES,
   MAX_ESTIMATED_WAIT_MINUTES,
   DEFAULT_QUEUE_POLICY,
   QUEUE_OPEN_BEFORE_MS,
@@ -991,7 +1199,9 @@ module.exports = {
   buildWaitEstimate,
   cancelQueue,
   getQueueForItem,
+  getQueueAvailabilityForItem,
   getQueuePolicy,
+  getLatestArrivalPrediction,
   getQueueSnapshot,
   joinQueue,
   markQueueAdmittedForBooking,

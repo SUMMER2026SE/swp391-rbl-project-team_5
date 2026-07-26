@@ -6,6 +6,7 @@ const mockPrisma = require('./helpers/mockPrisma');
 const {
   assertQueueEligibility,
   buildWaitEstimate,
+  getLatestArrivalPrediction,
   getQueueSnapshot,
   joinQueue,
   markQueueAdmittedForBooking,
@@ -72,7 +73,7 @@ function pressureMocks() {
 }
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  jest.resetAllMocks();
   mockPrisma.$transaction.mockImplementation((callback) => callback(mockPrisma));
   mockPrisma.liveTripEvent.create.mockResolvedValue({ id: 'event-1' });
 });
@@ -143,6 +144,25 @@ test('wait estimate never labels fallback or low-confidence predictions as ML', 
   });
 });
 
+test('ETA only accepts a fresh, non-fallback 15-minute arrival prediction', async () => {
+  mockPrisma.livePrediction.findFirst.mockResolvedValue(null);
+  await getLatestArrivalPrediction('attraction-1', {
+    prismaClient: mockPrisma,
+    now: NOW,
+  });
+
+  expect(mockPrisma.livePrediction.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+    where: expect.objectContaining({
+      horizonMinutes: 15,
+      usedFallback: false,
+      predictedAt: {
+        gte: new Date(NOW.getTime() - 30 * 60 * 1000),
+        lte: NOW,
+      },
+    }),
+  }));
+});
+
 test('queue pressure follows the booked time slot instead of the day aggregate', () => {
   const pressure = {
     summary: { score: 25, label: 'Thoáng', capacity: 500 },
@@ -189,7 +209,9 @@ test('joins a busy attraction queue without calling the party before the gate wi
   mockPrisma.liveTripItem.findFirst.mockResolvedValue(item);
   pressureMocks();
   mockPrisma.smartQueueEntry.create.mockResolvedValue(savedEntry);
-  mockPrisma.smartQueueEntry.findUnique.mockResolvedValue(savedEntry);
+  mockPrisma.smartQueueEntry.findUnique
+    .mockResolvedValueOnce(null)
+    .mockResolvedValue(savedEntry);
   mockPrisma.smartQueueEntry.updateMany.mockResolvedValue({ count: 1 });
 
   const result = await joinQueue({
@@ -285,6 +307,28 @@ test('enforces one SmartQueue enrolment per booked experience', async () => {
   expect(mockPrisma.liveTripEvent.create).not.toHaveBeenCalled();
 });
 
+test('blocks the same booking from enrolling through a second live itinerary', async () => {
+  const item = queueItem();
+  mockPrisma.liveTripItem.findFirst.mockResolvedValue(item);
+  pressureMocks();
+  mockPrisma.smartQueueEntry.findUnique.mockResolvedValue({
+    id: 'queue-other-trip',
+    liveTripItemId: 'item-from-other-trip',
+    status: 'WAITING',
+  });
+
+  await expect(joinQueue({
+    tripId: item.liveTripId,
+    itemId: item.id,
+    userId: 'user-1',
+    prismaClient: mockPrisma,
+    now: NOW,
+  })).rejects.toMatchObject({
+    code: 'QUEUE_BOOKING_ALREADY_ENROLLED',
+    statusCode: 409,
+  });
+});
+
 test('rejects a new enrolment when the finite queue capacity is full', async () => {
   const item = queueItem();
   mockPrisma.liveTripItem.findFirst.mockResolvedValue(item);
@@ -362,7 +406,13 @@ test('worker self-heals an active queue when QR check-in succeeded but its hook 
 
   const result = await sweepSmartQueues({ prismaClient: mockPrisma, now: NOW });
 
-  expect(result).toEqual({ scanned: 1, ready: 0, admitted: 1, expired: 0 });
+  expect(result).toEqual({
+    scanned: 1,
+    ready: 0,
+    admitted: 1,
+    expired: 0,
+    cancelled: 0,
+  });
   expect(mockPrisma.smartQueueEntry.updateMany).toHaveBeenCalledWith(expect.objectContaining({
     where: { id: entry.id, status: { in: ['WAITING', 'READY'] } },
     data: { status: 'ADMITTED', admittedAt: NOW },
@@ -486,4 +536,70 @@ test('AUTO does not call a party before the 15-minute gate window', async () => 
 
   expect(state.status).toBe('WAITING');
   expect(mockPrisma.smartQueueEntry.updateMany).not.toHaveBeenCalled();
+});
+
+test('AUTO never lets the return window extend beyond the queue close time', async () => {
+  const entry = {
+    id: 'queue-close',
+    liveTripId: 'trip-1',
+    liveTripItemId: 'item-close',
+    userId: 'user-1',
+    attractionId: 'attraction-1',
+    bookingId: 'booking-close',
+    visitDate: VISIT_DATE,
+    partySize: 2,
+    status: 'WAITING',
+    joinedAt: NOW,
+    expiresAt: new Date('2099-03-10T02:05:00.000Z'),
+    liveTripItem: { scheduledStart: new Date('2099-03-10T02:10:00.000Z') },
+  };
+  mockPrisma.smartQueuePolicy.findUnique.mockResolvedValue({
+    enabled: true,
+    mode: 'AUTO',
+    maxReadyParties: 3,
+    readyGraceMinutes: 10,
+  });
+  mockPrisma.smartQueueEntry.count
+    .mockResolvedValueOnce(0)
+    .mockResolvedValueOnce(0)
+    .mockResolvedValueOnce(0);
+  mockPrisma.smartQueueEntry.aggregate.mockResolvedValue({ _sum: { partySize: 0 } });
+  mockPrisma.smartQueueEntry.updateMany.mockResolvedValue({ count: 1 });
+
+  const state = await refreshQueueRecord(entry, {
+    prismaClient: mockPrisma,
+    now: NOW,
+    pressure: {
+      isClosed: false,
+      summary: { capacity: 100, checkinsLast15Minutes: 0, score: 80 },
+    },
+  });
+
+  expect(state.readyExpiresAt).toEqual(new Date('2099-03-10T02:05:00.000Z'));
+});
+
+test('worker closes a queue when the linked booking is cancelled', async () => {
+  const entry = {
+    id: 'queue-cancelled-booking',
+    liveTripId: 'trip-1',
+    liveTripItemId: 'item-cancelled-booking',
+    userId: 'user-1',
+    attractionId: 'attraction-1',
+    bookingId: 'booking-cancelled',
+    visitDate: VISIT_DATE,
+    partySize: 2,
+    status: 'WAITING',
+    joinedAt: NOW,
+    expiresAt: new Date('2099-03-10T05:00:00.000Z'),
+    booking: { status: 'REFUNDED', ticketInstances: [] },
+  };
+  mockPrisma.smartQueueEntry.findMany.mockResolvedValue([entry]);
+  mockPrisma.smartQueueEntry.updateMany.mockResolvedValue({ count: 1 });
+
+  const result = await sweepSmartQueues({ prismaClient: mockPrisma, now: NOW });
+
+  expect(result.cancelled).toBe(1);
+  expect(mockPrisma.smartQueueEntry.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    data: expect.objectContaining({ status: 'CANCELLED', cancelledAt: NOW }),
+  }));
 });

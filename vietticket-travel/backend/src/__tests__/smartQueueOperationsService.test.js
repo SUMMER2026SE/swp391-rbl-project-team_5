@@ -27,11 +27,13 @@ test('CALL is conditional and writes READY grace window with actor', async () =>
   const entry = {
     id: 'entry-1', liveTripId: 'trip-1', liveTripItemId: 'item-1', userId: 'user-1', attractionId: 'a-1',
     status: 'WAITING', joinedAt: new Date('2026-07-23T01:00:00Z'), readyAt: null,
+    expiresAt: new Date('2026-07-23T02:00:00Z'),
     liveTripItem: { scheduledStart: new Date('2026-07-23T01:15:00Z') },
   };
   const updated = { ...entry, status: 'READY' };
   const tx = {
     smartQueueEntry: {
+      count: jest.fn().mockResolvedValue(0),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       findUnique: jest.fn().mockResolvedValue(updated),
     },
@@ -72,6 +74,7 @@ test('CALL rejects jumping over an earlier waiting party', async () => {
     visitDate: new Date('2026-07-23T00:00:00Z'),
     status: 'WAITING',
     joinedAt: new Date('2026-07-23T01:05:00Z'),
+    expiresAt: new Date('2026-07-23T02:00:00Z'),
     booking: { reservation: { timeSlotId: 'slot-1' } },
     liveTripItem: { scheduledStart: new Date('2026-07-23T01:15:00Z') },
   };
@@ -88,6 +91,11 @@ test('CALL rejects jumping over an earlier waiting party', async () => {
         mode: 'STAFF_CONTROLLED',
       }),
     },
+    $transaction: jest.fn(async (callback) => callback({
+      smartQueueEntry: {
+        count: jest.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(0),
+      },
+    })),
   };
 
   await expect(transitionQueueEntry({
