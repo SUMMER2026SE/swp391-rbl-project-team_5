@@ -1,0 +1,65 @@
+@startuml
+title Create Ticket Product by Nested Attraction Route - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -description: String
+  -rejectionReason: String [0..1]
+  -draftData: Json [0..1]
+  -minTicketPrice: Decimal [0..1]
+  -status: AttractionStatus = DRAFT
+  --
+  +clearRejection(): void
+  +changeStatus(status: AttractionStatus): void
+  +updateDraft(draftData: Json): void
+  +isPublished(): Boolean
+  +isOwnedBy(partnerId: String): Boolean
+}
+
+class PartnerProfile <<model>> {
+  -id: String {UUID}
+  -userId: String {unique}
+  -description: String [0..1]
+  -rejectionReason: String [0..1]
+  -status: PartnerStatus = PENDING
+  --
+  +isApproved(): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -description: String
+  -originalPrice: Decimal
+  -sellingPrice: Decimal
+  -refundFeeRate: Decimal = 0.0
+  -status: TicketStatus = ACTIVE
+  --
+  {static} +create(attractionId: String, name: String, sellingPrice: Decimal): TicketProduct
+}
+
+PartnerProfile "1" -- "0..*" Attraction : attractions
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+
+@enduml

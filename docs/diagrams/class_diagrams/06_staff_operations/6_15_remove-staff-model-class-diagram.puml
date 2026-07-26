@@ -1,0 +1,69 @@
+@startuml
+title Remove Staff - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 180
+skinparam ranksep 160
+hide circle
+left to right direction
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -tokenVersion: Int = 0
+  -status: UserStatus = ACTIVE
+  --
+  +bumpTokenVersion(): void
+  +changeStatus(status: UserStatus): void
+}
+
+class StaffAttractionAssignment <<model>> {
+  -id: String {UUID}
+  -staffId: String
+  -attractionId: String
+  -createdById: String [0..1]
+  -revokedAt: DateTime [0..1]
+  -createdAt: DateTime
+  --
+  +revoke(at: DateTime): void
+}
+
+class AuthSession <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -tokenHash: String {unique, hashed} [0..1]
+  -expiresAt: DateTime
+  -revokedAt: DateTime [0..1]
+  --
+  +revoke(at: DateTime): void
+}
+
+class AuditLog <<model>> {
+  -id: String {UUID}
+  -actorId: String [0..1]
+  -entityId: String [0..1]
+  -action: String
+  -entityType: String
+  --
+  +concerns(entityType: String, entityId: String): Boolean
+}
+
+User "1" -- "0..*" StaffAttractionAssignment : staffAssignments
+User "0..1" -- "0..*" StaffAttractionAssignment : createdStaffAssignments
+User "1" *-- "0..*" AuthSession : authSessions
+User "0..1" -- "0..*" AuditLog : auditLogs
+
+@enduml

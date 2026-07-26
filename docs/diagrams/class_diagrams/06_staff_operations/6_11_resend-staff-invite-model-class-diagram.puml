@@ -1,0 +1,45 @@
+@startuml
+title Resend Staff Invite - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -passwordHash: String {hashed} [0..1]
+  -fullName: String
+  -role: UserRole = CUSTOMER
+  -status: UserStatus = ACTIVE
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class PasswordResetToken <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -token: String {unique, hashed}
+  -expiresAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+}
+
+User "1" *-- "0..1" PasswordResetToken : passwordResetTokens
+
+@enduml

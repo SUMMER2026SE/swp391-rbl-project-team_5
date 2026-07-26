@@ -1,0 +1,107 @@
+@startuml
+title Create Booking - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 240
+skinparam ranksep 200
+hide circle
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -ticketProductId: String
+  -timeSlotId: String [0..1]
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+  +isHeld(): Boolean
+}
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -voucherId: String [0..1]
+  -subtotalAmount: Decimal
+  -discountAmount: Decimal = 0.0
+  -totalAmount: Decimal
+  -paymentMethod: String = "vnpay"
+  -status: BookingStatus = PENDING_PAYMENT
+  --
+  {static} +place(userId: String, reservationId: String, totalAmount: Decimal): Booking
+  +isPaid(): Boolean
+  +isRefundable(at: DateTime): Boolean
+}
+
+class Voucher <<model>> {
+  -id: String {UUID}
+  -code: String {unique}
+  -usedCount: Int = 0
+  --
+  +consumeOne(): void
+  +isApplicable(amount: Decimal, at: DateTime): Boolean
+  +isExhausted(): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  --
+  +isOnSale(): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  --
+  +isPublished(): Boolean
+}
+
+class TimeSlot <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String [0..1]
+  -attractionId: String [0..1]
+  -startTime: String
+  -isActive: Boolean = true
+  --
+  +isActive(): Boolean
+}
+
+class AttractionImage <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -imageUrl: String
+  -isPrimary: Boolean = false
+  --
+  +isPrimary(): Boolean
+}
+
+TicketProduct "1" -- "0..*" Reservation : reservations
+TimeSlot "0..1" -- "0..*" Reservation : reservations
+Reservation "1" -- "0..1" Booking : booking
+Voucher "0..1" -- "0..*" Booking : bookings
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+TicketProduct "0..1" *-- "0..*" TimeSlot : timeSlots
+Attraction "0..1" -- "0..*" TimeSlot : timeSlots
+Attraction "1" *-- "0..*" AttractionImage : images
+Attraction "0..1" -- "0..*" Booking : snapshotBookings
+
+@enduml

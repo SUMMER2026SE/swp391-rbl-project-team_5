@@ -1,0 +1,88 @@
+@startuml
+title Handle VNPay Return - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 240
+skinparam ranksep 200
+hide circle
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -status: BookingStatus = PENDING_PAYMENT
+  -refundRequired: Boolean = false
+  --
+  +isPaid(): Boolean
+}
+
+class Payment <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -duplicateOfPaymentId: String [0..1]
+  -status: PaymentStatus = PENDING
+  -isDuplicate: Boolean = false
+  --
+  +isSucceeded(): Boolean
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+}
+
+class TicketInstance <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -qrCodeToken: String {unique}
+  -status: TicketInstanceStatus = VALID
+  --
+  +isUsable(at: DateTime): Boolean
+}
+
+class RefundRequest <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -type: RefundRequestType = CUSTOMER_CANCELLATION
+  -status: RefundStatus = PENDING
+  --
+  +isPending(): Boolean
+}
+
+class RefundTransaction <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -paymentId: String [0..1]
+  -refundRequestId: String [0..1]
+  -gateway: String = "VNPAY"
+  -status: RefundTransactionStatus = PENDING
+  --
+  +isSettled(): Boolean
+}
+
+Reservation "1" -- "0..1" Booking : booking
+Booking "1" *-- "0..*" Payment : payments
+Payment "0..1" -- "0..*" Payment : duplicatePayments
+Booking "1" *-- "0..*" TicketInstance : ticketInstances
+Booking "1" -- "0..*" RefundRequest : refundRequests
+Booking "1" -- "0..*" RefundTransaction : refundTransactions
+Payment "0..1" -- "0..*" RefundTransaction : refundTransactions
+RefundRequest "0..1" *-- "0..*" RefundTransaction : refundTransactions
+
+@enduml

@@ -1,0 +1,92 @@
+@startuml 02_customer
+' ============================================================
+'  KHU VUC 2 - KHACH HANG (Customer - da dang nhap)
+'  Nguon: AppRoutes.jsx + dieu huong thuc te (navigate / <Link>)
+'  Cac hop mau xam <<ext>> la man hinh o khu vuc khac (diem vao / ra).
+' ============================================================
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam nodesep 42
+skinparam ranksep 78
+skinparam ArrowColor #78909C
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #37474F
+skinparam state {
+  FontSize 12
+  FontColor #12232B
+  BorderColor #90A4AE
+  BackgroundColor #FFFFFF
+}
+skinparam StateFontStyle bold
+skinparam state<<ext>> {
+  BackgroundColor #ECEFF1
+  BorderColor #B0BEC5
+  FontColor #607D8B
+}
+
+title 2 - KHACH HANG  (Customer)
+
+state "2 - KHACH HANG  (Customer)" as Customer #E8F5E9 {
+  state "Ho so cua toi\n(/profile)" as Profile
+  state "Chinh sua ho so\n(/edit-profile)" as EditProfile
+  state "Doi mat khau\n(/change-password)" as ChangePwd
+  state "Diem da luu\n(/favorites)" as Favorites
+  state "Thanh toan / Checkout\n(/checkout/:reservationId)" as Checkout
+  state "Dat ve thanh cong\n(/booking-success)" as BookingOK
+  state "Ve cua toi\n(/my-tickets)" as MyTickets
+  state "Ve dien tu (QR)\n(/tickets/:bookingId)" as ETicket
+  state "Trung tam ho tro\n(/support)" as Support
+  state "Lich su ho tro\n(/my-support)" as MySupport
+  state "Nop ho so KYC doi tac\n(/partner/kyc)" as Kyc
+  state "Cho duyet doi tac\n(/partner/pending)" as Pending
+
+  ' -- Nhom tai khoan (quanh Profile) --
+  Profile --> EditProfile : Chinh sua
+  EditProfile --> Profile : Luu / Huy
+  Profile --> ChangePwd : Doi mat khau
+  ChangePwd --> Profile : Luu / Huy
+  Profile --> Favorites : Diem da luu
+  Profile --> MySupport : Lich su ho tro
+  Support --> MySupport : Gui yeu cau
+  ' -- Nhom dat ve --
+  Profile --> MyTickets : Ve cua toi
+  Checkout --> BookingOK : Thanh toan VNPay\nthanh cong
+  BookingOK --> ETicket : Xem ve dien tu
+  BookingOK --> MyTickets : Ve ban dau
+  MyTickets --> ETicket : Xem ve
+  MyTickets --> Checkout : Thanh toan lai\n(don dang giu)
+  ' -- Nhom onboarding doi tac --
+  Kyc --> Pending : Nop KYC xong
+  Pending --> Kyc : Can bo sung ho so
+}
+
+' -- Diem vao / ra sang khu vuc khac (ghost states) --
+state "Dang nhap\n(/login)\n[Guest]" as X_Login <<ext>>
+state "Chi tiet diem tham quan\n(/attractions/:id)\n[Guest]" as X_Detail <<ext>>
+state "Tim kiem diem tham quan\n(/attractions)\n[Guest]" as X_Search <<ext>>
+state "Tong quan doi tac\n(/partner/dashboard)\n[Partner]" as X_PDash <<ext>>
+
+' Diem vao khu vuc Customer
+X_Login  --> Profile   : CUSTOMER dang nhap
+X_Detail --> Checkout  : Giu cho ve\n(da dang nhap)
+X_Detail --> Support   : Can ho tro
+
+' Diem ra khoi khu vuc Customer
+Favorites --> X_Detail : Xem lai diem
+MyTickets --> X_Search : Kham pha them
+Pending   --> X_PDash  : Ho so duoc duyet ->\ndashboard doi tac
+
+' -- Giu cac ghost o dung phia, tranh mui ten cheo dai --
+X_Search -[hidden]-> X_PDash
+
+legend right
+  |= Mau |= Y nghia |
+  |<#E8F5E9>   | Man hinh khu vuc Customer |
+  |<#ECEFF1>   | Man hinh khu vuc khac (diem vao / ra) |
+  ==
+  * Cac trang trong khu vuc dieu huong qua lai bang header/menu co dinh.
+  * Luong dat ve: Checkout -> VNPay -> Dat ve thanh cong -> Ve dien tu.
+endlegend
+
+@enduml

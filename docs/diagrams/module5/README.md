@@ -9,7 +9,7 @@ Render bằng `@mermaid-js/mermaid-cli` (scale ×3). Nội dung + đối chiếu
 | B1 | `B1_PartnerProfile` | Vòng đời hồ sơ đối tác (PENDING→APPROVED/REJECTED/SUSPENDED) |
 | B2 | `B2_Attraction_status` | Máy trạng thái kiểm duyệt của Attraction (`status`) |
 | B3 | `B3_Attraction_publication` | Máy trạng thái phát hành (`publicationStatus`) |
-| B2b | `B2b_Attraction_orthogonal` | Bản gộp orthogonal 2 vùng đồng thời (chuẩn UML) |
+| B2b | `B2b_Attraction_orthogonal` | Bản gộp orthogonal 3 vùng đồng thời: status / operationalStatus / publicationStatus (chuẩn UML) |
 | B4 | `B4_TicketProduct` | Gói vé: ACTIVE↔INACTIVE→Archived |
 | B5 | `B5_StaffAttractionAssignment` | Phân công nhân viên: Active↔Revoked |
 | B6 | `B6_AttractionImage` | Ảnh: Primary/Secondary→Deleted |

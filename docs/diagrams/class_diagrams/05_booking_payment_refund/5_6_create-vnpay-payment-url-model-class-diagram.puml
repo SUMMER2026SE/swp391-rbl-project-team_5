@@ -1,0 +1,66 @@
+@startuml
+title Create VNPay Payment URL - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -totalAmount: Decimal
+  -paymentMethod: String = "vnpay"
+  -status: BookingStatus = PENDING_PAYMENT
+  -createdAt: DateTime
+  --
+  +isPaid(): Boolean
+  +isRefundable(at: DateTime): Boolean
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -paymentAttemptCount: Int = 0
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  -paymentDeadline: DateTime [0..1]
+  -createdAt: DateTime
+  --
+  +setPaymentDeadline(deadline: DateTime): void
+  +countPaymentAttempt(): void
+  +isExpired(at: DateTime): Boolean
+}
+
+class Payment <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -transactionId: String {unique} [0..1]
+  -duplicateOfPaymentId: String [0..1]
+  -amount: Decimal
+  -paymentGateway: String
+  -status: PaymentStatus = PENDING
+  -expiresAt: DateTime [0..1]
+  --
+  {static} +initiate(bookingId: String, amount: Decimal): Payment
+}
+
+Reservation "1" -- "0..1" Booking : booking
+Booking "1" *-- "0..*" Payment : payments
+Payment "0..1" -- "0..*" Payment : duplicatePayments
+
+@enduml

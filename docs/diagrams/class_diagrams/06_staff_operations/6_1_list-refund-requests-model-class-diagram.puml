@@ -1,0 +1,104 @@
+@startuml
+title List Refund Requests - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 240
+skinparam ranksep 200
+hide circle
+
+class RefundRequest <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -status: RefundStatus = PENDING
+  -createdAt: DateTime
+  --
+  +isPending(): Boolean
+  +isApproved(): Boolean
+}
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -status: BookingStatus = PENDING_PAYMENT
+  -createdAt: DateTime
+  --
+  +isPaid(): Boolean
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -employerPartnerId: String [0..1]
+  -email: String {unique}
+  -status: UserStatus = ACTIVE
+  -createdAt: DateTime
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class Payment <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -duplicateOfPaymentId: String [0..1]
+  -status: PaymentStatus = PENDING
+  -createdAt: DateTime
+  --
+  +isSucceeded(): Boolean
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -ticketProductId: String
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  -createdAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  -createdAt: DateTime
+  --
+  +isOnSale(): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  -createdAt: DateTime
+  --
+  +isPublished(): Boolean
+}
+
+Booking "1" -- "0..*" RefundRequest : refundRequests
+User "1" -- "0..*" Booking : bookings
+Reservation "1" -- "0..1" Booking : booking
+Booking "1" *-- "0..*" Payment : payments
+Payment "0..1" -- "0..*" Payment : duplicatePayments
+User "1" -- "0..*" Reservation : reservations
+TicketProduct "1" -- "0..*" Reservation : reservations
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+Attraction "0..1" -- "0..*" Booking : snapshotBookings
+
+@enduml

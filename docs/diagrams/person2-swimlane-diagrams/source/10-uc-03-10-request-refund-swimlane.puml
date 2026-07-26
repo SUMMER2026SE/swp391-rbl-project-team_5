@@ -1,0 +1,64 @@
+@startuml
+title UC-03-10 - Request Refund Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Open confirmed booking detail;
+:Request refund preview;
+
+|Booking Database|
+:Load Booking, refund policy\nand existing request;
+
+|VietTicket System|
+:Verify ownership, status,\nvisit cutoff and policy;
+:Calculate refund and fee amounts;
+
+|Customer|
+:View eligibility and amount;
+
+if (Refund eligible?) then (Yes)
+  :Enter reason and submit;
+
+  |VietTicket System|
+  :Revalidate reason and eligibility;
+
+  if (Request still valid?) then (Yes)
+    |Booking Database|
+    :Create PENDING RefundRequest;
+    :Set Booking REFUND_REQUESTED;
+
+    |Email Service|
+    :Send request-received email;
+
+    |Customer|
+    :View submission confirmation;
+  else (No)
+    |Customer|
+    :Display validation or\nduplicate-request error;
+  endif
+else (No)
+  :Display not-refundable reason;
+endif
+
+|Customer|
+stop
+@enduml

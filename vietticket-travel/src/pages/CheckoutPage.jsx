@@ -1,14 +1,23 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
+import { getPaymentMethods } from '../services/paymentApi.js'
 import { markItineraryQueueItemReserved } from '../utils/aiItineraryBookingQueue.js'
 import { formatReservationReference } from '../utils/bookingReference.js'
 import { validateEmail, validateOptionalPhone } from '../utils/formValidators.js'
 
-const paymentMethods = [
-  { id: 'vnpay', label: 'Ví VNPay', icon: 'account_balance_wallet' },
+const BANK_TRANSFER_METHOD = 'bank_transfer'
+
+const PAYMENT_METHOD_ICONS = {
+  vnpay: 'account_balance_wallet',
+  [BANK_TRANSFER_METHOD]: 'qr_code_2',
+}
+
+// Dự phòng khi chưa gọi được API (luôn có VNPay).
+const fallbackPaymentMethods = [
+  { code: 'vnpay', label: 'Ví VNPay', description: '', instant: true },
 ]
 
 const checkoutNavLinks = [
@@ -83,6 +92,8 @@ function CheckoutPage() {
     phone: '',
   })
   const [selectedPayment, setSelectedPayment] = useState('vnpay')
+  const [paymentMethods, setPaymentMethods] = useState(fallbackPaymentMethods)
+  const navigate = useNavigate()
   const [voucherCode, setVoucherCode] = useState('')
   const [appliedVoucherCode, setAppliedVoucherCode] = useState('')
   const [voucherMessage, setVoucherMessage] = useState('')
@@ -93,6 +104,24 @@ function CheckoutPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [now, setNow] = useState(() => Date.now())
+
+  // Nạp phương thức thanh toán đang mở. Chuyển khoản chỉ xuất hiện khi nền tảng
+  // đã cấu hình tài khoản ngân hàng nhận tiền.
+  useEffect(() => {
+    let active = true
+    getPaymentMethods()
+      .then((response) => {
+        if (!active) return
+        const methods = Array.isArray(response.data) ? response.data : []
+        if (methods.length > 0) setPaymentMethods(methods)
+      })
+      .catch(() => {
+        // Không gọi được API -> giữ nguyên VNPay mặc định.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -286,6 +315,13 @@ function CheckoutPage() {
         })
       }
 
+      // Chuyển khoản ngân hàng: không có cổng để redirect, đưa khách sang trang
+      // mã VietQR (số tiền + nội dung đối soát đã nhúng sẵn trong mã).
+      if (selectedPayment === BANK_TRANSFER_METHOD) {
+        navigate(`/bank-transfer/${bookingId}`)
+        return
+      }
+
       // VNPay: lấy URL thanh toán thật rồi chuyển hướng trình duyệt sang cổng.
       const paymentUrl = await bookingService.createVNPayUrl(bookingId)
       if (!paymentUrl) {
@@ -440,27 +476,34 @@ function CheckoutPage() {
                 <div className="flex flex-col gap-3">
                   {paymentMethods.map((method) => (
                     <label
-                      className={`flex cursor-pointer items-center gap-3 rounded-xl border-2 p-4 transition ${
-                        selectedPayment === method.id
+                      className={`flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 transition ${
+                        selectedPayment === method.code
                           ? 'border-primary bg-primary/5'
                           : 'border-outline-variant/40 hover:border-primary/40'
                       } ${booking.bookingId ? 'opacity-70 cursor-not-allowed' : ''}`}
-                      htmlFor={`payment-${method.id}`}
-                      key={method.id}
+                      htmlFor={`payment-${method.code}`}
+                      key={method.code}
                     >
                       <input
-                        checked={selectedPayment === method.id}
-                        className="h-4 w-4 accent-primary"
-                        id={`payment-${method.id}`}
+                        checked={selectedPayment === method.code}
+                        className="mt-1 h-4 w-4 accent-primary"
+                        id={`payment-${method.code}`}
                         name="paymentMethod"
-                        onChange={() => setSelectedPayment(method.id)}
+                        onChange={() => setSelectedPayment(method.code)}
                         type="radio"
                         disabled={Boolean(booking.bookingId)}
                       />
                       <span className="material-symbols-outlined text-primary" aria-hidden="true">
-                        {method.icon}
+                        {PAYMENT_METHOD_ICONS[method.code] || 'payments'}
                       </span>
-                      <span className="font-semibold text-on-surface">{method.label}</span>
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-on-surface">{method.label}</span>
+                        {method.description && (
+                          <span className="mt-0.5 block text-xs text-on-surface-variant">
+                            {method.description}
+                          </span>
+                        )}
+                      </span>
                     </label>
                   ))}
                 </div>

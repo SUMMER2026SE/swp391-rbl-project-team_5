@@ -1,0 +1,55 @@
+@startuml
+title UC-M4.04 - Save and Manage AI Itinerary Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Choose Save, List/Open\nor Delete itinerary;
+
+|VietTicket System|
+:Verify authentication;
+
+if (Authenticated?) then (Yes)
+  :Validate selected operation\nand itinerary data;
+
+  |Saved Itinerary Database|
+  :Execute selected operation:\nupsert, list, open or delete;
+  :Enforce ownership and unique\nuserId-planId rule;
+
+  |VietTicket System|
+  if (Account operation successful?) then (Yes)
+    |Customer|
+    :Display save, list, open\nor deletion result;
+  else (No)
+    |Device Storage|
+    :Keep current generated plan\nlocally when account save fails;
+
+    |Customer|
+    :Display local-save fallback\nor synchronization error;
+  endif
+else (No)
+  |Customer|
+  :Display sign-in requirement;
+endif
+
+|Customer|
+stop
+@enduml

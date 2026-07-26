@@ -9,7 +9,24 @@ const {
   getRefundPreview,
 } = require('../controllers/paymentController');
 
+const {
+  getBankTransferInstruction,
+  listPaymentMethods,
+} = require('../controllers/bankTransferController');
+
 const router = express.Router();
+
+// Danh sách phương thức thanh toán đang mở (VNPay luôn có; chuyển khoản chỉ
+// xuất hiện khi nền tảng đã cấu hình tài khoản nhận tiền).
+router.get('/methods', protect, restrictTo('CUSTOMER'), listPaymentMethods);
+
+// Mã VietQR + hướng dẫn chuyển khoản cho một đơn (chỉ chủ đơn xem được).
+router.get(
+  '/bank-transfer/:bookingId',
+  protect,
+  restrictTo('CUSTOMER'),
+  getBankTransferInstruction,
+);
 
 // Khách tạo URL thanh toán
 router.post('/create-vnpay-url', protect, restrictTo('CUSTOMER'), createVNPayUrl);

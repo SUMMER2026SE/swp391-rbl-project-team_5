@@ -1,0 +1,95 @@
+@startuml
+title List Attractions for Moderation - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -reviewedById: String [0..1]
+  -title: String
+  -status: AttractionStatus = DRAFT
+  -createdAt: DateTime
+  --
+  +isPublished(): Boolean
+  +isOwnedBy(partnerId: String): Boolean
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -fullName: String
+  -status: UserStatus = ACTIVE
+  -createdAt: DateTime
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class AttractionImage <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -imageUrl: String
+  -createdAt: DateTime
+  --
+  +isPrimary(): Boolean
+}
+
+class AttractionCategory <<model>> {
+  -attractionId: String
+  -categoryId: String
+  --
+  +links(categoryId: String): Boolean
+}
+
+class Category <<model>> {
+  -id: String {UUID}
+  -name: String {unique}
+  -createdAt: DateTime
+  --
+  +isActive(): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -createdAt: DateTime
+  --
+  +isOnSale(): Boolean
+}
+
+class AuditLog <<model>> {
+  -id: String {UUID}
+  -actorId: String [0..1]
+  -entityId: String [0..1]
+  -entityType: String
+  -createdAt: DateTime
+  --
+  +concerns(entityType: String, entityId: String): Boolean
+}
+
+Attraction "1" *-- "0..*" AttractionImage : images
+Attraction "1" *-- "0..*" AttractionCategory : categories
+Category "1" -- "0..*" AttractionCategory : attractions
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+User "0..1" -- "0..*" AuditLog : auditLogs
+User "0..1" -- "0..*" Attraction : reviewedAttractions
+
+@enduml

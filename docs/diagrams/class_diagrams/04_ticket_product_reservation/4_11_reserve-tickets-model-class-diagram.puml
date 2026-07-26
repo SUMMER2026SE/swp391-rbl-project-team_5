@@ -1,0 +1,108 @@
+@startuml
+title Reserve Tickets - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -ticketProductId: String
+  -timeSlotId: String [0..1]
+  -quantity: Int
+  -status: ReservationStatus = HELD
+  -date: DateTime
+  -expiresAt: DateTime
+  -paymentDeadline: DateTime [0..1]
+  --
+  {static} +hold(userId: String, ticketProductId: String, expiresAt: DateTime): Reservation
+}
+
+class DailyStock <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String
+  -capacity: Int
+  -heldQuantity: Int = 0
+  -date: DateTime
+  --
+  +hold(quantity: Int): void
+  +hasAvailable(quantity: Int): Boolean
+  +remaining(): Int
+}
+
+class AttractionDailyStock <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -capacity: Int
+  -heldQty: Int = 0
+  -date: DateTime
+  --
+  +hold(quantity: Int): void
+  +hasAvailable(quantity: Int): Boolean
+  +remaining(): Int
+}
+
+class TimeSlotStock <<model>> {
+  -id: String {UUID}
+  -timeSlotId: String
+  -heldQty: Int = 0
+  -date: DateTime
+  --
+  +hold(quantity: Int): void
+  +hasAvailable(quantity: Int): Boolean
+  +remaining(): Int
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  --
+  +isOnSale(): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  --
+  +isPublished(): Boolean
+}
+
+class TimeSlot <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String [0..1]
+  -attractionId: String [0..1]
+  -startTime: String
+  -isActive: Boolean = true
+  --
+  +isActive(): Boolean
+}
+
+TicketProduct "1" -- "0..*" Reservation : reservations
+TimeSlot "0..1" -- "0..*" Reservation : reservations
+TicketProduct "1" *-- "0..*" DailyStock : dailyStocks
+Attraction "1" *-- "0..*" AttractionDailyStock : dailyStocks
+TimeSlot "1" *-- "0..*" TimeSlotStock : timeSlotStocks
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+TicketProduct "0..1" *-- "0..*" TimeSlot : timeSlots
+Attraction "0..1" -- "0..*" TimeSlot : timeSlots
+
+@enduml

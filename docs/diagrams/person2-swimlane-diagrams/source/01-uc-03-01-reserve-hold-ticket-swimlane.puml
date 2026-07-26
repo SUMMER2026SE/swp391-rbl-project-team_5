@@ -1,0 +1,60 @@
+@startuml
+title UC-03-01 - Reserve / Hold Ticket Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+  BarColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Select a ticket product;
+:Choose visit date,\ntime slot and quantity;
+:Submit hold request;
+
+|VietTicket System|
+:Validate authentication,\nrequest and visit schedule;
+
+|Inventory Database|
+:Read current ticket stock;
+
+|VietTicket System|
+:Check booking rules\nand remaining capacity;
+
+if (Reservation can be created?) then (Yes)
+  |Inventory Database|
+  :Increase held quantities;
+  :Create Reservation as HELD\nwith a 10-minute expiry;
+
+  |VietTicket System|
+  :Return reservation ID\nand expiry time;
+
+  |Customer|
+  :Open checkout page;
+else (No)
+  |VietTicket System|
+  :Return validation or\navailability error;
+
+  |Customer|
+  :Show error message;
+endif
+
+|Customer|
+stop
+
+@enduml

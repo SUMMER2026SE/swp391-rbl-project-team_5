@@ -1,0 +1,79 @@
+@startuml
+title AI Generate Itinerary - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -city: String
+  -status: AttractionStatus = DRAFT
+  --
+  +isPublished(): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -type: TicketType = ADULT
+  --
+  +isOnSale(): Boolean
+}
+
+class Category <<model>> {
+  -id: String {UUID}
+  -name: String {unique}
+  -isActive: Boolean = true
+  --
+  +isActive(): Boolean
+}
+
+class AttractionCategory <<model>> {
+  -attractionId: String
+  -categoryId: String
+  --
+  +links(categoryId: String): Boolean
+}
+
+class FavoriteAttraction <<model>> {
+  -userId: String
+  -attractionId: String
+  -createdAt: DateTime
+  --
+  +belongsTo(userId: String): Boolean
+}
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -status: BookingStatus = PENDING_PAYMENT
+  -refundRequired: Boolean = false
+  --
+  +isPaid(): Boolean
+}
+
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+Attraction "1" *-- "0..*" AttractionCategory : categories
+Category "1" -- "0..*" AttractionCategory : attractions
+Attraction "1" -- "0..*" FavoriteAttraction : favoritedBy
+Attraction "0..1" -- "0..*" Booking : snapshotBookings
+
+@enduml

@@ -1,0 +1,58 @@
+@startuml
+title UC-M4.01 - Generate AI Itinerary Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Enter city, days, party size,\nstart date and optional budget;
+:Click Generate Itinerary;
+
+|VietTicket System|
+:Verify login, input rules\nand rate limit;
+
+if (Request valid?) then (Yes)
+  |Attraction Catalogue|
+  :Load published attractions\nand active ticket products;
+
+  |VietTicket System|
+  :Build grounded planning prompt;
+
+  |Gemini AI Service|
+  :Generate day-by-day visit plan;
+
+  |VietTicket System|
+  :Normalize and validate response;
+  :Enrich plan with weather,\nroute and availability data;
+
+  if (Plan generated?) then (Yes)
+    |Customer|
+    :View itinerary timeline,\nweather panels and route map;
+  else (No)
+    :Display generation or\nrate-limit error;
+  endif
+else (No)
+  |Customer|
+  :Display input or\nauthentication warning;
+endif
+
+|Customer|
+stop
+@enduml

@@ -1,0 +1,1051 @@
+{
+ "attributes": {
+  "User": {
+   "always": [
+    "id",
+    "email",
+    "status"
+   ],
+   "max": 8
+  },
+  "UserProfile": {
+   "always": [
+    "id",
+    "userId"
+   ],
+   "max": 7
+  },
+  "EmailVerificationToken": {
+   "always": [
+    "id",
+    "userId",
+    "token",
+    "expiresAt"
+   ],
+   "max": 6
+  },
+  "PasswordResetToken": {
+   "always": [
+    "id",
+    "userId",
+    "token",
+    "expiresAt"
+   ],
+   "max": 6
+  },
+  "AuthSession": {
+   "always": [
+    "id",
+    "userId",
+    "tokenHash",
+    "expiresAt"
+   ],
+   "max": 7
+  },
+  "OAuthAccount": {
+   "always": [
+    "id",
+    "userId",
+    "provider",
+    "providerAccountId"
+   ],
+   "max": 6
+  },
+  "Attraction": {
+   "always": [
+    "id",
+    "partnerId",
+    "title",
+    "status"
+   ],
+   "max": 8
+  },
+  "AttractionImage": {
+   "always": [
+    "id",
+    "attractionId",
+    "imageUrl"
+   ],
+   "max": 6
+  },
+  "Booking": {
+   "always": [
+    "id",
+    "userId",
+    "status"
+   ],
+   "max": 9
+  },
+  "Payment": {
+   "always": [
+    "id",
+    "bookingId",
+    "status"
+   ],
+   "max": 8
+  },
+  "Reservation": {
+   "always": [
+    "id",
+    "status",
+    "expiresAt"
+   ],
+   "max": 9
+  },
+  "TicketInstance": {
+   "always": [
+    "id",
+    "bookingId",
+    "qrCodeToken",
+    "status"
+   ],
+   "max": 8
+  },
+  "TicketProduct": {
+   "always": [
+    "id",
+    "attractionId",
+    "name"
+   ],
+   "max": 8
+  },
+  "RefundRequest": {
+   "always": [
+    "id",
+    "bookingId",
+    "status"
+   ],
+   "max": 9
+  },
+  "SupportTicket": {
+   "always": [
+    "id",
+    "userId",
+    "status"
+   ],
+   "max": 8
+  },
+  "SupportMessage": {
+   "always": [
+    "id",
+    "ticketId"
+   ],
+   "max": 7
+  },
+  "PartnerProfile": {
+   "always": [
+    "id",
+    "userId",
+    "status"
+   ],
+   "max": 8
+  },
+  "Review": {
+   "always": [
+    "id",
+    "attractionId",
+    "userId",
+    "rating"
+   ],
+   "max": 8
+  },
+  "Category": {
+   "always": [
+    "id",
+    "name"
+   ],
+   "max": 6
+  },
+  "Voucher": {
+   "always": [
+    "id",
+    "code"
+   ],
+   "max": 8
+  },
+  "StaffAttractionAssignment": {
+   "always": [
+    "id",
+    "staffId",
+    "attractionId"
+   ],
+   "max": 6
+  }
+ },
+ "methods": {
+  "User": {
+   "create": "register(email: String, passwordHash: String, fullName: String): User",
+   "update": {
+    "isEmailVerified": "markEmailVerified(): void",
+    "passwordHash": "changePassword(passwordHash: String): void",
+    "tokenVersion": "bumpTokenVersion(): void",
+    "status": "changeStatus(status: UserStatus): void",
+    "role": "changeRole(role: UserRole): void",
+    "employerPartnerId": "attachToEmployer(partnerId: String): void",
+    "termsAcceptedAt": "acceptTerms(at: DateTime, version: String): void",
+    "fullName": "rename(fullName: String): void"
+   },
+   "check": [
+    "isVerified(): Boolean",
+    "isActive(): Boolean"
+   ],
+   "fallback": [
+    "isVerified(): Boolean",
+    "isActive(): Boolean"
+   ]
+  },
+  "UserProfile": {
+   "create": "createFor(userId: String): UserProfile",
+   "update": {
+    "avatarUrl": "changeAvatar(avatarUrl: String): void",
+    "phoneNumber": "updateContactInfo(phoneNumber: String): void",
+    "address": "updateAddress(address: String): void",
+    "dateOfBirth": "updatePersonalInfo(dateOfBirth: DateTime): void"
+   },
+   "check": [
+    "isComplete(): Boolean"
+   ],
+   "fallback": [
+    "isComplete(): Boolean"
+   ]
+  },
+  "EmailVerificationToken": {
+   "create": "issue(userId: String, tokenHash: String, expiresAt: DateTime): EmailVerificationToken",
+   "update": {
+    "expiresAt": "renew(expiresAt: DateTime): void"
+   },
+   "check": [
+    "matches(tokenHash: String): Boolean",
+    "isExpired(at: DateTime): Boolean"
+   ],
+   "delete": "consume(): void",
+   "fallback": [
+    "isExpired(at: DateTime): Boolean"
+   ]
+  },
+  "PasswordResetToken": {
+   "create": "issue(userId: String, tokenHash: String, expiresAt: DateTime): PasswordResetToken",
+   "update": {
+    "expiresAt": "renew(expiresAt: DateTime): void"
+   },
+   "check": [
+    "matches(tokenHash: String): Boolean",
+    "isExpired(at: DateTime): Boolean"
+   ],
+   "delete": "consume(): void",
+   "fallback": [
+    "isExpired(at: DateTime): Boolean"
+   ]
+  },
+  "AuthSession": {
+   "create": "open(userId: String, tokenHash: String, expiresAt: DateTime): AuthSession",
+   "update": {
+    "revokedAt": "revoke(at: DateTime): void",
+    "lastSeenAt": "touch(at: DateTime): void",
+    "expiresAt": "extend(expiresAt: DateTime): void"
+   },
+   "check": [
+    "matches(tokenHash: String): Boolean",
+    "isExpired(at: DateTime): Boolean"
+   ],
+   "delete": "revoke(): void",
+   "fallback": [
+    "isExpired(at: DateTime): Boolean"
+   ]
+  },
+  "OAuthAccount": {
+   "create": "link(userId: String, provider: String, providerAccountId: String): OAuthAccount",
+   "update": {
+    "providerAccountId": "rebind(providerAccountId: String): void"
+   },
+   "check": [
+    "belongsTo(userId: String): Boolean"
+   ],
+   "delete": "unlink(): void",
+   "fallback": [
+    "belongsTo(userId: String): Boolean"
+   ]
+  },
+  "UserRoleMembership": {
+   "create": "grant(userId: String, role: UserRole): UserRoleMembership",
+   "update": {
+    "role": "changeRole(role: UserRole): void"
+   },
+   "check": [
+    "hasRole(role: UserRole): Boolean"
+   ],
+   "delete": "revoke(): void",
+   "fallback": [
+    "hasRole(role: UserRole): Boolean"
+   ]
+  },
+  "PartnerProfile": {
+   "create": "submitKyc(userId: String, businessName: String): PartnerProfile",
+   "update": {
+    "rejectionReason": "reject(reason: String): void",
+    "status": "changeStatus(status: PartnerStatus): void",
+    "commissionRate": "updateCommission(rate: Decimal): void",
+    "bankName": "updatePayoutInfo(bankName: String, bankAccountNumber: String): void",
+    "kycConsentAccepted": "acceptKycConsent(version: String, at: DateTime): void"
+   },
+   "check": [
+    "isApproved(): Boolean"
+   ],
+   "fallback": [
+    "isApproved(): Boolean"
+   ]
+  },
+  "Attraction": {
+   "create": "createDraft(partnerId: String, title: String): Attraction",
+   "update": {
+    "submittedAt": "submitForReview(at: DateTime): void",
+    "rejectionReason": "reject(reason: String, reviewerId: String): void",
+    "suspensionReason": "suspend(reason: String, byId: String): void",
+    "archivedAt": "archive(at: DateTime): void",
+    "publicationStatus": "changePublication(status: AttractionPublicationStatus): void",
+    "operationalStatus": "changeOperational(status: AttractionOperationalStatus): void",
+    "status": "changeStatus(status: AttractionStatus): void",
+    "averageRating": "recalculateRating(rating: Float, total: Int): void",
+    "draftData": "updateDraft(draftData: Json): void",
+    "title": "updateDetails(title: String, description: String): void",
+    "revision": "bumpRevision(): void"
+   },
+   "check": [
+    "isPublished(): Boolean",
+    "isOwnedBy(partnerId: String): Boolean"
+   ],
+   "fallback": [
+    "isPublished(): Boolean"
+   ]
+  },
+  "AttractionImage": {
+   "create": "attach(attractionId: String, imageUrl: String): AttractionImage",
+   "update": {
+    "isPrimary": "changePrimaryFlag(isPrimary: Boolean): void"
+   },
+   "check": [
+    "isPrimary(): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isPrimary(): Boolean"
+   ]
+  },
+  "Category": {
+   "create": "create(name: String, slug: String): Category",
+   "update": {
+    "name": "rename(name: String): void",
+    "isActive": "changeActivation(isActive: Boolean): void"
+   },
+   "check": [
+    "isActive(): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isActive(): Boolean"
+   ]
+  },
+  "AttractionCategory": {
+   "create": "assign(attractionId: String, categoryId: String): AttractionCategory",
+   "update": {
+    "categoryId": "reassign(categoryId: String): void"
+   },
+   "check": [
+    "links(categoryId: String): Boolean"
+   ],
+   "delete": "unassign(): void",
+   "fallback": [
+    "links(categoryId: String): Boolean"
+   ]
+  },
+  "TicketProduct": {
+   "create": "create(attractionId: String, name: String, sellingPrice: Decimal): TicketProduct",
+   "update": {
+    "sellingPrice": "changePrice(sellingPrice: Decimal): void",
+    "archivedAt": "archive(at: DateTime): void",
+    "status": "changeStatus(status: TicketStatus): void",
+    "refundPolicy": "setRefundPolicy(policy: RefundPolicyType, feeRate: Decimal): void"
+   },
+   "check": [
+    "isOnSale(): Boolean",
+    "isAvailableOn(date: DateTime): Boolean"
+   ],
+   "fallback": [
+    "isOnSale(): Boolean"
+   ]
+  },
+  "TimeSlot": {
+   "create": "create(ticketProductId: String, startTime: String, endTime: String): TimeSlot",
+   "update": {
+    "maxCapacity": "changeCapacity(maxCapacity: Int): void",
+    "isActive": "changeActivation(isActive: Boolean): void"
+   },
+   "check": [
+    "isActive(): Boolean",
+    "hasCapacityFor(quantity: Int): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isActive(): Boolean"
+   ]
+  },
+  "SpecialDate": {
+   "create": "create(attractionId: String, date: DateTime): SpecialDate",
+   "update": {
+    "closed": "changeClosedFlag(closed: Boolean): void",
+    "capacity": "overrideCapacity(capacity: Int): void"
+   },
+   "check": [
+    "isClosed(): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isClosed(): Boolean"
+   ]
+  },
+  "DailyStock": {
+   "create": "openFor(ticketProductId: String, date: DateTime, capacity: Int): DailyStock",
+   "update": {
+    "heldQuantity": "hold(quantity: Int): void",
+    "bookedQuantity": "commit(quantity: Int): void",
+    "capacity": "setQuota(capacity: Int): void"
+   },
+   "check": [
+    "hasAvailable(quantity: Int): Boolean",
+    "remaining(): Int"
+   ],
+   "fallback": [
+    "hasAvailable(quantity: Int): Boolean"
+   ]
+  },
+  "AttractionDailyStock": {
+   "create": "openFor(attractionId: String, date: DateTime, capacity: Int): AttractionDailyStock",
+   "update": {
+    "heldQty": "hold(quantity: Int): void",
+    "bookedQty": "commit(quantity: Int): void",
+    "capacity": "setQuota(capacity: Int): void"
+   },
+   "check": [
+    "hasAvailable(quantity: Int): Boolean",
+    "remaining(): Int"
+   ],
+   "fallback": [
+    "hasAvailable(quantity: Int): Boolean"
+   ]
+  },
+  "TimeSlotStock": {
+   "create": "openFor(timeSlotId: String, date: DateTime): TimeSlotStock",
+   "update": {
+    "heldQty": "hold(quantity: Int): void",
+    "bookedQty": "commit(quantity: Int): void"
+   },
+   "check": [
+    "hasAvailable(quantity: Int): Boolean",
+    "remaining(): Int"
+   ],
+   "fallback": [
+    "hasAvailable(quantity: Int): Boolean"
+   ]
+  },
+  "Reservation": {
+   "create": "hold(userId: String, ticketProductId: String, expiresAt: DateTime): Reservation",
+   "update": {
+    "paymentDeadline": "setPaymentDeadline(deadline: DateTime): void",
+    "paymentAttemptCount": "countPaymentAttempt(): void",
+    "expiresAt": "extendHold(expiresAt: DateTime): void",
+    "status": "changeStatus(status: ReservationStatus): void"
+   },
+   "check": [
+    "isExpired(at: DateTime): Boolean",
+    "isHeld(): Boolean"
+   ],
+   "delete": "release(): void",
+   "fallback": [
+    "isExpired(at: DateTime): Boolean"
+   ]
+  },
+  "FavoriteAttraction": {
+   "create": "add(userId: String, attractionId: String): FavoriteAttraction",
+   "update": {},
+   "check": [
+    "belongsTo(userId: String): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "belongsTo(userId: String): Boolean"
+   ]
+  },
+  "Review": {
+   "create": "post(userId: String, attractionId: String, rating: Int): Review",
+   "update": {
+    "replyComment": "reply(replyComment: String, at: DateTime): void",
+    "moderationReason": "moderate(reason: String, moderatorId: String): void",
+    "isHidden": "changeVisibility(isHidden: Boolean): void",
+    "comment": "edit(comment: String, rating: Int): void"
+   },
+   "check": [
+    "isVisible(): Boolean",
+    "isAuthoredBy(userId: String): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isVisible(): Boolean"
+   ]
+  },
+  "Booking": {
+   "create": "place(userId: String, reservationId: String, totalAmount: Decimal): Booking",
+   "update": {
+    "cancelledAt": "cancel(reason: String, at: DateTime): void",
+    "refundRequired": "flagRefundRequired(): void",
+    "status": "changeStatus(status: BookingStatus): void"
+   },
+   "check": [
+    "isPaid(): Boolean",
+    "isRefundable(at: DateTime): Boolean"
+   ],
+   "fallback": [
+    "isPaid(): Boolean"
+   ]
+  },
+  "Payment": {
+   "create": "initiate(bookingId: String, amount: Decimal): Payment",
+   "update": {
+    "paidAt": "markSucceeded(transactionNo: String, paidAt: DateTime): void",
+    "status": "changeStatus(status: PaymentStatus): void"
+   },
+   "check": [
+    "isSucceeded(): Boolean",
+    "matchesAmount(amount: Decimal): Boolean"
+   ],
+   "fallback": [
+    "isSucceeded(): Boolean"
+   ]
+  },
+  "TicketInstance": {
+   "create": "issue(bookingId: String, qrCodeToken: String): TicketInstance",
+   "update": {
+    "checkedInAt": "checkIn(staffId: String, at: DateTime): void",
+    "qrCodeToken": "reissue(qrCodeToken: String): void",
+    "status": "changeStatus(status: TicketInstanceStatus): void"
+   },
+   "check": [
+    "isUsable(at: DateTime): Boolean",
+    "isCheckedIn(): Boolean"
+   ],
+   "fallback": [
+    "isUsable(at: DateTime): Boolean"
+   ]
+  },
+  "Voucher": {
+   "create": "create(code: String, discountType: VoucherDiscountType): Voucher",
+   "update": {
+    "usedCount": "consumeOne(): void",
+    "isActive": "changeActivation(isActive: Boolean): void"
+   },
+   "check": [
+    "isApplicable(amount: Decimal, at: DateTime): Boolean",
+    "isExhausted(): Boolean"
+   ],
+   "fallback": [
+    "isApplicable(amount: Decimal, at: DateTime): Boolean"
+   ]
+  },
+  "RefundRequest": {
+   "create": "open(bookingId: String, type: RefundRequestType, amount: Decimal): RefundRequest",
+   "update": {
+    "processingStartedAt": "startProcessing(staffId: String, at: DateTime): void",
+    "processedAt": "markProcessed(at: DateTime): void",
+    "staffNotes": "addStaffNote(note: String): void",
+    "status": "changeStatus(status: RefundStatus): void"
+   },
+   "check": [
+    "isPending(): Boolean",
+    "isApproved(): Boolean"
+   ],
+   "fallback": [
+    "isPending(): Boolean"
+   ]
+  },
+  "RefundTransaction": {
+   "create": "start(refundRequestId: String, amount: Decimal): RefundTransaction",
+   "update": {
+    "reconciledAt": "reconcile(at: DateTime): void",
+    "gatewayResponseCode": "recordGatewayResult(code: String, transactionId: String): void",
+    "status": "changeStatus(status: RefundTransactionStatus): void"
+   },
+   "check": [
+    "isSettled(): Boolean"
+   ],
+   "fallback": [
+    "isSettled(): Boolean"
+   ]
+  },
+  "PartnerSettlement": {
+   "create": "openPeriod(partnerId: String, periodStart: DateTime, periodEnd: DateTime): PartnerSettlement",
+   "update": {
+    "paidAt": "markPaid(paidAt: DateTime): void",
+    "status": "changeStatus(status: SettlementStatus): void"
+   },
+   "check": [
+    "isPayable(): Boolean"
+   ],
+   "fallback": [
+    "isPayable(): Boolean"
+   ]
+  },
+  "PartnerSettlementItem": {
+   "create": "addFor(settlementId: String, bookingId: String, amount: Decimal): PartnerSettlementItem",
+   "update": {},
+   "check": [
+    "belongsTo(settlementId: String): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "belongsTo(settlementId: String): Boolean"
+   ]
+  },
+  "StaffAttractionAssignment": {
+   "create": "assign(staffId: String, attractionId: String, createdById: String): StaffAttractionAssignment",
+   "update": {
+    "revokedAt": "revoke(at: DateTime): void",
+    "attractionId": "reassign(attractionId: String): void"
+   },
+   "check": [
+    "covers(attractionId: String): Boolean"
+   ],
+   "delete": "revoke(): void",
+   "fallback": [
+    "covers(attractionId: String): Boolean"
+   ]
+  },
+  "SupportTicket": {
+   "create": "open(userId: String, subject: String, priority: SupportPriority): SupportTicket",
+   "update": {
+    "assignedToId": "assignTo(staffId: String, at: DateTime): void",
+    "resolvedAt": "resolve(resolutionCode: String, at: DateTime): void",
+    "firstRespondedAt": "markFirstResponse(at: DateTime): void",
+    "priority": "changePriority(priority: SupportPriority): void",
+    "status": "changeStatus(status: SupportStatus): void"
+   },
+   "check": [
+    "isOpen(): Boolean"
+   ],
+   "fallback": [
+    "isOpen(): Boolean"
+   ]
+  },
+  "SupportMessage": {
+   "create": "post(ticketId: String, senderId: String, message: String): SupportMessage",
+   "update": {
+    "message": "edit(message: String): void"
+   },
+   "check": [
+    "isFromStaff(): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isFromStaff(): Boolean"
+   ]
+  },
+  "AuditLog": {
+   "create": "record(actorId: String, action: String, entityType: String): AuditLog",
+   "update": {
+    "metadata": "attachMetadata(metadata: Json): void"
+   },
+   "check": [
+    "concerns(entityType: String, entityId: String): Boolean"
+   ],
+   "fallback": [
+    "concerns(entityType: String, entityId: String): Boolean"
+   ]
+  },
+  "NewsletterSubscription": {
+   "create": "subscribe(email: String): NewsletterSubscription",
+   "update": {
+    "isActive": "changeActivation(isActive: Boolean): void"
+   },
+   "check": [
+    "isSubscribed(): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isSubscribed(): Boolean"
+   ]
+  },
+  "SavedItinerary": {
+   "create": "save(userId: String, title: String, data: Json): SavedItinerary",
+   "update": {
+    "title": "rename(title: String): void",
+    "data": "updateContent(data: Json): void"
+   },
+   "check": [
+    "belongsTo(userId: String): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "belongsTo(userId: String): Boolean"
+   ]
+  },
+  "RevenueForecast": {
+   "create": "generate(attractionId: String, horizonDays: Int): RevenueForecast",
+   "update": {
+    "generatedAt": "refresh(generatedAt: DateTime): void"
+   },
+   "check": [
+    "isStale(at: DateTime): Boolean"
+   ],
+   "delete": "remove(): void",
+   "fallback": [
+    "isStale(at: DateTime): Boolean"
+   ]
+  },
+  "ScheduledJobLock": {
+   "create": "acquire(name: String, lockedUntil: DateTime): ScheduledJobLock",
+   "update": {
+    "lockedUntil": "extend(lockedUntil: DateTime): void"
+   },
+   "check": [
+    "isHeld(at: DateTime): Boolean"
+   ],
+   "delete": "release(): void",
+   "fallback": [
+    "isHeld(at: DateTime): Boolean"
+   ]
+  }
+ },
+ "updateBool": {
+  "Category": {
+   "isActive": {
+    "true": "activate(): void",
+    "false": "deactivate(): void"
+   }
+  },
+  "TimeSlot": {
+   "isActive": {
+    "true": "activate(): void",
+    "false": "deactivate(): void"
+   }
+  },
+  "TicketProduct": {
+   "isActive": {
+    "true": "activate(): void",
+    "false": "deactivate(): void"
+   }
+  },
+  "AttractionImage": {
+   "isPrimary": {
+    "true": "markAsPrimary(): void",
+    "false": "unmarkPrimary(): void"
+   }
+  },
+  "Review": {
+   "isHidden": {
+    "true": "hide(moderationReason: String, moderatorId: String): void",
+    "false": "unhide(): void"
+   }
+  },
+  "SpecialDate": {
+   "closed": {
+    "true": "close(): void",
+    "false": "reopen(): void"
+   }
+  },
+  "Booking": {
+   "refundRequired": {
+    "true": "flagRefundRequired(): void",
+    "false": "clearRefundFlag(): void"
+   }
+  },
+  "NewsletterSubscription": {
+   "isActive": {
+    "true": "resubscribe(): void",
+    "false": "unsubscribe(): void"
+   }
+  }
+ },
+ "updateNull": {
+  "Attraction": {
+   "rejectionReason": "clearRejection(): void",
+   "archivedAt": "restore(): void"
+  },
+  "PartnerProfile": {
+   "rejectionReason": "clearRejection(): void"
+  },
+  "RefundRequest": {
+   "processingStartedAt": "resetProcessing(): void"
+  },
+  "TicketProduct": {
+   "archivedAt": "restore(): void"
+  },
+  "AuthSession": {
+   "revokedAt": "reactivate(): void"
+  },
+  "User": {
+   "passwordHash": "clearPassword(): void"
+  },
+  "StaffAttractionAssignment": {
+   "revokedAt": "reactivate(createdById: String): void"
+  }
+ },
+ "relCards": {
+  "User|EmailVerificationToken": "0..1",
+  "User|PasswordResetToken": "0..1",
+  "User|UserProfile": "0..1",
+  "User|PartnerProfile": "0..1",
+  "Booking|Reservation": "0..1",
+  "Reservation|Booking": "0..1"
+ },
+ "extraRelations": [
+  {
+   "pair": [
+    "Attraction",
+    "Booking"
+   ],
+   "line": "Attraction \"0..1\" -- \"0..*\" Booking : snapshotBookings"
+  },
+  {
+   "pair": [
+    "Booking",
+    "SupportTicket"
+   ],
+   "line": "Booking \"0..1\" -- \"0..*\" SupportTicket : supportTickets"
+  },
+  {
+   "pair": [
+    "User",
+    "Attraction"
+   ],
+   "line": "User \"0..1\" -- \"0..*\" Attraction : reviewedAttractions",
+   "bridgeOnly": true
+  },
+  {
+   "pair": [
+    "User",
+    "RefundRequest"
+   ],
+   "line": "User \"1\" -- \"0..*\" RefundRequest : requestedRefunds",
+   "bridgeOnly": true
+  },
+  {
+   "pair": [
+    "User",
+    "RefundTransaction"
+   ],
+   "line": "User \"0..1\" -- \"0..*\" RefundTransaction : processedRefundTransactions",
+   "bridgeOnly": true
+  },
+  {
+   "pair": [
+    "User",
+    "PartnerSettlement"
+   ],
+   "line": "User \"0..1\" -- \"0..*\" PartnerSettlement : createdSettlements",
+   "bridgeOnly": true
+  },
+  {
+   "pair": [
+    "User",
+    "SupportMessage"
+   ],
+   "line": "User \"1\" -- \"0..*\" SupportMessage : sentSupportMessages",
+   "bridgeOnly": true
+  }
+ ],
+ "fnModels": {
+  "9.3": [
+   "Attraction",
+   "TicketProduct",
+   "Category",
+   "AttractionCategory",
+   "FavoriteAttraction",
+   "Booking"
+  ]
+ },
+ "fnMethods": {
+  "4.11": {
+   "DailyStock": [
+    "+hold(quantity: Int): void",
+    "+hasAvailable(quantity: Int): Boolean",
+    "+remaining(): Int"
+   ],
+   "AttractionDailyStock": [
+    "+hold(quantity: Int): void",
+    "+hasAvailable(quantity: Int): Boolean",
+    "+remaining(): Int"
+   ],
+   "TimeSlotStock": [
+    "+hold(quantity: Int): void",
+    "+hasAvailable(quantity: Int): Boolean",
+    "+remaining(): Int"
+   ]
+  },
+  "5.11": {
+   "DailyStock": [
+    "+release(quantity: Int): void",
+    "+remaining(): Int"
+   ],
+   "AttractionDailyStock": [
+    "+release(quantity: Int): void",
+    "+remaining(): Int"
+   ],
+   "TimeSlotStock": [
+    "+release(quantity: Int): void",
+    "+remaining(): Int"
+   ],
+   "Voucher": [
+    "+releaseOne(): void",
+    "+isApplicable(amount: Decimal, at: DateTime): Boolean"
+   ]
+  },
+  "5.3": {
+   "Voucher": [
+    "+consumeOne(): void",
+    "+isApplicable(amount: Decimal, at: DateTime): Boolean",
+    "+isExhausted(): Boolean"
+   ]
+  },
+  "5.6": {
+   "Reservation": [
+    "+setPaymentDeadline(deadline: DateTime): void",
+    "+countPaymentAttempt(): void",
+    "+isExpired(at: DateTime): Boolean"
+   ]
+  },
+  "3.1": {
+   "PartnerProfile": [
+    "{static} +submitKyc(userId: String, businessName: String): PartnerProfile",
+    "+updateKycInfo(businessName: String, taxCode: String): void",
+    "+isApproved(): Boolean"
+   ]
+  },
+  "3.3": {
+   "PartnerProfile": [
+    "+updatePayoutInfo(bankName: String, bankAccountNumber: String): void",
+    "+isApproved(): Boolean"
+   ],
+   "UserProfile": [
+    "+updateContactInfo(phoneNumber: String): void",
+    "+isComplete(): Boolean"
+   ]
+  },
+  "4.4": {
+   "TicketProduct": [
+    "+updateDetails(name: String, sellingPrice: Decimal): void",
+    "+isOnSale(): Boolean"
+   ]
+  },
+  "8.12": {
+   "Category": [
+    "+updateDetails(name: String, description: String): void",
+    "+isActive(): Boolean"
+   ]
+  },
+  "8.3": {
+   "AuthSession": [
+    "+revoke(at: DateTime): void",
+    "+isExpired(at: DateTime): Boolean"
+   ]
+  },
+  "6.2": {
+   "RefundTransaction": [
+    "+recordGatewayResult(code: String, transactionId: String): void",
+    "+isSettled(): Boolean"
+   ]
+  },
+  "5.7": {
+   "RefundTransaction": [
+    "+recordGatewayResult(code: String, transactionId: String): void",
+    "+isSettled(): Boolean"
+   ]
+  },
+  "9.3": {},
+  "1.11": {
+   "UserProfile": [
+    "+updateContactInfo(phoneNumber: String): void",
+    "+updateAddress(address: String): void",
+    "+isComplete(): Boolean"
+   ]
+  },
+  "1.12": {
+   "UserProfile": [
+    "+changeAvatar(avatarUrl: String): void",
+    "+isComplete(): Boolean"
+   ]
+  },
+  "2.9": {
+   "Review": [
+    "+hide(): void",
+    "+unhide(): void",
+    "+isVisible(): Boolean"
+   ]
+  },
+  "8.8": {
+   "Attraction": [
+    "+suspend(reason: String, reviewerId: String): void",
+    "+changePublication(status: AttractionPublicationStatus): void",
+    "+isPublished(): Boolean"
+   ]
+  }
+ },
+ "layout": {
+  "3.2": {
+   "nodesep": 240,
+   "ranksep": 200
+  },
+  "5.3": {
+   "nodesep": 240,
+   "ranksep": 200
+  },
+  "5.8": {
+   "nodesep": 240,
+   "ranksep": 200
+  },
+  "6.15": {
+   "nodesep": 180,
+   "ranksep": 160,
+   "direction": "left to right direction"
+  },
+  "6.1": {
+   "nodesep": 240,
+   "ranksep": 200
+  }
+ },
+ "updateOp": {
+  "Voucher": {
+   "usedCount": {
+    "increment": "consumeOne(): void",
+    "decrement": "releaseOne(): void"
+   }
+  },
+  "DailyStock": {
+   "heldQuantity": {
+    "increment": "hold(quantity: Int): void",
+    "decrement": "release(quantity: Int): void"
+   },
+   "bookedQuantity": {
+    "increment": "commit(quantity: Int): void",
+    "decrement": "rollback(quantity: Int): void"
+   }
+  },
+  "AttractionDailyStock": {
+   "heldQty": {
+    "increment": "hold(quantity: Int): void",
+    "decrement": "release(quantity: Int): void"
+   },
+   "bookedQty": {
+    "increment": "commit(quantity: Int): void",
+    "decrement": "rollback(quantity: Int): void"
+   }
+  },
+  "TimeSlotStock": {
+   "heldQty": {
+    "increment": "hold(quantity: Int): void",
+    "decrement": "release(quantity: Int): void"
+   },
+   "bookedQty": {
+    "increment": "commit(quantity: Int): void",
+    "decrement": "rollback(quantity: Int): void"
+   }
+  }
+ }
+}

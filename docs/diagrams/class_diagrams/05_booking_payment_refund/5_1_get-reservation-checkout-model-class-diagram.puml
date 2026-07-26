@@ -1,0 +1,98 @@
+@startuml
+title Get Reservation Checkout - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -ticketProductId: String
+  -timeSlotId: String [0..1]
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+  +isHeld(): Boolean
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -status: UserStatus = ACTIVE
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class UserProfile <<model>> {
+  -id: String {UUID}
+  -userId: String {unique}
+  -phoneNumber: String [0..1]
+  -avatarUrl: String [0..1]
+  --
+  +isComplete(): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  --
+  +isOnSale(): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  --
+  +isPublished(): Boolean
+}
+
+class AttractionImage <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -imageUrl: String
+  -isPrimary: Boolean = false
+  --
+  +isPrimary(): Boolean
+}
+
+class TimeSlot <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String [0..1]
+  -attractionId: String [0..1]
+  -startTime: String
+  -isActive: Boolean = true
+  --
+  +isActive(): Boolean
+}
+
+User "1" -- "0..*" Reservation : reservations
+TicketProduct "1" -- "0..*" Reservation : reservations
+TimeSlot "0..1" -- "0..*" Reservation : reservations
+User "1" *-- "0..1" UserProfile : profile
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+Attraction "1" *-- "0..*" AttractionImage : images
+TicketProduct "0..1" *-- "0..*" TimeSlot : timeSlots
+Attraction "0..1" -- "0..*" TimeSlot : timeSlots
+
+@enduml

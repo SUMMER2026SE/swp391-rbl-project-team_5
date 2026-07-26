@@ -1,0 +1,59 @@
+@startuml
+title UC-03-13 - Reissue E-Ticket Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Platform Staff|
+start
+:Verify customer identity\nand identify booking;
+:Submit reissue request;
+
+|VietTicket System|
+:Validate staff role,\nbooking and ticket eligibility;
+
+if (Reissue allowed?) then (Yes)
+  |Ticket Database|
+  :Expire existing VALID tickets;
+  :Create equal replacement tickets\nwith new QR tokens;
+
+  |Email Service|
+  :Send replacement e-tickets;
+
+  |VietTicket System|
+  if (Email delivered?) then (Yes)
+    :Return reissue success;
+  else (No)
+    :Keep new tickets valid;
+    :Return delivery error\nfor support retry;
+  endif
+
+  |Platform Staff|
+  :View reissue result;
+else (No)
+  |VietTicket System|
+  :Return not-found or\nineligible-booking error;
+
+  |Platform Staff|
+  :Display rejection reason;
+endif
+
+|Platform Staff|
+stop
+@enduml

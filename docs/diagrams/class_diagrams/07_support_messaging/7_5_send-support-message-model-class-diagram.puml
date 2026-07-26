@@ -1,0 +1,44 @@
+@startuml
+title Send Support Message - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class SupportTicket <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -status: SupportStatus = OPEN
+  -updatedAt: DateTime
+  --
+  +changeStatus(status: SupportStatus): void
+  +isOpen(): Boolean
+}
+
+class SupportMessage <<model>> {
+  -id: String {UUID}
+  -ticketId: String
+  -senderId: String
+  -message: String
+  -createdAt: DateTime
+  --
+  {static} +post(ticketId: String, senderId: String, message: String): SupportMessage
+}
+
+SupportTicket "1" *-- "0..*" SupportMessage : messages
+
+@enduml

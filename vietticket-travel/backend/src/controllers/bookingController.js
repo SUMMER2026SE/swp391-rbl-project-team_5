@@ -11,7 +11,19 @@ const {
 
 
 const { Decimal } = Prisma;
-const PAYMENT_METHODS = new Set(['vnpay']);
+const {
+  BANK_TRANSFER_METHOD,
+  getBankTransferHoldMs,
+} = require('../utils/bankTransferPolicy');
+const { getBankTransferConfig } = require('../config/runtimeConfig');
+
+// Chỉ mở phương thức chuyển khoản khi nền tảng đã cấu hình tài khoản nhận tiền,
+// tránh việc khách chọn được rồi lại không có mã QR để chuyển.
+function getAllowedPaymentMethods() {
+  const methods = new Set(['vnpay']);
+  if (getBankTransferConfig().configured) methods.add(BANK_TRANSFER_METHOD);
+  return methods;
+}
 
 const reservationInclude = {
   user: { include: { profile: true } },
@@ -35,7 +47,9 @@ const bookingInclude = {
   voucher: true,
   payments: { orderBy: { createdAt: 'desc' } },
   refundRequests: { orderBy: { createdAt: 'desc' } },
-  ticketInstances: true,
+  // Thứ tự cố định để "Vé #1, #2..." trên vé của khách không đổi sau mỗi lần
+  // check-in và khớp đúng với danh sách vé bên cổng soát vé của nhân viên.
+  ticketInstances: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
   reservation: {
     include: {
       timeSlot: true,
@@ -607,7 +621,7 @@ async function createBooking(req, res, next) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ message: 'Email không hợp lệ.' });
     }
-    if (!PAYMENT_METHODS.has(paymentMethod)) {
+    if (!getAllowedPaymentMethods().has(paymentMethod)) {
       return res.status(400).json({ message: 'Phương thức thanh toán không hợp lệ.' });
     }
 
@@ -765,6 +779,22 @@ async function createBooking(req, res, next) {
             ...buildBookingSnapshot(reservation, now),
           },
         });
+
+        // Chuyển khoản ngân hàng cần thời gian cho khách chuyển tiền và cho
+        // Admin đối chiếu sao kê. Giữ chỗ mặc định 10 phút sẽ khiến worker hủy
+        // đơn dù khách đã chuyển tiền -> nới hạn giữ chỗ cho riêng đơn này.
+        if (paymentMethod === BANK_TRANSFER_METHOD) {
+          const bankHoldExpiresAt = new Date(now.getTime() + getBankTransferHoldMs());
+          if (bankHoldExpiresAt > reservation.expiresAt) {
+            await tx.reservation.update({
+              where: { id: reservationId },
+              data: {
+                expiresAt: bankHoldExpiresAt,
+                paymentDeadline: bankHoldExpiresAt,
+              },
+            });
+          }
+        }
 
         return tx.booking.findUnique({
           where: { id: created.id },

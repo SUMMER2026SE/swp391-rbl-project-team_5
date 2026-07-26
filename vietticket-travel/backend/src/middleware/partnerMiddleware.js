@@ -147,8 +147,12 @@ async function requireCheckInEmployer(req, res, next) {
 
     const employerId = req.user?.employerPartnerId;
     if (!employerId) {
+      // Phân biệt rõ 2 loại STAFF để nhân viên không loay hoay ở cổng:
+      // nhân viên nền tảng (xử lý hoàn tiền) KHÔNG check-in được.
       return res.status(403).json({
-        message: 'Tài khoản nhân viên chưa thuộc đối tác nào.',
+        message:
+          'Tài khoản này là nhân viên nền tảng (xử lý hoàn tiền/hỗ trợ) nên không thể check-in tại cổng. '
+          + 'Vui lòng đăng nhập bằng tài khoản nhân viên cổng thuộc đối tác, hoặc nhờ quản trị viên gán đối tác chủ quản cho tài khoản này.',
         code: 'EMPLOYER_REQUIRED',
       });
     }

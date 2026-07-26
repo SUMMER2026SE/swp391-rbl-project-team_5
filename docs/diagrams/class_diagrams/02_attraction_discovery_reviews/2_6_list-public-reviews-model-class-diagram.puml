@@ -1,0 +1,57 @@
+@startuml
+title List Public Reviews - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Review <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -attractionId: String
+  -rating: Int
+  -isHidden: Boolean = false
+  -createdAt: DateTime
+  --
+  +isVisible(): Boolean
+  +isAuthoredBy(userId: String): Boolean
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -fullName: String
+  -status: UserStatus = ACTIVE
+  -createdAt: DateTime
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class UserProfile <<model>> {
+  -id: String {UUID}
+  -userId: String {unique}
+  -phoneNumber: String [0..1]
+  -avatarUrl: String [0..1]
+  --
+  +isComplete(): Boolean
+}
+
+User "1" -- "0..*" Review : reviews
+User "1" *-- "0..1" UserProfile : profile
+
+@enduml

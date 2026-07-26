@@ -1,0 +1,71 @@
+@startuml 05_admin
+' ============================================================
+'  KHU VUC 5 - QUAN TRI VIEN (Admin)
+'  Nguon: AppRoutes.jsx + dieu huong thuc te (navigate / <Link>)
+'  Cac hop mau xam <<ext>> la man hinh o khu vuc khac (diem vao / ra).
+' ============================================================
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam nodesep 42
+skinparam ranksep 78
+skinparam ArrowColor #78909C
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #37474F
+skinparam state {
+  FontSize 12
+  FontColor #12232B
+  BorderColor #90A4AE
+  BackgroundColor #FFFFFF
+}
+skinparam StateFontStyle bold
+skinparam state<<ext>> {
+  BackgroundColor #ECEFF1
+  BorderColor #B0BEC5
+  FontColor #607D8B
+}
+
+title 5 - QUAN TRI VIEN  (Admin)
+
+state "5 - QUAN TRI VIEN  (Admin)" as Admin #FFEBEE {
+  state "Bang dieu khien Admin\n(/admin)" as ADash
+  state "Dat ve & Thanh toan\n(/admin/bookings)" as ABookings
+  state "Bao cao tai chinh\n(/admin/reports)" as AReports
+  state "Duyet ho so KYC\n(/admin/kyc-approval)" as AKyc
+  state "Duyet dia diem\n(/admin/attraction-approval)" as AAttr
+  state "Quan ly vi pham\n(/admin/violations)" as AViol
+  state "Quan ly danh muc\n(/admin/categories)" as ACat
+  state "Kiem duyet danh gia\n(/admin/reviews)" as AReviews
+  state "Quan ly nguoi dung\n(/admin/users)" as AUsers
+
+  ADash --> ABookings : Dat ve & Thanh toan
+  ADash --> AReports  : Bao cao tai chinh
+  ADash --> AKyc      : Duyet ho so KYC
+  ADash --> AAttr     : Duyet dia diem
+  ADash --> AViol     : Quan ly vi pham
+  ADash --> ACat      : Quan ly danh muc
+  ADash --> AReviews  : Kiem duyet danh gia
+  ADash --> AUsers    : Quan ly nguoi dung
+}
+
+' -- Diem vao / ra sang khu vuc khac (ghost states) --
+state "Dang nhap\n(/login)  [Guest]" as X_Login <<ext>>
+state "Cho duyet doi tac\n(/partner/pending)  [Customer]" as X_Pending <<ext>>
+state "Quan ly hoan tien\n(/staff/refunds)  [Staff]" as X_SRefunds <<ext>>
+
+X_Login --> ADash : ADMIN dang nhap
+
+' Diem ra: lien ket nghiep vu Admin <-> Partner/Staff
+AKyc      --> X_Pending   : Admin duyet / tu choi KYC
+ABookings --> X_SRefunds  : Tao yeu cau hoan tien
+
+legend right
+  |= Mau |= Y nghia |
+  |<#FFEBEE>   | Man hinh khu vuc Admin |
+  |<#ECEFF1>   | Man hinh khu vuc khac (diem vao / ra) |
+  ==
+  * ADash la trung tam dieu huong; sidebar co dinh mo moi muc quan tri.
+  * Admin co the truy cap ca khu vuc Nhan vien (Staff).
+endlegend
+
+@enduml

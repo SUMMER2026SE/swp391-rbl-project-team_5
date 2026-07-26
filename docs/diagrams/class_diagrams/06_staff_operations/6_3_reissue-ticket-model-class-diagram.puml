@@ -1,0 +1,90 @@
+@startuml
+title Reissue Ticket - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -fullName: String
+  -email: String
+  -status: BookingStatus = PENDING_PAYMENT
+  --
+  +isPaid(): Boolean
+  +isRefundable(at: DateTime): Boolean
+}
+
+class TicketInstance <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -ticketProductId: String
+  -qrCodeToken: String {unique}
+  -status: TicketInstanceStatus = VALID
+  --
+  {static} +issue(bookingId: String, qrCodeToken: String): TicketInstance
+  +changeStatus(status: TicketInstanceStatus): void
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  --
+  +isOnSale(): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  --
+  +isPublished(): Boolean
+}
+
+class StaffAttractionAssignment <<model>> {
+  -id: String {UUID}
+  -staffId: String
+  -attractionId: String
+  -revokedAt: DateTime [0..1]
+  -createdAt: DateTime
+  --
+  +covers(attractionId: String): Boolean
+}
+
+Reservation "1" -- "0..1" Booking : booking
+Booking "1" *-- "0..*" TicketInstance : ticketInstances
+TicketProduct "1" -- "0..*" TicketInstance : ticketInstances
+TicketProduct "1" -- "0..*" Reservation : reservations
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+Attraction "1" *-- "0..*" StaffAttractionAssignment : staffAssignments
+Attraction "0..1" -- "0..*" Booking : snapshotBookings
+
+@enduml

@@ -1,0 +1,34 @@
+@startuml
+title Voucher State Diagram
+
+top to bottom direction
+hide empty description
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam linetype polyline
+skinparam ArrowColor black
+skinparam state {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  StartColor black
+  EndColor black
+}
+
+state "Active" as ACTIVE
+state "Inactive" as INACTIVE
+state "Expired" as EXPIRED
+state "Exhausted" as EXHAUSTED
+
+[*] -down-> ACTIVE : Voucher created
+
+ACTIVE -left-> INACTIVE : [disabled]
+INACTIVE -right-> ACTIVE : [re-enabled]
+ACTIVE -right-> EXPIRED : [expiry date reached]
+ACTIVE -down-> EXHAUSTED : [usage limit reached]
+
+EXPIRED --> [*]
+EXHAUSTED --> [*]
+
+@enduml

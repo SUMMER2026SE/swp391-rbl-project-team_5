@@ -8,7 +8,8 @@ và logic controller thật — không suy đoán.
 | Module | Thực thể | Enum / cờ | File |
 |---|---|---|---|
 | 3.6 | PartnerProfile | `PartnerStatus` (PENDING/APPROVED/REJECTED/SUSPENDED) | `sd_36_partner_profile` |
-| 3.6 | Attraction | `AttractionStatus` (DRAFT/PENDING/APPROVED/REJECTED/SUSPENDED) | `sd_36_attraction` |
+| 3.6 | Attraction | `AttractionStatus` (DRAFT/PENDING/APPROVED/REJECTED) | `sd_36_attraction` |
+| 3.6/3.9 | Attraction Operational | `AttractionOperationalStatus` (ACTIVE/SUSPENDED) | `sd_36_attraction_operational` |
 | 3.6 | Attraction Publication | `AttractionPublicationStatus` (PAUSED/ACTIVE/ARCHIVED) | `sd_36_attraction_publication` |
 | 3.6 | Ticket Product | `TicketStatus` (ACTIVE/INACTIVE) + archivedAt | `sd_36_ticket_product` |
 | 3.7 | Support Ticket | `SupportStatus` (OPEN/IN_PROGRESS/RESOLVED) | `sd_37_support_ticket` |

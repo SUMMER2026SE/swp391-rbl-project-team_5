@@ -1,0 +1,55 @@
+@startuml
+title UC-03-15 - Auto-Expire Hold Reservation Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Cleanup Worker|
+start
+:Wake on 60-second schedule;
+:Acquire scheduled-job lock;
+
+|Booking Database|
+:Select HELD reservations beyond\nexpiry plus grace period;
+
+|Cleanup Worker|
+while (Another candidate?) is (Yes)
+  |VietTicket System|
+  :Recheck Reservation status\nand expiry inside transaction;
+
+  if (Still expired and HELD?) then (Yes)
+    |Booking Database|
+    :Release held stock quantities;
+    :Set Reservation EXPIRED;
+    :Cancel linked orphan\nPENDING_PAYMENT Booking;
+
+    |Email Service|
+    :Queue expiration notice;
+  else (No)
+    |Cleanup Worker|
+    :Skip already processed\nor IPN-confirmed record;
+  endif
+
+  |Cleanup Worker|
+endwhile (No)
+
+:Release scheduled-job lock;
+:Log cycle result or retryable error;
+stop
+@enduml

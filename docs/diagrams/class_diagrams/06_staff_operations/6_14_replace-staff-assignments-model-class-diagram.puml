@@ -1,0 +1,70 @@
+@startuml
+title Replace Staff Assignments - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  -archivedAt: DateTime [0..1]
+  --
+  +isPublished(): Boolean
+  +isOwnedBy(partnerId: String): Boolean
+}
+
+class StaffAttractionAssignment <<model>> {
+  -id: String {UUID}
+  -staffId: String
+  -attractionId: String
+  -createdById: String [0..1]
+  -revokedAt: DateTime [0..1]
+  -createdAt: DateTime
+  --
+  {static} +assign(staffId: String, attractionId: String, createdById: String): StaffAttractionAssignment
+  +revoke(at: DateTime): void
+  +reactivate(createdById: String): void
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -status: UserStatus = ACTIVE
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class AuditLog <<model>> {
+  -id: String {UUID}
+  -actorId: String [0..1]
+  -entityId: String [0..1]
+  -action: String
+  -entityType: String
+  --
+  +concerns(entityType: String, entityId: String): Boolean
+}
+
+User "1" -- "0..*" StaffAttractionAssignment : staffAssignments
+Attraction "1" *-- "0..*" StaffAttractionAssignment : staffAssignments
+User "0..1" -- "0..*" StaffAttractionAssignment : createdStaffAssignments
+User "0..1" -- "0..*" AuditLog : auditLogs
+
+@enduml

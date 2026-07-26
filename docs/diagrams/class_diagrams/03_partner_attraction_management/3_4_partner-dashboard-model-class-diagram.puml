@@ -1,0 +1,109 @@
+@startuml
+title Partner Dashboard - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  -publicationStatus: AttractionPublicationStatus = PAUSED
+  -archivedAt: DateTime [0..1]
+  -createdAt: DateTime
+  --
+  +isPublished(): Boolean
+  +isOwnedBy(partnerId: String): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  -archivedAt: DateTime [0..1]
+  -createdAt: DateTime
+  --
+  +isOnSale(): Boolean
+  +isAvailableOn(date: DateTime): Boolean
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -ticketProductId: String
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  -createdAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+  +isHeld(): Boolean
+}
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -status: BookingStatus = PENDING_PAYMENT
+  -createdAt: DateTime
+  --
+  +isPaid(): Boolean
+  +isRefundable(at: DateTime): Boolean
+}
+
+class Payment <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -duplicateOfPaymentId: String [0..1]
+  -status: PaymentStatus = PENDING
+  -isDuplicate: Boolean = false
+  -createdAt: DateTime
+  --
+  +isSucceeded(): Boolean
+}
+
+class DailyStock <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String
+  -capacity: Int
+  -date: DateTime
+  --
+  +hasAvailable(quantity: Int): Boolean
+  +remaining(): Int
+}
+
+class RefundRequest <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -status: RefundStatus = PENDING
+  -createdAt: DateTime
+  --
+  +isPending(): Boolean
+}
+
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+TicketProduct "1" -- "0..*" Reservation : reservations
+Reservation "1" -- "0..1" Booking : booking
+Booking "1" *-- "0..*" Payment : payments
+Payment "0..1" -- "0..*" Payment : duplicatePayments
+TicketProduct "1" *-- "0..*" DailyStock : dailyStocks
+Booking "1" -- "0..*" RefundRequest : refundRequests
+Attraction "0..1" -- "0..*" Booking : snapshotBookings
+
+@enduml

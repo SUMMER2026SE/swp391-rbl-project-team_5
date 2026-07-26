@@ -1,0 +1,61 @@
+@startuml
+title UC-03-03 - Create Booking Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Confirm contact information,\nnote, voucher and VNPay;
+:Submit booking request;
+
+|VietTicket System|
+:Validate authentication,\ncontact data and payment method;
+
+|Booking Database|
+:Load HELD Reservation\nand existing Booking link;
+
+|VietTicket System|
+:Verify ownership, expiry\nand one-booking rule;
+:Revalidate voucher when supplied\nand calculate final total;
+
+if (Booking request valid?) then (Yes)
+  |Booking Database|
+  :Begin transaction;
+  :Create PENDING_PAYMENT Booking;
+  :Create PENDING Payment;
+  :Store discount and consume\nvoucher usage when applicable;
+  :Commit transaction;
+
+  |VietTicket System|
+  :Return booking data;
+
+  |Customer|
+  :Continue to VNPay payment;
+else (No)
+  |VietTicket System|
+  :Rollback or leave data unchanged;
+
+  |Customer|
+  :Display booking error;
+endif
+
+|Customer|
+stop
+@enduml
