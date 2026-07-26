@@ -5,6 +5,7 @@ jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 const {
   activateLiveTrip,
   extractActivityDescriptors,
+  findMatchingBooking,
   resolveActivityTimes,
 } = require('../services/liveTripService');
 const mockPrisma = require('./helpers/mockPrisma');
@@ -13,6 +14,24 @@ describe('liveTripService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.$transaction.mockImplementation((callback) => callback(mockPrisma));
+  });
+
+  test('does not guess between multiple same-day bookings without a slot or ticket match', () => {
+    const descriptor = {
+      attractionId: 'a1',
+      dateInfo: { key: '2099-03-10' },
+      activity: {},
+    };
+    const bookings = [
+      { id: 'booking-1', snapshotAttractionId: 'a1', snapshotVisitDate: new Date('2099-03-10T00:00:00Z'), reservation: { timeSlotId: 'slot-1' } },
+      { id: 'booking-2', snapshotAttractionId: 'a1', snapshotVisitDate: new Date('2099-03-10T00:00:00Z'), reservation: { timeSlotId: 'slot-2' } },
+    ];
+
+    expect(findMatchingBooking(descriptor, bookings, new Set())).toBeNull();
+    expect(findMatchingBooking({
+      ...descriptor,
+      activity: { suggestedTimeSlot: { timeSlotId: 'slot-2' } },
+    }, bookings, new Set())).toMatchObject({ id: 'booking-2' });
   });
 
   test('materialization accepts generated date-aware itinerary activities', () => {

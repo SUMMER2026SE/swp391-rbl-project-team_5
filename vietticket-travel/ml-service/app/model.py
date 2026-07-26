@@ -14,8 +14,10 @@ train/serving dùng chung 1 pipeline (tránh lệch train-serving).
 
 import json
 import os
+import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from hmac import compare_digest
 from typing import Dict, List, Optional
 
 import joblib
@@ -51,6 +53,8 @@ class EnsembleForecastModel:
         model_version: str = "rf_xgb_ensemble_v1",
         trained_at: Optional[datetime] = None,
         metrics: Optional[dict] = None,
+        artifact_sha256: Optional[str] = None,
+        artifact_integrity_verified: bool = False,
     ):
         self.rf = rf
         self.xgb = xgb
@@ -59,6 +63,8 @@ class EnsembleForecastModel:
         self.model_version = model_version
         self.trained_at = trained_at or datetime.now(timezone.utc)
         self.metrics = metrics or {}
+        self.artifact_sha256 = artifact_sha256
+        self.artifact_integrity_verified = artifact_integrity_verified
 
     # ---------- Training helpers ----------
 
@@ -109,22 +115,39 @@ class EnsembleForecastModel:
 
     def save(self, model_dir: str):
         os.makedirs(model_dir, exist_ok=True)
-        joblib.dump({"rf": self.rf, "xgb": self.xgb}, os.path.join(model_dir, MODEL_FILE))
+        model_path = os.path.join(model_dir, MODEL_FILE)
+        joblib.dump({"rf": self.rf, "xgb": self.xgb}, model_path)
+        with open(model_path, "rb") as artifact:
+            artifact_sha256 = hashlib.sha256(artifact.read()).hexdigest()
+        self.artifact_sha256 = artifact_sha256
+        self.artifact_integrity_verified = True
         metadata = {
             "model_version": self.model_version,
             "trained_at": self.trained_at.isoformat(),
             "city_freq_map": self.city_freq_map,
             "residual_std": self.residual_std,
             "metrics": self.metrics,
+            "artifact_sha256": artifact_sha256,
         }
         with open(os.path.join(model_dir, METADATA_FILE), "w", encoding="utf-8") as f:
             json.dump(metadata, f, ensure_ascii=False, indent=2)
 
     @classmethod
-    def load(cls, model_dir: str) -> "EnsembleForecastModel":
-        models = joblib.load(os.path.join(model_dir, MODEL_FILE))
+    def load(cls, model_dir: str, require_integrity: bool = False) -> "EnsembleForecastModel":
+        model_path = os.path.join(model_dir, MODEL_FILE)
         with open(os.path.join(model_dir, METADATA_FILE), "r", encoding="utf-8") as f:
             metadata = json.load(f)
+        expected_sha256 = str(metadata.get("artifact_sha256", "")).strip().lower()
+        artifact_integrity_verified = False
+        if require_integrity and not expected_sha256:
+            raise ValueError("Model artifact thiếu SHA-256 metadata.")
+        if expected_sha256:
+            with open(model_path, "rb") as artifact:
+                actual_sha256 = hashlib.sha256(artifact.read()).hexdigest()
+            if not compare_digest(actual_sha256, expected_sha256):
+                raise ValueError("Model artifact hash không khớp metadata.")
+            artifact_integrity_verified = True
+        models = joblib.load(model_path)
         return cls(
             rf=models["rf"],
             xgb=models["xgb"],
@@ -133,6 +156,8 @@ class EnsembleForecastModel:
             model_version=metadata.get("model_version", "rf_xgb_ensemble_v1"),
             trained_at=datetime.fromisoformat(metadata["trained_at"]) if metadata.get("trained_at") else None,
             metrics=metadata.get("metrics", {}),
+            artifact_sha256=expected_sha256 or None,
+            artifact_integrity_verified=artifact_integrity_verified,
         )
 
     @staticmethod

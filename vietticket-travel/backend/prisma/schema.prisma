@@ -1167,7 +1167,7 @@ model SmartQueueEntry {
   liveTripItemId String           @unique
   userId         String
   attractionId   String
-  bookingId      String
+  bookingId      String           @unique
   visitDate      DateTime         @db.Date
   partySize      Int
   status         SmartQueueStatus @default(WAITING)
@@ -1192,7 +1192,6 @@ model SmartQueueEntry {
 
   @@index([attractionId, visitDate, status, joinedAt])
   @@index([userId, status, updatedAt])
-  @@index([bookingId, status])
   @@index([expiresAt, status])
 }
 
@@ -1267,6 +1266,7 @@ model LivePrediction {
   trainingSource       String    @default("unknown")
   usedFallback         Boolean   @default(false)
   featureContributions Json?
+  qualityMetrics       Json?
   actualValue          Float?
   predictedAt          DateTime  @default(now())
   evaluatedAt          DateTime?

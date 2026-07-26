@@ -14,23 +14,97 @@ const { getVietnamDateKey } = require('../services/arrivalPressureService');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000;
 const JOB_NAME = 'live_trip_operations';
-const LOCK_TTL_MS = DEFAULT_INTERVAL_MS * 2;
+const LOCK_TTL_MS = 15 * 60 * 1000;
+const LOCK_HEARTBEAT_MS = Math.max(30 * 1000, Math.floor(LOCK_TTL_MS / 3));
+const PREDICTION_CONCURRENCY = 4;
+const PREDICTION_BUCKET_MINUTES = 15;
+
+// Keep the last processed bucket in-process so a 60-second interval cannot
+// re-run the entire catalogue 15 times. The observation upsert and prediction
+// cache remain the durable safeguards across restarts and multiple instances.
+let lastPredictionBucketKey = null;
+
+function predictionBucketStart(value) {
+  const date = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCSeconds(0, 0);
+  date.setUTCMinutes(
+    Math.floor(date.getUTCMinutes() / PREDICTION_BUCKET_MINUTES) * PREDICTION_BUCKET_MINUTES,
+  );
+  return date;
+}
+
+function predictionBucketKey(value) {
+  return predictionBucketStart(value)?.toISOString() || null;
+}
+
+async function predictionAlreadyRecorded(attractionId, now, prismaClient) {
+  if (!prismaClient?.livePrediction?.findFirst) return false;
+  const upperBound = now instanceof Date ? now : new Date(now);
+  const bucketStart = predictionBucketStart(upperBound);
+  if (!bucketStart) return false;
+  try {
+    const existing = await prismaClient.livePrediction.findFirst({
+      where: {
+        attractionId,
+        predictionType: 'ARRIVALS',
+        predictedAt: {
+          gte: bucketStart,
+          lte: upperBound,
+        },
+      },
+      select: { id: true },
+    });
+    return Boolean(existing);
+  } catch (error) {
+    // A read failure must not prevent a fresh operational prediction. The
+    // prediction write itself is already best-effort and auditable.
+    console.error(`[live-prediction] Không kiểm tra được prediction bucket ${attractionId}:`, error.message);
+    return false;
+  }
+}
+
+async function mapWithConcurrency(values, limit, mapper) {
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), values.length);
+  async function worker() {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
 
 async function sweepLiveTripOperations({ now = new Date(), prismaClient = prisma } = {}) {
   const queue = await sweepSmartQueues({ prismaClient, now });
   const autopilot = await sweepAutopilotTrips({ prismaClient, now });
-  // Observation writes are idempotent and run only at 15-minute boundaries;
-  // the worker result remains backwards compatible with Sprint 1–2 callers.
-  if (now instanceof Date && now.getUTCMinutes() % 15 === 0 && prismaClient?.attraction?.findMany) {
+  // Observation writes are idempotent per 15-minute bucket. Do not rely on
+  // seconds being exactly zero: setInterval commonly starts at an arbitrary
+  // millisecond and would otherwise silently skip every collection window.
+  const currentBucketKey = predictionBucketKey(now);
+  const shouldCollectPredictions = Boolean(
+    currentBucketKey
+    && currentBucketKey !== lastPredictionBucketKey
+    && prismaClient?.attraction?.findMany,
+  );
+  if (shouldCollectPredictions) {
     const attractions = await prismaClient.attraction.findMany({
       where: { status: 'APPROVED', publicationStatus: 'ACTIVE', archivedAt: null },
       select: { id: true },
-      take: 100,
+      orderBy: { id: 'asc' },
     });
-    for (const attraction of attractions || []) {
+    // Process the complete active catalogue. A hard `take` would permanently
+    // starve attractions after the first page; bounded concurrency keeps the
+    // ML service and database load predictable.
+    await mapWithConcurrency(attractions || [], PREDICTION_CONCURRENCY, async (attraction) => {
       await recordArrivalObservation(attraction.id, { now, prismaClient }).catch((error) => {
         console.error(`[live-prediction] Không ghi được snapshot ${attraction.id}:`, error.message);
       });
+      if (await predictionAlreadyRecorded(attraction.id, now, prismaClient)) return;
       await predictLiveArrivals({
         attractionId: attraction.id,
         date: getVietnamDateKey(now),
@@ -40,13 +114,17 @@ async function sweepLiveTripOperations({ now = new Date(), prismaClient = prisma
       }).catch((error) => {
         console.error(`[live-prediction] Không tạo được prediction ${attraction.id}:`, error.message);
       });
-    }
+    });
     await evaluateArrivalObservations({ now, prismaClient }).catch((error) => {
       console.error('[live-prediction] Không đánh giá được observation:', error.message);
     });
     await evaluateLivePredictions({ now, prismaClient }).catch((error) => {
       console.error('[live-prediction] Không đánh giá được prediction:', error.message);
     });
+    // Only mark the bucket after the catalogue query and all bounded workers
+    // have completed. If the catalogue query or worker orchestration itself
+    // fails, the next minute retries the same bucket instead of losing it.
+    lastPredictionBucketKey = currentBucketKey;
   }
   return { queue, autopilot };
 }
@@ -66,11 +144,23 @@ function startLiveTripWorker({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
     if (!lockAcquired) return;
 
     isRunning = true;
+    const heartbeat = setInterval(async () => {
+      try {
+        const refreshed = await acquireJobLock(JOB_NAME, LOCK_TTL_MS);
+        if (!refreshed) {
+          console.error('[live-trip] Không gia hạn được lock vận hành; instance khác có thể tiếp quản sau TTL.');
+        }
+      } catch (error) {
+        console.error('[live-trip] Không thể gia hạn lock vận hành:', error.message);
+      }
+    }, LOCK_HEARTBEAT_MS);
+    if (typeof heartbeat.unref === 'function') heartbeat.unref();
     try {
       await sweepLiveTripOperations();
     } catch (error) {
       console.error('[live-trip] Lỗi vòng quét vận hành:', error.message);
     } finally {
+      clearInterval(heartbeat);
       isRunning = false;
       await releaseJobLock(JOB_NAME);
     }
@@ -84,6 +174,8 @@ function startLiveTripWorker({ intervalMs = DEFAULT_INTERVAL_MS } = {}) {
 
 module.exports = {
   DEFAULT_INTERVAL_MS,
+  predictionBucketKey,
+  predictionBucketStart,
   startLiveTripWorker,
   sweepLiveTripOperations,
 };

@@ -2,9 +2,17 @@
 
 const prisma = require('../config/prisma');
 const { emitLiveTripUpdated } = require('../realtime/events');
-const { getAttractionPressure, getDateKey } = require('./arrivalPressureService');
+const {
+  getAttractionPressure,
+  getDateKey,
+  getVietnamDateKey,
+} = require('./arrivalPressureService');
 const { recordLiveTripEvent } = require('./liveTripEventService');
-const { DEFAULT_QUEUE_POLICY, selectQueuePressure } = require('./smartQueueService');
+const {
+  DEFAULT_QUEUE_POLICY,
+  markQueueAdmittedForBooking,
+  selectQueuePressure,
+} = require('./smartQueueService');
 
 const QUEUE_CALL_BEFORE_MS = 15 * 60 * 1000;
 
@@ -34,6 +42,11 @@ const QUEUE_ENTRY_SELECT = {
       status: true,
       fullName: true,
       reservation: { select: { timeSlotId: true } },
+      ticketInstances: {
+        where: { status: 'USED' },
+        select: { id: true },
+        take: 1,
+      },
     },
   },
 };
@@ -108,7 +121,7 @@ async function getPolicy(attractionId, { prismaClient = prisma } = {}) {
 async function listQueueOperations({ attractionId, date, prismaClient = prisma, now = new Date() } = {}) {
   const normalizedAttractionId = String(attractionId || '').trim();
   if (!normalizedAttractionId) throw httpError(400, 'INVALID_ATTRACTION', 'attractionId là bắt buộc.');
-  const visitDate = normalizeDateKey(date || getDateKey(now));
+  const visitDate = normalizeDateKey(date || getVietnamDateKey(now));
   const policy = await getPolicy(normalizedAttractionId, { prismaClient });
   const entries = await prismaClient.smartQueueEntry.findMany({
     where: {
@@ -125,9 +138,16 @@ async function listQueueOperations({ attractionId, date, prismaClient = prisma, 
     now,
   });
   const active = entries || [];
+  const referenceNow = new Date(now);
+  const liveReadyEntries = active.filter((entry) => (
+    entry.status === 'READY'
+    && (!entry.readyExpiresAt || new Date(entry.readyExpiresAt) > referenceNow)
+  ));
+  const liveReadyIds = new Set(liveReadyEntries.map((entry) => entry.id));
   const waitingPositions = new Map();
   const readyCounts = active.reduce((counts, entry) => {
     if (entry.status !== 'READY') return counts;
+    if (entry.readyExpiresAt && new Date(entry.readyExpiresAt) <= referenceNow) return counts;
     const scopeKey = entry.booking?.reservation?.timeSlotId || 'UNTIMED';
     counts.set(scopeKey, (counts.get(scopeKey) || 0) + 1);
     return counts;
@@ -138,14 +158,15 @@ async function listQueueOperations({ attractionId, date, prismaClient = prisma, 
     pressure,
     summary: {
       waitingParties: active.filter((entry) => entry.status === 'WAITING').length,
-      readyParties: active.filter((entry) => entry.status === 'READY').length,
+      readyParties: liveReadyEntries.length,
       waitingGuests: active
         .filter((entry) => entry.status === 'WAITING')
         .reduce((sum, entry) => sum + Number(entry.partySize || 0), 0),
-      readyGuests: active
-        .filter((entry) => entry.status === 'READY')
+      readyGuests: liveReadyEntries
         .reduce((sum, entry) => sum + Number(entry.partySize || 0), 0),
-      activeGuests: active.reduce((sum, entry) => sum + Number(entry.partySize || 0), 0),
+      activeGuests: active
+        .filter((entry) => entry.status === 'WAITING' || liveReadyIds.has(entry.id))
+        .reduce((sum, entry) => sum + Number(entry.partySize || 0), 0),
     },
     entries: active.map((entry) => {
       const scopeKey = entry.booking?.reservation?.timeSlotId || 'UNTIMED';
@@ -188,6 +209,19 @@ async function transitionQueueEntry({ entryId, action, actorId, prismaClient = p
   const entry = await prismaClient.smartQueueEntry.findUnique({ where: { id }, select: QUEUE_ENTRY_SELECT });
   if (!entry) throw httpError(404, 'QUEUE_ENTRY_NOT_FOUND', 'Không tìm thấy lượt SmartQueue.');
   const policy = await getPolicy(entry.attractionId, { prismaClient });
+  if (
+    ['WAITING', 'READY'].includes(entry.status)
+    && (entry.booking?.ticketInstances?.length || 0) > 0
+  ) {
+    // QR check-in is the source of truth. Reconcile a rare hook failure before
+    // staff can accidentally call or no-show an already admitted party.
+    await markQueueAdmittedForBooking(entry.bookingId, { prismaClient, admittedAt: new Date(now) });
+    throw httpError(
+      409,
+      'QUEUE_ALREADY_ADMITTED',
+      'Booking đã có vé check-in; lượt SmartQueue đã được đồng bộ sang ADMITTED.',
+    );
+  }
 
   if (normalizedAction === 'CALL') {
     if (!policy.enabled || policy.pausedAt) throw httpError(409, 'QUEUE_PAUSED', 'SmartQueue đang tạm dừng.');
@@ -212,67 +246,92 @@ async function transitionQueueEntry({ entryId, action, actorId, prismaClient = p
         'Chỉ có thể gọi khách từ 15 phút trước giờ tham quan để tránh làm hết cửa sổ quay lại quá sớm.',
       );
     }
-    if (entry.status === 'WAITING') {
-      const [waitingAhead, readyCount] = await Promise.all([
-        prismaClient.smartQueueEntry.count({
-          where: {
-            attractionId: entry.attractionId,
-            visitDate: entry.visitDate,
-            ...queueScopeWhere(entry),
-            status: 'WAITING',
-            expiresAt: { gt: calledAt },
-            OR: [
-              { joinedAt: { lt: entry.joinedAt } },
-              { joinedAt: entry.joinedAt, id: { lt: entry.id } },
-            ],
-          },
-        }),
-        prismaClient.smartQueueEntry.count({
-          where: {
-            attractionId: entry.attractionId,
-            visitDate: entry.visitDate,
-            ...queueScopeWhere(entry),
+    const graceExpiresAt = new Date(
+      calledAt.getTime() + Math.max(1, Number(policy.readyGraceMinutes) || 10) * 60 * 1000,
+    );
+    const readyExpiresAt = new Date(Math.min(
+      new Date(entry.expiresAt).getTime(),
+      graceExpiresAt.getTime(),
+    ));
+    try {
+      return await prismaClient.$transaction(async (tx) => {
+        const [waitingAhead, readyCount] = await Promise.all([
+          tx.smartQueueEntry.count({
+            where: {
+              attractionId: entry.attractionId,
+              visitDate: entry.visitDate,
+              ...queueScopeWhere(entry),
+              status: 'WAITING',
+              expiresAt: { gt: calledAt },
+              OR: [
+                { joinedAt: { lt: entry.joinedAt } },
+                { joinedAt: entry.joinedAt, id: { lt: entry.id } },
+              ],
+            },
+          }),
+          tx.smartQueueEntry.count({
+            where: {
+              attractionId: entry.attractionId,
+              visitDate: entry.visitDate,
+              ...queueScopeWhere(entry),
+              status: 'READY',
+              expiresAt: { gt: calledAt },
+              OR: [
+                { readyExpiresAt: null },
+                { readyExpiresAt: { gt: calledAt } },
+              ],
+            },
+          }),
+        ]);
+        if (Number(waitingAhead || 0) > 0) {
+          throw httpError(
+            409,
+            'QUEUE_FIFO_VIOLATION',
+            'Phải gọi nhóm đầu hàng chờ trước để bảo toàn FIFO.',
+          );
+        }
+        if (Number(readyCount || 0) >= Math.max(1, Number(policy.maxReadyParties) || 3)) {
+          throw httpError(
+            409,
+            'QUEUE_READY_CAPACITY_REACHED',
+            'Đã đạt số nhóm tối đa trong cửa sổ quay lại. Hãy check-in hoặc xử lý no-show trước.',
+          );
+        }
+
+        const result = await tx.smartQueueEntry.updateMany({
+          where: { id, status: 'WAITING', expiresAt: { gt: calledAt } },
+          data: {
             status: 'READY',
-            expiresAt: { gt: calledAt },
+            readyAt: entry.readyAt || calledAt,
+            readyExpiresAt,
+            calledAt,
+            calledById: actorId,
           },
-        }),
-      ]);
-      if (Number(waitingAhead || 0) > 0) {
-        throw httpError(
-          409,
-          'QUEUE_FIFO_VIOLATION',
-          'Phải gọi nhóm đầu hàng chờ trước để bảo toàn FIFO.',
-        );
-      }
-      if (Number(readyCount || 0) >= Math.max(1, Number(policy.maxReadyParties) || 3)) {
-        throw httpError(
-          409,
-          'QUEUE_READY_CAPACITY_REACHED',
-          'Đã đạt số nhóm tối đa trong cửa sổ quay lại. Hãy check-in hoặc xử lý no-show trước.',
-        );
-      }
+        });
+        if (result.count !== 1) {
+          throw httpError(409, 'QUEUE_STATE_CHANGED', 'Lượt vừa được xử lý bởi nhân viên khác.');
+        }
+        await recordLiveTripEvent({
+          client: tx,
+          liveTripId: entry.liveTripId,
+          liveTripItemId: entry.liveTripItemId,
+          userId: entry.userId,
+          type: 'QUEUE_CALLED',
+          severity: 'SUCCESS',
+          title: 'Nhân viên đã gọi lượt SmartQueue',
+          message: 'Vui lòng di chuyển đến cổng trong thời gian hiển thị.',
+          data: { queueEntryId: id, calledById: actorId, readyExpiresAt },
+        });
+        return tx.smartQueueEntry.findUnique({ where: { id }, select: QUEUE_ENTRY_SELECT });
+      }, { isolationLevel: 'Serializable' });
+    } catch (error) {
+      if (error?.code !== 'P2034') throw error;
+      throw httpError(
+        409,
+        'QUEUE_STATE_CHANGED',
+        'Hàng chờ vừa được xử lý đồng thời. Vui lòng tải lại trước khi gọi lượt tiếp theo.',
+      );
     }
-    const readyExpiresAt = new Date(calledAt.getTime() + policy.readyGraceMinutes * 60 * 1000);
-    const updated = await prismaClient.$transaction(async (tx) => {
-      const result = await tx.smartQueueEntry.updateMany({
-        where: { id, status: 'WAITING', expiresAt: { gt: calledAt } },
-        data: { status: 'READY', readyAt: entry.readyAt || calledAt, readyExpiresAt, calledAt, calledById: actorId },
-      });
-      if (result.count !== 1) throw httpError(409, 'QUEUE_STATE_CHANGED', 'Lượt vừa được xử lý bởi nhân viên khác.');
-      await recordLiveTripEvent({
-        client: tx,
-        liveTripId: entry.liveTripId,
-        liveTripItemId: entry.liveTripItemId,
-        userId: entry.userId,
-        type: 'QUEUE_CALLED',
-        severity: 'SUCCESS',
-        title: 'Nhân viên đã gọi lượt SmartQueue',
-        message: 'Vui lòng di chuyển đến cổng trong thời gian hiển thị.',
-        data: { queueEntryId: id, calledById: actorId, readyExpiresAt },
-      });
-      return tx.smartQueueEntry.findUnique({ where: { id }, select: QUEUE_ENTRY_SELECT });
-    });
-    return updated;
   }
 
   if (entry.status !== 'READY') {

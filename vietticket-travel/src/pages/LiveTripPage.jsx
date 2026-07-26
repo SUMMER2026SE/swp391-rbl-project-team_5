@@ -53,10 +53,16 @@ const ITEM_STATUS = {
 
 function formatDate(value) {
   if (!value) return 'Chưa có ngày'
-  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`)
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`)
   return Number.isNaN(date.getTime())
     ? String(value)
-    : date.toLocaleDateString('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })
+    : date.toLocaleDateString('vi-VN', {
+      weekday: 'long',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'Asia/Ho_Chi_Minh',
+    })
 }
 
 function formatTime(value) {
@@ -175,8 +181,10 @@ function AutopilotProposalPanel({ proposal, busy, onDecision }) {
 function SmartQueuePanel({ item, busy, onAction }) {
   if (!item.bookingId) return null
   const queue = item.smartQueue
-  const pressureLevel = item.pressure?.summary?.level
+  const selectedPressure = selectLiveTripPressure(item.pressure, item)
+  const pressureLevel = selectedPressure.metrics?.level
   const queueUseful = ['BUSY', 'VERY_BUSY'].includes(pressureLevel)
+  const availability = item.smartQueueAvailability
 
   if (queue?.status === 'NO_SHOW') {
     return (
@@ -197,18 +205,20 @@ function SmartQueuePanel({ item, busy, onAction }) {
   }
 
   if (!queue) {
-    if (!queueUseful) return null
+    if (!queueUseful && (!availability || availability.code === 'QUEUE_NOT_NEEDED')) return null
     return (
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-200 bg-cyan-50 p-4">
         <div>
-          <p className="text-sm font-black text-cyan-950">SmartQueue đang khả dụng</p>
+          <p className="text-sm font-black text-cyan-950">
+            {availability?.eligible === false ? 'SmartQueue chưa thể đăng ký' : 'SmartQueue đang khả dụng'}
+          </p>
           <p className="mt-1 text-xs leading-5 text-cyan-800">
-            Suất có giới hạn, mỗi booking đăng ký một lần trong ngày và vào cổng bằng QR trong cửa sổ được gọi.
+            {availability?.message || 'Suất có giới hạn, mỗi booking đăng ký một lần trong ngày và vào cổng bằng QR trong cửa sổ được gọi.'}
           </p>
         </div>
         <button
           className="rounded-xl bg-[#006b72] px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={busy}
+          disabled={busy || availability?.eligible === false}
           onClick={() => onAction(item, 'join')}
           type="button"
         >

@@ -25,13 +25,17 @@ curl http://127.0.0.1:8000/health
 ```
 
 Backend Node cần cấu hình `ML_SERVICE_URL=http://localhost:8000`. Nếu đặt
-`ML_SERVICE_API_KEY`, giá trị phải giống nhau ở hai service.
+`ML_SERVICE_API_KEY`, giá trị phải giống nhau ở hai service. Trong production,
+`ENVIRONMENT=production` và API key tối thiểu 32 ký tự là bắt buộc; service sẽ
+fail-fast và tắt Swagger/OpenAPI nếu cấu hình bảo mật chưa đạt.
 
 ## Định nghĩa dữ liệu
 
 Backend chỉ đưa vào lịch sử:
 
 - booking `COMPLETED` hoặc `NO_SHOW`;
+- chỉ booking thật (`isForecastTrainingSample=false`); các dòng demo được giữ
+  trong local DB nhưng bị loại khỏi export production;
 - gắn theo `snapshotVisitDate` (fallback sang ngày reservation);
 - payment `SUCCESS`, bỏ payment trùng;
 - trừ refund `SUCCESS`, không trừ lần nữa khoản hoàn payment trùng;
@@ -115,11 +119,18 @@ Backend chỉ gắn nhãn `AI_ENSEMBLE` khi `training_source=real_booking_histor
 
 - `GET /health`
 - `POST /forecast` — yêu cầu header `x-ml-api-key` nếu đã cấu hình key.
-- `POST /live/predict-arrivals` — dự báo số khách đến trong horizon, p50/p90 + metric time-split + feature contributions.
-- `POST /live/predict-wait` — suy ra ETA theo p50/p90 arrival throughput và party phía trước.
+- `POST /live/predict-arrivals` — dự báo số khách đến trong horizon, p10/p50/p90
+  đã calibration, time-split metrics, data-quality diagnostics và feature contributions.
+- `POST /live/predict-wait` — suy ra ETA theo throughput rate p10/p50 và party phía trước.
 - `POST /live/optimize` — constrained local search; bảo vệ item đã khóa, giới hạn shift và cấm overlap.
 
-Live endpoints nhận observations từ Node backend, không tự truy cập PostgreSQL. Khi ít hơn 24 observation có actual target, service trả heuristic fallback với `used_fallback=true` và `training_source=operational_heuristic`.
+Live endpoints nhận observations từ Node backend, không tự truy cập PostgreSQL.
+Model v3 loại timestamp tương lai/trùng, clip target bất khả thi, dùng feature tỷ lệ
+theo capacity, chu kỳ giờ/ngày, recency weighting và split-conformal calibration.
+Khi ít hơn 32 observation có actual target, service trả heuristic fallback với
+`used_fallback=true` và `training_source=operational_heuristic`. Dữ liệu demo,
+lịch sử quá cũ hoặc coverage/MAE không đạt luôn bị hạ confidence và không được
+SmartQueue/Autopilot dùng để ra quyết định live.
 
 ## Cấu trúc
 

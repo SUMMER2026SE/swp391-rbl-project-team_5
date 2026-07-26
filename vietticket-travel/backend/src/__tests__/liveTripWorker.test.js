@@ -7,6 +7,12 @@ jest.mock('../services/liveTripAutopilotService', () => ({
 jest.mock('../services/smartQueueService', () => ({
   sweepSmartQueues: jest.fn(),
 }));
+jest.mock('../services/livePredictionService', () => ({
+  evaluateArrivalObservations: jest.fn(),
+  evaluateLivePredictions: jest.fn(),
+  predictLiveArrivals: jest.fn(),
+  recordArrivalObservation: jest.fn(),
+}));
 jest.mock('../utils/cleanupWorker', () => ({
   acquireJobLock: jest.fn(),
   releaseJobLock: jest.fn(),
@@ -16,6 +22,12 @@ jest.mock('../utils/cleanupWorker', () => ({
 const prisma = require('../config/prisma');
 const { sweepAutopilotTrips } = require('../services/liveTripAutopilotService');
 const { sweepSmartQueues } = require('../services/smartQueueService');
+const {
+  evaluateArrivalObservations,
+  evaluateLivePredictions,
+  predictLiveArrivals,
+  recordArrivalObservation,
+} = require('../services/livePredictionService');
 const { acquireJobLock, releaseJobLock } = require('../utils/cleanupWorker');
 const {
   startLiveTripWorker,
@@ -29,6 +41,10 @@ beforeEach(() => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   sweepSmartQueues.mockResolvedValue({ scanned: 2, ready: 1, admitted: 0, expired: 0 });
   sweepAutopilotTrips.mockResolvedValue({ scanned: 1, refreshed: 1 });
+  evaluateArrivalObservations.mockResolvedValue({ evaluated: 0 });
+  evaluateLivePredictions.mockResolvedValue({ evaluated: 0 });
+  predictLiveArrivals.mockResolvedValue({});
+  recordArrivalObservation.mockResolvedValue({});
   releaseJobLock.mockResolvedValue(undefined);
 });
 
@@ -51,6 +67,33 @@ test('runs SmartQueue before Autopilot with one shared time and Prisma client', 
   expect(sweepAutopilotTrips).toHaveBeenCalledWith({ prismaClient: prisma, now });
   expect(sweepSmartQueues.mock.invocationCallOrder[0])
     .toBeLessThan(sweepAutopilotTrips.mock.invocationCallOrder[0]);
+});
+
+test('collects a new 15-minute bucket even when the worker tick is not on an exact boundary', async () => {
+  const now = new Date('2099-03-10T02:01:37.456Z');
+  const livePrisma = {
+    attraction: {
+      findMany: jest.fn().mockResolvedValue([{ id: 'attraction-1' }]),
+    },
+  };
+
+  await sweepLiveTripOperations({ now, prismaClient: livePrisma });
+
+  expect(recordArrivalObservation).toHaveBeenCalledWith(
+    'attraction-1',
+    expect.objectContaining({ now, prismaClient: livePrisma }),
+  );
+  expect(predictLiveArrivals).toHaveBeenCalledWith(
+    expect.objectContaining({
+      attractionId: 'attraction-1',
+      date: '2099-03-10',
+      now,
+      force: true,
+      prismaClient: livePrisma,
+    }),
+  );
+  expect(evaluateArrivalObservations).toHaveBeenCalledWith({ now, prismaClient: livePrisma });
+  expect(evaluateLivePredictions).toHaveBeenCalledWith({ now, prismaClient: livePrisma });
 });
 
 test('skips safely when another instance owns the distributed lock', async () => {

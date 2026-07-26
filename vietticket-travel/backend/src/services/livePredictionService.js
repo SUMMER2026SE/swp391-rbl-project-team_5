@@ -9,7 +9,11 @@ const {
 const ML_SERVICE_URL = String(process.env.ML_SERVICE_URL || 'http://localhost:8000').replace(/\/+$/, '');
 const ML_SERVICE_API_KEY = String(process.env.ML_SERVICE_API_KEY || '').trim();
 const REQUEST_TIMEOUT_MS = Math.min(15000, Math.max(1000, Number(process.env.ML_SERVICE_TIMEOUT_MS || 8000)));
-const OBSERVATION_WINDOW = 200;
+const OBSERVATION_WINDOW = 14 * 24 * 4;
+const EVALUATION_BATCH_SIZE = 100;
+const EVALUATION_CONCURRENCY = 6;
+const RUNTIME_QUALITY_WINDOW = 48;
+const MIN_RUNTIME_QUALITY_ROWS = 12;
 const PREDICTION_CACHE_MS = 15 * 60 * 1000;
 const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
 
@@ -36,9 +40,37 @@ function boundedInteger(value, { field, min, max, fallback }) {
   return normalized;
 }
 
+async function mapWithConcurrency(values, limit, mapper) {
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), values.length);
+  async function worker() {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
 function vietnamMinuteOfDay(value) {
   const shifted = new Date(new Date(value).getTime() + VIETNAM_OFFSET_MS);
   return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+}
+
+function assertLivePredictionDate(date, now) {
+  const today = getVietnamDateKey(now);
+  const requested = String(date || today).trim();
+  if (requested !== today) {
+    throw httpError(
+      400,
+      'LIVE_PREDICTION_DATE_NOT_TODAY',
+      'Dự báo live chỉ áp dụng cho ngày hiện tại theo giờ Việt Nam. Hãy dùng chỉ số áp lực lịch trước cho ngày khác.',
+    );
+  }
+  return today;
 }
 
 function currentObservation(pressure, now) {
@@ -93,12 +125,238 @@ function fallbackPrediction(current, horizonMinutes = 15) {
     predicted_p50: Math.round(p50 * 100) / 100,
     predicted_p90: Math.round(Math.min(capacity, p50 * 1.6 + 2) * 100) / 100,
     confidence: 'LOW',
-    model_version: 'arrival_fallback_node_v2',
+    model_version: 'arrival_fallback_node_v3',
     training_source: 'operational_heuristic',
     used_fallback: true,
-    feature_contributions: { checkins_last_15m: recent * 0.65, booked_guests: scheduled * 0.025, queue_guests: queue * 0.05 },
-    metrics: { reason: 'ML_SERVICE_UNAVAILABLE' },
+    feature_contributions: {
+      checkins_last_15m: recent * 0.65 * horizonScale,
+      booked_guests: scheduled * 0.025 * horizonScale,
+      queue_guests: queue * 0.05 * horizonScale,
+    },
+    metrics: {
+      reason: 'ML_SERVICE_UNAVAILABLE',
+      predicted_p10: Math.max(0, p50 - (Math.min(capacity, p50 * 1.6 + 2) - p50)),
+    },
   };
+}
+
+function validateMlPrediction(result, {
+  predictionType = 'ARRIVALS',
+  maximum = Number.POSITIVE_INFINITY,
+} = {}) {
+  if (!result || typeof result !== 'object') {
+    throw new Error('ML service trả response không hợp lệ.');
+  }
+  const p50 = Number(result.predicted_p50);
+  const p90 = Number(result.predicted_p90);
+  if (
+    !Number.isFinite(p50)
+    || !Number.isFinite(p90)
+    || p50 < 0
+    || p90 < p50
+    || p50 > maximum
+    || p90 > maximum
+  ) {
+    throw new Error(`ML service trả quantile ${predictionType} ngoài miền nghiệp vụ.`);
+  }
+  if (!['LOW', 'MEDIUM', 'HIGH'].includes(result.confidence)) {
+    throw new Error('ML service trả confidence không hợp lệ.');
+  }
+  if (
+    typeof result.used_fallback !== 'boolean'
+    || !String(result.model_version || '').trim()
+    || !String(result.training_source || '').trim()
+  ) {
+    throw new Error('ML service thiếu provenance bắt buộc.');
+  }
+  return {
+    ...result,
+    predicted_p50: p50,
+    predicted_p90: p90,
+  };
+}
+
+async function applyRuntimeQualityGate(attractionId, result, {
+  prismaClient = prisma,
+} = {}) {
+  if (
+    result.used_fallback
+    || result.confidence === 'LOW'
+    || !prismaClient?.livePrediction?.findMany
+  ) return result;
+
+  let rows;
+  try {
+    rows = await prismaClient.livePrediction.findMany({
+      where: {
+        attractionId,
+        predictionType: 'ARRIVALS',
+        modelVersion: result.model_version,
+        trainingSource: 'live_operational_history',
+        usedFallback: false,
+        actualValue: { not: null },
+      },
+      orderBy: { evaluatedAt: 'desc' },
+      take: RUNTIME_QUALITY_WINDOW,
+      select: {
+        predictedP50: true,
+        predictedP90: true,
+        actualValue: true,
+      },
+    });
+  } catch (error) {
+    console.error('[live-prediction] Không đọc được runtime quality window:', error.message);
+    return {
+      ...result,
+      confidence: 'LOW',
+      metrics: {
+        ...(result.metrics || {}),
+        runtime_quality_status: 'UNAVAILABLE',
+        confidence_reasons: [
+          ...new Set([
+            ...(Array.isArray(result.metrics?.confidence_reasons)
+              ? result.metrics.confidence_reasons
+              : []),
+            'RUNTIME_QUALITY_UNAVAILABLE',
+          ]),
+        ],
+      },
+    };
+  }
+  const evaluated = (rows || []).filter((row) => (
+    Number.isFinite(Number(row.predictedP50))
+    && Number.isFinite(Number(row.predictedP90))
+    && Number.isFinite(Number(row.actualValue))
+  ));
+  const metrics = {
+    ...(result.metrics || {}),
+    runtime_evaluation_count: evaluated.length,
+    runtime_evaluation_window: RUNTIME_QUALITY_WINDOW,
+  };
+  if (evaluated.length < MIN_RUNTIME_QUALITY_ROWS) {
+    return {
+      ...result,
+      confidence: result.confidence === 'HIGH' ? 'MEDIUM' : result.confidence,
+      metrics: {
+        ...metrics,
+        runtime_quality_status: 'WARMING_UP',
+      },
+    };
+  }
+
+  const absoluteError = evaluated.reduce(
+    (sum, row) => sum + Math.abs(Number(row.actualValue) - Number(row.predictedP50)),
+    0,
+  );
+  const actualTotal = evaluated.reduce(
+    (sum, row) => sum + Math.abs(Number(row.actualValue)),
+    0,
+  );
+  const actualMean = actualTotal / evaluated.length;
+  const normalizedMae = absoluteError / evaluated.length / Math.max(1, actualMean);
+  const p90Coverage = evaluated.filter(
+    (row) => Number(row.actualValue) <= Number(row.predictedP90),
+  ).length / evaluated.length;
+  const degraded = normalizedMae > 0.75 || p90Coverage < 0.65;
+
+  return {
+    ...result,
+    confidence: degraded ? 'LOW' : result.confidence,
+    metrics: {
+      ...metrics,
+      runtime_normalized_mae_p50: Math.round(normalizedMae * 1000) / 1000,
+      runtime_coverage_p90: Math.round(p90Coverage * 1000) / 1000,
+      runtime_quality_status: degraded ? 'DEGRADED' : 'HEALTHY',
+      ...(degraded
+        ? {
+            confidence_reasons: [
+              ...new Set([
+                ...(Array.isArray(result.metrics?.confidence_reasons)
+                  ? result.metrics.confidence_reasons
+                  : []),
+                'RUNTIME_DRIFT_DETECTED',
+              ]),
+            ],
+          }
+        : {}),
+    },
+  };
+}
+
+function validateOptimizerResult(result, items, {
+  liveTripId,
+  maxShiftMinutes,
+  travelBufferMinutes,
+} = {}) {
+  if (
+    !result
+    || typeof result !== 'object'
+    || result.live_trip_id !== liveTripId
+    || !String(result.algorithm_version || '').trim()
+    || !Array.isArray(result.proposals)
+    || result.proposals.length > items.length
+  ) {
+    throw new Error('ML optimizer trả response không hợp lệ.');
+  }
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const seen = new Set();
+  const finalItems = items.map((item) => ({ ...item }));
+  const finalById = new Map(finalItems.map((item) => [item.id, item]));
+
+  for (const proposal of result.proposals) {
+    const id = String(proposal?.item_id || '');
+    const item = itemById.get(id);
+    const proposedStart = Number(proposal?.proposed_start_minute);
+    const proposedEnd = Number(proposal?.proposed_end_minute);
+    if (
+      !item
+      || item.locked
+      || seen.has(id)
+      || !Number.isInteger(proposedStart)
+      || !Number.isInteger(proposedEnd)
+      || proposedStart < 0
+      || proposedEnd > 24 * 60
+      || proposedEnd <= proposedStart
+      || proposedEnd - proposedStart !== item.end_minute - item.start_minute
+      || Math.abs(proposedStart - item.start_minute)
+        > Math.min(maxShiftMinutes, item.flexibility_minutes)
+    ) {
+      throw new Error('ML optimizer vi phạm ràng buộc lịch trình.');
+    }
+    seen.add(id);
+    Object.assign(finalById.get(id), {
+      start_minute: proposedStart,
+      end_minute: proposedEnd,
+    });
+  }
+
+  for (let leftIndex = 0; leftIndex < finalItems.length; leftIndex += 1) {
+    const left = finalItems[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < finalItems.length; rightIndex += 1) {
+      const right = finalItems[rightIndex];
+      if (
+        left.day_index === right.day_index
+        && left.start_minute < right.end_minute + travelBufferMinutes
+        && right.start_minute < left.end_minute + travelBufferMinutes
+      ) {
+        throw new Error('ML optimizer trả lịch còn xung đột hoặc thiếu buffer di chuyển.');
+      }
+    }
+  }
+
+  const baselineScore = Number(result.baseline_score);
+  const optimizedScore = Number(result.optimized_score);
+  const totalShiftMinutes = Number(result.total_shift_minutes);
+  if (
+    !Number.isFinite(baselineScore)
+    || !Number.isFinite(optimizedScore)
+    || !Number.isInteger(totalShiftMinutes)
+    || totalShiftMinutes < 0
+    || Number(result.predicted_minutes_saved || 0) !== 0
+  ) {
+    throw new Error('ML optimizer trả metric không hợp lệ.');
+  }
+  return result;
 }
 
 async function loadObservationHistory(attractionId, { prismaClient = prisma } = {}) {
@@ -149,26 +407,47 @@ async function recordArrivalObservation(attractionId, { now = new Date(), prisma
 async function evaluateArrivalObservations({ now = new Date(), prismaClient = prisma } = {}) {
   if (!prismaClient?.arrivalObservation?.findMany) return { evaluated: 0 };
   const cutoff = new Date(new Date(now).getTime() - 15 * 60 * 1000);
-  const rows = await prismaClient.arrivalObservation.findMany({
-    where: { actualArrivalsNext15m: null, bucketStart: { lte: cutoff } },
-    take: 100,
-    select: { id: true, attractionId: true, bucketStart: true },
-  });
   let evaluated = 0;
-  for (const row of rows) {
-    const end = new Date(new Date(row.bucketStart).getTime() + 15 * 60 * 1000);
-    const actual = await prismaClient.ticketInstance.count({
+  let lastId = null;
+  while (true) {
+    const rows = await prismaClient.arrivalObservation.findMany({
       where: {
-        status: 'USED',
-        checkedInAt: { gte: row.bucketStart, lt: end },
-        booking: { snapshotAttractionId: row.attractionId },
+        actualArrivalsNext15m: null,
+        bucketStart: { lte: cutoff },
+        ...(lastId ? { id: { gt: lastId } } : {}),
       },
+      orderBy: { id: 'asc' },
+      take: EVALUATION_BATCH_SIZE,
+      select: { id: true, attractionId: true, bucketStart: true },
     });
-    const result = await prismaClient.arrivalObservation.updateMany({
-      where: { id: row.id, actualArrivalsNext15m: null },
-      data: { actualArrivalsNext15m: actual, evaluatedAt: new Date(now) },
-    });
-    evaluated += result.count;
+    if (!rows?.length) break;
+    const counts = await mapWithConcurrency(
+      rows,
+      EVALUATION_CONCURRENCY,
+      async (row) => {
+        try {
+          const end = new Date(new Date(row.bucketStart).getTime() + 15 * 60 * 1000);
+          const actual = await prismaClient.ticketInstance.count({
+            where: {
+              status: 'USED',
+              checkedInAt: { gte: row.bucketStart, lt: end },
+              booking: { snapshotAttractionId: row.attractionId },
+            },
+          });
+          const result = await prismaClient.arrivalObservation.updateMany({
+            where: { id: row.id, actualArrivalsNext15m: null },
+            data: { actualArrivalsNext15m: actual, evaluatedAt: new Date(now) },
+          });
+          return Number(result.count || 0);
+        } catch (error) {
+          console.error(`[live-prediction] Không đánh giá được observation ${row.id}:`, error.message);
+          return 0;
+        }
+      },
+    );
+    evaluated += counts.reduce((sum, count) => sum + count, 0);
+    lastId = rows[rows.length - 1].id;
+    if (rows.length < EVALUATION_BATCH_SIZE) break;
   }
   return { evaluated };
 }
@@ -176,39 +455,56 @@ async function evaluateArrivalObservations({ now = new Date(), prismaClient = pr
 async function evaluateLivePredictions({ now = new Date(), prismaClient = prisma } = {}) {
   if (!prismaClient?.livePrediction?.findMany) return { evaluated: 0 };
   const referenceNow = new Date(now);
-  const rows = await prismaClient.livePrediction.findMany({
-    where: {
-      predictionType: 'ARRIVALS',
-      actualValue: null,
-      predictedAt: { lte: new Date(referenceNow.getTime() - 5 * 60 * 1000) },
-    },
-    orderBy: { predictedAt: 'asc' },
-    take: 100,
-    select: {
-      id: true,
-      attractionId: true,
-      predictedAt: true,
-      horizonMinutes: true,
-    },
-  });
   let evaluated = 0;
-  for (const row of rows || []) {
-    const windowEnd = new Date(
-      new Date(row.predictedAt).getTime() + Number(row.horizonMinutes || 15) * 60 * 1000,
-    );
-    if (windowEnd > referenceNow) continue;
-    const actual = await prismaClient.ticketInstance.count({
+  let lastId = null;
+  while (true) {
+    const rows = await prismaClient.livePrediction.findMany({
       where: {
-        status: 'USED',
-        checkedInAt: { gte: row.predictedAt, lt: windowEnd },
-        booking: { snapshotAttractionId: row.attractionId },
+        predictionType: 'ARRIVALS',
+        actualValue: null,
+        predictedAt: { lte: new Date(referenceNow.getTime() - 5 * 60 * 1000) },
+        ...(lastId ? { id: { gt: lastId } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: EVALUATION_BATCH_SIZE,
+      select: {
+        id: true,
+        attractionId: true,
+        predictedAt: true,
+        horizonMinutes: true,
       },
     });
-    const result = await prismaClient.livePrediction.updateMany({
-      where: { id: row.id, actualValue: null },
-      data: { actualValue: actual, evaluatedAt: referenceNow },
-    });
-    evaluated += result.count;
+    if (!rows?.length) break;
+    const counts = await mapWithConcurrency(
+      rows,
+      EVALUATION_CONCURRENCY,
+      async (row) => {
+        const windowEnd = new Date(
+          new Date(row.predictedAt).getTime() + Number(row.horizonMinutes || 15) * 60 * 1000,
+        );
+        if (windowEnd > referenceNow) return 0;
+        try {
+          const actual = await prismaClient.ticketInstance.count({
+            where: {
+              status: 'USED',
+              checkedInAt: { gte: row.predictedAt, lt: windowEnd },
+              booking: { snapshotAttractionId: row.attractionId },
+            },
+          });
+          const result = await prismaClient.livePrediction.updateMany({
+            where: { id: row.id, actualValue: null },
+            data: { actualValue: actual, evaluatedAt: referenceNow },
+          });
+          return Number(result.count || 0);
+        } catch (error) {
+          console.error(`[live-prediction] Không đánh giá được prediction ${row.id}:`, error.message);
+          return 0;
+        }
+      },
+    );
+    evaluated += counts.reduce((sum, count) => sum + count, 0);
+    lastId = rows[rows.length - 1].id;
+    if (rows.length < EVALUATION_BATCH_SIZE) break;
   }
   return { evaluated };
 }
@@ -229,55 +525,89 @@ async function predictLiveArrivals({
     fallback: 15,
   });
   const referenceNow = new Date(now);
+  if (Number.isNaN(referenceNow.getTime())) {
+    throw httpError(400, 'INVALID_NOW', 'now phải là thời điểm hợp lệ.');
+  }
+  const liveDate = assertLivePredictionDate(date, referenceNow);
   const pressure = await getAttractionPressure(
     attractionId,
-    date || getVietnamDateKey(now),
+    liveDate,
     { prismaClient, now, publicOnly },
   );
+  const current = currentObservation(pressure, now);
   if (!force && prismaClient?.livePrediction?.findFirst) {
     const cached = await prismaClient.livePrediction.findFirst({
       where: {
         attractionId,
         predictionType: 'ARRIVALS',
         horizonMinutes: normalizedHorizon,
-        predictedAt: { gte: new Date(referenceNow.getTime() - PREDICTION_CACHE_MS) },
+        predictedAt: {
+          gte: new Date(referenceNow.getTime() - PREDICTION_CACHE_MS),
+          lte: referenceNow,
+        },
       },
       orderBy: { predictedAt: 'desc' },
     });
     if (cached) {
-      return {
-        attraction_id: attractionId,
-        attractionId,
-        prediction_type: 'ARRIVALS',
-        horizon_minutes: normalizedHorizon,
-        predicted_p50: cached.predictedP50,
-        predicted_p90: cached.predictedP90,
-        confidence: cached.confidence,
-        model_version: cached.modelVersion,
-        training_source: cached.trainingSource,
-        used_fallback: cached.usedFallback,
-        feature_contributions: cached.featureContributions || {},
-        metrics: { cache_hit: true, cache_ttl_seconds: PREDICTION_CACHE_MS / 1000 },
-        pressure,
-        cached: true,
-        generatedAt: cached.predictedAt,
-      };
+      try {
+        const cachedResult = await applyRuntimeQualityGate(
+          attractionId,
+          validateMlPrediction({
+            predicted_p50: cached.predictedP50,
+            predicted_p90: cached.predictedP90,
+            confidence: cached.confidence,
+            model_version: cached.modelVersion,
+            training_source: cached.trainingSource,
+            used_fallback: cached.usedFallback,
+            feature_contributions: cached.featureContributions || {},
+            metrics: {
+              ...(cached.qualityMetrics || {}),
+              cache_hit: true,
+              cache_ttl_seconds: PREDICTION_CACHE_MS / 1000,
+            },
+          }, {
+            predictionType: 'ARRIVALS',
+            maximum: Math.max(1, Number(current.capacity || 0)),
+          }),
+          { prismaClient },
+        );
+        return {
+          ...cachedResult,
+          attraction_id: attractionId,
+          attractionId,
+          prediction_type: 'ARRIVALS',
+          horizon_minutes: normalizedHorizon,
+          pressure,
+          cached: true,
+          generatedAt: new Date(cached.predictedAt).toISOString(),
+        };
+      } catch (error) {
+        // Never serve a corrupt or now-impossible cache row. Fall through to
+        // a fresh ML request, which itself has a conservative fallback.
+        console.error('[live-prediction] Bỏ qua cache không hợp lệ:', error.message);
+      }
     }
   }
-  const current = currentObservation(pressure, now);
   const observations = await loadObservationHistory(attractionId, { prismaClient });
   let result;
   try {
-    result = await callMl('/live/predict-arrivals', {
-      attraction_id: attractionId,
-      observations,
-      current,
-      horizon_minutes: normalizedHorizon,
-    });
+    result = validateMlPrediction(
+      await callMl('/live/predict-arrivals', {
+        attraction_id: attractionId,
+        observations,
+        current,
+        horizon_minutes: normalizedHorizon,
+      }),
+      {
+        predictionType: 'ARRIVALS',
+        maximum: Math.max(1, Number(current.capacity || 0)),
+      },
+    );
   } catch (error) {
     result = fallbackPrediction(current, normalizedHorizon);
     result.metrics = { ...result.metrics, error: error.message };
   }
+  result = await applyRuntimeQualityGate(attractionId, result, { prismaClient });
   const observation = prismaClient?.arrivalObservation?.findFirst
     ? await prismaClient.arrivalObservation.findFirst({
       where: { attractionId, bucketStart: floorBucket(referenceNow) },
@@ -296,6 +626,7 @@ async function predictLiveArrivals({
     trainingSource: result.training_source || 'unknown',
     usedFallback: Boolean(result.used_fallback),
     featureContributions: result.feature_contributions || null,
+    qualityMetrics: result.metrics || null,
     predictedAt: referenceNow,
   };
   if (prismaClient?.livePrediction?.create) {
@@ -308,11 +639,16 @@ async function predictLiveArrivals({
     attractionId,
     pressure,
     observedSamples: observations.length,
-    generatedAt: new Date().toISOString(),
+    generatedAt: referenceNow.toISOString(),
   };
 }
 
 async function predictLiveWait({ attractionId, date, guestsAhead, partySize, now = new Date(), publicOnly = false, prismaClient = prisma } = {}) {
+  const referenceNow = new Date(now);
+  if (Number.isNaN(referenceNow.getTime())) {
+    throw httpError(400, 'INVALID_NOW', 'now phải là thời điểm hợp lệ.');
+  }
+  const liveDate = assertLivePredictionDate(date, referenceNow);
   const normalizedGuestsAhead = boundedInteger(guestsAhead, {
     field: 'guestsAhead',
     min: 0,
@@ -327,20 +663,23 @@ async function predictLiveWait({ attractionId, date, guestsAhead, partySize, now
   });
   const pressure = await getAttractionPressure(
     attractionId,
-    date || getVietnamDateKey(now),
-    { prismaClient, now, publicOnly },
+    liveDate,
+    { prismaClient, now: referenceNow, publicOnly },
   );
   const current = currentObservation(pressure, now);
   const observations = await loadObservationHistory(attractionId, { prismaClient });
   try {
-    return await callMl('/live/predict-wait', {
-      attraction_id: attractionId,
-      observations,
-      current,
-      guests_ahead: normalizedGuestsAhead,
-      party_size: normalizedPartySize,
-      horizon_minutes: 15,
-    });
+    return validateMlPrediction(
+      await callMl('/live/predict-wait', {
+        attraction_id: attractionId,
+        observations,
+        current,
+        guests_ahead: normalizedGuestsAhead,
+        party_size: normalizedPartySize,
+        horizon_minutes: 15,
+      }),
+      { predictionType: 'WAIT_TIME', maximum: 240 },
+    );
   } catch {
     const throughput = Math.max(1, Number(current.checkins_last_15m || 0) || Number(current.capacity || 100) * 0.08);
     const guests = Math.max(1, normalizedGuestsAhead + normalizedPartySize);
@@ -354,6 +693,10 @@ async function predictLiveWait({ attractionId, date, guestsAhead, partySize, now
       training_source: 'operational_heuristic',
       used_fallback: true,
       feature_contributions: { guests_ahead: normalizedGuestsAhead, throughput },
+      metrics: {
+        reason: 'ML_SERVICE_UNAVAILABLE',
+        wait_formula: 'guests_divided_by_conservative_throughput_rate',
+      },
     };
   }
 }
@@ -381,16 +724,23 @@ async function optimizeLiveTrip({
     const start = new Date(item.scheduledStart);
     const end = item.scheduledEnd ? new Date(item.scheduledEnd) : new Date(start.getTime() + 90 * 60 * 1000);
     const startMinute = vietnamMinuteOfDay(start);
+    const itemDate = getVietnamDateKey(start);
+    const currentDate = getVietnamDateKey(referenceNow);
+    const isOngoing = start <= referenceNow && end > referenceNow;
+    const minutesUntilStart = itemDate === currentDate
+      ? Math.max(0, startMinute - vietnamMinuteOfDay(referenceNow))
+      : 24 * 60;
+    const locked = Boolean(item.bookingId) || isOngoing;
     const durationMinutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
     return {
       id: item.id,
       day_index: item.dayIndex,
       start_minute: startMinute,
       end_minute: Math.min(24 * 60, startMinute + durationMinutes),
-      locked: Boolean(item.bookingId),
-      risk_score: item.status === 'AT_RISK' ? 90 : 10,
-      flexibility_minutes: item.bookingId ? 0 : 30,
-      priority: item.bookingId ? 100 : 60,
+      locked,
+      risk_score: isOngoing ? 100 : item.status === 'AT_RISK' ? 90 : 10,
+      flexibility_minutes: locked ? 0 : Math.min(30, minutesUntilStart),
+      priority: locked ? 100 : 60,
     };
   });
   if (items.length === 0) {
@@ -415,14 +765,28 @@ async function optimizeLiveTrip({
     };
   }
   try {
-    return await callMl('/live/optimize', {
-      live_trip_id: liveTripId,
+    const maxShiftMinutes = 45;
+    const travelBufferMinutes = 30;
+    return validateOptimizerResult(
+      await callMl('/live/optimize', {
+        live_trip_id: liveTripId,
+        items,
+        max_shift_minutes: maxShiftMinutes,
+        travel_buffer_minutes: travelBufferMinutes,
+        timezone: 'Asia/Ho_Chi_Minh',
+      }),
       items,
-      max_shift_minutes: 45,
-      travel_buffer_minutes: 30,
-      timezone: 'Asia/Ho_Chi_Minh',
-    });
-  } catch {
+      {
+        liveTripId,
+        maxShiftMinutes,
+        travelBufferMinutes,
+      },
+    );
+  } catch (error) {
+    const failureReason = String(error?.message || '').startsWith('ML optimizer')
+      ? 'ML_RESPONSE_REJECTED'
+      : 'ML_SERVICE_UNAVAILABLE';
+    console.error('[live-prediction] Optimizer fallback:', error?.message || failureReason);
     return {
       live_trip_id: liveTripId,
       algorithm_version: 'optimizer_unavailable_v1',
@@ -436,7 +800,7 @@ async function optimizeLiveTrip({
         locked_items_immutable: true,
         travel_buffer_minutes: 30,
         timezone: 'Asia/Ho_Chi_Minh',
-        reason: 'ML_SERVICE_UNAVAILABLE',
+        reason: failureReason,
       },
     };
   }
@@ -445,6 +809,7 @@ async function optimizeLiveTrip({
 module.exports = {
   evaluateArrivalObservations,
   evaluateLivePredictions,
+  assertLivePredictionDate,
   floorBucket,
   loadObservationHistory,
   optimizeLiveTrip,

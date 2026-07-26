@@ -12,6 +12,7 @@ function PartnerSmartQueuePage() {
   const [attractionId, setAttractionId] = useState('')
   const [form, setForm] = useState({ enabled: true, mode: 'AUTO', openBeforeMinutes: 120, readyGraceMinutes: 10, maxReadyParties: 3, maxActiveParties: 100, fallbackThroughput15m: 8 })
   const [loading, setLoading] = useState(true)
+  const [policyReadyFor, setPolicyReadyFor] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -24,7 +25,21 @@ function PartnerSmartQueuePage() {
 
   useEffect(() => {
     if (!attractionId) return
-    getSmartQueuePolicy(attractionId).then((response) => setForm((current) => ({ ...current, ...response.data }))).catch((error) => toast.error(error.message || 'Không thể tải policy SmartQueue.'))
+    let active = true
+    getSmartQueuePolicy(attractionId)
+      .then((response) => {
+        if (active) {
+          setForm((current) => ({ ...current, ...response.data }))
+          setPolicyReadyFor(attractionId)
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setPolicyReadyFor('')
+          toast.error(error.message || 'Không thể tải policy SmartQueue.')
+        }
+      })
+    return () => { active = false }
   }, [attractionId])
 
   const selected = useMemo(() => attractions.find((item) => item.id === attractionId), [attractions, attractionId])
@@ -64,7 +79,7 @@ function PartnerSmartQueuePage() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><NumberField label="Mở trước (phút)" value={form.openBeforeMinutes} min={0} max={1440} onChange={(value) => setField('openBeforeMinutes', value)} /><NumberField label="Grace sau khi gọi (phút)" value={form.readyGraceMinutes} min={1} max={60} onChange={(value) => setField('readyGraceMinutes', value)} /><NumberField label="Nhóm cùng lúc tại cổng" value={form.maxReadyParties} min={1} max={50} onChange={(value) => setField('maxReadyParties', value)} /><NumberField label="Tổng suất hàng chờ" value={form.maxActiveParties} min={1} max={10000} onChange={(value) => setField('maxActiveParties', value)} /></div>
           <NumberField label="Throughput fallback / 15 phút" value={form.fallbackThroughput15m} min={1} max={10000} onChange={(value) => setField('fallbackThroughput15m', value)} />
           <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-xs leading-5 text-sky-900">Suất hàng chờ là hữu hạn; mỗi booking chỉ được đăng ký một lần cho hoạt động trong ngày. Fallback throughput là ước tính bảo thủ khi chưa đủ dữ liệu QR. Từ 24 snapshot hợp lệ, ML dùng time-split và quantile p50/p90; nếu service lỗi, UI luôn ghi rõ fallback.</div>
-          <button className="rounded-xl bg-[#006b72] px-5 py-3 text-sm font-black text-white disabled:opacity-60" disabled={saving || !selected} type="submit">{saving ? 'Đang lưu...' : 'Lưu policy vận hành'}</button>
+          <button className="rounded-xl bg-[#006b72] px-5 py-3 text-sm font-black text-white disabled:opacity-60" disabled={saving || policyReadyFor !== attractionId || !selected} type="submit">{saving ? 'Đang lưu...' : 'Lưu policy vận hành'}</button>
         </form>
       </div>
     </PartnerLayout>

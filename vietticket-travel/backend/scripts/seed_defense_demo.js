@@ -49,7 +49,7 @@ function fixtureId(scope, key) {
   return stableUuid(scope, key);
 }
 
-function assertLocalDemoDatabase() {
+function assertDemoDatabaseTarget({ allowExplicitRemote = false } = {}) {
   let databaseUrl;
   try {
     databaseUrl = new URL(String(process.env.DATABASE_URL || ''));
@@ -57,6 +57,15 @@ function assertLocalDemoDatabase() {
     throw new Error('DATABASE_URL không hợp lệ; từ chối reset dữ liệu demo.');
   }
   const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
+  if (localHosts.has(databaseUrl.hostname)) return;
+
+  const remoteConfirmed =
+    allowExplicitRemote
+    && process.env.DEPLOYMENT_MODE === 'defense-demo'
+    && process.env.ALLOW_REMOTE_DEMO_SEED === 'true'
+    && process.argv.includes('--confirm-remote-demo');
+  if (remoteConfirmed) return;
+
   if (!localHosts.has(databaseUrl.hostname)) {
     throw new Error('demo:prepare chỉ được phép reset database chạy trên localhost.');
   }
@@ -2617,6 +2626,7 @@ function printHandoff(readiness, forecastResults = [], liveShowcase = null) {
 async function main() {
   const checkOnly = process.argv.includes('--check');
   const confirmedLocalDemo = process.argv.includes('--confirm-local-demo');
+  const confirmedRemoteDemo = process.argv.includes('--confirm-remote-demo');
 
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Tuyệt đối không được seed dữ liệu bảo vệ trong production.');
@@ -2632,9 +2642,19 @@ async function main() {
     return;
   }
   if (!confirmedLocalDemo) {
-    throw new Error('Thiếu cờ --confirm-local-demo. Hãy chạy npm run demo:prepare.');
+    if (!confirmedRemoteDemo) {
+      throw new Error('Thiếu cờ --confirm-local-demo. Hãy chạy npm run demo:prepare.');
+    }
+    if (
+      process.env.DEPLOYMENT_MODE !== 'defense-demo'
+      || process.env.ALLOW_REMOTE_DEMO_SEED !== 'true'
+    ) {
+      throw new Error(
+        'Remote demo seed yêu cầu DEPLOYMENT_MODE=defense-demo và ALLOW_REMOTE_DEMO_SEED=true.',
+      );
+    }
   }
-  assertLocalDemoDatabase();
+  assertDemoDatabaseTarget({ allowExplicitRemote: confirmedRemoteDemo });
 
   console.log('Đang phục hồi bộ dữ liệu vận hành do script sở hữu...');
   await resetOwnedDemoData();
