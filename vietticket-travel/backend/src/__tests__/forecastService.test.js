@@ -212,6 +212,49 @@ describe('forecastService', () => {
     );
   });
 
+  test('chặn dự báo ML thấp bất thường so với lịch sử mùa vụ', async () => {
+    const { vietnamDateKey } = require('../services/forecastService');
+    const today = vietnamDateKey();
+    const bookings = [];
+    for (let offset = 1; offset <= 14; offset += 1) {
+      const date = new Date(`${today}T00:00:00.000Z`);
+      date.setUTCDate(date.getUTCDate() - offset);
+      const key = date.toISOString().slice(0, 10);
+      bookings.push(completedBooking(key, 400000, 1));
+      bookings.push(completedBooking(key, 400000, 1));
+      if (offset <= 2) bookings.push(completedBooking(key, 400000, 1));
+    }
+
+    mockPrisma.attraction.findUnique.mockResolvedValue(activeAttraction());
+    mockPrisma.booking.findMany.mockResolvedValue(bookings);
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model_version: 'rf_xgb_real_v3',
+        training_source: 'real_booking_history',
+        forecast: [{
+          date: today,
+          predicted_revenue: 1,
+          predicted_tickets: 0,
+          confidence_lower: 0,
+          confidence_upper: 2,
+        }],
+      }),
+    });
+
+    const { getForecastForAttraction } = require('../services/forecastService');
+    const result = await getForecastForAttraction('attraction-1', {
+      forecastDays: 1,
+      forceRefresh: true,
+    });
+
+    expect(result.method).toBe('AI_ENSEMBLE');
+    expect(result.usedFallback).toBe(false);
+    expect(result.forecast[0].predictedRevenue).toBeGreaterThanOrEqual(400000);
+    expect(result.forecast[0].predictedTickets).toBeGreaterThanOrEqual(1);
+    expect(result.warning).toMatch(/biên hợp lý/i);
+  });
+
   test('dùng cache đồng nhất, vẫn kiểm tra điều kiện mở bán và giữ tên attraction', async () => {
     const { vietnamDateKey } = require('../services/forecastService');
     const today = vietnamDateKey();

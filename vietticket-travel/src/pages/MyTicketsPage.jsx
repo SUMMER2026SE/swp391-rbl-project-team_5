@@ -7,6 +7,7 @@ import RefundModal from '../components/tickets/RefundModal.jsx'
 import ReviewModal from '../components/tickets/ReviewModal.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
+import { getLiveTrips } from '../services/liveTripApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 import { formatBookingReference } from '../utils/bookingReference.js'
 import { hasUsableTicketInstances } from '../utils/ticketInstanceStatus.js'
@@ -98,6 +99,7 @@ function MyTicketsPage() {
   const [errorMessage, setErrorMessage] = useState('')
   const [selectedReviewBooking, setSelectedReviewBooking] = useState(null)
   const [now, setNow] = useState(() => Date.now())
+  const [liveTrips, setLiveTrips] = useState([])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -117,6 +119,22 @@ function MyTicketsPage() {
       })
       .finally(() => {
         if (active) setIsLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    getLiveTrips()
+      .then((response) => {
+        if (active) setLiveTrips(Array.isArray(response?.data) ? response.data : [])
+      })
+      .catch(() => {
+        // Trip Mode is an additional surface; a temporary failure must not hide tickets.
       })
 
     return () => {
@@ -242,6 +260,10 @@ function MyTicketsPage() {
             <TicketOverview items={overviewItems} />
           )}
 
+          {liveTrips.some((trip) => trip.status === 'ACTIVE') && (
+            <LiveTripStrip trips={liveTrips.filter((trip) => trip.status === 'ACTIVE')} />
+          )}
+
           <div className="flex max-w-4xl flex-col gap-6">
             {isLoading ? (
               <p className="py-12 text-center font-semibold text-primary">
@@ -313,6 +335,43 @@ function TicketOverview({ items }) {
           <p className="mt-1 text-xs font-semibold opacity-80">{item.description}</p>
         </article>
       ))}
+    </section>
+  )
+}
+
+function LiveTripStrip({ trips }) {
+  return (
+    <section className="mb-6 max-w-4xl rounded-2xl border border-[#b7e9e6] bg-[#effcfb] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#00858a]">VietTicket Live</p>
+          <h2 className="mt-1 text-lg font-black text-primary">Chuyến đi đang được theo dõi</h2>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#006b72]">
+          {trips.length} chuyến đang bật
+        </span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {trips.map((trip) => (
+          <Link
+            className="group rounded-xl border border-[#c9ece9] bg-white p-4 transition hover:-translate-y-0.5 hover:border-[#00858a] hover:shadow-sm"
+            key={trip.id}
+            to={`/trip-mode/${trip.id}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-bold text-primary">{trip.title}</p>
+                <p className="mt-1 text-xs font-medium text-on-surface-variant">
+                  {formatDate(trip.startDate)} · {trip.itemCount || 0} hoạt động
+                </p>
+              </div>
+              <span className="material-symbols-outlined text-[#00858a] transition group-hover:translate-x-0.5" aria-hidden="true">
+                arrow_forward
+              </span>
+            </div>
+          </Link>
+        ))}
+      </div>
     </section>
   )
 }

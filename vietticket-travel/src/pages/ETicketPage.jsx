@@ -65,6 +65,45 @@ const getMapsUrl = (booking) => {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
 }
 
+async function copyTicketToken(token) {
+  try {
+    await navigator.clipboard.writeText(token)
+    toast.success('Đã sao chép mã vé để nhập tay.')
+  } catch {
+    toast.error('Không thể sao chép tự động. Vui lòng chọn và sao chép mã vé.')
+  }
+}
+
+export function TicketManualCode({ ticket, ticketLabel = 'vé' }) {
+  const token = String(ticket?.qrCodeToken || '').trim()
+  if (!token) return null
+
+  return (
+    <div className="mt-4 w-full max-w-[260px] rounded-xl border border-outline-variant/50 bg-surface-container-low p-3 text-left">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+        Mã vé để nhập tay
+      </p>
+      <p
+        className="mt-1 break-all font-mono text-xs font-semibold leading-5 text-on-surface"
+        title={token}
+      >
+        {token}
+      </p>
+      <button
+        aria-label={`Sao chép mã ${ticketLabel}`}
+        className="print:hidden mt-2 inline-flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/5"
+        onClick={() => void copyTicketToken(token)}
+        type="button"
+      >
+        <span className="material-symbols-outlined text-[15px]" aria-hidden="true">
+          content_copy
+        </span>
+        Sao chép mã vé
+      </button>
+    </div>
+  )
+}
+
 function ETicketPage() {
   const { bookingId } = useParams()
   const socket = useSocket()
@@ -384,7 +423,7 @@ function ETicketPage() {
                 </p>
                 <p
                   className="mt-2 font-mono text-3xl font-bold tracking-widest text-primary"
-                  title={booking.id}
+                  title={formatBookingReference(booking.id)}
                 >
                   {formatBookingReference(booking.id)}
                 </p>
@@ -403,15 +442,18 @@ function ETicketPage() {
               {(!canShowQr || ticketInstances.length === 1) && (
                 <div className="justify-self-center rounded-2xl border border-outline-variant/40 bg-white p-5 shadow-inner">
                   {canShowQr && primaryUsableTicket ? (
-                    <QRCodeSVG
-                      bgColor="#ffffff"
-                      fgColor="#000000"
-                      level="H"
-                      marginSize={1}
-                      size={210}
-                      title={`Vé ${formatBookingReference(booking.id)}`}
-                      value={`VIETTICKET:${primaryUsableTicket.qrCodeToken}`}
-                    />
+                    <div className="flex flex-col items-center">
+                      <QRCodeSVG
+                        bgColor="#ffffff"
+                        fgColor="#000000"
+                        level="H"
+                        marginSize={1}
+                        size={210}
+                        title={`Vé ${formatBookingReference(booking.id)}`}
+                        value={`VIETTICKET:${primaryUsableTicket.qrCodeToken}`}
+                      />
+                      <TicketManualCode ticket={primaryUsableTicket} />
+                    </div>
                   ) : (
                     <div className="flex h-[210px] w-[210px] flex-col items-center justify-center bg-surface-container-low text-center text-on-surface-variant">
                       <span className="material-symbols-outlined text-5xl" aria-hidden="true">
@@ -545,6 +587,9 @@ function QRTicketCard({ index, ticket }) {
       <span className={`mt-3 inline-block rounded-full px-3 py-1 text-xs font-bold ${displayStatusColor}`}>
         {displayStatusLabel}
       </span>
+      {isUsable && (
+        <TicketManualCode ticket={ticket} ticketLabel={`vé số ${index + 1}`} />
+      )}
     </div>
   )
 }

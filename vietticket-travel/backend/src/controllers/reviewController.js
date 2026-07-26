@@ -150,7 +150,7 @@ async function createReview(req, res, next) {
     });
 
     // Validations
-    if (!booking || booking.userId !== userId) {
+    if (!booking || booking.isForecastTrainingSample || booking.userId !== userId) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé của bạn.' });
     }
 

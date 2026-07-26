@@ -495,6 +495,7 @@ async function getDashboard(req, res, next) {
       totalBookingsThisMonth = await prisma.booking.count({
         where: {
           reservation: { ticketProduct: { attraction: { partnerId } } },
+          isForecastTrainingSample: false,
           status: { not: 'PENDING_PAYMENT' },
           payments: { some: { status: 'SUCCESS', isDuplicate: false } },
           createdAt: { gte: startOfMonth },
@@ -528,6 +529,7 @@ async function getDashboard(req, res, next) {
           pendingBookings = await prisma.booking.count({
             where: {
               reservationId: { in: reservationIds },
+              isForecastTrainingSample: false,
               status: 'PENDING_PARTNER',
             },
           });
@@ -559,6 +561,7 @@ async function getDashboard(req, res, next) {
           const recentRaw = await prisma.booking.findMany({
             where: {
               reservationId: { in: reservationIds },
+              isForecastTrainingSample: false,
               status: { not: 'PENDING_PAYMENT' },
               payments: {
                 some: { status: 'SUCCESS', isDuplicate: false },
@@ -856,6 +859,7 @@ async function getPartnerBookings(req, res, next) {
 
     const paidPartnerBookingWhere = {
       reservationId: { in: reservationIds },
+      isForecastTrainingSample: false,
       payments: {
         some: { status: 'SUCCESS', isDuplicate: false },
       },
@@ -1051,7 +1055,7 @@ async function approveBooking(req, res, next) {
       },
     });
 
-    if (!booking) {
+    if (!booking || booking.isForecastTrainingSample) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt vé.' });
     }
 
@@ -1110,7 +1114,7 @@ async function approveBooking(req, res, next) {
           },
         },
       });
-      if (!current || current.status !== 'PENDING_PARTNER') {
+      if (!current || current.isForecastTrainingSample || current.status !== 'PENDING_PARTNER') {
         const err = new Error('Đơn đặt vé đã được xử lý trước đó.');
         err.statusCode = 409;
         throw err;
@@ -1123,7 +1127,7 @@ async function approveBooking(req, res, next) {
         throw bookingConflict('Đơn đã quá thời hạn duyệt hoặc hoạt động đã bắt đầu.');
       }
       const claimed = await tx.booking.updateMany({
-        where: { id: bookingId, status: 'PENDING_PARTNER' },
+        where: { id: bookingId, status: 'PENDING_PARTNER', isForecastTrainingSample: false },
         data: { status: 'CONFIRMED' },
       });
       if (claimed.count !== 1) {
@@ -1210,7 +1214,7 @@ async function rejectBooking(req, res, next) {
       },
     });
 
-    if (!booking) {
+    if (!booking || booking.isForecastTrainingSample) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt vé.' });
     }
 
@@ -1252,7 +1256,7 @@ async function rejectBooking(req, res, next) {
           },
         },
       });
-      if (!booking || booking.status !== 'PENDING_PARTNER') {
+      if (!booking || booking.isForecastTrainingSample || booking.status !== 'PENDING_PARTNER') {
         throw bookingConflict();
       }
       if (booking.reservation.ticketProduct.attraction.partnerId !== partnerId) {
@@ -1262,7 +1266,7 @@ async function rejectBooking(req, res, next) {
       const reservation = booking.reservation;
       const hasPaid = booking.payments.length > 0;
       const claimed = await tx.booking.updateMany({
-        where: { id: bookingId, status: 'PENDING_PARTNER' },
+        where: { id: bookingId, status: 'PENDING_PARTNER', isForecastTrainingSample: false },
         data: {
           status: 'CANCELLED',
           refundRequired: hasPaid,
@@ -1427,7 +1431,7 @@ async function cancelConfirmedBooking(req, res, next) {
       },
     };
     const booking = await prisma.booking.findUnique({ where: { id: bookingId }, include });
-    if (!booking) {
+    if (!booking || booking.isForecastTrainingSample) {
       return res.status(404).json({ success: false, message: 'Không tìm thấy đơn đặt vé.' });
     }
     if (booking.reservation.ticketProduct.attraction.partnerId !== partnerId) {
@@ -1453,7 +1457,9 @@ async function cancelConfirmedBooking(req, res, next) {
 
     await prisma.$transaction(async (tx) => {
       const current = await tx.booking.findUnique({ where: { id: bookingId }, include });
-      if (!current || current.status !== 'CONFIRMED') throw bookingConflict();
+      if (!current || current.isForecastTrainingSample || current.status !== 'CONFIRMED') {
+        throw bookingConflict();
+      }
       if (current.reservation.ticketProduct.attraction.partnerId !== partnerId) {
         throw bookingConflict('Bạn không có quyền hủy đơn này.');
       }
@@ -1467,7 +1473,7 @@ async function cancelConfirmedBooking(req, res, next) {
 
       const hasPaid = current.payments.length > 0;
       const claimed = await tx.booking.updateMany({
-        where: { id: bookingId, status: 'CONFIRMED' },
+        where: { id: bookingId, status: 'CONFIRMED', isForecastTrainingSample: false },
         data: {
           status: 'CANCELLED',
           refundRequired: hasPaid,

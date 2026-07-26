@@ -14,6 +14,7 @@ const EditProfilePage = lazy(() => import('../pages/EditProfilePage.jsx'))
 const ForgotPasswordPage = lazy(() => import('../pages/ForgotPasswordPage.jsx'))
 const HomePage = lazy(() => import('../pages/HomePage.jsx'))
 const LoginPage = lazy(() => import('../pages/LoginPage.jsx'))
+const LiveTripPage = lazy(() => import('../pages/LiveTripPage.jsx'))
 const MyTicketsPage = lazy(() => import('../pages/MyTicketsPage.jsx'))
 const PartnerAddAttractionPage = lazy(() => import('../pages/PartnerAddAttractionPage.jsx'))
 const PartnerAttractionsPage = lazy(() => import('../pages/PartnerAttractionsPage.jsx'))
@@ -28,6 +29,7 @@ const PartnerReportsPage = lazy(() => import('../pages/PartnerReportsPage.jsx'))
 const PartnerSettlementsPage = lazy(() => import('../pages/PartnerSettlementsPage.jsx'))
 const PartnerSchedulePage = lazy(() => import('../pages/PartnerSchedulePage.jsx'))
 const PartnerSettingsPage = lazy(() => import('../pages/PartnerSettingsPage.jsx'))
+const PartnerSmartQueuePage = lazy(() => import('../pages/PartnerSmartQueuePage.jsx'))
 const PartnerTicketFormPage = lazy(() => import('../pages/PartnerTicketFormPage.jsx'))
 const PartnerTicketsPage = lazy(() => import('../pages/PartnerTicketsPage.jsx'))
 const ProfilePage = lazy(() => import('../pages/ProfilePage.jsx'))
@@ -49,6 +51,7 @@ const FinancialReportPage = lazy(() => import('../pages/admin/FinancialReportPag
 const AuditLogPage = lazy(() => import('../pages/admin/AuditLogPage.jsx'))
 const SettlementManagementPage = lazy(() => import('../pages/admin/SettlementManagementPage.jsx'))
 const CheckinPage = lazy(() => import('../pages/staff/CheckinPage.jsx'))
+const SmartQueueOperationsPage = lazy(() => import('../pages/staff/SmartQueueOperationsPage.jsx'))
 const RefundManagementPage = lazy(() => import('../pages/staff/RefundManagementPage.jsx'))
 const SupportTicketsPage = lazy(() => import('../pages/staff/SupportTicketsPage.jsx'))
 const PartnerReviewsPage = lazy(() => import('../pages/PartnerReviewsPage.jsx'))
@@ -357,6 +360,22 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/partner/smart-queue"
+        element={
+          <ProtectedRoute allowedRoles={['PARTNER']}>
+            <PartnerSmartQueuePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/trip-mode/:tripId"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <LiveTripPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/tickets/:bookingId"
         element={
           <ProtectedRoute>
@@ -387,6 +406,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePartnerStaff>
             <CheckinPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/smart-queue"
+        element={
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePartnerStaff>
+            <SmartQueueOperationsPage />
           </ProtectedRoute>
         }
       />

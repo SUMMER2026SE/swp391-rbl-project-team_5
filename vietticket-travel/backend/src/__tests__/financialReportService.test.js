@@ -193,6 +193,7 @@ describe('financial report calculations', () => {
     }));
     expect(prisma.refundRequest.aggregate.mock.calls[1][0].where).toEqual({
       status: { in: ['PENDING', 'PROCESSING'] },
+      booking: { isForecastTrainingSample: false },
       refundTransactions: {
         some: { status: { in: ['FAILED', 'NEEDS_RECONCILIATION'] } },
         none: { status: 'SUCCESS' },

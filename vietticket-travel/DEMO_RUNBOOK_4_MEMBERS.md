@@ -1,6 +1,6 @@
 # Kịch bản bảo vệ VietTicket Travel — 4 thành viên
 
-Tài liệu này dùng cho bộ dữ liệu vận hành tái lập v2 trên nhánh `HAnh`. Kịch bản chính kéo dài khoảng 32–38 phút, không trình bày đăng ký/đăng nhập/xác thực email. Các cửa sổ phải được đăng nhập sẵn trước khi giảng viên vào phòng.
+Tài liệu này dùng cho bộ dữ liệu vận hành tái lập v2 trên nhánh demo đã chuẩn bị (`HAnh` hoặc `codex/vietticket-live-autopilot`). Kịch bản chính kéo dài khoảng 32–38 phút, không trình bày đăng ký/đăng nhập/xác thực email. Các cửa sổ phải được đăng nhập sẵn trước khi giảng viên vào phòng.
 
 ### Nguyên tắc trung thực dữ liệu
 
@@ -91,31 +91,31 @@ Chỉ tiếp tục khi thấy `PRE-FLIGHT PASS`.
 
 Mật khẩu chung local: `Demo@VietTicket2026`
 
-| Cửa sổ | Vai trò       | Email                                | Trang mở sẵn                              |
-| -------- | -------------- | ------------------------------------ | ------------------------------------------- |
-| A        | Customer       | `minh.anh.nguyen@vietticket.local` | `http://localhost:5173/`                  |
-| B        | Partner        | `hoang.nam.tran@vietticket.local`  | `http://localhost:5173/partner/dashboard` |
-| C        | Gate staff     | `quoc.bao.pham@vietticket.local`   | `http://localhost:5173/staff/checkin`     |
-| D        | Platform staff | `thu.ha.le@vietticket.local`       | `http://localhost:5173/staff/refunds`     |
-| E        | Admin          | `ngoc.lan.vu@vietticket.local`     | `http://localhost:5173/admin`             |
+| Cửa sổ | Vai trò | Email | Trang mở sẵn |
+|---|---|---|---|
+| A | Customer | `minh.anh.nguyen@vietticket.local` | `http://localhost:5173/` |
+| B | Partner | `hoang.nam.tran@vietticket.local` | `http://localhost:5173/partner/dashboard` |
+| C | Gate staff | `quoc.bao.pham@vietticket.local` | `http://localhost:5173/staff/checkin` |
+| D | Platform staff | `thu.ha.le@vietticket.local` | `http://localhost:5173/staff/refunds` |
+| E | Admin | `ngoc.lan.vu@vietticket.local` | `http://localhost:5173/admin` |
 
 Dùng Chrome Profile/Edge/Firefox riêng để năm tài khoản không ghi đè cookie của nhau. Thành viên 3 giữ hai cửa sổ C và D. Đăng nhập trước, sau đó quay về đúng trang mở sẵn; không trình bày bước authentication.
 
 ## 4. Dữ liệu nhận diện nhanh
 
-| Dữ liệu                  | Giá trị dùng trong kịch bản                                    |
-| -------------------------- | ------------------------------------------------------------------- |
-| Thành phố tìm kiếm     | `ho chi minh`                                                     |
-| Voucher                    | `KHAMPHA15` — giảm 15%, tối đa 100.000đ, đơn từ 200.000đ |
-| QR check-in chính         | `VTQ-A74C-91D2-E8B5-01`                                           |
-| QR dự phòng              | `VTQ-A74C-91D2-E8B5-02`                                           |
-| Điểm giá thấp          | Bảo tàng Mỹ thuật Thành phố Hồ Chí Minh                     |
-| Điểm cần Partner duyệt | Tour Hoàng hôn trên sông Sài Gòn                              |
-| Điểm trọn ngày         | Khu du lịch sinh thái Vàm Sát – Cần Giờ                      |
-| Bản nháp Partner         | Tour Ẩm thực Chợ Lớn – Bản nháp                              |
-| Chờ Admin duyệt          | Không gian Văn hóa Áo dài Việt Nam                            |
-| Chờ Admin từ chối       | Trải nghiệm Chợ nổi Sài Gòn                                   |
-| Điểm đang đình chỉ   | Khu vui chơi Ven sông Sài Gòn                                   |
+| Dữ liệu | Giá trị dùng trong kịch bản |
+|---|---|
+| Thành phố tìm kiếm | `ho chi minh` |
+| Voucher | `KHAMPHA15` — giảm 15%, tối đa 100.000đ, đơn từ 200.000đ |
+| QR check-in chính | `VTQ-A74C-91D2-E8B5-01` |
+| QR dự phòng | `VTQ-A74C-91D2-E8B5-02` |
+| Điểm giá thấp | Bảo tàng Mỹ thuật Thành phố Hồ Chí Minh |
+| Điểm cần Partner duyệt | Tour Hoàng hôn trên sông Sài Gòn |
+| Điểm trọn ngày | Khu du lịch sinh thái Vàm Sát – Cần Giờ |
+| Bản nháp Partner | Tour Ẩm thực Chợ Lớn – Bản nháp |
+| Chờ Admin duyệt | Không gian Văn hóa Áo dài Việt Nam |
+| Chờ Admin từ chối | Trải nghiệm Chợ nổi Sài Gòn |
+| Điểm đang đình chỉ | Khu vui chơi Ven sông Sài Gòn |
 
 Nguồn kiểm chứng danh mục:
 
@@ -125,15 +125,15 @@ Nguồn kiểm chứng danh mục:
 
 Ký hiệu `T` dưới đây là ngày chạy `demo:prepare`. Dữ liệu tự dịch ngày theo ngày demo:
 
-| Mốc | Kịch bản                                                                                 |
-| ---- | ------------------------------------------------------------------------------------------ |
-| T    | Hai QR hợp lệ để check-in; một vé khác đã dùng để chứng minh chặn quét lại |
-| T+2  | Booking du thuyền chờ Partner duyệt                                                     |
-| T+3  | Booking du thuyền chờ Partner từ chối                                                  |
-| T+5  | Booking Customer có thể tự gửi yêu cầu hoàn                                         |
-| T+6  | Refund đã đối soát sandbox thành công, chờ Staff hoàn tất DB                     |
-| T+7  | Refund an toàn để Staff từ chối có lý do                                            |
-| T+8  | Booking riêng để cấp lại QR                                                           |
+| Mốc | Kịch bản |
+|---|---|
+| T | Hai QR hợp lệ để check-in; một vé khác đã dùng để chứng minh chặn quét lại |
+| T+2 | Booking du thuyền chờ Partner duyệt |
+| T+3 | Booking du thuyền chờ Partner từ chối |
+| T+5 | Booking Customer có thể tự gửi yêu cầu hoàn |
+| T+6 | Refund đã đối soát sandbox thành công, chờ Staff hoàn tất DB |
+| T+7 | Refund an toàn để Staff từ chối có lý do |
+| T+8 | Booking riêng để cấp lại QR |
 
 ## 5. Thứ tự trình bày bắt buộc
 
@@ -529,7 +529,7 @@ npm run demo:check
 
 ## 12. Checklist 3 phút trước khi bắt đầu
 
-- [ ] `git branch --show-current` trả `HAnh`.
+- [ ] `git branch --show-current` trả `HAnh` hoặc `codex/vietticket-live-autopilot`.
 - [ ] ML `/health`: model đã nạp và trả trạng thái `healthy`.
 - [ ] Backend `/api/health`: database connected.
 - [ ] Frontend mở được `http://localhost:5173`.

@@ -61,6 +61,7 @@ function refundOccurredAt(transaction) {
 function paymentPeriodWhere(startDate) {
   return {
     status: 'SUCCESS',
+    booking: { isForecastTrainingSample: false },
     OR: [
       { paidAt: { gte: startDate } },
       { paidAt: null, createdAt: { gte: startDate } },
@@ -85,6 +86,7 @@ function refundPeriodWhere(startDate) {
 
 function buildRecognizedBookingPeriodWhere(startDate, now = new Date()) {
   return {
+    isForecastTrainingSample: false,
     OR: [
       {
         status: { in: ['COMPLETED', 'NO_SHOW'] },
@@ -335,7 +337,10 @@ async function getPlatformFinancialReport(period) {
       },
     }),
     prisma.refundTransaction.findMany({
-      where: refundPeriodWhere(startDate),
+      where: {
+        ...refundPeriodWhere(startDate),
+        booking: { isForecastTrainingSample: false },
+      },
       select: {
         amount: true,
         processedAt: true,
@@ -393,6 +398,7 @@ async function getPlatformFinancialReport(period) {
     prisma.refundRequest.aggregate({
       where: {
         status: { in: ['PENDING', 'PROCESSING', 'APPROVED'] },
+        booking: { isForecastTrainingSample: false },
         refundTransactions: { none: { status: 'SUCCESS' } },
       },
       _count: { _all: true },
@@ -403,6 +409,7 @@ async function getPlatformFinancialReport(period) {
     prisma.refundRequest.aggregate({
       where: {
         status: { in: ['PENDING', 'PROCESSING'] },
+        booking: { isForecastTrainingSample: false },
         refundTransactions: {
           some: { status: { in: ['FAILED', 'NEEDS_RECONCILIATION'] } },
           none: { status: 'SUCCESS' },
@@ -558,6 +565,7 @@ async function listPlatformFinancialTransactions({
       ? prisma.payment.findMany({
           where: {
             AND: paymentFilters,
+            booking: { isForecastTrainingSample: false },
             ...(status ? { status } : {}),
           },
           orderBy: { createdAt: 'desc' },
@@ -580,6 +588,7 @@ async function listPlatformFinancialTransactions({
       ? prisma.refundTransaction.findMany({
           where: {
             AND: refundFilters,
+            booking: { isForecastTrainingSample: false },
             ...(status ? { status } : {}),
           },
           orderBy: { createdAt: 'desc' },

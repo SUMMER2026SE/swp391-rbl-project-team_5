@@ -24,7 +24,7 @@ function Test-HttpEndpoint([string]$Label, [string]$Uri) {
 
 $branch = (& git branch --show-current).Trim()
 Assert-CommandSucceeded 'Read Git branch'
-$allowedBranches = @('Karma', 'HAnh')
+$allowedBranches = @('Karma', 'HAnh', 'codex/vietticket-live-autopilot')
 if ($allowedBranches -notcontains $branch) {
   throw "Current branch is '$branch'. Checkout one of: $($allowedBranches -join ', ') before the demo."
 }
@@ -40,12 +40,12 @@ try {
   Assert-CommandSucceeded 'Demo data check'
 
   & npm.cmd run demo:llm-check
-  Assert-CommandSucceeded 'LLM provider check'
+  Assert-CommandSucceeded 'AI itinerary readiness check'
 }
 finally {
   Pop-Location
 }
 
 Write-Host ''
-Write-Host 'PRE-FLIGHT PASS: services, demo data, AI, and branch HAnh are ready.' -ForegroundColor Green
+Write-Host "PRE-FLIGHT PASS: services, operational data, AI itinerary, and branch $branch are ready." -ForegroundColor Green
 Write-Host 'Do not run demo:prepare/demo:smoke after signing in to the demo browser profiles.' -ForegroundColor Yellow

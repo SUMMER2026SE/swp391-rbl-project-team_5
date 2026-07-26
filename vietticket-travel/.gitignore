@@ -20,6 +20,10 @@ backend/private/
 backend/public/uploads/*
 !backend/public/uploads/.gitkeep
 
+# Local QA/demo artefacts
+tmp/
+backend/jest-unit-results.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

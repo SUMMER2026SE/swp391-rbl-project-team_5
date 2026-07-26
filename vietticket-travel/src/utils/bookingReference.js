@@ -1,9 +1,8 @@
 /**
  * Human-facing booking reference.
  *
- * IDs in production are UUIDs, while demo fixtures intentionally share a long
- * prefix. Using the tail keeps references short and, importantly, distinct for
- * both kinds of IDs. The tail is also searchable against the original ID.
+ * Persistence IDs are UUIDs. Using the opaque tail keeps references short,
+ * stable and searchable without exposing the full internal identifier.
  */
 export function formatBookingReference(value) {
   const id = String(value || '').trim()

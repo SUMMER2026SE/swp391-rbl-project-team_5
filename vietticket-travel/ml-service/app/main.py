@@ -22,10 +22,17 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 
 from .config import settings
 from .model import EnsembleForecastModel, forecast_recursive
+from .live_model import optimize_schedule, predict_arrivals, predict_wait
 from .schemas import (
     ForecastRequest,
     ForecastResponse,
     HealthResponse,
+    LivePredictionRequest,
+    LivePredictionResponse,
+    OptimizeRequest,
+    OptimizeResponse,
+    WaitPredictionRequest,
+    WaitPredictionResponse,
 )
 
 _model: EnsembleForecastModel | None = None
@@ -123,3 +130,31 @@ def forecast(payload: ForecastRequest, _auth: bool = Depends(require_api_key)):
         ],
         warning=warning,
     )
+
+
+@app.post("/live/predict-arrivals", response_model=LivePredictionResponse)
+def predict_live_arrivals(payload: LivePredictionRequest, _auth: bool = Depends(require_api_key)):
+    result = predict_arrivals(payload.observations, payload.current, payload.horizon_minutes)
+    return LivePredictionResponse(
+        attraction_id=payload.attraction_id,
+        prediction_type="ARRIVALS",
+        horizon_minutes=payload.horizon_minutes,
+        generated_at=datetime.now(timezone.utc),
+        **result,
+    )
+
+
+@app.post("/live/predict-wait", response_model=WaitPredictionResponse)
+def predict_live_wait(payload: WaitPredictionRequest, _auth: bool = Depends(require_api_key)):
+    result = predict_wait(payload)
+    return WaitPredictionResponse(
+        attraction_id=payload.attraction_id,
+        horizon_minutes=payload.horizon_minutes,
+        generated_at=datetime.now(timezone.utc),
+        **result,
+    )
+
+
+@app.post("/live/optimize", response_model=OptimizeResponse)
+def optimize_live_trip(payload: OptimizeRequest, _auth: bool = Depends(require_api_key)):
+    return OptimizeResponse(**optimize_schedule(payload))

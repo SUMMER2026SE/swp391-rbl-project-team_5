@@ -19,6 +19,7 @@ const ticketController = require('../controllers/ticketController');
 const scheduleController = require('../controllers/scheduleController');
 const reviewController = require('../controllers/reviewController');
 const settlementController = require('../controllers/settlementController');
+const smartQueueOperationsController = require('../controllers/smartQueueOperationsController');
 
 const router = express.Router();
 const staffInviteLimiter = rateLimit({
@@ -103,6 +104,8 @@ router.delete('/tickets/:ticketId', ticketController.deleteTicket);
 // Lịch & sức chứa
 router.get('/attractions/:id/schedule', scheduleController.getSchedule);
 router.put('/attractions/:id/schedule', scheduleController.saveSchedule);
+router.get('/attractions/:id/smart-queue-policy', smartQueueOperationsController.getPartnerPolicy);
+router.put('/attractions/:id/smart-queue-policy', smartQueueOperationsController.updatePartnerPolicy);
 
 // Đặt vé (quản lý phía đối tác)
 router.get('/bookings', restrictTo('PARTNER'), partnerController.getPartnerBookings);

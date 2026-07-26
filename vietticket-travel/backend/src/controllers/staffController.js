@@ -29,6 +29,7 @@ const {
   sendRefundStatusEmail,
   sendReissueTicketEmail,
 } = require('../utils/mailer');
+const { markQueueAdmittedForBooking } = require('../services/smartQueueService');
 
 function getClientIp(req) {
   return getRequestIp(req) || '127.0.0.1';
@@ -779,7 +780,7 @@ async function reissueTicket(req, res, next) {
           },
         });
 
-        if (!booking) {
+        if (!booking || booking.isForecastTrainingSample) {
           throw httpError(404, 'Không tìm thấy đơn đặt vé.');
         }
 
@@ -1106,6 +1107,18 @@ async function checkInTicket(req, res, next) {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
+    // SmartQueue là lớp vận hành bổ sung. Check-in vé đã thành công không được
+    // rollback chỉ vì cập nhật hàng chờ/realtime tạm thời thất bại.
+    let smartQueueUpdated = false;
+    try {
+      const queueResult = await markQueueAdmittedForBooking(result.instance.bookingId, {
+        admittedAt: result.checkedInAt,
+      });
+      smartQueueUpdated = queueResult.count > 0;
+    } catch (queueError) {
+      console.error('[staff-checkin] Không thể cập nhật SmartQueue:', queueError.message);
+    }
+
     return res.json({
       success: true,
       message: `Check-in thành công ${result.checkedInCount} vé.`,
@@ -1116,6 +1129,7 @@ async function checkInTicket(req, res, next) {
         checkedInAt: result.checkedInAt,
         checkedInBy: req.user.email,
         bookingStatus: result.bookingStatus,
+        smartQueueUpdated,
       },
     });
   } catch (error) {
@@ -1147,6 +1161,7 @@ async function listTodayBookings(req, res, next) {
 
     const bookings = await prisma.booking.findMany({
       where: {
+        isForecastTrainingSample: false,
         status: { in: ['CONFIRMED', 'COMPLETED'] },
         reservation: {
           date: todayDate,
@@ -1248,6 +1263,7 @@ async function listOperationalBookings(req, res, next) {
 
     const search = String(req.query.search || '').trim();
     const where = {
+      isForecastTrainingSample: false,
       status: 'CONFIRMED',
       reservation: {
         date: { gte: dateFrom, lte: dateTo },

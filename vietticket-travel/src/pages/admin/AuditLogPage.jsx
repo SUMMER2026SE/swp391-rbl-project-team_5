@@ -2,6 +2,11 @@ import { useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import { getAuditLogs } from '../../services/adminApi.js'
+import {
+  formatBookingReference,
+  formatRefundRequestReference,
+  formatTicketReference,
+} from '../../utils/bookingReference.js'
 
 const ENTITY_TYPES = [
   '',
@@ -69,16 +74,18 @@ function entityTypeLabel(value) {
 function entityReference(type, value) {
   const id = String(value || '').trim()
   if (!id) return '—'
-  const prefixes = { BOOKING: 'VT', TICKET: 'VE', REFUND_REQUEST: 'RF', SUPPORT_TICKET: 'HT', SETTLEMENT: 'ĐS' }
   const key = String(type || '').replace(/([a-z])([A-Z])/g, '$1_$2').toUpperCase()
-  const publicNumericSuffix = id.match(/(\d{12})$/)?.[1]
+  if (key === 'BOOKING') return formatBookingReference(id)
+  if (['REFUND_REQUEST', 'REFUNDREQUEST'].includes(key)) return formatRefundRequestReference(id)
+  if (key === 'TICKET') return formatTicketReference(id)
+  const prefixes = { SUPPORT_TICKET: 'HT', SUPPORTTICKET: 'HT', SETTLEMENT: 'ĐS' }
   let hash = 14695981039346656037n
   for (const character of id) {
     hash ^= BigInt(character.codePointAt(0))
     hash = BigInt.asUintN(64, hash * 1099511628211n)
   }
   const opaqueSuffix = hash.toString(36).toUpperCase().padStart(10, '0').slice(-10)
-  return `${prefixes[key] || 'HS'}-${publicNumericSuffix || opaqueSuffix}`
+  return `${prefixes[key] || 'HS'}-${opaqueSuffix}`
 }
 
 const METADATA_LABELS = {

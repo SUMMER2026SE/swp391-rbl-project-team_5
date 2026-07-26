@@ -806,7 +806,9 @@ describe('chatWithUser', () => {
 
     const userPrompt = generateText.mock.calls[0][1];
     expect(mockPrisma.booking.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'user-1' } }),
+      expect.objectContaining({
+        where: { userId: 'user-1', isForecastTrainingSample: false },
+      }),
     );
     expect(userPrompt).toContain('DU LIEU CA NHAN CUA KHACH');
     expect(userPrompt).toContain('Ba Na Hills');

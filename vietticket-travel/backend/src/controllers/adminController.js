@@ -1450,7 +1450,7 @@ async function getAdminBookings(req, res, next) {
       return res.status(400).json({ message: 'Trạng thái đặt vé không hợp lệ.' });
     }
 
-    const where = {};
+    const where = { isForecastTrainingSample: false };
     if (status) where.status = status;
     if (onlyRefundRequired) where.refundRequired = true;
     if (search) {
@@ -1505,13 +1505,22 @@ async function getAdminBookings(req, res, next) {
             },
           },
         }),
-        prisma.booking.groupBy({ by: ['status'], _count: { _all: true } }),
-        prisma.booking.count({ where: { refundRequired: true } }),
+        prisma.booking.groupBy({
+          by: ['status'],
+          where: { isForecastTrainingSample: false },
+          _count: { _all: true },
+        }),
+        prisma.booking.count({
+          where: { refundRequired: true, isForecastTrainingSample: false },
+        }),
         prisma.payment.aggregate({
           where: {
             status: 'SUCCESS',
             isDuplicate: false,
-            booking: { status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] } },
+            booking: {
+              status: { in: ['CONFIRMED', 'COMPLETED', 'NO_SHOW'] },
+              isForecastTrainingSample: false,
+            },
           },
           _sum: { amount: true },
         }),
@@ -1602,7 +1611,12 @@ async function getDashboard(req, res, next) {
       }),
       prisma.partnerProfile.count({ where: { status: 'PENDING' } }),
       prisma.partnerProfile.count({ where: { createdAt: { gte: startDate } } }),
-      prisma.booking.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.booking.count({
+        where: {
+          createdAt: { gte: startDate },
+          isForecastTrainingSample: false,
+        },
+      }),
       getPlatformFinancialReport(period),
       prisma.partnerProfile.findMany({
         where: { status: 'PENDING' },

@@ -118,6 +118,7 @@ async function sweepExpiredPartnerApprovals({
 } = {}) {
   const candidates = await prisma.booking.findMany({
     where: {
+      isForecastTrainingSample: false,
       status: 'PENDING_PARTNER',
       payments: { some: { status: 'SUCCESS', isDuplicate: false } },
     },

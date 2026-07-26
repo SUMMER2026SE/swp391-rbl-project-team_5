@@ -4,7 +4,7 @@ import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import useSocket from '../context/useSocket.js'
 import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
-import { formatBookingReference } from '../utils/bookingReference.js'
+import { formatBookingReference, formatTicketReference } from '../utils/bookingReference.js'
 import { getTicketTypeLabel } from '../utils/ticketType.js'
 
 // Nhãn + màu trạng thái lấy từ nguồn dùng chung (utils/bookingStatus.js)
@@ -387,7 +387,7 @@ function PartnerBookingsPage() {
                 <h3 className="text-lg font-bold text-[#191c1d] flex items-center gap-2">
                   Chi tiết Đặt vé
                   <span className="font-mono text-sm text-[#00629d] bg-[#cfe5ff] px-2 py-0.5 rounded">
-                    #{selectedBooking.id.toUpperCase()}
+                    {formatBookingReference(selectedBooking.id)}
                   </span>
                 </h3>
                 <p className="text-xs text-[#6f797a] mt-0.5">Ngày đặt: {selectedBooking.createdAt ? new Date(selectedBooking.createdAt).toLocaleString('vi-VN') : selectedBooking.date}</p>
@@ -551,7 +551,7 @@ function PartnerBookingsPage() {
                         <div key={ticket.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-white rounded-lg border border-[#e1e3e4] text-sm gap-2">
                           <div>
                             <span className="font-semibold text-[#191c1d]">Vé #{index + 1}</span>
-                            <span className="font-mono text-xs text-[#6f797a] ml-2">({ticket.id})</span>
+                            <span className="font-mono text-xs text-[#6f797a] ml-2">({formatTicketReference(ticket.id)})</span>
                             {ticket.checkedInAt && (
                               <p className="text-xs text-[#6f797a] mt-1">
                                 Check-in lúc: {new Date(ticket.checkedInAt).toLocaleString('vi-VN')}

@@ -23,6 +23,7 @@ const newsletterRoutes = require('./routes/newsletterRoutes');
 const aiRoutes = require('./routes/aiRoutes');
 const weatherRoutes = require('./routes/weatherRoutes');
 const forecastRoutes = require('./routes/forecastRoutes');
+const liveTripRoutes = require('./routes/liveTripRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -109,6 +110,7 @@ app.use('/api/newsletter', newsletterRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/forecast', forecastRoutes);
+app.use('/api/live', liveTripRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -477,7 +477,7 @@ async function getReservation(req, res, next) {
 async function listBookings(req, res, next) {
   try {
     const bookings = await prisma.booking.findMany({
-      where: { userId: req.user.id },
+      where: { userId: req.user.id, isForecastTrainingSample: false },
       include: bookingInclude,
       orderBy: { createdAt: 'desc' },
     });
@@ -498,7 +498,11 @@ async function getBooking(req, res, next) {
       include: bookingInclude,
     });
 
-    if (!booking || booking.userId !== req.user.id) {
+    if (
+      !booking
+      || booking.userId !== req.user.id
+      || booking.isForecastTrainingSample
+    ) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé.' });
     }
 
