@@ -112,6 +112,11 @@ function finalizationTx(requestOverrides = {}) {
     reservation: { update: jest.fn().mockResolvedValue({}) },
     ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     booking: { update: jest.fn().mockResolvedValue({}) },
+    loyaltyTransaction: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+    },
+    user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
   };
 }
 

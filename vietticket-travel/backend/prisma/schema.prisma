@@ -33,6 +33,9 @@ model User {
   isEmailVerified   Boolean      @default(false)
   status            UserStatus   @default(ACTIVE)
   tokenVersion      Int          @default(0)
+  // Số dư điểm thưởng (cache). Nguồn chân lý là tổng LoyaltyTransaction.points;
+  // cột này được cập nhật nguyên tử cùng mỗi giao dịch điểm để đọc nhanh.
+  loyaltyPoints     Int          @default(0)
   termsAcceptedAt   DateTime?
   termsVersion      String?
   privacyVersion    String?
@@ -61,6 +64,8 @@ model User {
   checkedInTickets        TicketInstance[]            @relation("TicketCheckedInBy")
   auditLogs               AuditLog[]
   savedItineraries        SavedItinerary[]
+  loyaltyTransactions     LoyaltyTransaction[]
+  loyaltyVouchers         Voucher[]                   @relation("VoucherOwner")
   liveTrips               LiveTrip[]
   smartQueueEntries       SmartQueueEntry[]
   liveTripEvents          LiveTripEvent[]
@@ -634,6 +639,7 @@ model Booking {
   settlementItems    PartnerSettlementItem[]
   liveTripItems      LiveTripItem[]
   smartQueueEntries  SmartQueueEntry[]
+  loyaltyTransactions LoyaltyTransaction[]
 
   @@index([userId])
   @@index([voucherId])
@@ -749,6 +755,11 @@ model TicketInstance {
   @@index([checkedInAt])
 }
 
+enum VoucherSource {
+  PROMOTION // Mã khuyến mãi công khai do Admin tạo (dùng chung)
+  LOYALTY   // Voucher cá nhân sinh ra khi khách đổi điểm thưởng
+}
+
 model Voucher {
   id            String              @id @default(uuid())
   code          String              @unique
@@ -760,12 +771,53 @@ model Voucher {
   isActive      Boolean             @default(true)
   usageLimit    Int?
   usedCount     Int                 @default(0)
+  // Chủ sở hữu voucher. NULL = mã công khai; có giá trị = voucher cá nhân
+  // (đổi điểm) và CHỈ tài khoản này được dùng.
+  userId        String?
+  source        VoucherSource       @default(PROMOTION)
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
-  bookings Booking[]
+  bookings            Booking[]
+  owner               User?                @relation("VoucherOwner", fields: [userId], references: [id], onDelete: Cascade)
+  loyaltyTransactions LoyaltyTransaction[]
 
   @@index([isActive, expiryDate])
+  @@index([userId])
+}
+
+enum LoyaltyTransactionType {
+  EARN       // Cộng điểm khi đơn CONFIRMED
+  REVERSAL   // Thu hồi điểm khi đơn đã cộng điểm bị hoàn tiền
+  REDEEM     // Trừ điểm khi đổi lấy voucher
+  ADJUSTMENT // Điều chỉnh thủ công (dự phòng)
+}
+
+// Sổ cái điểm thưởng: mỗi dòng là một biến động điểm bất biến.
+// points > 0 (EARN), points < 0 (REDEEM/REVERSAL). balanceAfter là số dư
+// ngay sau giao dịch, phục vụ hiển thị sao kê mà không cần tính lũy kế.
+model LoyaltyTransaction {
+  id           String                 @id @default(uuid())
+  userId       String
+  bookingId    String?
+  voucherId    String?
+  type         LoyaltyTransactionType
+  points       Int
+  balanceAfter Int
+  description  String
+  metadata     Json?
+  createdAt    DateTime               @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  voucher Voucher? @relation(fields: [voucherId], references: [id], onDelete: SetNull)
+
+  // Đảm bảo mỗi đơn chỉ cộng điểm 1 lần và thu hồi 1 lần (idempotent).
+  // Postgres coi các NULL là khác nhau nên REDEEM/ADJUSTMENT (bookingId NULL)
+  // không bị ràng buộc này.
+  @@unique([bookingId, type])
+  @@index([userId, createdAt])
+  @@index([voucherId])
 }
 
 enum RefundStatus {

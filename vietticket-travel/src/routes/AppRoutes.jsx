@@ -39,6 +39,7 @@ const SearchAttractionsPage = lazy(() => import('../pages/SearchAttractionsPage.
 const SupportCenterPage = lazy(() => import('../pages/SupportCenterPage.jsx'))
 const MySupportTicketsPage = lazy(() => import('../pages/MySupportTicketsPage.jsx'))
 const UserFavoritesPage = lazy(() => import('../pages/UserFavoritesPage.jsx'))
+const MyRewardsPage = lazy(() => import('../pages/MyRewardsPage.jsx'))
 const VerifyEmailPage = lazy(() => import('../pages/VerifyEmailPage.jsx'))
 const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard.jsx'))
 const KycApprovalPage = lazy(() => import('../pages/admin/KycApprovalPage.jsx'))
@@ -211,6 +212,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <UserFavoritesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/rewards"
+        element={
+          <ProtectedRoute>
+            <MyRewardsPage />
           </ProtectedRoute>
         }
       />

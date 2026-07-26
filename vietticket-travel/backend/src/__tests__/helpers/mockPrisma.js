@@ -315,6 +315,13 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
   },
+  loyaltyTransaction: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    aggregate: jest.fn(),
+  },
   $transaction: jest.fn(),
   $queryRaw: jest.fn(),
 };

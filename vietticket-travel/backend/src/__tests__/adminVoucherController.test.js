@@ -52,7 +52,7 @@ describe('admin voucher management', () => {
     );
 
     expect(prisma.voucher.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { code: { contains: 'WELCOME', mode: 'insensitive' } },
+      where: { source: 'PROMOTION', code: { contains: 'WELCOME', mode: 'insensitive' } },
       skip: 0,
       take: 20,
     }));

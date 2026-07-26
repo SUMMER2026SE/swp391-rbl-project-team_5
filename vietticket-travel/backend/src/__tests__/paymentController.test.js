@@ -186,6 +186,11 @@ function setupTx({
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: 'refund-tx-1' }),
     },
+    loyaltyTransaction: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'lt-earn' }),
+    },
+    user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 100 }) },
   };
   prisma.$transaction.mockImplementation((cb) => cb(tx));
   return tx;

@@ -97,6 +97,62 @@ describe('validateAndApplyVoucher', () => {
     );
   });
 
+  test('chặn voucher loyalty của người khác (không phải chủ sở hữu)', async () => {
+    mockPrisma.voucher.findUnique.mockResolvedValue({
+      id: 'voucher-lt',
+      code: 'LTABCDEFGH',
+      discountType: 'FIXED',
+      discountValue: new Decimal(50000),
+      maxDiscount: null,
+      minSpend: new Decimal(200000),
+      expiryDate: new Date(Date.now() + 86400000),
+      isActive: true,
+      usageLimit: 1,
+      usedCount: 0,
+      userId: 'owner-1',
+      source: 'LOYALTY',
+    });
+    const res = makeResponse();
+
+    await validateAndApplyVoucher({
+      user: { id: 'attacker-2' },
+      body: { voucherCode: 'LTABCDEFGH', subtotalAmount: 300000 },
+    }, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('không thuộc về tài khoản') }),
+    );
+  });
+
+  test('cho phép chủ sở hữu dùng voucher loyalty của mình', async () => {
+    mockPrisma.voucher.findUnique.mockResolvedValue({
+      id: 'voucher-lt',
+      code: 'LTABCDEFGH',
+      discountType: 'FIXED',
+      discountValue: new Decimal(50000),
+      maxDiscount: null,
+      minSpend: new Decimal(200000),
+      expiryDate: new Date(Date.now() + 86400000),
+      isActive: true,
+      usageLimit: 1,
+      usedCount: 0,
+      userId: 'owner-1',
+      source: 'LOYALTY',
+    });
+    const res = makeResponse();
+
+    await validateAndApplyVoucher({
+      user: { id: 'owner-1' },
+      body: { voucherCode: 'LTABCDEFGH', subtotalAmount: 300000 },
+    }, res, jest.fn());
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ discountAmount: 50000, totalAmount: 250000 }),
+    }));
+  });
+
   test('làm tròn voucher phần trăm về số nguyên VND theo half-up', async () => {
     mockPrisma.voucher.findUnique.mockResolvedValue({
       id: 'voucher-rounding',
