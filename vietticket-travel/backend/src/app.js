@@ -79,11 +79,46 @@ app.use('/uploads', express.static(
 app.get('/api/health', async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    return res.json({
+    const payload = {
       status: 'ok',
       database: 'connected',
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    // Staging-only diagnostics help verify a remote restore without exposing
+    // catalog counts or database metadata from a production health endpoint.
+    if (process.env.NODE_ENV !== 'production' && req.query.details === 'true') {
+      const [
+        totalAttractions,
+        approvedAttractions,
+        publicAttractions,
+        totalPartners,
+        approvedPartners,
+      ] = await Promise.all([
+        prisma.attraction.count(),
+        prisma.attraction.count({ where: { status: 'APPROVED' } }),
+        prisma.attraction.count({
+          where: {
+            publishedAt: { not: null },
+            publicationStatus: 'ACTIVE',
+            operationalStatus: 'ACTIVE',
+            archivedAt: null,
+            partner: { status: 'APPROVED' },
+          },
+        }),
+        prisma.partnerProfile.count(),
+        prisma.partnerProfile.count({ where: { status: 'APPROVED' } }),
+      ]);
+      payload.catalog = {
+        totalAttractions,
+        approvedAttractions,
+        publicAttractions,
+        totalPartners,
+        approvedPartners,
+      };
+    }
+
+    return res.json(payload);
   } catch {
     return res.status(503).json({
       status: 'unavailable',
