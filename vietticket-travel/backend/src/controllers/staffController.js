@@ -79,7 +79,34 @@ async function assertStaffAttractionAccess(client, user, attractionId) {
     select: { id: true },
   });
   if (!assignment) {
-    throw httpError(403, 'Bạn không được phân công check-in tại địa điểm này.');
+    // Chỉ chạy trên nhánh lỗi: nêu rõ vé thuộc địa điểm nào và nhân viên đang
+    // được phân công ở đâu, để nhân viên/quản trị xử lý ngay tại cổng.
+    const [ticketAttraction, assigned] = await Promise.all([
+      client.attraction.findUnique({
+        where: { id: attractionId },
+        select: { title: true },
+      }),
+      client.staffAttractionAssignment.findMany({
+        where: { staffId: user.id, revokedAt: null },
+        select: { attraction: { select: { title: true } } },
+        take: 5,
+      }),
+    ]);
+
+    const ticketPlace = ticketAttraction?.title
+      ? `"${ticketAttraction.title}"`
+      : 'địa điểm khác';
+    const assignedTitles = assigned
+      .map((item) => item.attraction?.title)
+      .filter(Boolean);
+    const assignedText = assignedTitles.length
+      ? `Bạn đang được phân công tại: ${assignedTitles.join(', ')}.`
+      : 'Hiện bạn chưa được phân công địa điểm nào — vui lòng liên hệ quản trị viên để được gán địa điểm.';
+
+    throw httpError(
+      403,
+      `Vé này thuộc ${ticketPlace}, không nằm trong phạm vi check-in của bạn. ${assignedText}`,
+    );
   }
 }
 
@@ -1006,6 +1033,201 @@ async function lookupTicketByQr(req, res, next) {
   }
 }
 
+// ------------------------------------------------------------
+// Tra cứu hợp nhất cho cổng soát vé.
+// Nhân viên có thể nhập/quét:
+//   - Mã QR của một vé (token UUID, có hoặc không có tiền tố VIETTICKET:)
+//   - Mã đặt chỗ in trên vé (VT-XXXXXXXXXXXX) hoặc chính UUID của đơn
+// Trả về TẤT CẢ vé trong đơn kèm trạng thái từng vé để nhân viên soát lần lượt
+// cho nhóm khách. Không ghi DB; check-in vẫn đi qua POST /checkin/:token.
+// ------------------------------------------------------------
+const CHECKIN_TICKET_INCLUDE = {
+  booking: {
+    include: {
+      reservation: {
+        include: {
+          timeSlot: true,
+          ticketProduct: {
+            include: {
+              attraction: {
+                select: { id: true, title: true, openTime: true, closeTime: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
+const CHECKIN_BOOKING_INCLUDE = {
+  reservation: {
+    include: {
+      timeSlot: true,
+      ticketProduct: {
+        include: {
+          attraction: {
+            select: { id: true, title: true, openTime: true, closeTime: true },
+          },
+        },
+      },
+    },
+  },
+  ticketInstances: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+};
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Mã đặt chỗ hiển thị = "VT-" + 12 ký tự cuối của UUID (viết hoa).
+function normalizeBookingReference(raw) {
+  const cleaned = String(raw || '')
+    .trim()
+    .replace(/\s+/gu, '')
+    .replace(/^VT[-–—]?/iu, '');
+  // Yêu cầu tối thiểu 8 ký tự để không khớp quá rộng khi nhân viên gõ thiếu.
+  if (!/^[0-9a-f-]{8,36}$/iu.test(cleaned)) return null;
+  return cleaned.toLowerCase();
+}
+
+async function findBookingByReference(reference) {
+  const normalized = normalizeBookingReference(reference);
+  if (!normalized) return null;
+
+  return prisma.booking.findFirst({
+    where: {
+      isForecastTrainingSample: false,
+      ...(UUID_PATTERN.test(normalized)
+        ? { id: normalized }
+        : { id: { endsWith: normalized, mode: 'insensitive' } }),
+    },
+    orderBy: { createdAt: 'desc' },
+    include: CHECKIN_BOOKING_INCLUDE,
+  });
+}
+
+function getBookingAttractionId(booking) {
+  return booking?.reservation?.ticketProduct?.attraction?.id
+    || booking?.reservation?.ticketProduct?.attractionId
+    || booking?.snapshotAttractionId
+    || null;
+}
+
+// Gói dữ liệu trả về: thông tin đơn + trạng thái từng vé.
+function buildCheckinLookupPayload(booking, instances, matchedTicketId = null) {
+  const tickets = instances.map((instance, index) => {
+    // getCheckinBlockReason cần instance.booking -> ghép lại khi duyệt từ booking.
+    const withBooking = instance.booking ? instance : { ...instance, booking };
+    const blockReason = getCheckinBlockReason(withBooking);
+    return {
+      ticketId: instance.id,
+      token: instance.qrCodeToken,
+      index: index + 1,
+      status: instance.status,
+      checkedInAt: instance.checkedInAt || null,
+      canCheckIn: blockReason === null,
+      blockReason,
+      isMatched: matchedTicketId ? instance.id === matchedTicketId : false,
+    };
+  });
+
+  const base = toCheckinTicket(
+    instances[0]?.booking ? instances[0] : { ...instances[0], booking },
+  );
+
+  return {
+    ...base,
+    matchedTicketId,
+    tickets,
+    summary: {
+      total: tickets.length,
+      valid: tickets.filter((ticket) => ticket.status === 'VALID').length,
+      used: tickets.filter((ticket) => ticket.status === 'USED').length,
+      checkable: tickets.filter((ticket) => ticket.canCheckIn).length,
+    },
+  };
+}
+
+// GET /api/staff/lookup?q=... — tra cứu bằng mã QR HOẶC mã đặt chỗ.
+async function lookupCheckinTarget(req, res, next) {
+  try {
+    const raw = String(req.query.q ?? req.query.code ?? '').trim();
+    if (!raw) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Vui lòng quét mã QR hoặc nhập mã vé / mã đặt chỗ.' },
+      });
+    }
+
+    // 1) Ưu tiên khớp chính xác mã QR của một vé.
+    const token = normalizeQrToken(raw);
+    const instance = token
+      ? await prisma.ticketInstance.findUnique({
+          where: { qrCodeToken: token },
+          include: CHECKIN_TICKET_INCLUDE,
+        })
+      : null;
+
+    if (instance) {
+      if (instance.booking?.isForecastTrainingSample) {
+        return res.status(404).json({
+          success: false,
+          error: { message: 'Không tìm thấy vé với mã này.' },
+        });
+      }
+      await assertStaffAttractionAccess(
+        prisma,
+        req.user,
+        getTicketAttractionId(instance),
+      );
+      // Lấy toàn bộ vé cùng đơn để nhân viên soát lần lượt cho nhóm khách.
+      const siblings = await prisma.ticketInstance.findMany({
+        where: { bookingId: instance.bookingId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      return res.json({
+        success: true,
+        data: {
+          matchType: 'TICKET',
+          ...buildCheckinLookupPayload(instance.booking, siblings, instance.id),
+        },
+      });
+    }
+
+    // 2) Không phải mã QR -> thử mã đặt chỗ (VT-XXXX) hoặc UUID đơn.
+    const booking = await findBookingByReference(raw);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          message:
+            'Không tìm thấy vé hoặc đơn với mã này. Kiểm tra lại mã QR, mã vé, hoặc mã đặt chỗ dạng VT-XXXXXXXXXXXX.',
+        },
+      });
+    }
+
+    await assertStaffAttractionAccess(prisma, req.user, getBookingAttractionId(booking));
+
+    if (booking.ticketInstances.length === 0) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          message: `Đơn này chưa có vé điện tử (trạng thái: ${booking.status}). Chỉ đơn đã xác nhận mới có mã QR.`,
+        },
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        matchType: 'BOOKING',
+        ...buildCheckinLookupPayload(booking, booking.ticketInstances),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 // POST /api/staff/checkin/:token — check-in đúng vé được quét.
 // Mỗi TicketInstance có QR riêng; quét một QR chỉ được dùng một vé để hỗ trợ
 // nhóm khách đến tách lượt và tránh vô tình khóa toàn bộ booking.
@@ -1472,6 +1694,7 @@ module.exports = {
   reconcileRefundRequest,
   reissueTicket,
   lookupTicketByQr,
+  lookupCheckinTarget,
   checkInTicket,
   listTodayBookings,
   listOperationalBookings,

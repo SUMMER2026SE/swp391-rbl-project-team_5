@@ -10,6 +10,7 @@ const ADMIN_AVATAR =
 const NAV_ITEMS_ADMIN = [
   { to: '/admin',                     icon: 'dashboard',      label: 'Tổng quan',          end: true },
   { to: '/admin/bookings',            icon: 'receipt_long',   label: 'Đặt vé & Thanh toán' },
+  { to: '/admin/bank-transfers',      icon: 'qr_code_2',      label: 'Đối chiếu chuyển khoản' },
   { to: '/admin/reports',             icon: 'finance',        label: 'Báo cáo tài chính' },
   { to: '/admin/settlements',         icon: 'request_quote',  label: 'Đối soát đối tác' },
   { to: '/admin/kyc-approval',        icon: 'verified_user',  label: 'Duyệt hồ sơ KYC' },

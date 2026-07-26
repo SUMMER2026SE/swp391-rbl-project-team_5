@@ -90,7 +90,25 @@ function validateProductionEnv() {
   }
 }
 
+// --- Tài khoản ngân hàng nhận tiền của nền tảng (thanh toán chuyển khoản) ---
+// Đặt trong .env, KHÔNG commit vào mã nguồn. Nếu chưa cấu hình đủ,
+// phương thức chuyển khoản sẽ tự động bị ẩn khỏi trang thanh toán.
+function getBankTransferConfig() {
+  const bankBin = String(process.env.BANK_BIN || '').trim();
+  const accountNumber = String(process.env.BANK_ACCOUNT_NUMBER || '').trim();
+  const accountName = String(process.env.BANK_ACCOUNT_NAME || '').trim().toUpperCase();
+  const bankName = String(process.env.BANK_NAME || '').trim();
+
+  const configured =
+    /^\d{6}$/u.test(bankBin)
+    && /^\d{6,19}$/u.test(accountNumber)
+    && accountName.length > 0;
+
+  return { bankBin, accountNumber, accountName, bankName, configured };
+}
+
 module.exports = {
+  getBankTransferConfig,
   getFrontendUrl,
   isProduction,
   normalizeUrl,

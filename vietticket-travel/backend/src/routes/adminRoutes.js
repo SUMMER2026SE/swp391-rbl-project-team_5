@@ -28,6 +28,7 @@ const {
 const protect = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
 const reviewController = require('../controllers/reviewController');
+const bankTransferController = require('../controllers/bankTransferController');
 const settlementController = require('../controllers/settlementController');
 
 const router = express.Router();
@@ -50,6 +51,13 @@ router.get('/categories', listCategories);
 router.post('/categories', createCategory);
 router.put('/categories/:id', updateCategory);
 router.delete('/categories/:id', deleteCategory);
+// Đối chiếu thanh toán chuyển khoản: xem hàng đợi và xác nhận đã nhận tiền.
+router.get('/bank-transfers', bankTransferController.listBankTransferQueue);
+router.post(
+  '/bank-transfers/:bookingId/confirm',
+  bankTransferController.confirmBankTransferPayment,
+);
+
 router.get('/vouchers', listVouchers);
 router.post('/vouchers', createVoucher);
 router.put('/vouchers/:id', updateVoucher);
