@@ -4,8 +4,6 @@ stateDiagram-v2
     REJECTED --> PENDING : Edit and resubmit
     PENDING --> APPROVED : Admin approves
     PENDING --> REJECTED : Admin rejects
-    APPROVED --> SUSPENDED : Admin suspends
-    SUSPENDED --> APPROVED : Admin restores
     DRAFT --> Archived : Partner deletes
     REJECTED --> Archived : Partner deletes
     APPROVED --> Archived : Partner deletes

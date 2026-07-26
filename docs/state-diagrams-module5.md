@@ -17,15 +17,16 @@
 | Sơ đồ | Trạng thái | Ghi chú kiểm tra |
 |---|---|---|
 | B1 PartnerProfile | ✅ Chính xác | REJECTED→PENDING chỉ khi resubmit; SUSPENDED **không** tự đăng ký lại được (chỉ admin gỡ). Guard duyệt: chỉ khi PENDING. |
-| B2 Attraction (status) | ✅ Đã sửa | Bỏ `ARCHIVED` khỏi máy status (nó thuộc publicationStatus). Xóa chỉ set `archivedAt`, status giữ nguyên. |
+| B2 Attraction (status) | ✅ Đã sửa | Bỏ `ARCHIVED` **và** `SUSPENDED` khỏi máy status. ARCHIVED thuộc publicationStatus; SUSPENDED thuộc `operationalStatus`. Xóa chỉ set `archivedAt`, status giữ nguyên. |
+| B2op Attraction (operationalStatus) | ✅ Mới thêm | `ACTIVE ↔ SUSPENDED`. Admin đình chỉ/khôi phục **không** đổi status; cả hai đều ép publicationStatus=PAUSED. |
 | B3 Attraction (publicationStatus) | ✅ Đã sửa | **Duyệt lần đầu → ACTIVE** (không phải PAUSED). Duyệt lại giữ nguyên; đình chỉ ép PAUSED. |
-| B2b Bản gộp orthogonal | ✅ Mới thêm | Cho SRS cần 1 sơ đồ duy nhất cho Attraction. |
+| B2b Bản gộp orthogonal | ✅ 3 vùng | status / operationalStatus / publicationStatus chạy song song. Cho SRS cần 1 sơ đồ duy nhất cho Attraction. |
 | B4 TicketProduct | ✅ Chính xác + rõ hơn | Thêm chú thích: sửa vé của địa điểm đã publish đi qua `draftData`, chỉ ghi DB khi duyệt lại. |
 | B5 StaffAttractionAssignment | ✅ Chính xác | Tái phân công = upsert `revokedAt=null`; xóa nhân viên cũng revoke. |
 | B6 AttractionImage | ✅ Chính xác | `setPrimaryImage` hạ primary cũ; xóa primary tự thăng ảnh kế. |
 | B7 TimeSlot / SpecialDate | ✅ Chính xác (lifecycle) | Không có enum status; TimeSlot dùng `isActive`, SpecialDate dùng `closed`. |
 
-**2 lỗi đã sửa so với bản đầu:** (1) publicationStatus lần duyệt đầu là ACTIVE; (2) ARCHIVED không phải giá trị của `status`.
+**3 lỗi đã sửa so với bản đầu:** (1) publicationStatus lần duyệt đầu là ACTIVE; (2) ARCHIVED không phải giá trị của `status`; (3) SUSPENDED không phải giá trị của `status` mà là `operationalStatus` (enum riêng ACTIVE/SUSPENDED) — đình chỉ/khôi phục không đổi `status`, chỉ đổi `operationalStatus` và ép `publicationStatus=PAUSED`.
 
 ---
 
@@ -59,20 +60,22 @@ YÊU CẦU ĐẦU RA:
 
 **Ví dụ điền sẵn cho Attraction** (dán thẳng vào chỗ `{{...}}`):
 
-- Trường trạng thái: `status: AttractionStatus` **và** `publicationStatus: AttractionPublicationStatus` (2 máy trạng thái song song)
-- Enum status: `DRAFT, PENDING, APPROVED, REJECTED, SUSPENDED`
+- Trường trạng thái: `status: AttractionStatus`, `operationalStatus: AttractionOperationalStatus` **và** `publicationStatus: AttractionPublicationStatus` (3 máy trạng thái song song)
+- Enum status: `DRAFT, PENDING, APPROVED, REJECTED`
+- Enum operationalStatus: `ACTIVE, SUSPENDED`
 - Enum publicationStatus: `PAUSED, ACTIVE, ARCHIVED`
-- Initial: `status=DRAFT` / `publicationStatus=PAUSED`
+- Initial: `status=DRAFT` / `operationalStatus=ACTIVE` / `publicationStatus=PAUSED`
 - Transitions (status):
   - `DRAFT --> PENDING : Partner / submit gửi duyệt [snapshot hợp lệ]`
   - `REJECTED --> PENDING : Partner / gửi duyệt lại`
   - `PENDING --> APPROVED : Admin / duyệt (set publishedAt)`
   - `PENDING --> REJECTED : Admin / từ chối [có rejectionReason]`
-  - `APPROVED --> SUSPENDED : Admin / đình chỉ [status=APPROVED & đã publishedAt]`
-  - `SUSPENDED --> APPROVED : Admin / khôi phục`
+- Transitions (operationalStatus):
+  - `ACTIVE --> SUSPENDED : Admin / đình chỉ [đã publishedAt & operationalStatus=ACTIVE] (đồng thời ép publicationStatus=PAUSED)`
+  - `SUSPENDED --> ACTIVE : Admin / khôi phục (giữ publicationStatus=PAUSED, status không đổi)`
 - Transitions (publicationStatus):
   - `PAUSED --> ACTIVE : Admin / DUYỆT LẦN ĐẦU (publishedAt=null ⇒ tự phát hành ACTIVE)`
-  - `PAUSED --> ACTIVE : Partner / bật bán vé [đã publishedAt & status≠SUSPENDED]`
+  - `PAUSED --> ACTIVE : Partner / bật bán vé [đã publishedAt & operationalStatus≠SUSPENDED]`
   - `ACTIVE --> PAUSED : Partner / tạm dừng bán vé  |  Admin / đình chỉ`
   - `PAUSED,ACTIVE --> ARCHIVED : Partner / xóa (set archivedAt, status giữ nguyên)`
 
@@ -107,15 +110,17 @@ stateDiagram-v2
 ```
 
 > **QUAN TRỌNG — Attraction có 2 máy trạng thái CHẠY SONG SONG (orthogonal):**
-> `status` (vòng kiểm duyệt của Admin) và `publicationStatus` (đối tác bật/tắt bán
-> vé). Ngoài ra `archivedAt` là cờ soft-delete cắt ngang cả hai. `ARCHIVED` chỉ là
-> giá trị của `publicationStatus`, **KHÔNG** phải giá trị của `status` — khi xóa,
-> `status` được giữ nguyên, chỉ `archivedAt` + `publicationStatus=ARCHIVED` thay đổi.
-> Vẽ 3 sơ đồ: B2 (status), B3 (publicationStatus), B2b (bản gộp orthogonal chuẩn UML).
+> `status` (vòng kiểm duyệt của Admin), `operationalStatus` (Admin đình chỉ/khôi phục)
+> và `publicationStatus` (đối tác bật/tắt bán vé). Ngoài ra `archivedAt` là cờ soft-delete
+> cắt ngang cả ba. `ARCHIVED` chỉ là giá trị của `publicationStatus` và `SUSPENDED` chỉ là
+> giá trị của `operationalStatus` — **KHÔNG** phải giá trị của `status`. Khi xóa, `status`
+> được giữ nguyên, chỉ `archivedAt` + `publicationStatus=ARCHIVED` thay đổi. Khi đình chỉ,
+> chỉ `operationalStatus=SUSPENDED` (+ ép `publicationStatus=PAUSED`), `status` giữ nguyên.
+> Vẽ 4 sơ đồ: B2 (status), B2op (operationalStatus), B3 (publicationStatus), B2b (bản gộp orthogonal chuẩn UML).
 
 ### B2. Attraction – Máy trạng thái KIỂM DUYỆT (`status: AttractionStatus`)
 
-Tập trạng thái hợp lệ: `DRAFT, PENDING, APPROVED, REJECTED, SUSPENDED` (không có ARCHIVED).
+Tập trạng thái hợp lệ: `DRAFT, PENDING, APPROVED, REJECTED` (không có ARCHIVED, không có SUSPENDED).
 
 ```mermaid
 stateDiagram-v2
@@ -124,12 +129,23 @@ stateDiagram-v2
     REJECTED --> PENDING : Edit and resubmit
     PENDING --> APPROVED : Admin approves
     PENDING --> REJECTED : Admin rejects
-    APPROVED --> SUSPENDED : Admin suspends
-    SUSPENDED --> APPROVED : Admin restores
     DRAFT --> Archived : Partner deletes
     REJECTED --> Archived : Partner deletes
     APPROVED --> Archived : Partner deletes
     Archived --> [*]
+```
+
+### B2op. Attraction – Máy trạng thái VẬN HÀNH (`operationalStatus: AttractionOperationalStatus`)
+
+Tập trạng thái hợp lệ: `ACTIVE, SUSPENDED`. Đình chỉ/khôi phục do Admin, không đổi `status`;
+cả hai hành động đều ép `publicationStatus=PAUSED`.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> ACTIVE : Created (default)
+    ACTIVE --> SUSPENDED : Admin suspends [publishedAt set]
+    SUSPENDED --> ACTIVE : Admin restores
 ```
 
 ### B3. Attraction – Máy trạng thái PHÁT HÀNH (`publicationStatus`)
@@ -160,17 +176,19 @@ stateDiagram-v2
         REJECTED --> PENDING : resubmit
         PENDING --> APPROVED : approve
         PENDING --> REJECTED : reject
-        APPROVED --> SUSPENDED : suspend
-        SUSPENDED --> APPROVED : restore
+        --
+        [*] --> ACTIVE_OP
+        ACTIVE_OP --> SUSPENDED : admin suspend
+        SUSPENDED --> ACTIVE_OP : admin restore
         --
         [*] --> PAUSED
-        PAUSED --> ACTIVE : publish
-        ACTIVE --> PAUSED : pause / suspend
+        PAUSED --> ACTIVE_PUB : publish
+        ACTIVE_PUB --> PAUSED : pause / suspend
     }
     Live --> [*] : Partner deletes (archived)
 ```
 
-*Vùng bên trái = `status`, vùng bên phải = `publicationStatus` — hai vùng chạy đồng thời.*
+*Ba vùng chạy đồng thời: `status` (kiểm duyệt) / `operationalStatus` (đình chỉ) / `publicationStatus` (phát hành). `ACTIVE_OP`/`ACTIVE_PUB` là cùng tên `ACTIVE` ở hai enum khác nhau, đặt khác id để Mermaid không gộp node.*
 
 ### B4. TicketProduct (`status: TicketStatus` + `archivedAt`)
 

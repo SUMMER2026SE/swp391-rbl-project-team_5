@@ -1,0 +1,58 @@
+@startuml
+title List All Support Tickets - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class SupportTicket <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -assignedToId: String [0..1]
+  -status: SupportStatus = OPEN
+  -createdAt: DateTime
+  -updatedAt: DateTime
+  --
+  +isOpen(): Boolean
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -fullName: String
+  -status: UserStatus = ACTIVE
+  -createdAt: DateTime
+  -updatedAt: DateTime
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class SupportMessage <<model>> {
+  -id: String {UUID}
+  -ticketId: String
+  -message: String
+  -createdAt: DateTime
+  --
+  +isFromStaff(): Boolean
+}
+
+User "1" -- "0..*" SupportTicket : supportTickets
+User "0..1" -- "0..*" SupportTicket : assignedSupportTickets
+SupportTicket "1" *-- "0..*" SupportMessage : messages
+
+@enduml

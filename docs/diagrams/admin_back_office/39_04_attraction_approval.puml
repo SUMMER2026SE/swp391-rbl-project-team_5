@@ -17,7 +17,7 @@ if (Decision?) then (Approve)
   |System|
   :PUT /api/admin/attractions/:id/review (APPROVED) - BR-13, BR-24;
   :Toast "Da phe duyet dia diem: ...";
-  :Attraction becomes publishable by partner;
+  :First approval auto-publishes (publicationStatus = ACTIVE);\nre-approval keeps current publication state;
   |Notification Service|
   :Notify partner (approved);
 else (Reject)

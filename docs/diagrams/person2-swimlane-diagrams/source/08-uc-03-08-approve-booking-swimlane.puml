@@ -1,0 +1,55 @@
+@startuml
+title UC-03-08 - Approve Booking Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Partner|
+start
+:Open pending bookings;
+:Select booking and click Approve;
+
+|VietTicket System|
+:Verify partner ownership\nand booking status;
+
+if (Approval valid?) then (Yes)
+  |Booking Database|
+  :Commit inventory when needed;
+  :Generate TicketInstances\nwhen none exist;
+  :Set Booking CONFIRMED;
+
+  |Email Service|
+  :Queue e-ticket confirmation email;
+
+  |VietTicket System|
+  :Return approved booking;
+
+  |Partner|
+  :View approval success;
+else (No)
+  |VietTicket System|
+  :Reject ownership or\nstatus violation;
+
+  |Partner|
+  :Display approval error;
+endif
+
+|Partner|
+stop
+@enduml

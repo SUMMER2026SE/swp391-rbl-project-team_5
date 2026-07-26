@@ -1,0 +1,51 @@
+@startuml
+title Archive Ticket Product - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -rejectionReason: String [0..1]
+  -draftData: Json [0..1]
+  -minTicketPrice: Decimal [0..1]
+  -status: AttractionStatus = DRAFT
+  -archivedAt: DateTime [0..1]
+  --
+  +clearRejection(): void
+  +changeStatus(status: AttractionStatus): void
+  +updateDraft(draftData: Json): void
+  +isPublished(): Boolean
+  +isOwnedBy(partnerId: String): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  -archivedAt: DateTime [0..1]
+  --
+  +archive(at: DateTime): void
+}
+
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+
+@enduml

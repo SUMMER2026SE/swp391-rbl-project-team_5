@@ -1,0 +1,64 @@
+@startuml
+title UC-03-04 - Online Payment via VNPay Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Click Pay via VNPay;
+
+|VietTicket System|
+:Validate booking ownership,\nstatus, amount and configuration;
+
+|Booking Database|
+:Load Booking, Payment\nand Reservation;
+
+|VietTicket System|
+:Check PENDING_PAYMENT status\nand active hold;
+
+if (Payment can start?) then (Yes)
+  |Booking Database|
+  :Create a new transaction reference;
+  :Refresh Reservation expiry;
+  :Keep Payment as PENDING;
+
+  |VietTicket System|
+  :Build HMAC-SHA512 signed\nVNPay payment URL;
+
+  |VNPay|
+  :Receive redirect request;
+  :Display payment page;
+
+  |Customer|
+  :Complete or cancel payment;
+
+  |VietTicket System|
+  :Await result processing\nin UC-03-05;
+else (No)
+  |VietTicket System|
+  :Return ownership, status,\nexpiry or setup error;
+
+  |Customer|
+  :Display payment error;
+endif
+
+|Customer|
+stop
+@enduml

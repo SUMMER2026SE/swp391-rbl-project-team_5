@@ -1,0 +1,56 @@
+@startuml 04_staff
+' ============================================================
+'  KHU VUC 4 - NHAN VIEN (Staff)
+'  Nguon: AppRoutes.jsx + dieu huong thuc te (navigate / <Link>)
+'  Cac hop mau xam <<ext>> la man hinh o khu vuc khac (diem vao).
+' ============================================================
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam nodesep 42
+skinparam ranksep 78
+skinparam ArrowColor #78909C
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #37474F
+skinparam state {
+  FontSize 12
+  FontColor #12232B
+  BorderColor #90A4AE
+  BackgroundColor #FFFFFF
+}
+skinparam StateFontStyle bold
+skinparam state<<ext>> {
+  BackgroundColor #ECEFF1
+  BorderColor #B0BEC5
+  FontColor #607D8B
+}
+left to right direction
+
+title 4 - NHAN VIEN  (Staff)
+
+state "4 - NHAN VIEN  (Staff)" as Staff #F3E5F5 {
+  state "Check-in ve (QR)\n(/staff/checkin)" as SCheckin
+  state "Ho tro khach hang\n(/staff/tickets)" as STickets
+  state "Quan ly hoan tien\n(/staff/refunds)" as SRefunds
+
+  SCheckin --> STickets : Ho tro khach hang
+  STickets --> SRefunds : Quan ly hoan tien
+}
+
+' -- Diem vao khu vuc khac (ghost states) --
+state "Dang nhap\n(/login)  [Guest]" as X_Login <<ext>>
+state "Dat ve & Thanh toan\n(/admin/bookings)  [Admin]" as X_ABookings <<ext>>
+
+X_Login     --> SCheckin : STAFF dang nhap
+X_ABookings --> SRefunds : Admin tao yeu cau hoan tien
+
+legend right
+  |= Mau |= Y nghia |
+  |<#F3E5F5>   | Man hinh khu vuc Staff |
+  |<#ECEFF1>   | Man hinh khu vuc khac (diem vao) |
+  ==
+  * Cac trang trong khu vuc dieu huong qua lai bang menu co dinh.
+  * Admin cung co the truy cap ca khu vuc Staff.
+endlegend
+
+@enduml

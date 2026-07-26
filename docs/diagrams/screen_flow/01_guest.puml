@@ -1,0 +1,94 @@
+@startuml 01_guest
+' ============================================================
+'  KHU VUC 1 - KHACH (Public / Guest - chua dang nhap)
+'  Nguon: AppRoutes.jsx + dieu huong thuc te (navigate / <Link>)
+'  Cac hop mau xam <<ext>> la CUM man hinh o khu vuc khac (diem ra);
+'  chi tiet tung khu vuc xem file tuong ung + 00_overview.puml.
+' ============================================================
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam nodesep 45
+skinparam ranksep 90
+skinparam ArrowColor #78909C
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #37474F
+skinparam state {
+  FontSize 12
+  FontColor #12232B
+  BorderColor #90A4AE
+  BackgroundColor #FFFFFF
+}
+skinparam StateFontStyle bold
+skinparam state<<ext>> {
+  BackgroundColor #ECEFF1
+  BorderColor #B0BEC5
+  FontColor #607D8B
+}
+left to right direction
+
+title 1 - KHACH  (Public / Guest)
+
+state "1 - KHACH  (Public / Guest)" as Public #E3F2FD {
+  state "Trang chu\n(/)" as Home
+  state "Tim kiem diem tham quan\n(/attractions)" as Search
+  state "Chi tiet diem tham quan\n(/attractions/:id)" as Detail
+  state "Trang tinh: Gioi thieu / FAQ /\nDieu khoan / Bao mat" as Static
+  state "Dang nhap\n(/login)" as Login
+  state "Dang ky\n(/register)" as Register
+  state "Xac thuc email\n(/verify-email)" as Verify
+  state "Quen mat khau\n(/forgot-password)" as Forgot
+  state "Dat lai mat khau\n(/reset-password)" as Reset
+  state "Dang ky doi tac\n(/partner/register)" as PartnerReg
+  state "404 - Khong tim thay\n(*)" as NotFound
+
+  Home --> Login  : Dang nhap
+  Home --> Register : Dang ky
+  Home --> Search : Kham pha / Tim kiem
+  Home --> Static : Gioi thieu / FAQ
+  Home --> PartnerReg : Tro thanh doi tac
+  Search --> Detail : Chon diem tham quan
+  Register --> Login : Da co tai khoan
+  Login --> Register : Chua co tai khoan
+  Login --> Forgot : Quen mat khau
+  Forgot --> Reset : Mo link trong email
+  Reset --> Login : Dat lai thanh cong
+  Register --> Verify : Gui email xac thuc
+  Verify --> Login : Xac thuc xong (tu chuyen)
+  PartnerReg --> Verify : Can xac thuc email
+}
+
+[*] --> Home
+
+' -- Diem ra sang khu vuc khac (cac cum ghost, gom lai cho gon) --
+state "Khu vuc sau dang nhap\n(Customer / Partner /\nStaff / Admin)" as X_RoleHome <<ext>>
+state "Thanh toan / Checkout\n(/checkout/:reservationId)\n[Customer]" as X_Checkout <<ext>>
+state "Trung tam ho tro\n(/support)\n[Customer]" as X_Support <<ext>>
+state "Luong doi tac\n(KYC / Cho duyet /\nDashboard)" as X_PartnerFlow <<ext>>
+
+' Dang nhap -> dinh tuyen theo vai tro (chi tiet o 00_overview)
+Login --> X_RoleHome : Dang nhap thanh cong\n(dinh tuyen theo vai tro)
+
+' Luong dat ve tu trang chi tiet
+Detail --> Login      : Dat ve khi chua dang nhap
+Detail --> X_Checkout : Giu cho ve (da dang nhap)
+Detail --> X_Support  : Can ho tro
+
+' Luong tro thanh doi tac
+PartnerReg --> X_PartnerFlow : Sau khi dang ky\n(tuy trang thai ho so)
+
+' -- Gom cum ghost cho thang hang, tranh mui ten cheo --
+X_RoleHome -[hidden]-> X_Checkout
+X_Checkout -[hidden]-> X_Support
+X_Support  -[hidden]-> X_PartnerFlow
+
+legend right
+  |= Mau |= Y nghia |
+  |<#E3F2FD>   | Man hinh khu vuc Guest |
+  |<#ECEFF1>   | Cum man hinh khu vuc khac (diem ra) |
+  ==
+  * Cac trang trong khu vuc dieu huong qua lai bang header co dinh.
+  * Chi tiet dinh tuyen sau dang nhap + luong doi tac: xem 00_overview / 02..05.
+endlegend
+
+@enduml

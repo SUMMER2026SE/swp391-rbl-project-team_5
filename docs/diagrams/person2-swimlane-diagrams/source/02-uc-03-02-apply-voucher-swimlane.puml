@@ -1,0 +1,53 @@
+@startuml
+title UC-03-02 - Apply Voucher Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Enter voucher code;
+:Click Apply;
+
+|VietTicket System|
+:Validate authentication,\ncode and provisional subtotal;
+
+|Voucher Database|
+:Load voucher and\nusage information;
+
+|VietTicket System|
+:Check active period,\nminimum spend and usage limit;
+
+if (Voucher valid?) then (Yes)
+  :Calculate fixed or\npercentage discount;
+  :Apply maximum-discount cap\nand total floor;
+
+  |Customer|
+  :Display discount and\npreview total;
+else (No)
+  |VietTicket System|
+  :Return the rejection reason;
+
+  |Customer|
+  :Display voucher error;
+endif
+
+|Customer|
+stop
+@enduml

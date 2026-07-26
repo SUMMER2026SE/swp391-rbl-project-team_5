@@ -1,0 +1,60 @@
+@startuml 00_overview
+' ============================================================
+'  VietTicket - SCREEN FLOW / OVERVIEW (ban do tong the theo vai tro)
+'  Muc tieu: nhin nhanh 5 khu vuc + cach di chuyen giua cac khu vuc.
+'  Chi tiet tung khu vuc xem cac file 01..05.
+' ============================================================
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam nodesep 32
+skinparam ranksep 60
+skinparam ArrowColor #78909C
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #37474F
+skinparam state {
+  FontSize 13
+  FontColor #12232B
+  BorderColor #90A4AE
+  BackgroundColor #FFFFFF
+  AttributeFontColor #455A64
+  AttributeFontSize 11
+}
+skinparam StateFontStyle bold
+
+title Screen Flow - Tong the theo vai tro (Overview)
+
+[*] --> Guest
+
+state "1 - KHACH  (Public / Guest)\n/, /attractions, /login, /register..." as Guest #E3F2FD
+state "2 - KHACH HANG  (Customer)\n/profile, /checkout, /my-tickets..." as Customer #E8F5E9
+state "3 - DOI TAC  (Partner)\n/partner/dashboard, /partner/attractions..." as Partner #FFF3E0
+state "4 - NHAN VIEN  (Staff)\n/staff/checkin, /staff/tickets, /staff/refunds" as Staff #F3E5F5
+state "5 - QUAN TRI VIEN  (Admin)\n/admin, /admin/kyc-approval, /admin/users..." as Admin #FFEBEE
+
+' -- Dang nhap la bo dinh tuyen theo vai tro --
+Guest --> Customer : Dang nhap = CUSTOMER
+Guest --> Partner  : Dang nhap = PARTNER
+Guest --> Admin    : Dang nhap = ADMIN
+Guest --> Staff    : Dang nhap = STAFF
+
+' -- Cac luong nghiep vu chinh --
+Guest    --> Customer : Dat ve / Checkout (sau khi dang nhap)
+Customer --> Partner  : Nop KYC duoc duyet -> tro thanh doi tac
+Admin    --> Partner  : Duyet / tu choi ho so KYC
+Admin    --> Staff    : Admin tao yeu cau hoan tien
+Admin    --> Staff    : Admin truy cap duoc khu vuc Staff
+
+legend right
+  |= Mau |= Khu vuc / Vai tro |= File chi tiet |
+  |<#E3F2FD>   | Khach  (Public / Guest) | 01_guest.puml |
+  |<#E8F5E9>   | Khach hang  (Customer) | 02_customer.puml |
+  |<#FFF3E0>   | Doi tac  (Partner) | 03_partner.puml |
+  |<#F3E5F5>   | Nhan vien  (Staff) | 04_staff.puml |
+  |<#FFEBEE>   | Quan tri vien  (Admin) | 05_admin.puml |
+  ==
+  * Moi khu vuc la 1 diagram rieng, xem file tuong ung.
+  * Nut "Dang xuat" o moi khu vuc deu quay ve trang Dang nhap.
+endlegend
+
+@enduml

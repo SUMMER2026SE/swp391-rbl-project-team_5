@@ -1,0 +1,70 @@
+@startuml
+title Partner Create Staff - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class User <<model>> {
+  -id: String {UUID}
+  -employerPartnerId: String [0..1]
+  -email: String {unique}
+  -passwordHash: String {hashed} [0..1]
+  -fullName: String
+  -role: UserRole = CUSTOMER
+  -provider: AuthProvider = LOCAL
+  -isEmailVerified: Boolean = false
+  --
+  {static} +register(email: String, passwordHash: String, fullName: String): User
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class PasswordResetToken <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -token: String {unique, hashed}
+  -expiresAt: DateTime
+  --
+  {static} +issue(userId: String, tokenHash: String, expiresAt: DateTime): PasswordResetToken
+  +consume(): void
+}
+
+class UserProfile <<model>> {
+  -id: String {UUID}
+  -userId: String {unique}
+  -phoneNumber: String [0..1]
+  -avatarUrl: String [0..1]
+  --
+  {static} +createFor(userId: String): UserProfile
+}
+
+class AuditLog <<model>> {
+  -id: String {UUID}
+  -actorId: String [0..1]
+  -entityId: String [0..1]
+  -action: String
+  -entityType: String
+  --
+  +concerns(entityType: String, entityId: String): Boolean
+}
+
+User "1" *-- "0..1" PasswordResetToken : passwordResetTokens
+User "1" *-- "0..1" UserProfile : profile
+User "0..1" -- "0..*" AuditLog : auditLogs
+
+@enduml

@@ -7,11 +7,13 @@ stateDiagram-v2
         REJECTED --> PENDING : resubmit
         PENDING --> APPROVED : approve
         PENDING --> REJECTED : reject
-        APPROVED --> SUSPENDED : suspend
-        SUSPENDED --> APPROVED : restore
+        --
+        [*] --> ACTIVE_OP
+        ACTIVE_OP --> SUSPENDED : admin suspend
+        SUSPENDED --> ACTIVE_OP : admin restore
         --
         [*] --> PAUSED
-        PAUSED --> ACTIVE : publish
-        ACTIVE --> PAUSED : pause / suspend
+        PAUSED --> ACTIVE_PUB : publish
+        ACTIVE_PUB --> PAUSED : pause / suspend
     }
     Live --> [*] : Partner deletes (archived)

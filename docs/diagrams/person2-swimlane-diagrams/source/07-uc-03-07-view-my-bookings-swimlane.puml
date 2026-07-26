@@ -1,0 +1,62 @@
+@startuml
+title UC-03-07 - View My Bookings and Detail Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Customer|
+start
+:Open My Bookings;
+
+|VietTicket System|
+:Verify authentication;
+
+if (Authenticated?) then (Yes)
+  |Booking Database|
+  :Query bookings owned\nby the customer;
+
+  |VietTicket System|
+  :Return booking list;
+
+  |Customer|
+  :Select a booking;
+
+  |Booking Database|
+  :Load booking detail, tickets,\npayment, refund and review data;
+
+  |VietTicket System|
+  :Verify booking ownership;
+
+  if (Booking accessible?) then (Yes)
+    :Return amounts, status,\ncontact data and available QR codes;
+
+    |Customer|
+    :View booking detail;
+  else (No)
+    |Customer|
+    :Display not-found or\nforbidden message;
+  endif
+else (No)
+  |Customer|
+  :Sign in again;
+endif
+
+|Customer|
+stop
+@enduml

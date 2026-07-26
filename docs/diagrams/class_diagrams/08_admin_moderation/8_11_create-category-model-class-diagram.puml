@@ -1,0 +1,34 @@
+@startuml
+title Create Category - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Category <<model>> {
+  -id: String {UUID}
+  -name: String {unique}
+  -description: String [0..1]
+  -icon: String [0..1]
+  -isActive: Boolean = true
+  --
+  {static} +create(name: String, slug: String): Category
+}
+
+
+
+@enduml

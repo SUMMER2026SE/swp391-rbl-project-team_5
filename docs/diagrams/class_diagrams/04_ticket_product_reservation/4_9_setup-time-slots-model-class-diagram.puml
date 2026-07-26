@@ -1,0 +1,69 @@
+@startuml
+title Setup Time Slots - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -archivedAt: DateTime [0..1]
+  --
+  +isOnSale(): Boolean
+  +isAvailableOn(date: DateTime): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  -archivedAt: DateTime [0..1]
+  --
+  +isPublished(): Boolean
+}
+
+class PartnerProfile <<model>> {
+  -id: String {UUID}
+  -userId: String {unique}
+  -kycConsentAccepted: Boolean = false
+  -status: PartnerStatus = PENDING
+  --
+  +isApproved(): Boolean
+}
+
+class TimeSlot <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String [0..1]
+  -attractionId: String [0..1]
+  -startTime: String
+  -endTime: String
+  -maxCapacity: Int
+  -isActive: Boolean = true
+  --
+  {static} +create(ticketProductId: String, startTime: String, endTime: String): TimeSlot
+  +deactivate(): void
+}
+
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+PartnerProfile "1" -- "0..*" Attraction : attractions
+TicketProduct "0..1" *-- "0..*" TimeSlot : timeSlots
+Attraction "0..1" -- "0..*" TimeSlot : timeSlots
+
+@enduml
