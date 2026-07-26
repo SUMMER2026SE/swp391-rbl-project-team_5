@@ -70,6 +70,26 @@ describe('partyConsensusService', () => {
     expect(scored[0].minimumSatisfaction).toBeGreaterThanOrEqual(0.7);
   });
 
+  test('does not schedule an attraction that nobody endorsed', () => {
+    const members = [member('m1'), member('m2')];
+    const candidates = [
+      candidate('c1', 'endorsed', ['Thiên nhiên'], 200_000),
+      candidate('c2', 'unvoted', ['Bảo tàng'], 100_000, 5),
+    ];
+    const votes = [
+      { memberId: 'm1', candidateId: 'c1', value: 'LOVE' },
+      { memberId: 'm2', candidateId: 'c1', value: 'LIKE' },
+    ];
+
+    const result = selectConsensusCandidates(
+      scoreCandidates({ members, candidates, votes }),
+      2,
+    );
+
+    expect(result.selected.map((item) => item.attractionId)).toEqual(['endorsed']);
+    expect(result.unendorsed.map((item) => item.attractionId)).toEqual(['unvoted']);
+  });
+
   test('final metrics are calculated from attractions actually scheduled', () => {
     const members = [member('m1'), member('m2')];
     const candidates = [

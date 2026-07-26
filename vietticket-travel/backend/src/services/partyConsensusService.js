@@ -1,6 +1,6 @@
 'use strict';
 
-const ALGORITHM_VERSION = 'PARTY_CONSENSUS_V1';
+const ALGORITHM_VERSION = 'PARTY_CONSENSUS_V2';
 const VOTE_SATISFACTION = Object.freeze({
   LOVE: 1,
   LIKE: 0.7,
@@ -76,13 +76,19 @@ function scoreCandidates({ candidates = [], members = [], votes = [] } = {}) {
       const price = candidatePrice(candidate);
       const vetoMemberIds = [];
       const satisfactionByMember = {};
+      let voteCount = 0;
+      let positiveVoteCount = 0;
       let preferenceMatches = 0;
       let declaredBudgets = 0;
       let comfortableBudgets = 0;
 
       activeMembers.forEach((member) => {
         const vote = voteByKey.get(`${member.id}:${candidate.id}`);
+        if (vote?.value) voteCount += 1;
         if (vote?.value === 'VETO') vetoMemberIds.push(member.id);
+        if (vote?.value === 'LOVE' || vote?.value === 'LIKE') {
+          positiveVoteCount += 1;
+        }
 
         const preferenceMatch = hasPreferenceMatch(member, candidate);
         if (preferenceMatch) preferenceMatches += 1;
@@ -135,6 +141,8 @@ function scoreCandidates({ candidates = [], members = [], votes = [] } = {}) {
         budgetComfortRatio,
         preferenceMatchRatio,
         satisfactionByMember,
+        voteCount,
+        positiveVoteCount,
         vetoMemberIds,
         excluded: vetoMemberIds.length > 0,
       };
@@ -149,11 +157,16 @@ function scoreCandidates({ candidates = [], members = [], votes = [] } = {}) {
 
 function selectConsensusCandidates(scoredCandidates, targetCount) {
   const count = Math.max(1, Number(targetCount) || 1);
-  const eligible = (scoredCandidates || []).filter((candidate) => !candidate.excluded);
+  const eligible = (scoredCandidates || []).filter(
+    (candidate) => !candidate.excluded && candidate.positiveVoteCount > 0,
+  );
   return {
     eligible,
     selected: eligible.slice(0, count),
     vetoed: (scoredCandidates || []).filter((candidate) => candidate.excluded),
+    unendorsed: (scoredCandidates || []).filter(
+      (candidate) => !candidate.excluded && candidate.positiveVoteCount === 0,
+    ),
   };
 }
 

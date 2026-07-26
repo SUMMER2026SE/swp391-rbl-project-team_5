@@ -29,6 +29,18 @@ async function joinRoom(req, res, next) {
   }
 }
 
+async function previewInvite(req, res, next) {
+  try {
+    const preview = await partyRoomService.previewInvite(
+      req.params.roomId,
+      req.body?.inviteToken,
+    );
+    return res.json({ success: true, data: preview });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function getSession(req, res, next) {
   try {
     const room = await partyRoomService.getRoom(
@@ -139,6 +151,7 @@ module.exports = {
   getSession,
   joinRoom,
   listRooms,
+  previewInvite,
   removeMember,
   reopenRoom,
   rotateInvite,

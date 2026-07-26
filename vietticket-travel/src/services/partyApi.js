@@ -24,6 +24,13 @@ export function joinPartyRoom(roomId, payload) {
   })
 }
 
+export function previewPartyInvite(roomId, inviteToken) {
+  return apiRequest(`/party/rooms/${encodeURIComponent(roomId)}/invite/preview`, {
+    method: 'POST',
+    body: { inviteToken },
+  })
+}
+
 export function getPartyRoomSession(roomId, partyToken = '') {
   return apiRequest(`/party/rooms/${encodeURIComponent(roomId)}/session`, {
     method: 'GET',

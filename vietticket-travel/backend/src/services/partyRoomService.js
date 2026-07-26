@@ -154,6 +154,16 @@ function dateKey(value) {
   return value ? new Date(value).toISOString().slice(0, 10) : null;
 }
 
+function isTripDatePast(value) {
+  const key = dateKey(value);
+  return Boolean(key && key < todayInVietnam());
+}
+
+function requiredVoterCount(memberCount) {
+  const count = Math.max(0, Number(memberCount) || 0);
+  return Math.max(2, Math.ceil(count * 0.6));
+}
+
 function normalizeDisplayName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
@@ -235,6 +245,13 @@ function validateCreateRoomInput(input = {}) {
   if (!city || city.length < 2 || city.length > 100) {
     throw createHttpError(400, 'PARTY_CITY_INVALID', 'Vui lòng nhập thành phố hợp lệ.');
   }
+  if (title.length > 120) {
+    throw createHttpError(
+      400,
+      'PARTY_TITLE_INVALID',
+      'Tên chuyến đi không được vượt quá 120 ký tự.',
+    );
+  }
   if (!startDate || startDateKey < tomorrow || startDateKey > latestDate) {
     throw createHttpError(
       400,
@@ -274,7 +291,7 @@ function validateCreateRoomInput(input = {}) {
   }
 
   return {
-    title: title.slice(0, 120) || `Cùng khám phá ${city}`,
+    title: title || `Cùng khám phá ${city}`,
     city,
     startDate,
     startDateKey,
@@ -349,6 +366,10 @@ function serializeRoom(room, actor = null) {
     totalBudget: toMoney(room.totalBudget),
     pace: room.pace,
     maxMembers: room.maxMembers,
+    votingPolicy: {
+      quorumPercent: 60,
+      requiredVoters: requiredVoterCount((room.members || []).length),
+    },
     status: room.status,
     version: room.version,
     inviteExpiresAt: room.inviteExpiresAt,
@@ -387,9 +408,31 @@ function serializeRoom(room, actor = null) {
 }
 
 async function loadRoom(roomId, { prismaClient = prisma } = {}) {
+  await expireStaleRooms({ roomId }, { prismaClient });
   return prismaClient.partyRoom.findUnique({
     where: { id: String(roomId || '').trim() },
     include: PARTY_ROOM_INCLUDE,
+  });
+}
+
+async function expireStaleRooms(
+  { roomId, hostUserId } = {},
+  { prismaClient = prisma } = {},
+) {
+  const today = new Date(`${todayInVietnam()}T00:00:00.000Z`);
+  return prismaClient.partyRoom.updateMany({
+    where: {
+      ...(roomId ? { id: String(roomId).trim() } : {}),
+      ...(hostUserId ? { hostUserId } : {}),
+      status: { in: ['OPEN', 'FINALIZED'] },
+      startDate: { lt: today },
+    },
+    data: {
+      status: 'EXPIRED',
+      closedAt: new Date(),
+      inviteExpiresAt: new Date(),
+      version: { increment: 1 },
+    },
   });
 }
 
@@ -400,12 +443,14 @@ function assertHost(room, userId) {
 }
 
 function assertOpen(room) {
-  if (room.status !== 'OPEN') {
+  if (room.status !== 'OPEN' || isTripDatePast(room.startDate)) {
     throw createHttpError(
       409,
       'PARTY_ROOM_NOT_OPEN',
       room.status === 'FINALIZED'
         ? 'Lịch trình đã được chốt. Host cần mở lại bình chọn trước khi thay đổi.'
+        : room.status === 'EXPIRED' || isTripDatePast(room.startDate)
+          ? 'Ngày khởi hành đã qua nên phòng chỉ còn được xem trong lịch sử.'
         : 'Phòng chuyến đi không còn nhận thay đổi.',
     );
   }
@@ -413,6 +458,7 @@ function assertOpen(room) {
 
 async function createRoom(userId, input, { prismaClient = prisma } = {}) {
   const values = validateCreateRoomInput(input);
+  await expireStaleRooms({ hostUserId: userId }, { prismaClient });
   const roomCount = await prismaClient.partyRoom.count({
     where: {
       hostUserId: userId,
@@ -506,6 +552,7 @@ async function createRoom(userId, input, { prismaClient = prisma } = {}) {
 }
 
 async function listRooms(userId, { prismaClient = prisma } = {}) {
+  await expireStaleRooms({ hostUserId: userId }, { prismaClient });
   const [activeRooms, archivedRooms] = await Promise.all([
     prismaClient.partyRoom.findMany({
       where: {
@@ -614,7 +661,69 @@ async function getRoom(roomId, actor, { prismaClient = prisma } = {}) {
   return serializeRoom(room, actor);
 }
 
+async function previewInvite(
+  roomId,
+  inviteToken,
+  { prismaClient = prisma } = {},
+) {
+  await expireStaleRooms({ roomId }, { prismaClient });
+  const token = String(inviteToken || '').trim();
+  if (!token) {
+    throw createHttpError(400, 'PARTY_INVITE_REQUIRED', 'Link mời không hợp lệ.');
+  }
+  const room = await prismaClient.partyRoom.findUnique({
+    where: { id: String(roomId || '').trim() },
+    select: {
+      id: true,
+      title: true,
+      city: true,
+      startDate: true,
+      dayCount: true,
+      adults: true,
+      children: true,
+      maxMembers: true,
+      status: true,
+      inviteTokenHash: true,
+      inviteExpiresAt: true,
+      host: { select: { fullName: true } },
+      _count: {
+        select: {
+          members: { where: { removedAt: null } },
+        },
+      },
+    },
+  });
+  if (!room || !tokensMatch(token, room.inviteTokenHash)) {
+    throw createHttpError(
+      404,
+      'PARTY_INVITE_INVALID',
+      'Link mời không hợp lệ hoặc đã được thay thế.',
+    );
+  }
+  assertOpen(room);
+  if (new Date(room.inviteExpiresAt) <= new Date()) {
+    throw createHttpError(
+      410,
+      'PARTY_INVITE_EXPIRED',
+      'Link mời đã hết hạn. Hãy nhờ Host tạo link mới.',
+    );
+  }
+  return {
+    id: room.id,
+    title: room.title,
+    city: room.city,
+    startDate: dateKey(room.startDate),
+    dayCount: room.dayCount,
+    travelers: room.adults + room.children,
+    memberCount: room._count.members,
+    maxMembers: room.maxMembers,
+    host: { fullName: room.host.fullName },
+    inviteExpiresAt: room.inviteExpiresAt,
+  };
+}
+
 async function joinRoom(roomId, input = {}, { prismaClient = prisma } = {}) {
+  await expireStaleRooms({ roomId }, { prismaClient });
   const displayName = validateDisplayName(input.displayName);
   const inviteToken = String(input.inviteToken || '').trim();
   const avatarKey = normalizeAvatar(input.avatarKey);
@@ -632,6 +741,7 @@ async function joinRoom(roomId, input = {}, { prismaClient = prisma } = {}) {
           select: {
             id: true,
             status: true,
+            startDate: true,
             maxMembers: true,
             inviteTokenHash: true,
             inviteExpiresAt: true,
@@ -724,7 +834,7 @@ async function updateMember(
 ) {
   const member = await prismaClient.partyMember.findFirst({
     where: { id: actor.memberId, roomId, removedAt: null },
-    include: { room: { select: { status: true } } },
+    include: { room: { select: { status: true, startDate: true } } },
   });
   if (!member) throw createHttpError(404, 'PARTY_MEMBER_NOT_FOUND', 'Không tìm thấy thành viên.');
   assertOpen(member.room);
@@ -792,7 +902,7 @@ async function castVote(
 
   const candidate = await prismaClient.partyCandidate.findFirst({
     where: { id: String(candidateId || '').trim(), roomId },
-    include: { room: { select: { status: true } } },
+    include: { room: { select: { status: true, startDate: true } } },
   });
   if (!candidate) {
     throw createHttpError(404, 'PARTY_CANDIDATE_NOT_FOUND', 'Không tìm thấy địa điểm trong phòng.');
@@ -849,7 +959,7 @@ async function clearVote(
 ) {
   const candidate = await prismaClient.partyCandidate.findFirst({
     where: { id: String(candidateId || '').trim(), roomId },
-    include: { room: { select: { status: true } } },
+    include: { room: { select: { status: true, startDate: true } } },
   });
   if (!candidate) {
     throw createHttpError(404, 'PARTY_CANDIDATE_NOT_FOUND', 'Không tìm thấy địa điểm trong phòng.');
@@ -891,11 +1001,12 @@ async function finalizeRoom(roomId, userId, { prismaClient = prisma } = {}) {
   const activeMembers = room.members || [];
   const votes = room.candidates.flatMap((candidate) => candidate.votes || []);
   const votingMembers = votingMemberIds(votes, activeMembers.map((member) => member.id));
-  if (activeMembers.length < 2 || votingMembers.length < 2) {
+  const requiredVoters = requiredVoterCount(activeMembers.length);
+  if (activeMembers.length < 2 || votingMembers.length < requiredVoters) {
     throw createHttpError(
       409,
       'PARTY_NOT_ENOUGH_VOTERS',
-      'Cần ít nhất hai thành viên trong phòng và hai người đã bình chọn trước khi chốt.',
+      `Cần ít nhất ${requiredVoters} trên ${activeMembers.length} thành viên đã bình chọn (ngưỡng 60%) trước khi chốt.`,
     );
   }
 
@@ -913,8 +1024,8 @@ async function finalizeRoom(roomId, userId, { prismaClient = prisma } = {}) {
   if (selection.selected.length === 0) {
     throw createHttpError(
       409,
-      'PARTY_ALL_CANDIDATES_VETOED',
-      'Tất cả địa điểm đã bị phủ quyết. Hãy mở lại thảo luận và thay đổi bình chọn.',
+      'PARTY_NO_ENDORSED_CANDIDATES',
+      'Chưa có địa điểm nào được chọn “Phù hợp” hoặc “Rất muốn đi” mà không bị phủ quyết.',
     );
   }
 
@@ -966,6 +1077,7 @@ async function finalizeRoom(roomId, userId, { prismaClient = prisma } = {}) {
       minimumSatisfaction: metrics.minimumSatisfaction,
       memberCount: activeMembers.length,
       votingMemberCount: votingMembers.length,
+      requiredVoterCount: requiredVoters,
       catalogCheckedAt,
       vetoedAttractionIds: selection.vetoed.map((candidate) => candidate.attractionId),
       selectedAttractionIds: metrics.selectedAttractionIds,
@@ -1047,12 +1159,15 @@ async function finalizeRoom(roomId, userId, { prismaClient = prisma } = {}) {
           ...metrics,
           catalogCheckedAt,
           votingMemberCount: votingMembers.length,
+          requiredVoterCount: requiredVoters,
           candidateScores: scoredCandidates.map((candidate) => ({
             attractionId: candidate.attractionId,
             title: candidate.title,
             score: Math.round(candidate.score * 100),
             averageSatisfaction: Math.round(candidate.averageSatisfaction * 100),
             minimumSatisfaction: Math.round(candidate.minimumSatisfaction * 100),
+            voteCount: candidate.voteCount,
+            positiveVoteCount: candidate.positiveVoteCount,
             vetoCount: candidate.vetoMemberIds.length,
           })),
         },
@@ -1124,6 +1239,7 @@ async function reopenRoom(roomId, userId, { prismaClient = prisma } = {}) {
 }
 
 async function rotateInvite(roomId, userId, { prismaClient = prisma } = {}) {
+  await expireStaleRooms({ roomId }, { prismaClient });
   const room = await prismaClient.partyRoom.findUnique({
     where: { id: String(roomId || '').trim() },
   });
@@ -1149,6 +1265,7 @@ async function rotateInvite(roomId, userId, { prismaClient = prisma } = {}) {
 }
 
 async function removeMember(roomId, memberId, userId, { prismaClient = prisma } = {}) {
+  await expireStaleRooms({ roomId }, { prismaClient });
   const room = await prismaClient.partyRoom.findUnique({
     where: { id: String(roomId || '').trim() },
   });
@@ -1198,6 +1315,7 @@ async function removeMember(roomId, memberId, userId, { prismaClient = prisma } 
 }
 
 async function closeRoom(roomId, userId, { prismaClient = prisma } = {}) {
+  await expireStaleRooms({ roomId }, { prismaClient });
   const room = await prismaClient.partyRoom.findUnique({
     where: { id: String(roomId || '').trim() },
   });
@@ -1233,6 +1351,7 @@ module.exports = {
   closeRoom,
   createRoom,
   dateKey,
+  expireStaleRooms,
   finalizeRoom,
   findActor,
   getRoom,
@@ -1241,6 +1360,9 @@ module.exports = {
   normalizeDisplayName,
   normalizeIdentity,
   normalizePreferences,
+  previewInvite,
+  requiredVoterCount,
+  isTripDatePast,
   removeMember,
   reopenRoom,
   rotateInvite,

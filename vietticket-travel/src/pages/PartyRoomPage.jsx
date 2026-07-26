@@ -182,6 +182,20 @@ function PartyRoomPage() {
     () => new Set((room?.votes || []).map((vote) => vote.memberId)).size,
     [room?.votes],
   )
+  const requiredVoters = Number(
+    room?.votingPolicy?.requiredVoters
+      || Math.max(2, Math.ceil((room?.members?.length || 0) * 0.6)),
+  )
+  const endorsedCandidateCount = useMemo(
+    () => (room?.candidates || []).filter((candidate) => {
+      const votes = (room?.votes || []).filter((vote) => vote.candidateId === candidate.id)
+      return (
+        votes.some((vote) => ['LOVE', 'LIKE'].includes(vote.value))
+        && !votes.some((vote) => vote.value === 'VETO')
+      )
+    }).length,
+    [room?.candidates, room?.votes],
+  )
   const isHost = Boolean(room?.me?.isHost)
   const isOpen = room?.status === 'OPEN'
   const status = statusMeta[room?.status] || statusMeta.CLOSED
@@ -190,7 +204,7 @@ function PartyRoomPage() {
     latestPlan
     && (
       room?.status === 'FINALIZED'
-      || (room?.status === 'CLOSED' && room?.finalizedAt)
+      || (['CLOSED', 'EXPIRED'].includes(room?.status) && room?.finalizedAt)
     ),
   )
   const inviteUrl = useMemo(
@@ -217,6 +231,14 @@ function PartyRoomPage() {
 
   const handleFinalize = async () => {
     if (action) return
+    if (
+      votingMemberCount < room.members.length
+      && !window.confirm(
+        `Đã đủ ngưỡng ${requiredVoters}/${room.members.length} người, nhưng vẫn còn ${room.members.length - votingMemberCount} người chưa vote. Bạn vẫn muốn chốt?`,
+      )
+    ) {
+      return
+    }
     setAction('finalize')
     try {
       const response = await finalizePartyRoom(roomId)
@@ -559,6 +581,12 @@ function PartyRoomPage() {
                     Đã bình chọn <strong>{votingMemberCount} người</strong>
                   </p>
                   <p className="flex items-center justify-between">
+                    Ngưỡng chốt 60% <strong>{requiredVoters} người</strong>
+                  </p>
+                  <p className="flex items-center justify-between">
+                    Điểm được ủng hộ <strong>{endorsedCandidateCount} điểm</strong>
+                  </p>
+                  <p className="flex items-center justify-between">
                     Phiên dữ liệu <strong>v{room.version}</strong>
                   </p>
                 </div>
@@ -567,7 +595,8 @@ function PartyRoomPage() {
                   disabled={
                     action === 'finalize'
                     || room.members.length < 2
-                    || votingMemberCount < 2
+                    || votingMemberCount < requiredVoters
+                    || endorsedCandidateCount < 1
                   }
                   onClick={() => void handleFinalize()}
                   type="button"
@@ -577,9 +606,17 @@ function PartyRoomPage() {
                   </span>
                   {action === 'finalize' ? 'Đang kiểm tra vé...' : 'Chốt lịch trình chung'}
                 </button>
-                {(room.members.length < 2 || votingMemberCount < 2) && (
+                {(room.members.length < 2 || votingMemberCount < requiredVoters) && (
                   <p className="mt-3 text-xs leading-5 text-slate-500">
-                    Cần ít nhất 2 thành viên và 2 người đã vote để kết quả có ý nghĩa.
+                    {room.members.length < 2
+                      ? 'Cần ít nhất 2 thành viên trong phòng trước khi chốt.'
+                      : `Cần tối thiểu ${requiredVoters}/${room.members.length} thành viên đã vote để đạt ngưỡng đồng thuận 60%.`}
+                  </p>
+                )}
+                {endorsedCandidateCount < 1 && votingMemberCount >= requiredVoters && (
+                  <p className="mt-3 text-xs leading-5 text-amber-700">
+                    Cần ít nhất một địa điểm được chọn “Phù hợp” hoặc “Rất muốn đi”
+                    và không bị phủ quyết.
                   </p>
                 )}
               </section>
@@ -668,6 +705,17 @@ function CandidateCard({
             </span>
           ))}
         </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-[#eef8f7] px-3 py-2 text-[11px] font-semibold text-[#356466]">
+          <span className="inline-flex items-center gap-1">
+            <span className="material-symbols-outlined text-base">event_available</span>
+            {snapshot.availabilityDate
+              ? `Tồn lúc mở phòng: ${formatDate(snapshot.availabilityDate)}`
+              : 'Sẽ kiểm tra tồn khi chốt'}
+          </span>
+          {snapshot.maxAvailableTickets != null && (
+            <span>Tối đa {snapshot.maxAvailableTickets} vé/loại</span>
+          )}
+        </div>
 
         <div className="mt-4 flex min-h-8 items-center gap-1">
           {votes.slice(0, 8).map((vote) => {
@@ -754,7 +802,7 @@ function InvitePanel({ inviteUrl, loading, onCopy, onRotate, room }) {
         />
       </div>
       <p className="mt-3 text-xs text-slate-500">
-        Tối đa {room.maxMembers} người · Link hiện tại có thời hạn
+        Tối đa {room.maxMembers} người · Link hết hạn {formatDateTime(room.inviteExpiresAt)}
       </p>
       <button
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-[#79c9c2] bg-[#effaf8] px-4 py-3 text-sm font-extrabold text-[#006b68]"

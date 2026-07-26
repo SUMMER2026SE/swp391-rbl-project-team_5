@@ -2,9 +2,11 @@
 
 const {
   candidateSnapshot,
+  isTripDatePast,
   normalizeDisplayName,
   normalizeIdentity,
   normalizePreferences,
+  requiredVoterCount,
   serializeRoom,
   validateDisplayName,
   validateCreateRoomInput,
@@ -53,11 +55,22 @@ describe('partyRoomService business validation', () => {
       .toThrow('Ngày bắt đầu phải từ ngày mai');
   });
 
+  test('detects only dates before today as expired planning rooms', () => {
+    expect(isTripDatePast(shiftDate(todayInVietnam(), -1))).toBe(true);
+    expect(isTripDatePast(todayInVietnam())).toBe(false);
+    expect(isTripDatePast(shiftDate(todayInVietnam(), 1))).toBe(false);
+  });
+
   test('rejects unrealistic room capacity and group budget', () => {
     expect(() => validateCreateRoomInput(validRoom({ maxMembers: 11 })))
       .toThrow('Phòng chỉ hỗ trợ từ 2 đến 10 thành viên');
     expect(() => validateCreateRoomInput(validRoom({ totalBudget: 99_999 })))
       .toThrow('Ngân sách vé của nhóm');
+  });
+
+  test('rejects an overlong trip title instead of silently truncating it', () => {
+    expect(() => validateCreateRoomInput(validRoom({ title: 'A'.repeat(121) })))
+      .toThrow('Tên chuyến đi không được vượt quá 120 ký tự');
   });
 
   test('normalizes Vietnamese identities and limits preference noise', () => {
@@ -73,6 +86,17 @@ describe('partyRoomService business validation', () => {
   test('rejects an overlong display name instead of silently truncating identity', () => {
     expect(() => validateDisplayName('A'.repeat(41)))
       .toThrow('Tên hiển thị phải có từ 2 đến 40 ký tự');
+  });
+
+  test.each([
+    [1, 2],
+    [2, 2],
+    [3, 2],
+    [4, 3],
+    [6, 4],
+    [10, 6],
+  ])('requires a practical 60%% voting quorum for %i members', (members, expected) => {
+    expect(requiredVoterCount(members)).toBe(expected);
   });
 
   test('snapshots date-specific sellable inventory for the voting room', () => {
@@ -119,5 +143,9 @@ describe('partyRoomService business validation', () => {
     expect(payload.me.userId).toBeUndefined();
     expect(payload.members[0].userId).toBeUndefined();
     expect(payload.votes.map((vote) => vote.id)).toEqual(['vote-active']);
+    expect(payload.votingPolicy).toEqual({
+      quorumPercent: 60,
+      requiredVoters: 2,
+    });
   });
 });

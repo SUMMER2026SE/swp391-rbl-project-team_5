@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import Header from '../components/Header.jsx'
 import Seo from '../components/Seo.jsx'
 import { CATEGORY_OPTIONS } from '../constants/travelCriteria.js'
-import { joinPartyRoom } from '../services/partyApi.js'
+import { joinPartyRoom, previewPartyInvite } from '../services/partyApi.js'
 import { loadPartySession, savePartySession } from '../utils/partySession.js'
 
 const avatarOptions = [
@@ -16,12 +16,25 @@ const avatarOptions = [
   { value: 'emerald', color: 'bg-emerald-500' },
 ]
 
+const formatInviteDate = (value) => {
+  if (!value) return ''
+  return new Intl.DateTimeFormat('vi-VN', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(`${value}T00:00:00`))
+}
+
 function PartyJoinPage() {
   const { roomId } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const inviteToken = searchParams.get('invite') || ''
   const existingSession = useMemo(() => loadPartySession(roomId), [roomId])
+  const [preview, setPreview] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(Boolean(inviteToken))
+  const [previewError, setPreviewError] = useState('')
   const [form, setForm] = useState({
     displayName: '',
     avatarKey: 'teal',
@@ -29,6 +42,29 @@ function PartyJoinPage() {
     preferences: [],
   })
   const [joining, setJoining] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!inviteToken) {
+      return undefined
+    }
+    previewPartyInvite(roomId, inviteToken)
+      .then((response) => {
+        if (!cancelled) setPreview(response?.data || null)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPreview(null)
+          setPreviewError(error.message)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [inviteToken, roomId])
 
   const togglePreference = (value) => {
     setForm((current) => ({
@@ -90,6 +126,20 @@ function PartyJoinPage() {
               Bạn chỉ cần tên hiển thị. Phiên này chỉ có quyền vote trong đúng phòng,
               không truy cập booking hoặc tài khoản của Host.
             </p>
+            {preview && (
+              <div className="mt-6 rounded-2xl border border-white/15 bg-white/10 p-4">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-[#8ff9ec]">
+                  Chuyến đi bạn sắp tham gia
+                </p>
+                <h2 className="mt-2 text-xl font-black text-white">{preview.title}</h2>
+                <p className="mt-2 text-sm leading-6 text-white/75">
+                  {preview.city} · {formatInviteDate(preview.startDate)} · {preview.dayCount} ngày
+                </p>
+                <p className="mt-1 text-xs font-semibold text-white/60">
+                  Host: {preview.host?.fullName} · {preview.memberCount}/{preview.maxMembers} người đang trong phòng
+                </p>
+              </div>
+            )}
             <div className="mt-8 space-y-4 text-sm font-semibold text-white/85">
               {[
                 ['favorite', 'Chọn điểm bạn thực sự muốn đi'],
@@ -105,6 +155,24 @@ function PartyJoinPage() {
           </section>
 
           <section className="p-6 md:p-10">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[#008b84]">
+                Hồ sơ trong phòng
+              </p>
+              <h2 className="mt-1 text-2xl font-black">Bạn muốn được gọi là gì?</h2>
+            </div>
+
+            {existingSession && (
+              <button
+                className="mt-5 flex w-full items-center justify-between rounded-xl border border-[#a8dfda] bg-[#effaf8] px-4 py-3 text-left text-sm font-bold text-[#006b68]"
+                onClick={() => navigate(`/party/${roomId}`)}
+                type="button"
+              >
+                Bạn đã có phiên trong phòng — mở lại ngay
+                <span className="material-symbols-outlined">arrow_forward</span>
+              </button>
+            )}
+
             {!inviteToken ? (
               <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
                 <span className="material-symbols-outlined text-6xl text-amber-500">link_off</span>
@@ -113,32 +181,28 @@ function PartyJoinPage() {
                   Hãy quét lại QR hoặc nhờ Host gửi link mời PartySync mới.
                 </p>
               </div>
+            ) : previewLoading ? (
+              <div className="flex min-h-[420px] flex-col items-center justify-center text-center" role="status">
+                <span className="material-symbols-outlined animate-spin text-5xl text-[#008b84]">
+                  progress_activity
+                </span>
+                <p className="mt-4 font-bold text-slate-600">Đang xác minh lời mời…</p>
+              </div>
+            ) : previewError || !preview ? (
+              <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
+                <span className="material-symbols-outlined text-6xl text-amber-500">link_off</span>
+                <h2 className="mt-4 text-2xl font-black">Không thể dùng lời mời này</h2>
+                <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
+                  {previewError || 'Lời mời không còn hiệu lực. Hãy nhờ Host tạo mã QR mới.'}
+                </p>
+              </div>
             ) : (
               <>
-                <div>
-                  <p className="text-xs font-black uppercase tracking-[0.16em] text-[#008b84]">
-                    Hồ sơ trong phòng
-                  </p>
-                  <h2 className="mt-1 text-2xl font-black">Bạn muốn được gọi là gì?</h2>
-                </div>
-
-                {existingSession && (
-                  <button
-                    className="mt-5 flex w-full items-center justify-between rounded-xl border border-[#a8dfda] bg-[#effaf8] px-4 py-3 text-left text-sm font-bold text-[#006b68]"
-                    onClick={() => navigate(`/party/${roomId}`)}
-                    type="button"
-                  >
-                    Bạn đã có phiên trong phòng — mở lại ngay
-                    <span className="material-symbols-outlined">arrow_forward</span>
-                  </button>
-                )}
-
                 <form className="mt-6 space-y-6" onSubmit={handleSubmit}>
                   <label className="block">
                     <span className="text-sm font-extrabold text-slate-700">Tên hiển thị</span>
                     <input
                       autoComplete="nickname"
-                      autoFocus
                       className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3.5 outline-none transition focus:border-[#008b84] focus:ring-4 focus:ring-[#008b84]/10"
                       maxLength="40"
                       minLength="2"
@@ -154,9 +218,10 @@ function PartyJoinPage() {
                   <fieldset>
                     <legend className="text-sm font-extrabold text-slate-700">Màu đại diện</legend>
                     <div className="mt-3 flex flex-wrap gap-3">
-                      {avatarOptions.map((avatar) => (
+                      {avatarOptions.map((avatar, index) => (
                         <label className="cursor-pointer" key={avatar.value}>
                           <input
+                            aria-label={`Màu đại diện ${index + 1}`}
                             checked={form.avatarKey === avatar.value}
                             className="sr-only"
                             name="avatar"

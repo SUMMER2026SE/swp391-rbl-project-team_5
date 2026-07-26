@@ -42,6 +42,7 @@ const formatDate = (value) => {
 function PartyRoomsPage() {
   const navigate = useNavigate()
   const [rooms, setRooms] = useState([])
+  const [roomView, setRoomView] = useState('active')
   const [loadingRooms, setLoadingRooms] = useState(true)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState({
@@ -77,6 +78,11 @@ function PartyRoomsPage() {
     () => rooms.filter((room) => ['OPEN', 'FINALIZED'].includes(room.status)),
     [rooms],
   )
+  const archivedRooms = useMemo(
+    () => rooms.filter((room) => ['CLOSED', 'EXPIRED'].includes(room.status)),
+    [rooms],
+  )
+  const visibleRooms = roomView === 'active' ? activeRooms : archivedRooms
 
   const handleChange = (event) => {
     const { name, value } = event.target
@@ -170,7 +176,7 @@ function PartyRoomsPage() {
           </div>
         </section>
 
-        <div className="mx-auto grid max-w-7xl gap-8 px-5 py-10 lg:grid-cols-[0.92fr_1.08fr]">
+        <div className="mx-auto grid max-w-7xl items-start gap-8 px-5 py-10 lg:grid-cols-[0.92fr_1.08fr]">
           <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
             <div className="flex items-start gap-4">
               <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#d8f5f1] text-[#006b68]">
@@ -189,6 +195,7 @@ function PartyRoomsPage() {
                 <span className="text-sm font-bold text-slate-700">Tên chuyến đi</span>
                 <input
                   className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-[#008b84] focus:ring-4 focus:ring-[#008b84]/10"
+                  maxLength="120"
                   name="title"
                   onChange={handleChange}
                   placeholder="Ví dụ: Đà Nẵng cùng hội bạn"
@@ -201,6 +208,7 @@ function PartyRoomsPage() {
                   <span className="text-sm font-bold text-slate-700">Thành phố</span>
                   <input
                     className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-[#008b84] focus:ring-4 focus:ring-[#008b84]/10"
+                    maxLength="100"
                     name="city"
                     onChange={handleChange}
                     required
@@ -220,6 +228,26 @@ function PartyRoomsPage() {
                     value={form.startDate}
                   />
                 </label>
+              </div>
+
+              <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[150px_1fr] sm:items-center">
+                <label className="block">
+                  <span className="text-sm font-bold text-slate-700">Người cùng quyết định</span>
+                  <input
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 outline-none focus:border-[#008b84]"
+                    max="10"
+                    min="2"
+                    name="maxMembers"
+                    onChange={handleChange}
+                    required
+                    type="number"
+                    value={form.maxMembers}
+                  />
+                </label>
+                <p className="text-xs leading-5 text-slate-500">
+                  Đây là số người được quét QR và bình chọn, có thể khác số khách thực sự đi.
+                  Phòng hỗ trợ tối đa 10 người ra quyết định.
+                </p>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -320,21 +348,54 @@ function PartyRoomsPage() {
               </button>
             </div>
 
+            <div className="mt-6 flex rounded-xl border border-slate-200 bg-white p-1" role="tablist" aria-label="Lọc danh sách phòng">
+              <button
+                aria-selected={roomView === 'active'}
+                className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-extrabold transition ${
+                  roomView === 'active'
+                    ? 'bg-[#006b68] text-white shadow-sm'
+                    : 'text-slate-500 hover:bg-slate-50'
+                }`}
+                onClick={() => setRoomView('active')}
+                role="tab"
+                type="button"
+              >
+                Đang hoạt động ({activeRooms.length})
+              </button>
+              <button
+                aria-selected={roomView === 'history'}
+                className={`flex-1 rounded-lg px-3 py-2.5 text-sm font-extrabold transition ${
+                  roomView === 'history'
+                    ? 'bg-[#006b68] text-white shadow-sm'
+                    : 'text-slate-500 hover:bg-slate-50'
+                }`}
+                onClick={() => setRoomView('history')}
+                role="tab"
+                type="button"
+              >
+                Lịch sử ({archivedRooms.length})
+              </button>
+            </div>
+
             <div className="mt-6 space-y-4">
               {loadingRooms ? (
                 <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center font-semibold text-slate-500">
                   Đang tải các phòng…
                 </div>
-              ) : rooms.length === 0 ? (
+              ) : visibleRooms.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-10 text-center">
                   <span className="material-symbols-outlined text-5xl text-slate-300">diversity_3</span>
-                  <h3 className="mt-3 font-black">Chưa có phòng nào</h3>
+                  <h3 className="mt-3 font-black">
+                    {roomView === 'active' ? 'Chưa có phòng đang hoạt động' : 'Chưa có phòng trong lịch sử'}
+                  </h3>
                   <p className="mt-2 text-sm text-slate-500">
-                    Tạo chuyến đầu tiên để mời bạn bè cùng lựa chọn.
+                    {roomView === 'active'
+                      ? 'Tạo chuyến mới để mời bạn bè cùng lựa chọn.'
+                      : 'Các phòng đã đóng hoặc hết hạn sẽ xuất hiện tại đây.'}
                   </p>
                 </div>
               ) : (
-                rooms.map((room) => {
+                visibleRooms.map((room) => {
                   const status = statusMeta[room.status] || statusMeta.CLOSED
                   return (
                     <Link

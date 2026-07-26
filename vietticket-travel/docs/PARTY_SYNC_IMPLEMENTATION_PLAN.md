@@ -85,6 +85,13 @@ Mỗi candidate có utility:
 ```
 
 `LOVE = 1.0`, `LIKE = 0.7`, chưa vote = `0.35`, `VETO` loại candidate.
+Từ `PARTY_CONSENSUS_V2`, một địa điểm chỉ được đưa vào allowlist lập lịch khi có ít
+nhất một phiếu `LOVE/LIKE` và không có `VETO`; địa điểm chưa ai ủng hộ không được tự
+chèn chỉ để lấp đầy ngày.
+
+Host chỉ có thể chốt khi ít nhất 60% thành viên hoạt động đã vote, làm tròn lên và
+không thấp hơn hai người. Nếu đã đủ quorum nhưng chưa đủ 100%, UI yêu cầu Host xác nhận
+rõ trước khi tiếp tục.
 
 Engine chọn một allowlist giới hạn theo số ngày và nhịp độ, sau đó dùng planner
 nghiệp vụ hiện hữu để xếp ngày/khung giờ và tạo đúng ticket line. Điểm đồng thuận
@@ -129,6 +136,7 @@ Kết quả phải trả:
 
 ### Public join có rate limit
 
+- `POST /api/party/rooms/:roomId/invite/preview`
 - `POST /api/party/rooms/:roomId/join`
 
 ## 7. Realtime
@@ -150,6 +158,8 @@ snapshot chính thức. Guest socket chỉ được vào room gắn trong scoped
 - Migration và Prisma validation thành công.
 - Unit test consensus, opaque token, validation, payload privacy và fixed-time ticket scheduling.
 - E2E API/UI kiểm tra ownership, guest scope, join/vote/finalize/reopen/remove/close.
+- E2E kiểm tra preview lời mời an toàn, quorum 60%, chỉ chọn candidate được ủng hộ,
+  phòng quá ngày tự chuyển `EXPIRED` và dashboard tách hoạt động/lịch sử.
 - E2E kiểm tra guest không thể dùng scoped token để đọc danh sách phòng hoặc chốt lịch.
 - Frontend test helper lưu scoped guest session theo từng phòng.
 - Lint, frontend test/build và backend test xanh.
@@ -162,7 +172,8 @@ snapshot chính thức. Guest socket chỉ được vào room gắn trong scoped
 
 1. Đăng nhập tài khoản CUSTOMER trên laptop và mở `/party`.
 2. Tạo phòng cho ngày còn vé, ngân sách và số khách thực tế.
-3. Chiếu QR; một thành viên quét bằng điện thoại, nhập tên và tham gia mà không cần đăng nhập.
+3. Chiếu QR; một thành viên quét bằng điện thoại, kiểm tra đúng tên chuyến, Host, ngày đi,
+   sau đó nhập tên và tham gia mà không cần đăng nhập.
 4. Hai màn hình bình chọn đồng thời để hội đồng thấy số phiếu cập nhật realtime.
 5. Cố tình dùng một `VETO` để giải thích quyền phủ quyết, sau đó đổi sang lựa chọn đồng thuận.
 6. Host chốt lịch; trình bày điểm đồng thuận, mức hài lòng thấp nhất, chi phí/người,
@@ -182,8 +193,8 @@ Khách trên điện thoại không cần đăng nhập; guest token chỉ có q
 
 - Migration `20260724160000_add_party_sync` đã được áp dụng lên database demo.
 - Browser E2E đã chạy bằng một desktop context cho Host và một mobile viewport cho Guest.
-- Luồng đã xác nhận: tạo phòng HTTP 201, QR hiển thị, guest join không tài khoản, realtime
-  2/2 người vote, token mời cũ vô hiệu sau rotate, guest bị chặn khỏi API Host, chốt lịch,
+- Luồng đã xác nhận: tạo phòng HTTP 201, QR hiển thị, preview đúng chuyến đi, guest join
+  không tài khoản, realtime, quorum 60%, token mời cũ vô hiệu sau rotate, guest bị chặn khỏi API Host, chốt lịch,
   lịch được chuyển sang booking queue, reopen, remove/revoke và close.
 - Planner đã được sửa để tôn trọng vé có giờ cố định như `16:30`, đồng thời không tự chèn
   địa điểm ngoài candidate allowlist chỉ để lấp đầy lịch.
@@ -192,3 +203,7 @@ Khách trên điện thoại không cần đăng nhập; guest token chỉ có q
 - Join chạy trong transaction `SERIALIZABLE` với retry giới hạn để không vượt sức chứa khi
   nhiều điện thoại quét cùng lúc; khách bị xóa nhầm có thể tham gia lại bằng tên cũ nhưng
   member/vote cũ vẫn được giữ cho audit.
+- Dashboard tách phòng hoạt động và lịch sử; phòng có ngày đi đã qua tự chuyển `EXPIRED`
+  và không thể join, vote, đổi QR hoặc chốt lại.
+- Mobile audit xác nhận menu đóng có chiều cao 0, trang join không tràn ngang và không
+  tự cuộn qua phần thông tin lời mời.

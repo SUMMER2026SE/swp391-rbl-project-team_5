@@ -15,6 +15,7 @@ const {
   getSession,
   joinRoom,
   listRooms,
+  previewInvite,
   removeMember,
   reopenRoom,
   rotateInvite,
@@ -44,6 +45,7 @@ const mutationLimiter = rateLimit({
 });
 
 // Public join is scoped by the opaque invite token in the request body.
+router.post('/rooms/:roomId/invite/preview', joinLimiter, previewInvite);
 router.post('/rooms/:roomId/join', joinLimiter, joinRoom);
 
 // Host-only lifecycle operations.
