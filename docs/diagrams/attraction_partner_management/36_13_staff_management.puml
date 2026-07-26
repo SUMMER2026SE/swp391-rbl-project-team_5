@@ -1,0 +1,44 @@
+@startuml
+title 3.6.13 Staff Management (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/staff;
+|System|
+:Load staff list\n(name, email, status, assignments) - BR-23;
+|Partner|
+switch (Staff action?)
+case (Create staff)
+  :Enter full name + email;
+  |System|
+  if (Name & email provided?) then (No)
+    |Partner|
+    :Toast "Vui long nhap ho ten va email.";
+  else (Yes)
+    |System|
+    :POST /api/partners/staff;
+    :Send email invite (set password);
+    :Toast "Da tao nhan vien va gui email moi dat mat khau.";
+  endif
+case (Lock / Unlock)
+  |System|
+  :PATCH /api/partners/staff/:id/status;
+case (Assign attractions)
+  |System|
+  :PUT /api/partners/staff/:id/assignments;
+  :Toast "Da cap nhat phan cong dia diem.";
+case (Resend invite)
+  |System|
+  :POST /api/partners/staff/:id/invite;
+case (Remove staff)
+  |System|
+  :DELETE /api/partners/staff/:staffId;
+endswitch
+|System|
+stop
+@enduml

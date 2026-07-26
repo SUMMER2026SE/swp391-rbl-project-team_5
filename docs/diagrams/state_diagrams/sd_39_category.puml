@@ -1,0 +1,23 @@
+@startuml
+title Category Lifecycle - 3.9 (isActive + delete)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+state "ACTIVE (isActive = true)" as ACTIVE
+state "HIDDEN (isActive = false)" as HIDDEN
+
+[*] --> ACTIVE : Admin creates category
+ACTIVE --> HIDDEN : Admin hides
+HIDDEN --> ACTIVE : Admin shows
+ACTIVE --> [*] : Admin deletes (confirm)
+HIDDEN --> [*] : Admin deletes (confirm)
+
+ACTIVE : Selectable for attractions & search
+@enduml

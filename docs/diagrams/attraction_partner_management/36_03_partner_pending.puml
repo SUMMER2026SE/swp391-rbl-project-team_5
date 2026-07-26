@@ -1,0 +1,31 @@
+@startuml
+title 3.6.3 Partner Pending / Under Review (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner Applicant|
+start
+:Open /partner/pending;
+|System|
+:Load profile status\nGET /api/partners/me;
+switch (PartnerProfile status?)
+case (PENDING)
+  |System|
+  :Show status panel\n"Ho so dang cho Admin duyet";
+  |Partner Applicant|
+  :Wait for Admin decision;
+case (REJECTED)
+  |System|
+  :Show status panel + rejection reason\n+ guidance to resubmit;
+  |Partner Applicant|
+  :Go back to KYC to resubmit;
+case (APPROVED)
+  |System|
+  :Redirect to /partner/dashboard;
+endswitch
+|System|
+stop
+@enduml

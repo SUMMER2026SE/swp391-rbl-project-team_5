@@ -1,0 +1,42 @@
+@startuml
+title 3.4.3 Online Payment - VNPay (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+skinparam noteBackgroundColor #EEF6FF
+
+|Customer|
+start
+:Confirm payment on checkout\n(redirected to VNPay);
+|System|
+:Build signed VNPay URL (HMAC-SHA512);
+|Payment Gateway (VNPay)|
+:Customer pays on gateway page;
+:Return result to browser\n+ send server-to-server IPN;
+|System|
+:Handle IPN GET /api/payments/vnpay-ipn\n(verify HMAC-SHA512 + amount, idempotent) - BR-21;
+if (Signature & amount valid, payment success?) then (No)
+  :Mark Payment = FAILED;
+  :Keep booking = PENDING_PAYMENT (allow retry);
+  |Customer|
+  :See failure on return page;
+else (Yes)
+  |System|
+  :Serializable transaction:\ncommit inventory (HELD -> BOOKED) - BR-15;
+  if (Ticket auto-issue?) then (Yes)
+    :Set booking = CONFIRMED\n+ generate e-tickets (QR);
+  else (Manual approval)
+    :Set booking = PENDING_PARTNER - BR-16;
+  endif
+  |Notification Service|
+  :Send ticket / confirmation email;
+  |Customer|
+  :See success on return page\nGET /api/payments/vnpay-return;
+  note right: Return page runs an idempotent\nreconciliation fallback if IPN is delayed
+endif
+
+|System|
+stop
+@enduml

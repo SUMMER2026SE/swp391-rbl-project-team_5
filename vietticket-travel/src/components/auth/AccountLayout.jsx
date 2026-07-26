@@ -18,6 +18,12 @@ const navItems = [
     active: 'saved',
   },
   {
+    label: 'Điểm thưởng',
+    icon: 'redeem',
+    to: '/rewards',
+    active: 'rewards',
+  },
+  {
     label: 'Lịch sử hỗ trợ',
     icon: 'support_agent',
     to: '/my-support',
@@ -40,7 +46,7 @@ function AccountLayout({ active = 'profile', children }) {
     || hasRole(currentUser, 'PARTNER')
   const visibleNavItems = navItems.filter((item) => {
     if (currentUser.provider === 'GOOGLE' && item.active === 'password') return false
-    if (isOperationalUser && ['bookings', 'saved', 'support'].includes(item.active)) return false
+    if (isOperationalUser && ['bookings', 'saved', 'support', 'rewards'].includes(item.active)) return false
     return true
   })
 

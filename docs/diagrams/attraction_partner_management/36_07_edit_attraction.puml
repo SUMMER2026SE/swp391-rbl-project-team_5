@@ -1,0 +1,46 @@
+@startuml
+title 3.6.7 Edit Attraction (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/attractions/:id/edit;
+|System|
+:Load attraction into tabbed form\n(overview, location, images);
+|Partner|
+if (Action?) then (Toggle publication)
+  :Toggle publication switch;
+  |System|
+  :PATCH /api/partners/attractions/:id/publication;
+  :Toast "Da mo ban dia diem" /\n"Da tam dung ban dia diem";
+else (Edit content)
+  |Partner|
+  :Edit fields across tabs;
+  :Click Save;
+  |System|
+  :Validate (same rules as Add) - BR-11..13;
+  if (Data valid?) then (No)
+    |System|
+    :Focus tab with invalid field;
+    |Partner|
+    :Show error toast and block save;
+  else (Yes)
+    |System|
+    :Save changes\nPUT /api/partners/attractions/:id;
+    if (Significant change?) then (Yes)
+      :Reset status = DRAFT then re-submit to Admin\n(status = PENDING);
+      |Admin|
+      :Review updated version\n(APPROVED -> republish / REJECTED -> reason);
+    else (No)
+      |System|
+      :Keep current approval status;
+    endif
+  endif
+endif
+|System|
+stop
+@enduml

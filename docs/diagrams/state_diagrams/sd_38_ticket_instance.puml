@@ -1,0 +1,22 @@
+@startuml
+title E-Ticket (TicketInstance) Lifecycle - 3.8 (TicketInstanceStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> VALID : Booking confirmed\n(e-ticket + QR issued)
+VALID --> USED : Partner staff checks in at gate\n(POST /api/staff/checkin/:token)
+VALID --> EXPIRED : Booking cancelled by partner /\nnot used
+VALID --> REFUNDED : Refund processed
+USED --> [*]
+EXPIRED --> [*]
+REFUNDED --> [*]
+
+USED : Cannot be cancelled/refunded
+@enduml

@@ -1,0 +1,35 @@
+@startuml
+title 3.4.5 My Tickets (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Customer|
+start
+:Open /my-tickets from account menu;
+|System|
+:Load bookings\nGET /api/bookings;
+:Render list with status badges\n(pending payment, awaiting partner, confirmed,\ncompleted, cancelled, refund requested/refunded);
+if (Arrived from payment redirect?) then (Yes)
+  :Surface status toast\n(success / pending-partner info / error);
+else (No)
+endif
+|Customer|
+switch (Action?)
+case (Filter)
+  :Filter bookings by status;
+case (Open ticket)
+  :Select a booking;
+  |System|
+  :Open /tickets/:bookingId (BR-16, BR-17);
+case (Resume payment)
+  |Customer|
+  :Click "Resume payment" (PENDING_PAYMENT);
+  |System|
+  :Return to checkout / VNPay to retry;
+endswitch
+|System|
+stop
+@enduml

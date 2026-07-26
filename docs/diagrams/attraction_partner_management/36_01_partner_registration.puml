@@ -1,0 +1,31 @@
+@startuml
+title 3.6.1 Partner Registration (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+skinparam noteBackgroundColor #EEF6FF
+
+|Customer / Guest|
+start
+:Click "Become a partner"\nopen /partner/register;
+repeat :Fill registration form;
+  :Enter account fields\n(full name, email, phone, password)\n+ business name;
+  :Click "Continue";
+  |System|
+  :Validate required fields\n(BR-03, BR-04, BR-05);
+  if (Data valid?) then (No)
+    |Customer / Guest|
+    :Show toast\n"Vui long kiem tra lai thong tin dang ky.";
+  else (Yes)
+    |System|
+    :Create or upgrade user account;
+  endif
+repeat while (Registration accepted?) is (No) not (Yes)
+
+|System|
+:Redirect to KYC page (/partner/kyc);
+:Show success toast\n(guide to upload legal documents);
+stop
+@enduml

@@ -262,6 +262,11 @@ function makeApproveTx(booking, { existingTicketCount = 0, claimCount = 1 } = {}
       count:      jest.fn().mockResolvedValue(existingTicketCount),
       createMany: jest.fn().mockResolvedValue({ count: 2 }),
     },
+    loyaltyTransaction: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create:     jest.fn().mockResolvedValue({ id: 'lt-earn' }),
+    },
+    user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 100 }) },
   };
 }
 

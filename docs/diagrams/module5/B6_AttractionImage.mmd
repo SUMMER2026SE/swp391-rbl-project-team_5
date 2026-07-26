@@ -1,0 +1,8 @@
+stateDiagram-v2
+    direction LR
+    [*] --> Primary : Upload first image
+    [*] --> Secondary : Upload more images
+    Secondary --> Primary : Set as primary
+    Primary --> Secondary : Another set as primary
+    Primary --> [*] : Delete
+    Secondary --> [*] : Delete

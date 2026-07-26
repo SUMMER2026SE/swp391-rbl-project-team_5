@@ -1,0 +1,1172 @@
+@startuml
+title Sequence Diagram - 6.1 List Refund Requests (GET /api/staff/refunds)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('STAFF','ADMIN') + requirePlatformStaff\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/staff/refunds?status&search&page&limit
+activate Router
+Router -> Guard : protect -> restrictTo('STAFF','ADMIN') -> requirePlatformStaff
+activate Guard
+ref over Guard, DB : protect (Module 1) + platform-staff check (ADMIN or STAFF w/o employer)
+Guard --> Router : next() (req.user set)
+deactivate Guard
+
+Router -> Staff : listRefundRequests(req, res, next)
+activate Staff
+Staff -> Staff : assertPlatformRefundStaff(req.user)
+alt status invalid
+  Staff --> Browser : 400 Bad Request
+else Valid / empty
+  Staff -> Staff : build where { status?, search OR bookingId/name/attraction }
+end
+
+group Promise.all
+  Staff -> Prisma : refundRequest.findMany({ where }, include booking+transactions, skip, take)
+  activate Prisma
+  Prisma -> DB : SELECT RefundRequest[] (+ latest transaction + booking chain)
+  DB --> Prisma : requests
+  Prisma --> Staff : requests
+  deactivate Prisma
+  Staff -> Prisma : refundRequest.count({ where })
+  activate Prisma
+  Prisma -> DB : COUNT RefundRequest
+  DB --> Prisma : total
+  Prisma --> Staff : total
+  deactivate Prisma
+  Staff -> Prisma : refundRequest.groupBy({ by: status })
+  activate Prisma
+  Prisma -> DB : GROUP BY status (stat cards)
+  DB --> Prisma : statusGroups
+  Prisma --> Staff : statusGroups
+  deactivate Prisma
+end
+
+Staff --> Browser : 200 OK { data, pagination, stats }
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.2 Process Refund Request (PATCH /api/staff/refunds/:refundId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('STAFF','ADMIN') + requirePlatformStaff\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+control "RefundLifecycleService\n<<Service>>" as RefundSvc
+control "PaymentController.refundViaVnpay\n<<Controller>>" as PayCtl
+participant "VNPay\n<<Payment Gateway>>" as VNPay
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PATCH /api/staff/refunds/:refundId\nbody: action (APPROVED|REJECTED), staffNotes?
+activate Router
+Router -> Guard : protect -> restrictTo('STAFF','ADMIN') -> requirePlatformStaff
+activate Guard
+ref over Guard, DB : platform-staff guard (see 6.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : processRefundRequest(req, res, next)
+activate Staff
+Staff -> Staff : assertPlatformRefundStaff(req.user)
+
+== Input Validation ==
+alt action not in {APPROVED, REJECTED}
+  Staff --> Browser : 400 Bad Request
+else REJECTED without staffNotes
+  Staff --> Browser : 400 Bad Request (nhap ly do tu choi)
+else Valid
+  Staff -> Staff : continue processing
+end
+
+Staff -> Prisma : refundRequest.findUnique({ id }, include booking+payments+transactions)
+activate Prisma
+Prisma -> DB : SELECT RefundRequest (+ booking + payments + transactions)
+DB --> Prisma : refundRequest | null
+Prisma --> Staff : refundRequest
+deactivate Prisma
+alt Not found
+  Staff --> Browser : 404 Not Found
+else status != PENDING
+  Staff --> Browser : 409 Conflict (khong con cho xu ly)
+else REJECTED and mandatory refund
+  Staff --> Browser : 400 Bad Request (khong the tu choi hoan bat buoc)
+else Processable
+  Staff -> Staff : continue processing
+end
+
+== Claim (concurrency guard) ==
+Staff -> Prisma : refundRequest.updateMany({ PENDING -> PROCESSING, processedById })
+activate Prisma
+Prisma -> DB : UPDATE RefundRequest PROCESSING
+DB --> Prisma : count
+Prisma --> Staff : claimed
+deactivate Prisma
+alt claimed.count != 1 (taken by another staff)
+  Staff --> Browser : 409 Conflict
+else Claimed
+  Staff -> Staff : continue processing
+end
+
+alt action == REJECTED
+  group Prisma transaction (Serializable)
+    Staff -> Prisma : re-check PROCESSING; opt booking REFUND_REQUESTED -> revert status + refundRequired:false
+    activate Prisma
+    Prisma -> DB : UPDATE Booking (revert) if needed
+    DB --> Prisma : ok
+    deactivate Prisma
+    Staff -> Prisma : refundRequest.update({ REJECTED, staffNotes, processedAt })
+    activate Prisma
+    Prisma -> DB : UPDATE RefundRequest REJECTED
+    DB --> Prisma : updated
+    Prisma --> Staff : updated
+    deactivate Prisma
+  end
+  Staff -> Prisma : auditLog.create({ REFUND_REQUEST_REJECTED })
+  activate Prisma
+  Prisma -> DB : INSERT AuditLog
+  Prisma --> Staff : ok
+  deactivate Prisma
+  Staff -> Mailer : sendRefundStatusEmail(REJECTED) (non-blocking)
+  activate Mailer
+  Mailer --> Staff : result
+  deactivate Mailer
+  Staff --> Browser : 200 OK { data: updated }
+else action == APPROVED
+  Staff -> RefundSvc : findRefundTargetPayment(refundRequest)
+  activate RefundSvc
+  RefundSvc --> Staff : payment | null
+  deactivate RefundSvc
+  alt No successful VNPay payment
+    Staff --> Browser : 422 Unprocessable (khong tim thay giao dich)
+  else Has payment
+    Staff -> Staff : continue processing
+  end
+  alt existing uncertain transaction (PENDING/PROCESSING/NEEDS_RECONCILIATION)
+    Staff --> Browser : 202 Accepted { requiresReconciliation:true }
+  else No in-flight transaction
+    Staff -> RefundSvc : assertRefundCanBeSubmitted(...) -> { requestedAmount, capturedAmount }
+    activate RefundSvc
+    RefundSvc --> Staff : amounts (transactionType 02 full / 03 partial)
+    deactivate RefundSvc
+    Staff -> Prisma : refundTransaction.create({ status:'PROCESSING' })
+    activate Prisma
+    Prisma -> DB : INSERT RefundTransaction (PROCESSING)
+    DB --> Prisma : refundTransaction
+    Prisma --> Staff : refundTransaction
+    deactivate Prisma
+    Staff -> PayCtl : refundViaVnpay({ payment, amount, transactionType, requestId })
+    activate PayCtl
+    PayCtl -> VNPay : POST VNP_API (refund, signed)
+    activate VNPay
+    VNPay --> PayCtl : { vnp_ResponseCode, vnp_Message }
+    deactivate VNPay
+    PayCtl --> Staff : gatewayResult
+    deactivate PayCtl
+    Staff -> RefundSvc : classifyVnpayRefundResult(gatewayResult)
+    activate RefundSvc
+    RefundSvc --> Staff : outcome (SUCCESS | FAILED | PENDING_RECONCILIATION)
+    deactivate RefundSvc
+    alt outcome == PENDING_RECONCILIATION (or network uncertain)
+      Staff -> Prisma : refundTransaction.update({ NEEDS_RECONCILIATION })
+      activate Prisma
+      Prisma -> DB : UPDATE RefundTransaction
+      Prisma --> Staff : ok
+      deactivate Prisma
+      Staff --> Browser : 202 Accepted { requiresReconciliation:true }
+    else outcome == FAILED
+      Staff -> Prisma : refundTransaction.update(FAILED) + refundRequest.update(back PENDING)
+      activate Prisma
+      Prisma -> DB : UPDATE RefundTransaction FAILED + RefundRequest PENDING
+      Prisma --> Staff : ok
+      deactivate Prisma
+      Staff --> Browser : 502 Bad Gateway (VNPay tu choi)
+    else outcome == SUCCESS
+      Staff -> Staff : continue to finalize
+    end
+  end
+
+  group Prisma transaction (Serializable)
+    Staff -> RefundSvc : finalizeSuccessfulRefund(tx, ...)
+    activate RefundSvc
+    RefundSvc -> Prisma : releaseInventory + ticketInstance.updateMany(REFUNDED) + booking.update(REFUNDED) + refundRequest.update(APPROVED)
+    activate Prisma
+    Prisma -> DB : UPDATE stocks + TicketInstance + Booking + RefundRequest
+    DB --> Prisma : ok
+    Prisma --> RefundSvc : updated refundRequest
+    deactivate Prisma
+    RefundSvc --> Staff : updated
+    deactivate RefundSvc
+  end
+  Staff -> Prisma : auditLog.create({ REFUND_REQUEST_APPROVED })
+  activate Prisma
+  Prisma -> DB : INSERT AuditLog
+  Prisma --> Staff : ok
+  deactivate Prisma
+  Staff -> Mailer : sendRefundStatusEmail(APPROVED) (non-blocking)
+  activate Mailer
+  Mailer --> Staff : result
+  deactivate Mailer
+  Staff --> Browser : 200 OK { data: updated }
+end
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.2b Reconcile Refund (POST /api/staff/refunds/:refundId/reconcile) [related staff endpoint]
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('STAFF','ADMIN') + requirePlatformStaff\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+control "RefundLifecycleService\n<<Service>>" as RefundSvc
+control "PaymentController.queryVnpayTransaction\n<<Controller>>" as PayCtl
+participant "VNPay\n<<Payment Gateway>>" as VNPay
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/staff/refunds/:refundId/reconcile
+activate Router
+Router -> Guard : platform-staff guard (see 6.1)
+activate Guard
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : reconcileRefundRequest(req, res, next)
+activate Staff
+Staff -> Staff : assertPlatformRefundStaff(req.user)
+Staff -> Prisma : refundRequest.findUnique({ id }, include transactions PROCESSING/NEEDS_RECONCILIATION)
+activate Prisma
+Prisma -> DB : SELECT RefundRequest (+ transaction + payment)
+DB --> Prisma : refundRequest
+Prisma --> Staff : refundRequest
+deactivate Prisma
+alt Not found
+  Staff --> Browser : 404 Not Found
+else status != PROCESSING
+  Staff --> Browser : 409 Conflict (chi don dang xu ly)
+else No transaction to reconcile
+  Staff --> Browser : 422 Unprocessable
+else Reconcilable
+  Staff -> PayCtl : queryVnpayTransaction({ payment })
+  activate PayCtl
+  PayCtl -> VNPay : POST VNP_API (querydr, signed)
+  activate VNPay
+  VNPay --> PayCtl : { responseCode, transactionStatus }
+  deactivate VNPay
+  PayCtl --> Staff : queryResult
+  deactivate PayCtl
+  Staff -> RefundSvc : classifyVnpayReconciliationResult(queryResult, transaction)
+  activate RefundSvc
+  RefundSvc --> Staff : outcome
+  deactivate RefundSvc
+end
+
+alt outcome == PENDING_RECONCILIATION
+  Staff -> Prisma : refundTransaction.update({ NEEDS_RECONCILIATION, reconciledAt })
+  activate Prisma
+  Prisma -> DB : UPDATE RefundTransaction
+  Prisma --> Staff : ok
+  deactivate Prisma
+  Staff --> Browser : 202 Accepted { requiresReconciliation:true }
+else outcome == FAILED
+  group Prisma transaction
+    Staff -> Prisma : refundTransaction.update(FAILED) + refundRequest.update(back PENDING)
+    activate Prisma
+    Prisma -> DB : UPDATE RefundTransaction + RefundRequest
+    Prisma --> Staff : ok
+    deactivate Prisma
+  end
+  Staff --> Browser : 200 OK { status:'PENDING' }
+else outcome == SUCCESS
+  group Prisma transaction (Serializable)
+    Staff -> RefundSvc : finalizeSuccessfulRefund(tx, ...)
+    activate RefundSvc
+    RefundSvc -> Prisma : releaseInventory + tickets REFUNDED + booking REFUNDED + refundRequest APPROVED
+    activate Prisma
+    Prisma -> DB : UPDATE (finalize refund)
+    Prisma --> RefundSvc : updated
+    deactivate Prisma
+    RefundSvc --> Staff : updated
+    deactivate RefundSvc
+  end
+  Staff -> Prisma : auditLog.create({ REFUND_RECONCILED_SUCCESS })
+  activate Prisma
+  Prisma -> DB : INSERT AuditLog
+  Prisma --> Staff : ok
+  deactivate Prisma
+  Staff -> Mailer : sendRefundStatusEmail(APPROVED)
+  activate Mailer
+  Mailer --> Staff : result
+  deactivate Mailer
+  Staff --> Browser : 200 OK { data: updated }
+end
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.3 Reissue Ticket (POST /api/staff/bookings/:bookingId/reissue)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('STAFF','ADMIN') + requireActiveEmployer\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/staff/bookings/:bookingId/reissue
+activate Router
+Router -> Guard : protect -> restrictTo('STAFF','ADMIN') -> requireActiveEmployer
+activate Guard
+ref over Guard, DB : protect + employer APPROVED check
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : reissueTicket(req, res, next)
+activate Staff
+group Prisma transaction (Serializable)
+  Staff -> Prisma : booking.findUnique({ id }, include user + VALID ticketInstances + reservation)
+  activate Prisma
+  Prisma -> DB : SELECT Booking (+ tickets + attraction)
+  DB --> Prisma : booking | null
+  Prisma --> Staff : booking
+  deactivate Prisma
+  alt Booking not found
+    Staff --> Browser : 404 Not Found
+  else Found
+    Staff -> Prisma : assertStaffAttractionAccess -> staffAttractionAssignment.findFirst (unless ADMIN)
+    activate Prisma
+    Prisma -> DB : SELECT StaffAttractionAssignment
+    DB --> Prisma : assignment | null
+    Prisma --> Staff : ok | throw 403
+    deactivate Prisma
+  end
+  alt status not in {CONFIRMED, COMPLETED}
+    Staff --> Browser : 409 Conflict (chi cap lai don da xac nhan)
+  else no VALID ticket instances
+    Staff --> Browser : 400 Bad Request (khong con ve hieu luc)
+  else Reissuable
+    Staff -> Prisma : ticketInstance.updateMany({ VALID -> EXPIRED })
+    activate Prisma
+    Prisma -> DB : UPDATE old TicketInstance EXPIRED
+    Prisma --> Staff : ok
+    deactivate Prisma
+    Staff -> Prisma : ticketInstance.create x N (new QR tokens, VALID)
+    activate Prisma
+    Prisma -> DB : INSERT new TicketInstance[]
+    DB --> Prisma : newInstances
+    Prisma --> Staff : newInstances
+    deactivate Prisma
+  end
+end
+
+Staff -> Mailer : sendReissueTicketEmail({ to, bookingId, newTicketCount }) (non-blocking)
+activate Mailer
+Mailer --> Staff : result
+deactivate Mailer
+Staff --> Browser : 200 OK { data: newInstances }
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.4 Lookup Ticket by QR (GET /api/staff/checkin/:token)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('STAFF','ADMIN') + requireCheckInEmployer\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+note over Browser, Router
+  Read-only lookup at the gate. Does not write DB.
+end note
+
+Browser -> Router : GET /api/staff/checkin/:token
+activate Router
+Router -> Guard : protect -> restrictTo('STAFF','ADMIN') -> requireCheckInEmployer
+activate Guard
+ref over Guard, DB : protect + employer APPROVED/SUSPENDED check
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : lookupTicketByQr(req, res, next)
+activate Staff
+Staff -> Staff : token = normalizeQrToken(param) (strip 'VIETTICKET:')
+alt Missing token
+  Staff --> Browser : 400 Bad Request
+else Token present
+  Staff -> Prisma : ticketInstance.findUnique({ qrCodeToken }, include booking + reservation + attraction)
+  activate Prisma
+  Prisma -> DB : SELECT TicketInstance (+ booking chain)
+  DB --> Prisma : instance | null
+  Prisma --> Staff : instance
+  deactivate Prisma
+end
+alt Instance not found
+  Staff --> Browser : 404 Not Found
+else Found
+  Staff -> Prisma : assertStaffAttractionAccess -> staffAttractionAssignment.findFirst (unless ADMIN)
+  activate Prisma
+  Prisma -> DB : SELECT StaffAttractionAssignment
+  DB --> Prisma : assignment | null
+  Prisma --> Staff : ok | throw 403
+  deactivate Prisma
+  Staff -> Staff : blockReason = getCheckinBlockReason(instance) (status/date/time checks)
+  Staff --> Browser : 200 OK { ...ticket, canCheckIn, blockReason }
+end
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.5 Check In Ticket (POST /api/staff/checkin/:token)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('STAFF','ADMIN') + requireCheckInEmployer\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/staff/checkin/:token
+activate Router
+Router -> Guard : protect -> restrictTo('STAFF','ADMIN') -> requireCheckInEmployer
+activate Guard
+ref over Guard, DB : protect + check-in employer guard (see 6.4)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : checkInTicket(req, res, next)
+activate Staff
+Staff -> Staff : token = normalizeQrToken(param)
+alt Missing token
+  Staff --> Browser : 400 Bad Request
+else Token present
+  Staff -> Staff : continue processing
+end
+
+group Prisma transaction (Serializable)
+  Staff -> Prisma : ticketInstance.findUnique({ qrCodeToken }, include booking + reservation + attraction)
+  activate Prisma
+  Prisma -> DB : SELECT TicketInstance
+  DB --> Prisma : instance | null
+  Prisma --> Staff : instance
+  deactivate Prisma
+  alt Instance not found
+    Staff --> Browser : 404 Not Found
+  else Found
+    Staff -> Prisma : assertStaffAttractionAccess (unless ADMIN)
+    activate Prisma
+    Prisma -> DB : SELECT StaffAttractionAssignment
+    DB --> Prisma : ok | throw 403
+    deactivate Prisma
+  end
+  alt getCheckinBlockReason != null (USED/REFUNDED/EXPIRED/wrong day/time)
+    Staff --> Browser : 409 Conflict (blockReason)
+  else Valid to check in
+    Staff -> Prisma : ticketInstance.updateMany({ id, VALID -> USED, checkedInAt, checkedInById })
+    activate Prisma
+    Prisma -> DB : UPDATE TicketInstance USED (guard status=VALID)
+    DB --> Prisma : count
+    Prisma --> Staff : updated
+    deactivate Prisma
+    alt updated.count == 0 (raced by another staff)
+      Staff --> Browser : 409 Conflict (vua duoc check-in)
+    else Checked in
+      Staff -> Prisma : ticketInstance.count({ bookingId, status != USED })
+      activate Prisma
+      Prisma -> DB : COUNT remaining non-used tickets
+      DB --> Prisma : nonUsedCount
+      Prisma --> Staff : nonUsedCount
+      deactivate Prisma
+      opt nonUsedCount == 0 (all tickets used)
+        Staff -> Prisma : booking.updateMany({ CONFIRMED -> COMPLETED })
+        activate Prisma
+        Prisma -> DB : UPDATE Booking COMPLETED
+        Prisma --> Staff : ok
+        deactivate Prisma
+      end
+      Staff -> Prisma : auditLog.create({ TICKET_CHECKED_IN })
+      activate Prisma
+      Prisma -> DB : INSERT AuditLog
+      Prisma --> Staff : ok
+      deactivate Prisma
+    end
+  end
+end
+
+Staff --> Browser : 200 OK { ...ticket, ticketStatus:'USED', bookingStatus }
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.6 List Today Bookings (GET /api/staff/bookings/today)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('STAFF','ADMIN') + requireCheckInEmployer\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/staff/bookings/today
+activate Router
+Router -> Guard : protect -> restrictTo('STAFF','ADMIN') -> requireCheckInEmployer
+activate Guard
+ref over Guard, DB : check-in employer guard (see 6.4)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : listTodayBookings(req, res, next)
+activate Staff
+Staff -> Staff : today = todayInVietnam()
+opt user is not ADMIN
+  Staff -> Prisma : staffAttractionAssignment.findMany({ staffId, revokedAt:null })
+  activate Prisma
+  Prisma -> DB : SELECT assigned attractionIds
+  DB --> Prisma : assignments
+  Prisma --> Staff : assignedAttractionIds
+  deactivate Prisma
+end
+
+Staff -> Prisma : booking.findMany({ CONFIRMED/COMPLETED, reservation.date = today, attraction in assigned? })
+activate Prisma
+Prisma -> DB : SELECT today bookings (+ ticketInstances + attraction)
+DB --> Prisma : bookings
+Prisma --> Staff : bookings
+deactivate Prisma
+
+Staff -> Staff : map usedCount/validCount/checkedIn per booking
+Staff --> Browser : 200 OK { data, meta:{ date, total, checkedIn } }
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.7 Admin List Staff Assignments (GET /api/staff/assignments/:staffId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/staff/assignments/:staffId
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : protect (Module 1) + ADMIN role check
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : listStaffAssignments(req, res, next)
+activate Staff
+Staff -> Prisma : user.findUnique({ id: staffId }, select roleMemberships)
+activate Prisma
+Prisma -> DB : SELECT User (+ roles)
+DB --> Prisma : staff | null
+Prisma --> Staff : staff
+deactivate Prisma
+alt Not found or not a STAFF
+  Staff --> Browser : 404 Not Found
+else Valid staff
+  Staff -> Prisma : staffAttractionAssignment.findMany({ staffId, revokedAt:null }, include attraction)
+  activate Prisma
+  Prisma -> DB : SELECT active assignments (+ attraction)
+  DB --> Prisma : assignments
+  Prisma --> Staff : assignments
+  deactivate Prisma
+  Staff --> Browser : 200 OK { data:{ staff, assignments } }
+end
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.8 Admin Replace Staff Assignments (PUT /api/staff/assignments/:staffId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "StaffRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "StaffController\n<<Controller>>" as Staff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/staff/assignments/:staffId\nbody: attractionIds[]
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : protect + ADMIN role check
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Staff : replaceStaffAssignments(req, res, next)
+activate Staff
+alt attractionIds not an array
+  Staff --> Browser : 400 Bad Request
+else Valid array
+  Staff -> Staff : continue processing
+end
+
+group Prisma transaction
+  Staff -> Prisma : user.findUnique({ id: staffId }, select role + employerPartnerId)
+  activate Prisma
+  Prisma -> DB : SELECT User (+ roles)
+  DB --> Prisma : staff | null
+  Prisma --> Staff : staff
+  deactivate Prisma
+  alt Not found or not STAFF
+    Staff --> Browser : 404 Not Found
+  else No employerPartnerId
+    Staff --> Browser : 400 Bad Request (chua thuoc doi tac nao)
+  else Valid staff
+    Staff -> Prisma : attraction.count({ ids, partnerId=employer, published+ACTIVE+not suspended })
+    activate Prisma
+    Prisma -> DB : COUNT eligible attractions
+    DB --> Prisma : attractionCount
+    Prisma --> Staff : attractionCount
+    deactivate Prisma
+  end
+  alt attractionCount != attractionIds.length
+    Staff --> Browser : 400 Bad Request (dia diem khong hop le)
+  else All eligible
+    Staff -> Prisma : staffAttractionAssignment.updateMany({ notIn ids -> revokedAt })
+    activate Prisma
+    Prisma -> DB : UPDATE revoke removed assignments
+    Prisma --> Staff : ok
+    deactivate Prisma
+    Staff -> Prisma : staffAttractionAssignment.upsert x ids (revive/create)
+    activate Prisma
+    Prisma -> DB : UPSERT assignments
+    Prisma --> Staff : ok
+    deactivate Prisma
+    Staff -> Prisma : auditLog.create({ STAFF_ASSIGNMENTS_REPLACED })
+    activate Prisma
+    Prisma -> DB : INSERT AuditLog
+    Prisma --> Staff : ok
+    deactivate Prisma
+  end
+end
+Staff --> Browser : 200 OK { data:{ staffId, attractionIds } }
+deactivate Staff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.9 Partner List Staff (GET /api/partners/staff)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner + restrictTo('PARTNER')\n<<Middleware Chain>>" as Guard
+control "PartnerStaffController\n<<Controller>>" as PStaff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/staff
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner -> restrictTo('PARTNER')
+activate Guard
+ref over Guard, DB : approved-partner + PARTNER role guard
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> PStaff : listStaff(req, res, next)
+activate PStaff
+PStaff -> Prisma : user.findMany({ roleMemberships STAFF, employerPartnerId=partner.id }, include assignments)
+activate Prisma
+Prisma -> DB : SELECT staff users (+ profile + active assignments)
+DB --> Prisma : staff[]
+Prisma --> PStaff : staff[]
+deactivate Prisma
+PStaff --> Browser : 200 OK { data: staff.map(toStaffResponse) }
+deactivate PStaff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.10 Partner Create Staff (POST /api/partners/staff)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner + restrictTo('PARTNER')\n<<Middleware Chain>>" as Guard
+control "PartnerStaffController\n<<Controller>>" as PStaff
+control "Validators\n<<Utility>>" as Validators
+control "TokenUtils\n<<Utility>>" as TokenUtils
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/partners/staff\nbody: fullName, email, phoneNumber?
+activate Router
+Router -> Guard : approved-partner + PARTNER role guard
+activate Guard
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> PStaff : createStaff(req, res, next)
+activate PStaff
+PStaff -> Validators : validateFullName / isValidEmail / isValidPhoneNumber
+activate Validators
+Validators --> PStaff : validation result
+deactivate Validators
+alt Invalid fullName / email / phone
+  PStaff --> Browser : 400 Bad Request
+else Valid
+  PStaff -> Prisma : user.findUnique({ where:{ email } })
+  activate Prisma
+  Prisma -> DB : SELECT User by email
+  DB --> Prisma : existing | null
+  Prisma --> PStaff : existing
+  deactivate Prisma
+end
+alt Email already used
+  PStaff --> Browser : 409 Conflict
+else Available
+  group Prisma transaction
+    PStaff -> Prisma : user.create({ role:'STAFF', employerPartnerId, isEmailVerified:true, passwordHash:null, roleMemberships })
+    activate Prisma
+    Prisma -> DB : INSERT User (STAFF, no password)
+    DB --> Prisma : created
+    Prisma --> PStaff : created
+    deactivate Prisma
+    PStaff -> TokenUtils : createInviteToken(tx, userId) (reuse PasswordResetToken, 48h)
+    activate TokenUtils
+    TokenUtils -> Prisma : passwordResetToken.deleteMany + create(hashToken)
+    activate Prisma
+    Prisma -> DB : DELETE old + INSERT PasswordResetToken
+    Prisma --> TokenUtils : ok
+    deactivate Prisma
+    TokenUtils --> PStaff : inviteToken
+    deactivate TokenUtils
+    PStaff -> Prisma : auditLog.create({ PARTNER_STAFF_CREATED })
+    activate Prisma
+    Prisma -> DB : INSERT AuditLog
+    Prisma --> PStaff : ok
+    deactivate Prisma
+  end
+  PStaff -> Mailer : sendStaffInviteEmail({ to, businessName, token }) (non-blocking)
+  activate Mailer
+  Mailer --> PStaff : result
+  deactivate Mailer
+  PStaff --> Browser : 201 Created { data: toStaffResponse(staff) }
+end
+deactivate PStaff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.11 Resend Staff Invite (POST /api/partners/staff/:staffId/invite)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner + restrictTo('PARTNER')\n<<Middleware Chain>>" as Guard
+control "PartnerStaffController\n<<Controller>>" as PStaff
+control "TokenUtils\n<<Utility>>" as TokenUtils
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/partners/staff/:staffId/invite
+activate Router
+Router -> Guard : approved-partner + PARTNER role guard
+activate Guard
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> PStaff : resendStaffInvite(req, res, next)
+activate PStaff
+PStaff -> Prisma : findOwnedStaff(partnerId, staffId) -> user.findUnique
+activate Prisma
+Prisma -> DB : SELECT User (verify STAFF owned by partner)
+DB --> Prisma : staff | null
+Prisma --> PStaff : staff
+deactivate Prisma
+alt Not found / not owned
+  PStaff --> Browser : 404 Not Found
+else staff.passwordHash set (already activated)
+  PStaff --> Browser : 409 Conflict (da kich hoat)
+else Not activated yet
+  PStaff -> TokenUtils : createInviteToken(tx, staff.id)
+  activate TokenUtils
+  TokenUtils -> Prisma : passwordResetToken.deleteMany + create
+  activate Prisma
+  Prisma -> DB : DELETE + INSERT PasswordResetToken
+  Prisma --> TokenUtils : ok
+  deactivate Prisma
+  TokenUtils --> PStaff : inviteToken
+  deactivate TokenUtils
+  PStaff -> Mailer : sendStaffInviteEmail(...) (non-blocking)
+  activate Mailer
+  Mailer --> PStaff : result
+  deactivate Mailer
+  PStaff --> Browser : 200 OK { message }
+end
+deactivate PStaff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.12 Change Staff Status (PATCH /api/partners/staff/:staffId/status)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner + restrictTo('PARTNER')\n<<Middleware Chain>>" as Guard
+control "PartnerStaffController\n<<Controller>>" as PStaff
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PATCH /api/partners/staff/:staffId/status\nbody: status (ACTIVE | LOCKED)
+activate Router
+Router -> Guard : approved-partner + PARTNER role guard
+activate Guard
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> PStaff : changeStaffStatus(req, res, next)
+activate PStaff
+alt status not in {ACTIVE, LOCKED}
+  PStaff --> Browser : 400 Bad Request
+else Valid status
+  PStaff -> Prisma : findOwnedStaff(partnerId, staffId)
+  activate Prisma
+  Prisma -> DB : SELECT User (STAFF owned)
+  DB --> Prisma : staff | null
+  Prisma --> PStaff : staff
+  deactivate Prisma
+end
+alt Not found / not owned
+  PStaff --> Browser : 404 Not Found
+else Found
+  opt staff.status != new status
+    group Prisma transaction
+      PStaff -> Prisma : user.update({ status, tokenVersion++ if LOCKED })
+      activate Prisma
+      Prisma -> DB : UPDATE User status
+      Prisma --> PStaff : ok
+      deactivate Prisma
+      opt status == LOCKED
+        PStaff -> Prisma : authSession.updateMany({ revokedAt }) (revoke sessions)
+        activate Prisma
+        Prisma -> DB : UPDATE AuthSession revoke
+        Prisma --> PStaff : ok
+        deactivate Prisma
+      end
+      PStaff -> Prisma : auditLog.create({ PARTNER_STAFF_LOCKED | UNLOCKED })
+      activate Prisma
+      Prisma -> DB : INSERT AuditLog
+      Prisma --> PStaff : ok
+      deactivate Prisma
+    end
+    PStaff -> Mailer : sendAccountStatusEmail({ to, status }) (non-blocking)
+    activate Mailer
+    Mailer --> PStaff : result
+    deactivate Mailer
+  end
+  PStaff -> Prisma : findOwnedStaff (refresh)
+  activate Prisma
+  Prisma -> DB : SELECT User (fresh)
+  DB --> Prisma : fresh
+  Prisma --> PStaff : fresh
+  deactivate Prisma
+  PStaff --> Browser : 200 OK { data: toStaffResponse(fresh) }
+end
+deactivate PStaff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.13 Get Staff Assignments (GET /api/partners/staff/:staffId/assignments)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner + restrictTo('PARTNER')\n<<Middleware Chain>>" as Guard
+control "PartnerStaffController\n<<Controller>>" as PStaff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/staff/:staffId/assignments
+activate Router
+Router -> Guard : approved-partner + PARTNER role guard
+activate Guard
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> PStaff : getStaffAssignments(req, res, next)
+activate PStaff
+PStaff -> Prisma : findOwnedStaff(partnerId, staffId)
+activate Prisma
+Prisma -> DB : SELECT User (STAFF owned + active assignments)
+DB --> Prisma : staff | null
+Prisma --> PStaff : staff
+deactivate Prisma
+alt Not found / not owned
+  PStaff --> Browser : 404 Not Found
+else Found
+  PStaff -> Prisma : attraction.findMany({ partnerId, archivedAt:null })
+  activate Prisma
+  Prisma -> DB : SELECT partner attractions
+  DB --> Prisma : attractions
+  Prisma --> PStaff : attractions
+  deactivate Prisma
+  PStaff --> Browser : 200 OK { staff, assignedAttractionIds, attractions }
+end
+deactivate PStaff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.14 Replace Staff Assignments (PUT /api/partners/staff/:staffId/assignments)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner + restrictTo('PARTNER')\n<<Middleware Chain>>" as Guard
+control "PartnerStaffController\n<<Controller>>" as PStaff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/partners/staff/:staffId/assignments\nbody: attractionIds[]
+activate Router
+Router -> Guard : approved-partner + PARTNER role guard
+activate Guard
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> PStaff : replaceStaffAssignments(req, res, next)
+activate PStaff
+alt attractionIds not an array
+  PStaff --> Browser : 400 Bad Request
+else Valid array
+  group Prisma transaction
+    PStaff -> Prisma : findOwnedStaff(partnerId, staffId)
+    activate Prisma
+    Prisma -> DB : SELECT User (STAFF owned)
+    DB --> Prisma : staff | null
+    Prisma --> PStaff : staff
+    deactivate Prisma
+    alt Not found / not owned
+      PStaff --> Browser : 404 Not Found
+    else Found
+      opt attractionIds not empty
+        PStaff -> Prisma : attraction.count({ ids, partnerId, archivedAt:null })
+        activate Prisma
+        Prisma -> DB : COUNT owned attractions
+        DB --> Prisma : ownedCount
+        Prisma --> PStaff : ownedCount
+        deactivate Prisma
+        alt ownedCount != attractionIds.length
+          PStaff --> Browser : 400 Bad Request (dia diem khong thuoc ban)
+        else All owned
+          PStaff -> PStaff : continue processing
+        end
+      end
+      PStaff -> Prisma : staffAttractionAssignment.updateMany({ notIn ids -> revokedAt })
+      activate Prisma
+      Prisma -> DB : UPDATE revoke removed
+      Prisma --> PStaff : ok
+      deactivate Prisma
+      PStaff -> Prisma : staffAttractionAssignment.upsert x ids
+      activate Prisma
+      Prisma -> DB : UPSERT assignments
+      Prisma --> PStaff : ok
+      deactivate Prisma
+      PStaff -> Prisma : auditLog.create({ PARTNER_STAFF_ASSIGNMENTS_REPLACED })
+      activate Prisma
+      Prisma -> DB : INSERT AuditLog
+      Prisma --> PStaff : ok
+      deactivate Prisma
+    end
+  end
+  PStaff --> Browser : 200 OK { data:{ staffId, attractionIds } }
+end
+deactivate PStaff
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 6.15 Remove Staff (DELETE /api/partners/staff/:staffId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner + restrictTo('PARTNER')\n<<Middleware Chain>>" as Guard
+control "PartnerStaffController\n<<Controller>>" as PStaff
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+note over Browser, PStaff
+  Soft removal: lock account + revoke assignments/sessions.
+  No hard delete (preserve check-in history).
+end note
+
+Browser -> Router : DELETE /api/partners/staff/:staffId
+activate Router
+Router -> Guard : approved-partner + PARTNER role guard
+activate Guard
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> PStaff : removeStaff(req, res, next)
+activate PStaff
+group Prisma transaction
+  PStaff -> Prisma : findOwnedStaff(partnerId, staffId)
+  activate Prisma
+  Prisma -> DB : SELECT User (STAFF owned)
+  DB --> Prisma : staff | null
+  Prisma --> PStaff : staff
+  deactivate Prisma
+  alt Not found / not owned
+    PStaff --> Browser : 404 Not Found
+  else Found
+    PStaff -> Prisma : staffAttractionAssignment.updateMany({ revokedAt })
+    activate Prisma
+    Prisma -> DB : UPDATE revoke all assignments
+    Prisma --> PStaff : ok
+    deactivate Prisma
+    PStaff -> Prisma : user.update({ status:'LOCKED', tokenVersion++ })
+    activate Prisma
+    Prisma -> DB : UPDATE User LOCKED
+    Prisma --> PStaff : ok
+    deactivate Prisma
+    PStaff -> Prisma : authSession.updateMany({ revokedAt })
+    activate Prisma
+    Prisma -> DB : UPDATE revoke sessions
+    Prisma --> PStaff : ok
+    deactivate Prisma
+    PStaff -> Prisma : auditLog.create({ PARTNER_STAFF_REMOVED })
+    activate Prisma
+    Prisma -> DB : INSERT AuditLog
+    Prisma --> PStaff : ok
+    deactivate Prisma
+  end
+end
+PStaff --> Browser : 200 OK { data:{ staffId } }
+deactivate PStaff
+deactivate Router
+@enduml

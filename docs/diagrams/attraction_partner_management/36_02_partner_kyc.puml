@@ -1,0 +1,45 @@
+@startuml
+title 3.6.2 Partner Verification - KYC (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner Applicant|
+start
+:Sign in and open /partner/kyc;
+repeat :Fill KYC profile;
+  :Enter business details + tax code\n+ bank / payout info;
+  :Upload business license\n(JPEG / PNG / PDF, < 5 MB);
+  :Click "Submit"\nPOST /api/partners/register;
+  |System|
+  :Validate legal fields + file type/size\n(BR-11);
+  if (KYC input valid?) then (No)
+    |Partner Applicant|
+    :Show error toast\n(invalid / oversized file or incomplete form);
+  else (Yes)
+    |System|
+    :Create / refresh PartnerProfile = PENDING;
+    :Show success toast (await Admin approval);
+    :Notify Admin of new KYC request;
+    |Admin|
+    :Review KYC documents;
+    if (Approve KYC?) then (Yes)
+      |System|
+      :Set PartnerProfile = APPROVED\n+ grant PARTNER role;
+      :Email approval to partner;
+    else (No)
+      |System|
+      :Set PartnerProfile = REJECTED\n+ store rejection reason;
+      :Email rejection reason to partner;
+      |Partner Applicant|
+      :Read reason on pending page;
+    endif
+  endif
+repeat while (Partner approved?) is (No) not (Yes)
+
+|System|
+:Unlock partner workspace (dashboard);
+stop
+@enduml

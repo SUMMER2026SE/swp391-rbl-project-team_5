@@ -21,6 +21,7 @@ const {
 } = require('../utils/activityTime');
 const { expirePendingPartnerBooking } = require('../utils/pendingPartnerWorker');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
+const { awardPointsForBooking } = require('../services/loyaltyService');
 const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
 const { formatBookingReference } = require('../utils/bookingReference');
 const {
@@ -1153,6 +1154,14 @@ async function approveBooking(req, res, next) {
           reservation.quantity,
         );
       }
+
+      // Cộng điểm thưởng khi đối tác duyệt đơn (đơn chuyển sang CONFIRMED).
+      await awardPointsForBooking(tx, {
+        id: current.id,
+        userId: current.userId,
+        totalAmount: current.totalAmount,
+        isForecastTrainingSample: current.isForecastTrainingSample,
+      });
     });
 
     emitBookingStatusUpdated({

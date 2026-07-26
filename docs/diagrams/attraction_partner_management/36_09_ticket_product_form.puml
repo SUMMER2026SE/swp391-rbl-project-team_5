@@ -1,0 +1,30 @@
+@startuml
+title 3.6.9 Ticket Product Form (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open ticket form\n(/tickets/new or /tickets/:ticketId/edit);
+repeat :Fill ticket product;
+  :Enter name, type (ADULT/CHILD/FAMILY/GROUP),\ndescription, original & selling price;
+  :Choose refund policy\n(NON_REFUNDABLE / FREE_CANCELLATION / REFUND_WITH_FEE)\n+ refund fee rate;
+  :Click Save;
+  |System|
+  :Validate (name + description required,\nprices positive) - BR-17;
+  if (Input valid?) then (No)
+    |Partner|
+    :Toast "Vui long kiem tra lai thong tin.";
+  else (Yes)
+    |System|
+    :POST/PUT ticket endpoint;
+    :Toast "Da tao goi ve thanh cong!" /\n"Da cap nhat goi ve thanh cong!";
+  endif
+repeat while (Retry after error?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

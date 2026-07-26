@@ -1,0 +1,818 @@
+@startuml
+title Sequence Diagram - 8.1 Admin Dashboard (GET /api/admin/dashboard)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+control "AnalyticsService\n<<Service>>" as Analytics
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/admin/dashboard?period=...
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : protect (Module 1) + ADMIN role check
+Guard --> Router : next() (req.user set)
+deactivate Guard
+
+Router -> Admin : getDashboard(req, res, next)
+activate Admin
+Admin -> Analytics : normalizePeriod / getPeriodStart(period)
+activate Analytics
+Analytics --> Admin : period, startDate
+deactivate Analytics
+
+group Promise.all
+  Admin -> Prisma : user.count / attraction.count / attraction.count(active) / partnerProfile.count(PENDING) / partnerProfile.count(new) / booking.count(period)
+  activate Prisma
+  Prisma -> DB : COUNT users / attractions / partners / bookings
+  DB --> Prisma : counts
+  Prisma --> Admin : counts
+  deactivate Prisma
+  Admin -> Admin : getPlatformFinancialReport(period)
+  activate Admin
+  Admin -> Prisma : payment.aggregate + timeline queries
+  activate Prisma
+  Prisma -> DB : SUM/GROUP payments
+  DB --> Prisma : financialReport
+  Prisma --> Admin : financialReport
+  deactivate Prisma
+  Admin --> Admin : financialReport
+  deactivate Admin
+  Admin -> Prisma : partnerProfile.findMany(PENDING take 5) / attraction.findMany(PENDING take 6)
+  activate Prisma
+  Prisma -> DB : SELECT pending partners + attractions
+  DB --> Prisma : pending lists
+  Prisma --> Admin : pending lists
+  deactivate Prisma
+end
+
+Admin --> Browser : 200 OK { stats, trend, pendingPartners, pendingAttractions }
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.2 List Users (GET /api/admin/users)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/admin/users?page&limit&role&status&search
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : getUsers(req, res, next)
+activate Admin
+alt role filter invalid
+  Admin --> Browser : 400 Bad Request (vai tro khong hop le)
+else status filter invalid
+  Admin --> Browser : 400 Bad Request (trang thai khong hop le)
+else Valid filters
+  Admin -> Admin : where = buildUserWhere({ search, role, status })
+end
+
+group Prisma transaction
+  Admin -> Prisma : user.count (total / activeCustomers / partners / locked)
+  activate Prisma
+  Prisma -> DB : COUNT users (stat cards)
+  DB --> Prisma : stats
+  Prisma --> Admin : stats
+  deactivate Prisma
+  Admin -> Prisma : user.findMany({ where }, include profile+roles, skip, take) + user.count({ where })
+  activate Prisma
+  Prisma -> DB : SELECT User[] + COUNT filtered
+  DB --> Prisma : users, total
+  Prisma --> Admin : users, total
+  deactivate Prisma
+end
+
+Admin --> Browser : 200 OK { users: map(sanitizeUser), pagination, stats }
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.3 Change User Status (PATCH /api/admin/users/:id/status)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PATCH /api/admin/users/:id/status\nbody: status (ACTIVE|LOCKED), reason?, sendEmail?
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : changeUserStatus(req, res, next)
+activate Admin
+alt status not in {ACTIVE, LOCKED}
+  Admin --> Browser : 400 Bad Request
+else Valid status
+  Admin -> Prisma : user.findUnique({ id }, include profile+roles)
+  activate Prisma
+  Prisma -> DB : SELECT User
+  DB --> Prisma : user | null
+  Prisma --> Admin : user
+  deactivate Prisma
+end
+alt User not found
+  Admin --> Browser : 404 Not Found
+else LOCKED and target == self
+  Admin --> Browser : 400 Bad Request (khong the tu khoa)
+else Allowed
+  group Prisma transaction
+    Admin -> Prisma : user.update({ status, tokenVersion++ })
+    activate Prisma
+    Prisma -> DB : UPDATE User status
+    Prisma --> Admin : nextUser
+    deactivate Prisma
+    opt status == LOCKED
+      Admin -> Prisma : authSession.updateMany({ revokedAt })
+      activate Prisma
+      Prisma -> DB : UPDATE revoke sessions
+      Prisma --> Admin : ok
+      deactivate Prisma
+    end
+  end
+  opt sendEmail == true
+    Admin -> Mailer : sendAccountStatusEmail({ to, status, reason }) (non-blocking)
+    activate Mailer
+    Mailer --> Admin : result
+    deactivate Mailer
+  end
+  Admin --> Browser : 200 OK { user: sanitizeUser(updatedUser) }
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.4 List Partner Profiles (GET /api/admin/partners)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/admin/partners?status
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : getPartners(req, res, next)
+activate Admin
+alt status filter invalid
+  Admin --> Browser : 400 VALIDATION_ERROR
+else Valid / empty
+  Admin -> Prisma : partnerProfile.findMany({ where:{ status? } }, select + user, orderBy desc)
+  activate Prisma
+  Prisma -> DB : SELECT PartnerProfile[] (+ user + phone)
+  DB --> Prisma : partners
+  Prisma --> Admin : partners
+  deactivate Prisma
+  Admin --> Browser : 200 OK { data: partners }
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.5 Review Partner KYC (PUT /api/admin/partners/:id/review)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/admin/partners/:id/review\nbody: action (APPROVED|REJECTED), rejectionReason?
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : reviewPartner(req, res, next)
+activate Admin
+alt action not in {APPROVED, REJECTED}
+  Admin --> Browser : 400 VALIDATION_ERROR
+else REJECTED without rejectionReason
+  Admin --> Browser : 400 VALIDATION_ERROR
+else Valid
+  Admin -> Prisma : partnerProfile.findUnique({ id }, include user)
+  activate Prisma
+  Prisma -> DB : SELECT PartnerProfile (+ user)
+  DB --> Prisma : partner | null
+  Prisma --> Admin : partner
+  deactivate Prisma
+end
+alt Partner not found
+  Admin --> Browser : 404 Not Found
+else status != PENDING
+  Admin --> Browser : 409 INVALID_STATUS
+else Pending
+  alt action == APPROVED
+    group Prisma transaction
+      Admin -> Prisma : partnerProfile.update(APPROVED) + user.update(role PARTNER) + grantRole(CUSTOMER, PARTNER)
+      activate Prisma
+      Prisma -> DB : UPDATE PartnerProfile + User + RoleMembership
+      Prisma --> Admin : ok
+      deactivate Prisma
+    end
+    Admin -> Mailer : sendPartnerReviewEmail(APPROVED) (non-blocking)
+    activate Mailer
+    Mailer --> Admin : result
+    deactivate Mailer
+  else action == REJECTED
+    group Prisma transaction
+      Admin -> Prisma : partnerProfile.update(REJECTED, reason) + user.update(role CUSTOMER) + grant(CUSTOMER)/revoke(PARTNER)
+      activate Prisma
+      Prisma -> DB : UPDATE PartnerProfile + User + RoleMembership
+      Prisma --> Admin : ok
+      deactivate Prisma
+    end
+    Admin -> Mailer : sendPartnerReviewEmail(REJECTED, reason) (non-blocking)
+    activate Mailer
+    Mailer --> Admin : result
+    deactivate Mailer
+  end
+  Admin --> Browser : 200 OK { message }
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.6 List Attractions for Moderation (GET /api/admin/attractions)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/admin/attractions?page&limit&status&search
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : getAttractions(req, res, next)
+activate Admin
+alt status filter invalid
+  Admin --> Browser : 400 VALIDATION_ERROR
+else Valid
+  Admin -> Admin : build where { archivedAt:null, status?, search OR title/city/partner }
+end
+
+group Prisma transaction
+  Admin -> Prisma : attraction.findMany({ where }, include partner+images+tickets+slots) + attraction.count
+  activate Prisma
+  Prisma -> DB : SELECT Attraction[] + COUNT
+  DB --> Prisma : attractions, total
+  Prisma --> Admin : attractions, total
+  deactivate Prisma
+end
+
+group Promise.all
+  Admin -> Prisma : auditLog.findMany({ entityType:'ATTRACTION', entityId in ids })
+  activate Prisma
+  Prisma -> DB : SELECT AuditLog (review history)
+  DB --> Prisma : logs
+  Prisma --> Admin : logs
+  deactivate Prisma
+  Admin -> Prisma : user.findMany({ id in reviewerIds }) (reviewer names)
+  activate Prisma
+  Prisma -> DB : SELECT reviewer names
+  DB --> Prisma : reviewers
+  Prisma --> Admin : reviewers
+  deactivate Prisma
+end
+
+Admin -> Admin : data = map(mapModerationAttraction) (PENDING uses submittedData snapshot)
+Admin --> Browser : 200 OK { data, pagination }
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.7 Review Attraction Submission (PUT /api/admin/attractions/:id/review)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+control "AttractionWorkflowService\n<<Service>>" as Workflow
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/admin/attractions/:id/review\nbody: action (APPROVED|REJECTED), rejectionReason?
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : reviewAttraction(req, res, next)
+activate Admin
+alt action invalid
+  Admin --> Browser : 400 VALIDATION_ERROR
+else REJECTED without reason
+  Admin --> Browser : 400 VALIDATION_ERROR
+else Valid
+  Admin -> Prisma : attraction.findUnique({ id }, include partner.user)
+  activate Prisma
+  Prisma -> DB : SELECT Attraction (+ partner + user)
+  DB --> Prisma : attraction | null
+  Prisma --> Admin : attraction
+  deactivate Prisma
+end
+alt Not found / archived
+  Admin --> Browser : 404 Not Found
+else status != PENDING or no submittedData
+  Admin --> Browser : 409 INVALID_STATE
+else Reviewable
+  Admin -> Workflow : validateSubmissionSnapshot(submittedData)
+  activate Workflow
+  Workflow --> Admin : missing[]
+  deactivate Workflow
+end
+alt action APPROVED and missing.length > 0
+  Admin --> Browser : 409 INCOMPLETE_SUBMISSION
+else action APPROVED and category inactive
+  Admin --> Browser : 409 CATEGORY_UNAVAILABLE
+else Proceed
+  group Prisma transaction
+    Admin -> Prisma : attraction.updateMany({ id, status:PENDING, revision } -> reviewedAt) (optimistic lock)
+    activate Prisma
+    Prisma -> DB : UPDATE lock (guard revision)
+    DB --> Prisma : count
+    Prisma --> Admin : lock
+    deactivate Prisma
+    alt lock.count != 1 (handled by another admin)
+      Admin --> Browser : 409 Conflict
+    else Locked
+      alt action == APPROVED
+        Admin -> Workflow : applyApprovedSnapshot(tx, id, snapshot)
+        activate Workflow
+        Workflow -> Prisma : sync attraction fields + images + tickets + schedule
+        activate Prisma
+        Prisma -> DB : UPDATE/INSERT Attraction/Image/Ticket/TimeSlot/SpecialDate
+        Prisma --> Workflow : ok
+        deactivate Prisma
+        Workflow --> Admin : ok
+        deactivate Workflow
+        Admin -> Prisma : refreshAttractionMinPrice + attraction.update(APPROVED, published, clear draft/submitted)
+        activate Prisma
+        Prisma -> DB : UPDATE Attraction (APPROVED + publishedAt)
+        Prisma --> Admin : ok
+        deactivate Prisma
+      else action == REJECTED
+        Admin -> Prisma : attraction.update(REJECTED, rejectionReason, draftData=snapshot, clear submitted)
+        activate Prisma
+        Prisma -> DB : UPDATE Attraction (REJECTED)
+        Prisma --> Admin : ok
+        deactivate Prisma
+      end
+      Admin -> Prisma : auditLog.create({ ATTRACTION_APPROVED | ATTRACTION_REJECTED })
+      activate Prisma
+      Prisma -> DB : INSERT AuditLog
+      Prisma --> Admin : ok
+      deactivate Prisma
+    end
+  end
+  Admin -> Mailer : sendAttractionReviewEmail(action, reason) (non-blocking)
+  activate Mailer
+  Mailer --> Admin : result
+  deactivate Mailer
+  Admin --> Browser : 200 OK { message }
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.8 Hide Attraction (PUT /api/admin/attractions/:id/hide)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/admin/attractions/:id/hide\nbody: reason
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : hideAttraction(req, res, next)
+activate Admin
+alt Missing reason
+  Admin --> Browser : 400 VALIDATION_ERROR
+else Reason present
+  Admin -> Prisma : attraction.findUnique({ id }, include partner.user)
+  activate Prisma
+  Prisma -> DB : SELECT Attraction (+ partner + user)
+  DB --> Prisma : attraction | null
+  Prisma --> Admin : attraction
+  deactivate Prisma
+end
+alt Not found / archived
+  Admin --> Browser : 404 Not Found
+else status != APPROVED or not published
+  Admin --> Browser : 409 INVALID_STATUS_TRANSITION
+else Suspendable
+  group Prisma transaction
+    Admin -> Prisma : attraction.updateMany({ id, status:APPROVED } -> SUSPENDED, PAUSED, reason)
+    activate Prisma
+    Prisma -> DB : UPDATE Attraction SUSPENDED (guard)
+    DB --> Prisma : count
+    Prisma --> Admin : updated
+    deactivate Prisma
+    alt updated.count != 1 (raced)
+      Admin --> Browser : 409 Conflict
+    else Suspended
+      Admin -> Prisma : auditLog.create({ ATTRACTION_SUSPENDED })
+      activate Prisma
+      Prisma -> DB : INSERT AuditLog
+      Prisma --> Admin : ok
+      deactivate Prisma
+    end
+  end
+  Admin -> Mailer : sendAttractionViolationEmail(reason) (non-blocking)
+  activate Mailer
+  Mailer --> Admin : result
+  deactivate Mailer
+  Admin --> Browser : 200 OK { message }
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.9 Admin Booking Management (GET /api/admin/bookings)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/admin/bookings?page&limit&status&search&refundRequired
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : getAdminBookings(req, res, next)
+activate Admin
+alt status filter invalid
+  Admin --> Browser : 400 Bad Request
+else Valid
+  Admin -> Admin : build where { status?, refundRequired?, search OR id/name/email/attraction }
+end
+
+group Promise.all
+  Admin -> Prisma : booking.count + booking.findMany(include payments+refunds+tickets+reservation)
+  activate Prisma
+  Prisma -> DB : SELECT Booking[] + COUNT
+  DB --> Prisma : bookings, total
+  Prisma --> Admin : bookings, total
+  deactivate Prisma
+  Admin -> Prisma : booking.groupBy(status) + booking.count(refundRequired) + payment.aggregate(revenue)
+  activate Prisma
+  Prisma -> DB : GROUP status + SUM revenue
+  DB --> Prisma : stats
+  Prisma --> Admin : stats
+  deactivate Prisma
+end
+
+Admin --> Browser : 200 OK { data, pagination, stats }
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.10 List Categories (GET /api/admin/categories)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/admin/categories
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : listCategories(req, res, next)
+activate Admin
+Admin -> Prisma : category.findMany({ orderBy name, include _count.attractions(active) })
+activate Prisma
+Prisma -> DB : SELECT Category[] (+ attraction count)
+DB --> Prisma : categories
+Prisma --> Admin : categories
+deactivate Prisma
+Admin --> Browser : 200 OK { data: [{ id, name, isActive, attractionCount }] }
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.11 Create Category (POST /api/admin/categories)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/admin/categories\nbody: name, description?, icon?, isActive?
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : createCategory(req, res, next)
+activate Admin
+Admin -> Admin : categoryPayload(body) (name 2-80, description <=300, icon <=50)
+alt Payload invalid
+  Admin --> Browser : 400 Bad Request
+else Valid
+  Admin -> Prisma : category.create({ data })
+  activate Prisma
+  Prisma -> DB : INSERT Category
+  DB --> Prisma : category | P2002
+  Prisma --> Admin : result
+  deactivate Prisma
+  alt Duplicate name (P2002)
+    Admin --> Browser : 409 Conflict (ten da ton tai)
+  else Created
+    Admin --> Browser : 201 Created { data: category }
+  end
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.12 Update Category (PUT /api/admin/categories/:id)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/admin/categories/:id\nbody: name?, description?, icon?, isActive?
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : updateCategory(req, res, next)
+activate Admin
+Admin -> Admin : categoryPayload(body, { partial:true })
+alt Payload invalid
+  Admin --> Browser : 400 Bad Request
+else No fields to update
+  Admin --> Browser : 400 Bad Request (khong co du lieu)
+else Valid
+  Admin -> Prisma : category.update({ where:{ id }, data })
+  activate Prisma
+  Prisma -> DB : UPDATE Category
+  DB --> Prisma : category | P2002 | P2025
+  Prisma --> Admin : result
+  deactivate Prisma
+  alt Duplicate name (P2002)
+    Admin --> Browser : 409 Conflict
+  else Not found (P2025)
+    Admin --> Browser : 404 Not Found
+  else Updated
+    Admin --> Browser : 200 OK { data: category }
+  end
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.13 Delete Category (DELETE /api/admin/categories/:id)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "AdminController\n<<Controller>>" as Admin
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : DELETE /api/admin/categories/:id
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Admin : deleteCategory(req, res, next)
+activate Admin
+Admin -> Prisma : category.findUnique({ id }, include _count.attractions)
+activate Prisma
+Prisma -> DB : SELECT Category (+ usage count)
+DB --> Prisma : category | null
+Prisma --> Admin : category
+deactivate Prisma
+alt Not found
+  Admin --> Browser : 404 Not Found
+else attractionCount > 0 (in use)
+  Admin --> Browser : 409 Conflict (dang duoc su dung - hay an thay vi xoa)
+else Unused
+  Admin -> Prisma : category.delete({ id })
+  activate Prisma
+  Prisma -> DB : DELETE Category
+  Prisma --> Admin : ok
+  deactivate Prisma
+  Admin --> Browser : 200 OK { message }
+end
+deactivate Admin
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 8.14 List Admin Reviews (GET /api/admin/reviews)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AdminRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('ADMIN')\n<<Middleware Chain>>" as Guard
+control "ReviewController\n<<Controller>>" as Review
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/admin/reviews
+activate Router
+Router -> Guard : protect -> restrictTo('ADMIN')
+activate Guard
+ref over Guard, DB : ADMIN guard (see 8.1)
+Guard --> Router : next()
+deactivate Guard
+
+Router -> Review : listAdminReviews(req, res, next)
+activate Review
+Review -> Prisma : review.findMany({ include attraction+user, orderBy createdAt desc })
+activate Prisma
+Prisma -> DB : SELECT Review[] (+ attraction title + user)
+DB --> Prisma : reviews
+Prisma --> Review : reviews
+deactivate Prisma
+Review --> Browser : 200 OK { data: reviews (rating, comment, replyComment, isHidden, ...) }
+deactivate Review
+deactivate Router
+@enduml

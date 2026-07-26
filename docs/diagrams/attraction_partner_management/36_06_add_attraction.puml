@@ -1,0 +1,55 @@
+@startuml
+title 3.6.6 Add Attraction (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Click "New attraction"\nopen /partner/attractions/new;
+repeat :Fill attraction form;
+  :Enter name, description, address/city,\ncoordinates, opening hours, categories;
+  :Add images (each an image file, <= 5 MB);
+  |System|
+  :Validate base fields\n(name, address, city, >= 1 category) - BR-11..13;
+  if (Base fields valid?) then (No)
+    |Partner|
+    :Show specific error toast;
+  else (Yes)
+    |Partner|
+    if (Choose action?) then (Save draft)
+      |System|
+      :Upload images\nPOST /api/upload/attraction-images;
+      :Create attraction (status = DRAFT)\nPOST /api/partners/attractions;
+      :Success toast (draft saved);
+    else (Submit for approval)
+      |System|
+      :Validate submission snapshot\n(desc >= 50, valid times, coordinates, >= 1 image);
+      if (Snapshot complete?) then (No)
+        |Partner|
+        :Show missing-field toast;
+      else (Yes)
+        |System|
+        :Upload images + create attraction;
+        :Set status = PENDING (send to Admin);
+        |Admin|
+        :Review submission;
+        if (Approve?) then (Yes)
+          |System|
+          :Apply snapshot, status = APPROVED,\npublishedAt = now, publicationStatus set;
+          :Email approval - attraction public;
+        else (No)
+          |System|
+          :Status = REJECTED (keep draft + reason);
+          :Email rejection reason;
+        endif
+      endif
+    endif
+  endif
+repeat while (Need to fix and retry?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

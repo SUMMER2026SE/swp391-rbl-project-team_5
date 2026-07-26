@@ -1,0 +1,39 @@
+@startuml
+title 3.6.11 Partner Bookings (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/bookings;
+|System|
+:Load bookings\nGET /api/partners/bookings (filterable);
+|Partner|
+:Filter by status (e.g. pending_partner);
+if (Decide on booking?) then (Approve)
+  :Click Approve\nPATCH /api/partners/bookings/:id/approve;
+  |System|
+  :Set booking = CONFIRMED + create QR (BR-16);
+  :Toast "Da xac nhan don dat ve." + notify customer;
+elseif (Reject) then (Reject)
+  |Partner|
+  :Enter reject reason (>= 5 chars);
+  |System|
+  if (Reason >= 5 chars?) then (No)
+    |Partner|
+    :Show validation error;
+  else (Yes)
+    |System|
+    :Set booking = CANCELLED + release stock;
+    :Refund paid customer 100% + notify;
+  endif
+else (Just browse)
+  |Partner|
+  :View booking list;
+endif
+|System|
+stop
+@enduml

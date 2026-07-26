@@ -1,0 +1,19 @@
+@startuml
+title User Account Lifecycle - 3.9 (UserStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> ACTIVE : Account created & verified
+ACTIVE --> LOCKED : Admin locks account\n(PATCH /api/admin/users/:id/status)
+LOCKED --> ACTIVE : Admin unlocks account
+
+ACTIVE : Can sign in and use the platform
+LOCKED : Sign-in blocked\n(admin cannot lock own account)
+@enduml

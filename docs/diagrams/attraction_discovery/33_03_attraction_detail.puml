@@ -1,0 +1,37 @@
+@startuml
+title 3.3.3 Attraction Detail (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Visitor / Customer|
+start
+:Open /attractions/:id;
+|System|
+:Load attraction GET /api/attractions/:id\n+ reviews GET /api/reviews + weather GET /api/weather;
+:Render gallery, description, map, ticket products, reviews;
+|Visitor / Customer|
+switch (Action?)
+case (Book a ticket)
+  |System|
+  :Open Ticket Booking modal (see 3.4.1) - BR-14;
+case (Favorite)
+  |System|
+  if (Signed in?) then (Yes)
+    :POST /api/attractions/:id/favorite (toggle);
+  else (No)
+    |Visitor / Customer|
+    :Redirect to /login;
+  endif
+case (Share)
+  |Visitor / Customer|
+  :Copy attraction link to clipboard;
+case (Read reviews)
+  |Visitor / Customer|
+  :Browse ratings, comments, partner replies (BR-19);
+endswitch
+|System|
+stop
+@enduml

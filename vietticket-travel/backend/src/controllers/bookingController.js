@@ -278,9 +278,16 @@ function toBookingResponse(booking) {
   };
 }
 
-function validateVoucher(voucher, subtotalAmount, now = new Date()) {
+function validateVoucher(voucher, subtotalAmount, now = new Date(), userId = null) {
   if (!voucher || !voucher.isActive || voucher.expiryDate <= now) {
     const error = new Error('Mã ưu đãi không hợp lệ hoặc đã hết hạn.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Voucher cá nhân (đổi điểm) chỉ chủ sở hữu mới được dùng.
+  if (voucher.userId && voucher.userId !== userId) {
+    const error = new Error('Mã ưu đãi này không thuộc về tài khoản của bạn.');
     error.statusCode = 400;
     throw error;
   }
@@ -361,12 +368,12 @@ function calculateDiscount(voucher, subtotalAmount) {
   return Decimal.min(discountAmount, subtotalAmount);
 }
 
-async function findVoucher(client, voucherCode, subtotalAmount, now) {
+async function findVoucher(client, voucherCode, subtotalAmount, now, userId = null) {
   const code = normalizeVoucherCode(voucherCode);
   if (!code) return { voucher: null, discountAmount: new Decimal(0) };
 
   const voucher = await client.voucher.findUnique({ where: { code } });
-  validateVoucher(voucher, subtotalAmount, now);
+  validateVoucher(voucher, subtotalAmount, now, userId);
 
   return {
     voucher,
@@ -534,6 +541,7 @@ async function validateAndApplyVoucher(req, res, next) {
       voucherCode,
       subtotalAmount,
       new Date(),
+      req.user?.id || null,
     );
     const totalAmount = subtotalAmount.minus(discountAmount);
     const parsedTotal = parseVndInteger(totalAmount);
@@ -686,6 +694,7 @@ async function createBooking(req, res, next) {
           voucherCode,
           subtotalAmount,
           now,
+          userId,
         );
         const totalAmount = subtotalAmount.minus(discountAmount);
         const parsedTotal = parseVndInteger(totalAmount);

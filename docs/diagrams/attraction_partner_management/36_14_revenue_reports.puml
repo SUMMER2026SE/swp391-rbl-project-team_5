@@ -1,0 +1,27 @@
+@startuml
+title 3.6.14 Revenue Reports (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/reports;
+|System|
+:Load report data\nGET /api/partners/reports (BR-20);
+if (Load ok?) then (No)
+  |Partner|
+  :Show error toast;
+else (Yes)
+  |System|
+  :Render revenue chart + booking metrics\n(gross, commission, net payout);
+  |Partner|
+  :Change reporting period;
+  |System|
+  :Recompute figures for selected period;
+endif
+|System|
+stop
+@enduml

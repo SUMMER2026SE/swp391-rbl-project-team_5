@@ -1,0 +1,36 @@
+@startuml
+title 3.8.3 Support Ticket Handling (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Platform Staff|
+start
+:Open /staff/tickets;
+|System|
+:Load all support tickets\nGET /api/support/tickets;
+:Render ticket queue (status, requester);
+|Platform Staff|
+switch (Action?)
+case (Claim)
+  |System|
+  :PATCH /api/support/tickets/:ticketId/status (claimed);
+  :Toast "Da nhan xu ly ticket.";
+case (Reply)
+  |Platform Staff|
+  :Write reply in conversation;
+  |System|
+  :POST /api/support/tickets/:ticketId/messages;
+case (Resolve)
+  |System|
+  :PATCH /api/support/tickets/:ticketId/status (resolved);
+  :Toast "Da danh dau yeu cau la da giai quyet.";
+case (Just view)
+  |Platform Staff|
+  :Read the conversation;
+endswitch
+|System|
+stop
+@enduml

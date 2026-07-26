@@ -1,0 +1,38 @@
+@startuml
+title 3.8.2 Refund Management (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Platform Staff|
+start
+:Open /staff/refunds;
+|System|
+:Load refund requests\nGET /api/staff/refunds;
+|Platform Staff|
+:Select a request (view detail + refund preview);
+if (Decision?) then (Approve)
+  :Click Approve\nPATCH /api/staff/refunds/:refundId (BR-17);
+  |Payment Gateway (VNPay)|
+  :Process refund back to customer;
+  |System|
+  :Mark refund done + notify customer;
+  :Toast "Da duyet yeu cau hoan tien.";
+else (Reject)
+  |Platform Staff|
+  :Enter rejection reason;
+  |System|
+  if (Reason provided?) then (No)
+    |Platform Staff|
+    :Show "Vui long nhap ly do tu choi.";
+  else (Yes)
+    |System|
+    :PATCH /api/staff/refunds/:refundId (reject);
+    :Toast "Da tu choi yeu cau hoan tien." + notify;
+  endif
+endif
+|System|
+stop
+@enduml

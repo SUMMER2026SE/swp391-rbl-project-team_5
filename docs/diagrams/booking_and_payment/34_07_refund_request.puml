@@ -1,0 +1,41 @@
+@startuml
+title 3.4.7 Refund Request (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Customer|
+start
+:On e-ticket page, click "Request refund";
+|System|
+:Check ticket refund policy + booking status;
+if (Booking refund-eligible?) then (No)
+  |Customer|
+  :Show error\n(non-refundable / ineligible status);
+else (Yes)
+  |System|
+  :Open modal + show refund preview\n(refundable amount + cancellation fee);
+  repeat :Fill refund request;
+    |Customer|
+    :Enter reason (min 5 characters);
+    :Click Submit;
+    |System|
+    :Validate reason (required, >= 5 chars) - BR-17;
+    if (Reason valid?) then (No)
+      |Customer|
+      :Show validation error;
+    else (Yes)
+      |System|
+      :POST /api/payments/refund-request;
+      :Set booking = REFUND_REQUESTED;
+      :Toast "Da gui yeu cau hoan tien.\nNhan vien se xu ly som.";
+      note right: Platform staff will process\nthe refund request later
+    endif
+  repeat while (Retry after error?) is (Yes) not (No)
+endif
+
+|System|
+stop
+@enduml

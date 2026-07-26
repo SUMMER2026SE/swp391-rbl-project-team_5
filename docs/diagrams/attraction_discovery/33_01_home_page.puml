@@ -1,0 +1,37 @@
+@startuml
+title 3.3.1 Home Page (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Visitor|
+start
+:Open site root /;
+|System|
+:Load featured attractions + popular destinations\n(public attraction API);
+:Render landing page;
+|Visitor|
+switch (Action?)
+case (Hero search / category)
+  |System|
+  :Navigate to /attractions with chosen filters;
+case (Subscribe newsletter)
+  |Visitor|
+  :Enter email + subscribe;
+  |System|
+  :POST /api/newsletter/subscribe;
+case (Become a partner)
+  |System|
+  :Navigate to partner registration;
+case (AI recommendation)
+  |System|
+  :Open AI recommendation section (see 3.5.2);
+case (Just browse)
+  |Visitor|
+  :Explore the landing page;
+endswitch
+|System|
+stop
+@enduml

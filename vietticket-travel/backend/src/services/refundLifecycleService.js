@@ -1,6 +1,7 @@
 'use strict';
 
 const { releaseInventory } = require('../utils/refundService');
+const { reversePointsForBooking } = require('./loyaltyService');
 
 const REFUND_GATEWAY_OUTCOME = Object.freeze({
   SUCCESS: 'SUCCESS',
@@ -277,6 +278,8 @@ async function finalizeSuccessfulRefund(
       where: { id: booking.id },
       data: { status: 'REFUNDED', refundRequired: false },
     });
+    // Thu hồi điểm thưởng đã cộng cho đơn này (nếu có) khi hoàn tiền thành công.
+    await reversePointsForBooking(tx, { id: booking.id });
   }
 
   const updated = await tx.refundRequest.update({

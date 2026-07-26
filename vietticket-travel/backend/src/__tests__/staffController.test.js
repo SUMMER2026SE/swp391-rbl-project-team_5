@@ -222,6 +222,11 @@ describe('processRefundRequest', () => {
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     // Đọc trước (ngoài transaction) để quyết định có gọi cổng VNPay không.
     prisma.refundRequest.findUnique.mockResolvedValue(request);
@@ -305,6 +310,11 @@ describe('processRefundRequest', () => {
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     prisma.refundRequest.findUnique.mockResolvedValue(request);
     prisma.$transaction.mockImplementation((callback) => callback(tx));
@@ -406,6 +416,11 @@ describe('processRefundRequest', () => {
       reservation: { update: jest.fn() },
       ticketInstance: { updateMany: jest.fn() },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     prisma.refundRequest.findUnique.mockResolvedValue(request);
     prisma.refundTransaction.update
@@ -517,6 +532,11 @@ describe('reconcileRefundRequest', () => {
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     prisma.$transaction.mockImplementation((callback) => callback(tx));
     const { req, res, next } = makeReqRes({

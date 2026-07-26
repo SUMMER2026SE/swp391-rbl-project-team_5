@@ -2106,7 +2106,9 @@ async function listVouchers(req, res, next) {
     const skip = (page - 1) * limit;
     const search = String(req.query.search || '').trim().toUpperCase();
     const activeFilter = String(req.query.isActive || '').trim().toLowerCase();
-    const where = {};
+    // Chỉ quản lý mã khuyến mãi công khai; voucher cá nhân (đổi điểm) không
+    // hiển thị ở màn hình quản lý voucher của Admin.
+    const where = { source: 'PROMOTION' };
 
     if (search) where.code = { contains: search, mode: 'insensitive' };
     if (activeFilter === 'true' || activeFilter === 'false') {

@@ -1,0 +1,34 @@
+@startuml
+title 3.2.7 Edit Profile (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|User|
+start
+:Open /edit-profile;
+repeat :Edit personal info;
+  :Update full name, phone, gender, DOB, address;
+  :Optionally choose a new avatar\n(JPEG/PNG, <= 2 MB);
+  :Click Save;
+  |System|
+  :Validate (name 2-50 letters, VN phone,\nDOB in past & >= 12 yrs, avatar type/size)\nBR-04, BR-05, BR-06, BR-09, BR-10;
+  if (Input valid?) then (No)
+    |User|
+    :Error toast, save blocked;
+  else (Yes)
+    |System|
+    if (New avatar chosen?) then (Yes)
+      :Upload avatar first\nPOST /api/users/avatar;
+    else (No)
+    endif
+    :Save profile\nPUT /api/users/profile;
+    :Success toast (profile updated);
+  endif
+repeat while (Retry after error?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

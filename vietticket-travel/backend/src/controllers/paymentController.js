@@ -25,6 +25,7 @@ const {
 const { sendRefundRequestReceivedEmail } = require('../utils/mailer');
 const { formatBookingReference } = require('../utils/bookingReference');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
+const { awardPointsForBooking } = require('../services/loyaltyService');
 const { getFrontendUrl } = require('../config/runtimeConfig');
 const {
   MIN_VNPAY_AMOUNT,
@@ -545,6 +546,13 @@ async function reconcileVnpayPayment(query) {
                 reservation.ticketProductId,
                 reservation.quantity,
               );
+              // Cộng điểm thưởng cho khách khi đơn được xác nhận ngay sau thanh toán.
+              await awardPointsForBooking(tx, {
+                id: current.id,
+                userId: current.userId,
+                totalAmount: current.totalAmount,
+                isForecastTrainingSample: current.isForecastTrainingSample,
+              });
               bookingStatus = 'CONFIRMED';
             }
             return {

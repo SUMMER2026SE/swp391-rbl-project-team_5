@@ -1,0 +1,8 @@
+stateDiagram-v2
+    direction LR
+    [*] --> ACTIVE : Partner creates
+    ACTIVE --> INACTIVE : Deactivate
+    INACTIVE --> ACTIVE : Activate
+    ACTIVE --> Archived : Partner deletes
+    INACTIVE --> Archived : Partner deletes
+    Archived --> [*]
