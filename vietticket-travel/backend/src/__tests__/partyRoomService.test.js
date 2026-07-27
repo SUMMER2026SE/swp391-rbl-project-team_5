@@ -2,11 +2,13 @@
 
 const {
   candidateSnapshot,
+  closeRoom,
   isTripDatePast,
   normalizeDisplayName,
   normalizeIdentity,
   normalizePreferences,
   requiredVoterCount,
+  reopenRoom,
   serializeRoom,
   validateDisplayName,
   validateCreateRoomInput,
@@ -148,4 +150,76 @@ describe('partyRoomService business validation', () => {
       requiredVoters: 2,
     });
   });
-});
+
+  test('does not reopen a finalized plan after its first booking has started', async () => {
+    const room = {
+      id: 'room-booked',
+      hostUserId: 'host-1',
+      status: 'FINALIZED',
+      version: 8,
+      bookingStartedAt: new Date('2026-07-27T10:00:00.000Z'),
+      savedItinerary: { liveTrip: null },
+    };
+    const prismaClient = {
+      partyRoom: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findUnique: jest.fn().mockResolvedValue(room),
+      },
+    };
+
+    await expect(reopenRoom(room.id, 'host-1', { prismaClient }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'PARTY_BOOKING_ALREADY_STARTED' });
+  });
+
+  test('atomically refuses reopen when booking starts after the room was read', async () => {
+    const room = {
+      id: 'room-racing',
+      hostUserId: 'host-1',
+      status: 'FINALIZED',
+      version: 8,
+      bookingStartedAt: null,
+      savedItinerary: { liveTrip: null },
+    };
+    const prismaClient = {
+      partyRoom: {
+        updateMany: jest.fn()
+          .mockResolvedValueOnce({ count: 0 }) // stale-room sweep
+          .mockResolvedValueOnce({ count: 0 }), // compare-and-set reopen loses the race
+        findUnique: jest.fn().mockResolvedValue(room),
+      },
+    };
+
+    await expect(reopenRoom(room.id, 'host-1', { prismaClient }))
+      .rejects.toMatchObject({ statusCode: 409, code: 'PARTY_ROOM_VERSION_CHANGED' });
+    expect(prismaClient.partyRoom.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: room.id,
+          version: 8,
+          bookingStartedAt: null,
+        }),
+      }),
+      );
+    });
+
+    test('refuses to close a finalized room after itinerary booking has started', async () => {
+      const room = {
+        id: 'room-booking-in-progress',
+        hostUserId: 'host-1',
+        status: 'FINALIZED',
+        version: 8,
+        bookingStartedAt: new Date('2026-07-27T10:00:00.000Z'),
+      };
+      const prismaClient = {
+        partyRoom: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          findUnique: jest.fn().mockResolvedValue(room),
+          update: jest.fn(),
+        },
+      };
+
+      await expect(closeRoom(room.id, 'host-1', { prismaClient }))
+        .rejects.toMatchObject({ statusCode: 409, code: 'PARTY_BOOKING_ALREADY_STARTED' });
+      expect(prismaClient.partyRoom.update).not.toHaveBeenCalled();
+    });
+  });

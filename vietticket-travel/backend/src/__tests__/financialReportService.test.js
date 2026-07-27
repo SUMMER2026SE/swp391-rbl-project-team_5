@@ -188,6 +188,9 @@ describe('financial report calculations', () => {
       commissionRevenueAmount: 30000,
     }));
     expect(prisma.payment.findMany.mock.calls[0][0].where).not.toHaveProperty('isDuplicate');
+    expect(prisma.payment.findMany.mock.calls[0][0].where).toEqual(expect.objectContaining({
+      paymentGateway: { not: 'RECOVERY_CREDIT' },
+    }));
     expect(prisma.partnerProfile.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { status: 'APPROVED' },
     }));

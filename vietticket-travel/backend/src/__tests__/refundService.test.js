@@ -157,7 +157,7 @@ describe('getRefundEligibility', () => {
     });
     expect(getRefundEligibility(booking, now)).toEqual(expect.objectContaining({
       refundable: false,
-      notRefundableReason: expect.stringMatching(/VNPay/i),
+      notRefundableReason: expect.stringMatching(/phương thức gốc/i),
     }));
   });
 

@@ -102,10 +102,13 @@ export function createItineraryBookingQueue(plan, options = {}) {
   if (items.length === 0) return null
 
   return {
-    id: makeQueueId(options.now),
+    id: options.queueId || makeQueueId(options.now),
     createdAt: new Date(options.now || Date.now()).toISOString(),
     ownerId: options.ownerId || null,
     planId: plan?.clientPlanId || plan?.id || null,
+    itineraryId: options.itineraryId || null,
+    itineraryVersion: Number(options.itineraryVersion) || null,
+    partyRoomId: options.partyRoomId || null,
     planTitle: plan?.title || 'Lịch trình AI',
     currentIndex: 0,
     items,
@@ -230,6 +233,46 @@ export function completeItineraryQueueItemByBookingId(
   }, storage)
 }
 
+export function syncItineraryBookingQueueProgress(
+  progressItems,
+  storage = getDefaultStorage(),
+) {
+  const progressByItem = new Map(
+    (Array.isArray(progressItems) ? progressItems : [])
+      .filter((item) => item?.itemId)
+      .map((item) => [String(item.itemId), item]),
+  )
+  if (progressByItem.size === 0) return loadItineraryBookingQueue(storage)
+
+  return updateItineraryBookingQueue((queue) => {
+    const updatedAt = makeUpdatedAt()
+    const items = queue.items.map((item) => {
+      const progress = progressByItem.get(String(item.id))
+      if (!progress) return item
+      const completed = progress.fulfilled === true
+      return {
+        ...item,
+        bookingId: progress.bookingId || item.bookingId || null,
+        bookingStatus: progress.bookingStatus || item.bookingStatus || null,
+        status: completed
+          ? 'completed'
+          : ['CANCELLED', 'REFUNDED'].includes(progress.bookingStatus)
+            ? 'action_required'
+            : 'booking_created',
+        ...(completed ? { completedAt: progress.paidAt || updatedAt } : {}),
+        updatedAt,
+      }
+    })
+    const nextIndex = items.findIndex((item) => item.status !== 'completed')
+    return {
+      ...queue,
+      currentIndex: nextIndex === -1 ? items.length : nextIndex,
+      items,
+      updatedAt,
+    }
+  }, storage)
+}
+
 export function getNextItineraryQueueStep(queue) {
   const items = Array.isArray(queue?.items) ? queue.items : []
   if (items.length === 0) return null
@@ -271,6 +314,8 @@ export function buildItineraryQueueBookingUrl(queue, item) {
     extraParams: {
       aiQueueId: queue.id,
       aiQueueItemId: item.id,
+      ...(queue.itineraryId ? { itineraryId: queue.itineraryId } : {}),
+      ...(queue.itineraryVersion ? { itineraryVersion: queue.itineraryVersion } : {}),
     },
   })
 }

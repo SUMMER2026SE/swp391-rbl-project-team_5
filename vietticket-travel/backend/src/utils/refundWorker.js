@@ -120,7 +120,7 @@ async function markPreflightFailure(transaction, error) {
 
 async function sweepPendingRefundTransactions({ limit = 20 } = {}) {
   const pending = await prisma.refundTransaction.findMany({
-    where: { status: 'PENDING' },
+    where: { status: 'PENDING', gateway: 'VNPAY' },
     orderBy: { createdAt: 'asc' },
     take: limit,
     include: { payment: true, refundRequest: true },
@@ -227,6 +227,7 @@ async function sweepRefundReconciliations({ limit = 20, now = new Date() } = {})
   const transactions = await prisma.refundTransaction.findMany({
     where: {
       status: { in: ['PROCESSING', 'NEEDS_RECONCILIATION'] },
+      gateway: 'VNPAY',
       submittedAt: { lte: retryBefore },
       AND: [
         {

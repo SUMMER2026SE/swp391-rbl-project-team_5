@@ -18,9 +18,22 @@ const { getActivityWindow, isBookingCutoffPassed } = require('../utils/activityT
 const { parseVndInteger } = require('../utils/money');
 const { writeAuditLog } = require('../utils/auditLog');
 const { recordLiveTripEvent } = require('./liveTripEventService');
+const {
+  awardPointsForBooking,
+  reversePointsForBooking,
+} = require('./loyaltyService');
 
 const { Decimal } = Prisma;
-const RECOVERY_WINDOW_MS = Number(process.env.RECOVERY_WINDOW_MS || 30 * 60 * 1000);
+const DEFAULT_RECOVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const MIN_RECOVERY_WINDOW_MS = 15 * 60 * 1000;
+const MAX_RECOVERY_WINDOW_MS = 72 * 60 * 60 * 1000;
+const configuredRecoveryWindow = Number(process.env.RECOVERY_WINDOW_MS);
+const RECOVERY_WINDOW_MS = Number.isFinite(configuredRecoveryWindow)
+  ? Math.min(
+      Math.max(Math.round(configuredRecoveryWindow), MIN_RECOVERY_WINDOW_MS),
+      MAX_RECOVERY_WINDOW_MS,
+    )
+  : DEFAULT_RECOVERY_WINDOW_MS;
 const MAX_RECOVERY_OPTIONS = 8;
 
 const ORIGINAL_BOOKING_INCLUDE = {
@@ -160,6 +173,22 @@ function buildOriginalSnapshot(booking) {
     quantity: reservation.quantity,
     totalAmount: Number(booking.totalAmount),
   };
+}
+
+function getRecoveryExpiry(originalSnapshot, now = new Date()) {
+  const configuredExpiry = new Date(now.getTime() + RECOVERY_WINDOW_MS);
+  if (!originalSnapshot?.visitDate) return configuredExpiry;
+
+  // A Rescue choice is useful only on the affected visit date. For trips farther
+  // in the future customers receive up to 24 hours; for same-day incidents the
+  // offer closes at the end of that local day and automatically falls back to a refund.
+  const { endsAt } = getActivityWindow({
+    date: new Date(`${originalSnapshot.visitDate}T00:00:00.000Z`),
+    attraction: { openTime: '00:00', closeTime: '23:59' },
+  });
+  return endsAt && endsAt > now && endsAt < configuredExpiry
+    ? endsAt
+    : configuredExpiry;
 }
 
 function toOptionContext(recoveryCaseOrContext) {
@@ -380,7 +409,7 @@ async function createRecoveryCaseForCancellation(
       trigger,
       reason,
       creditAmount,
-      expiresAt: new Date(now.getTime() + RECOVERY_WINDOW_MS),
+      expiresAt: getRecoveryExpiry(context.originalSnapshot, now),
       originalSnapshot: context.originalSnapshot,
     },
   });
@@ -449,7 +478,7 @@ async function expireRecoveryCase(recoveryCaseId, { now = new Date() } = {}) {
       recoveryCase,
       {
         now,
-        reason: `Hết thời hạn ${Math.round(RECOVERY_WINDOW_MS / 60000)} phút chọn phương án thay thế. Hoàn tiền 100% tự động.`,
+        reason: 'Hết thời hạn chọn phương án thay thế. Hoàn tiền 100% tự động.',
       },
     );
     await writeAuditLog({
@@ -845,6 +874,16 @@ async function acceptRecoveryOption({
       })),
     });
 
+    // Loyalty follows the final service the customer keeps, not the cancelled
+    // booking that originally funded the Rescue exchange.
+    await reversePointsForBooking(tx, { id: original.id });
+    await awardPointsForBooking(tx, {
+      id: replacementBooking.id,
+      userId: replacementBooking.userId,
+      totalAmount: replacementBooking.totalAmount,
+      isForecastTrainingSample: replacementBooking.isForecastTrainingSample,
+    });
+
     const refundDifference = creditAmountNumber - totalAmountNumber;
     if (refundDifference > 0) {
       const queuedRefund = await queueRecoveryDifferenceRefund(tx, fundingBooking, {
@@ -1009,6 +1048,7 @@ function serializeRecoveryCase(recoveryCase, { options } = {}) {
 
 module.exports = {
   CASE_INCLUDE,
+  DEFAULT_RECOVERY_WINDOW_MS,
   MAX_RECOVERY_OPTIONS,
   ORIGINAL_BOOKING_INCLUDE,
   RECOVERY_WINDOW_MS,
@@ -1019,6 +1059,7 @@ module.exports = {
   declineRecoveryCase,
   expireRecoveryCase,
   findEligibleRecoveryOptions,
+  getRecoveryExpiry,
   resolveRecoveryFundingBooking,
   serializeRecoveryCase,
   sweepExpiredRecoveryCases,

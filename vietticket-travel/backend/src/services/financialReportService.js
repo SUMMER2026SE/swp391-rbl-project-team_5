@@ -61,6 +61,7 @@ function refundOccurredAt(transaction) {
 function paymentPeriodWhere(startDate) {
   return {
     status: 'SUCCESS',
+    paymentGateway: { not: 'RECOVERY_CREDIT' },
     booking: { isForecastTrainingSample: false },
     OR: [
       { paidAt: { gte: startDate } },
@@ -566,6 +567,7 @@ async function listPlatformFinancialTransactions({
           where: {
             AND: paymentFilters,
             booking: { isForecastTrainingSample: false },
+            paymentGateway: { not: 'RECOVERY_CREDIT' },
             ...(status ? { status } : {}),
           },
           orderBy: { createdAt: 'desc' },

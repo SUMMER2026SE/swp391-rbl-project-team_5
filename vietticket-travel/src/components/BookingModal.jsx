@@ -97,6 +97,15 @@ export default function BookingModal({
   const navigate = useNavigate()
   const location = useLocation()
   const { isAuthenticated, isAuthLoading } = useAuth()
+  const itinerarySearchParams = new URLSearchParams(location.search)
+  const itineraryId = itinerarySearchParams.get('itineraryId') || ''
+  const itineraryVersion = itinerarySearchParams.get('itineraryVersion') || ''
+  const isLockedItineraryLine = Boolean(
+    aiQueueId
+    && aiQueueItemId
+    && itineraryId
+    && /^[1-9]\d*$/.test(itineraryVersion),
+  )
   const [todayStr] = useState(() => toDateInputValue(new Date()))
   const [todayDate] = useState(() => {
     const date = parseDateInputValue(todayStr) || new Date()
@@ -136,12 +145,24 @@ export default function BookingModal({
   const maxQuantity =
     typeof selectedSlot?.availableTickets === 'number' ? selectedSlot.availableTickets : null
   const checkoutDisabled =
-    isSubmitting || isAuthLoading || isLoadingSlots || !ticketId || !selectedTimeSlotId
+    isSubmitting
+    || isAuthLoading
+    || isLoadingSlots
+    || !ticketId
+    || !selectedTimeSlotId
+    || (
+      isLockedItineraryLine
+      && maxQuantity !== null
+      && quantity > maxQuantity
+    )
   const checkoutButtonText = (() => {
     if (isSubmitting) return 'Đang giữ vé...'
     if (isAuthLoading) return 'Đang kiểm tra đăng nhập...'
     if (isLoadingSlots) return 'Đang kiểm tra vé...'
     if (!selectedTimeSlotId) return 'Chọn khung giờ để tiếp tục'
+    if (maxQuantity !== null && quantity > maxQuantity) {
+      return `Chỉ còn ${maxQuantity}/${quantity} vé theo lịch đã chốt`
+    }
     return 'Tiếp tục thanh toán'
   })()
 
@@ -180,21 +201,24 @@ export default function BookingModal({
       cellDate.setHours(0, 0, 0, 0)
       const cellTime = cellDate.getTime()
       const isPast = cellTime < todayTime
-      const isToday = cellTime === todayTime
+        const isToday = cellTime === todayTime
 
-      const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-      const isSelected = selectedDate === dateStr
+        const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        const isSelected = selectedDate === dateStr
+        const isDateDisabled = isPast || (isLockedItineraryLine && !isSelected)
 
-      cells.push(
-        <button
+        cells.push(
+          <button
           key={`day-${d}`}
-          onClick={() => setSelectedDate(dateStr)}
-          disabled={isPast}
-          type="button"
-          className={`h-10 flex items-center justify-center rounded-xl text-sm font-semibold transition active:scale-90 ${
-            isPast
-              ? 'opacity-30 cursor-not-allowed text-gray-400'
-              : isSelected
+          onClick={() => {
+              if (!isLockedItineraryLine) setSelectedDate(dateStr)
+            }}
+            disabled={isDateDisabled}
+            type="button"
+            className={`h-10 flex items-center justify-center rounded-xl text-sm font-semibold transition active:scale-90 ${
+              isDateDisabled
+                ? 'opacity-30 cursor-not-allowed text-gray-400'
+                : isSelected
                 ? 'bg-[#006068] text-white shadow-md shadow-[#006068]/20 font-bold'
                 : isToday
                   ? 'border-2 border-[#006068] text-[#006068] font-bold'
@@ -209,6 +233,7 @@ export default function BookingModal({
   }
 
   const handlePrevMonth = () => {
+    if (isLockedItineraryLine) return
     if (currentMonth === 0) {
       setCurrentMonth(11)
       setCurrentYear(y => y - 1)
@@ -218,6 +243,7 @@ export default function BookingModal({
   }
 
   const handleNextMonth = () => {
+    if (isLockedItineraryLine) return
     if (currentMonth === 11) {
       setCurrentMonth(0)
       setCurrentYear(y => y + 1)
@@ -279,11 +305,18 @@ export default function BookingModal({
                 !isSlotUnavailable(slot),
             )
           : null
-        const availableSlot = preferredSlot || slots.find((slot) => !isSlotUnavailable(slot))
+        const availableSlot = preferredSlot || (
+          isLockedItineraryLine && initialTimeSlotId
+            ? null
+            : slots.find((slot) => !isSlotUnavailable(slot))
+        )
         setSelectedTimeSlotId(availableSlot ? getSlotId(availableSlot) : '')
         if (availableSlot) {
-          setQuantity((current) =>
-            clampQuantityToLimit(current, availableSlot.availableTickets))
+          setQuantity((current) => (
+            isLockedItineraryLine
+              ? current
+              : clampQuantityToLimit(current, availableSlot.availableTickets)
+          ))
         }
       } catch (error) {
         // Bỏ qua lỗi do chính mình huỷ request (đổi ngày/đóng modal).
@@ -302,15 +335,27 @@ export default function BookingModal({
     return () => {
       controller.abort()
     }
-  }, [initialTimeSlotId, isOpen, selectedDate, ticketId])
+  }, [initialTimeSlotId, isLockedItineraryLine, isOpen, selectedDate, ticketId])
 
   const handleSelectSlot = (slot) => {
+    if (
+      isLockedItineraryLine
+      && initialTimeSlotId
+      && getSlotId(slot) !== String(initialTimeSlotId)
+    ) {
+      return
+    }
     setSelectedTimeSlotId(getSlotId(slot))
     setActionError('')
-    setQuantity((current) => clampQuantityToLimit(current, slot?.availableTickets))
+    setQuantity((current) => (
+      isLockedItineraryLine
+        ? current
+        : clampQuantityToLimit(current, slot?.availableTickets)
+    ))
   }
 
   const handleQtyChange = (delta) => {
+    if (isLockedItineraryLine) return
     setQuantity((current) => {
       const next = Math.max(1, current + delta)
       if (delta > 0 && maxQuantity !== null && next > maxQuantity) {
@@ -399,6 +444,10 @@ export default function BookingModal({
       if (aiQueueId && aiQueueItemId) {
         checkoutParams.set('aiQueueId', aiQueueId)
         checkoutParams.set('aiQueueItemId', aiQueueItemId)
+        if (isLockedItineraryLine) {
+          checkoutParams.set('itineraryId', itineraryId)
+          checkoutParams.set('itineraryVersion', itineraryVersion)
+        }
       }
       onClose()
       navigate(
@@ -480,7 +529,7 @@ export default function BookingModal({
                 <div className="flex items-center justify-between mb-4 border-b border-[#bdc9ca]/20 pb-3">
                   <button
                     onClick={handlePrevMonth}
-                    disabled={isPrevMonthDisabled()}
+                    disabled={isLockedItineraryLine || isPrevMonthDisabled()}
                     className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#e2e2e5] transition disabled:opacity-30 disabled:cursor-not-allowed"
                     type="button"
                     aria-label="Tháng trước"
@@ -494,6 +543,7 @@ export default function BookingModal({
 
                   <button
                     onClick={handleNextMonth}
+                    disabled={isLockedItineraryLine}
                     className="w-9 h-9 flex items-center justify-center rounded-full hover:bg-[#e2e2e5] transition"
                     type="button"
                     aria-label="Tháng sau"
@@ -541,6 +591,11 @@ export default function BookingModal({
                   {timeSlots.map((slot) => {
                     const slotId = getSlotId(slot)
                     const disabled = isSlotUnavailable(slot)
+                      || (
+                        isLockedItineraryLine
+                        && initialTimeSlotId
+                        && slotId !== String(initialTimeSlotId)
+                      )
                     const isSelected = selectedTimeSlotId === slotId
 
                     return (
@@ -587,7 +642,11 @@ export default function BookingModal({
               <TicketCountRow
                 ageLabel={getTicketEligibilityLabel(ticketProduct)}
                 count={quantity}
-                disableIncrement={maxQuantity !== null && quantity >= maxQuantity}
+                disableIncrement={
+                  isLockedItineraryLine
+                  || (maxQuantity !== null && quantity >= maxQuantity)
+                }
+                disableDecrement={isLockedItineraryLine}
                 label={ticketTypeMeta.label}
                 minValue={1}
                 onChange={handleQtyChange}
@@ -596,6 +655,11 @@ export default function BookingModal({
               {maxQuantity !== null && (
                 <p className="text-xs font-semibold text-[#6e797a]">
                   Khung giờ đang chọn còn {maxQuantity} vé.
+                </p>
+              )}
+              {isLockedItineraryLine && (
+                <p className="rounded-xl border border-[#bce4df] bg-[#effaf8] p-3 text-xs font-semibold leading-5 text-[#00504e]">
+                  Ngày đi, khung giờ đã chốt (nếu có) và số lượng được khóa theo lịch trình nhóm. Nếu tồn vé không còn đủ, hãy quay lại danh sách để lập phương án mới.
                 </p>
               )}
             </section>
@@ -668,7 +732,16 @@ export default function BookingModal({
   )
 }
 
-function TicketCountRow({ ageLabel, count, disableIncrement = false, label, minValue, onChange, price }) {
+function TicketCountRow({
+  ageLabel,
+  count,
+  disableDecrement = false,
+  disableIncrement = false,
+  label,
+  minValue,
+  onChange,
+  price,
+}) {
   return (
     <div className="flex flex-col gap-4 rounded-2xl bg-[#f3f3f6] p-5 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -681,7 +754,7 @@ function TicketCountRow({ ageLabel, count, disableIncrement = false, label, minV
           <button
             aria-label={`Giảm ${label}`}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-white shadow-sm transition hover:text-[#006068] disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={count <= minValue}
+            disabled={disableDecrement || count <= minValue}
             onClick={() => onChange(-1)}
             type="button"
           >

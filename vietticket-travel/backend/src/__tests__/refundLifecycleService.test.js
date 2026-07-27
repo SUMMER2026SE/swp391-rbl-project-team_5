@@ -3,6 +3,9 @@
 jest.mock('../utils/refundService', () => ({
   releaseInventory: jest.fn(),
 }));
+jest.mock('../services/loyaltyService', () => ({
+  reversePointsForBooking: jest.fn(),
+}));
 
 const {
   REFUND_GATEWAY_OUTCOME,
@@ -14,6 +17,7 @@ const {
   getPaymentRefundBalance,
 } = require('../services/refundLifecycleService');
 const { releaseInventory } = require('../utils/refundService');
+const { reversePointsForBooking } = require('../services/loyaltyService');
 
 describe('refund processing eligibility', () => {
   test('blocks legacy payments that cannot be safely refunded through VNPay', () => {
@@ -36,6 +40,21 @@ describe('refund processing eligibility', () => {
         vnp_CreateDate: '20260720103000',
       },
     })).toEqual({ canApprove: true, mode: 'VNPAY', blockReason: null });
+  });
+
+  test('requires a manual bank reference for a bank-transfer refund', () => {
+    expect(getRefundProcessingEligibility({
+      id: 'payment-bank-1',
+      transactionId: 'BT-booking-1',
+      paymentGateway: 'BANK_TRANSFER',
+      status: 'SUCCESS',
+      isDuplicate: false,
+    })).toEqual({
+      canApprove: true,
+      mode: 'MANUAL_BANK_TRANSFER',
+      blockReason: null,
+      requiresManualReference: true,
+    });
   });
 
   test('allows only the explicit non-production operational fixture to use the local adapter', () => {
@@ -231,6 +250,14 @@ describe('VietTicket Rescue refund finalization', () => {
       where: { id: 'booking-vnpay-root' },
       data: { status: 'REFUNDED', refundRequired: false },
     });
+    expect(reversePointsForBooking).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ id: replacement.id }),
+    );
+    expect(reversePointsForBooking).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ id: 'booking-vnpay-root' }),
+    );
   });
 
   test('a full Rescue refund closes the RecoveryCase after gateway success', async () => {
