@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import fallbackImage from '../assets/ninh_binh.webp'
 import { getRecentlyViewedAttractions } from '../utils/recentlyViewedAttractions.js'
 

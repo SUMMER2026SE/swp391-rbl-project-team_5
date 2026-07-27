@@ -1,12 +1,13 @@
-import { BrowserRouter } from 'react-router-dom'
+import { BrowserRouter } from 'react-router'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import { ToastContainer } from 'react-toastify'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { SocketProvider } from './context/SocketContext.jsx'
-import { useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router'
 import AppRoutes from './routes/AppRoutes.jsx'
 import ChatbotWidget from './components/ChatbotWidget.jsx'
 import RecoveryAlert from './components/RecoveryAlert.jsx'
+import RouteMetadata from './components/RouteMetadata.jsx'
 
 function ChatbotWithRouteCheck() {
   const location = useLocation()
@@ -29,6 +30,7 @@ function App() {
           <AppRoutes />
           <RecoveryAlert />
           <ChatbotWithRouteCheck />
+          <RouteMetadata />
           <ToastContainer
             autoClose={2600}
             closeOnClick

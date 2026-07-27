@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import { useAuth } from '../context/useAuth.js'

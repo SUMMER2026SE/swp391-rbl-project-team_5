@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { toast } from 'react-toastify'
 import AuthCard from '../components/auth/AuthCard.jsx'
 import AuthFormInput from '../components/auth/AuthFormInput.jsx'

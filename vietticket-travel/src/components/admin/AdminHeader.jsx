@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useAuth } from '../../context/useAuth.js';
 import { hasRole } from '../../utils/userRoles.js';
 import '../../styles/admin.css';

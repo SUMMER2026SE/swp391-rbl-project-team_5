@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'react-toastify'
 import AIItineraryRouteMap from '../components/AIItineraryRouteMap.jsx'

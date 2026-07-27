@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'react-toastify'
 import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'

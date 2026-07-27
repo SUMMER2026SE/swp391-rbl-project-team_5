@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { toast } from 'react-toastify'
 import Header from '../components/Header.jsx'
 import Seo from '../components/Seo.jsx'

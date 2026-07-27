@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router';
 import { useAuth } from '../../context/useAuth.js';
 import '../../styles/admin.css';
 import { hasRole } from '../../utils/userRoles.js';

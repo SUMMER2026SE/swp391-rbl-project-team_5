@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'react-toastify'
 import { getBankTransferInstruction } from '../services/paymentApi.js'

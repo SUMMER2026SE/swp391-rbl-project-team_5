@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router'
 import { useAuth } from '../context/useAuth.js'
 import useSocket from '../context/useSocket.js'
 import { listRecoveryCases } from '../services/recoveryApi.js'

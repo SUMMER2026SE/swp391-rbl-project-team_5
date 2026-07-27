@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router'
 import bookingService from '../services/bookingService.js'
 import { checkAvailability, reserveTickets } from '../services/attractionApi.js'
 import { useAuth } from '../context/useAuth.js'

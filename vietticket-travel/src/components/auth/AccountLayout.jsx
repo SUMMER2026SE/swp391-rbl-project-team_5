@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router'
 import { defaultUser } from '../../context/authConstants.js'
 import { useAuth } from '../../context/useAuth.js'
 import { hasRole } from '../../utils/userRoles.js'

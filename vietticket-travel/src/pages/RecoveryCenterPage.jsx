@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router'
 import { toast } from 'react-toastify'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
@@ -613,7 +613,7 @@ function RecoveryCenterPage() {
       <Seo
         title={`${pageTitle} | VietTicket Travel`}
         description="Đổi vé thay thế còn chỗ hoặc nhận hoàn tiền 100% khi nhà cung cấp hủy hoạt động."
-        noindex
+        noIndex
       />
       <Header activeLink="VietTicket Rescue" />
       {id ? (
