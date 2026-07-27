@@ -166,6 +166,32 @@ test('chỉ hoàn tất booking và vé sau khi VNPay xác nhận 00/00', async 
   }));
 });
 
+test('fixture bảo vệ dùng adapter local và không gọi VNPay thật', async () => {
+  const transaction = pendingTransaction({
+    payment: payment({
+      rawResponse: {
+        source: 'operational_fixture_v2',
+        vnp_TransactionNo: '123456',
+        vnp_CreateDate: '20260710120000',
+      },
+    }),
+  });
+  const tx = finalizationTx();
+  prisma.refundTransaction.findMany.mockResolvedValue([transaction]);
+  prisma.$transaction.mockImplementation((callback) => callback(tx));
+
+  await expect(sweepPendingRefundTransactions()).resolves.toBe(1);
+
+  expect(refundViaVnpay).not.toHaveBeenCalled();
+  expect(tx.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
+    data: expect.objectContaining({
+      status: 'SUCCESS',
+      gatewayResponseCode: '00',
+      gatewayTransactionStatus: '00',
+    }),
+  }));
+});
+
 test('VNPay từ chối dứt khoát thì đánh dấu FAILED và trả request về hàng chờ', async () => {
   const transaction = pendingTransaction();
   const tx = finalizationTx();

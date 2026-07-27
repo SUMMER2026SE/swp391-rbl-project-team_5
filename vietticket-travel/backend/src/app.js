@@ -26,6 +26,7 @@ const weatherRoutes = require('./routes/weatherRoutes');
 const forecastRoutes = require('./routes/forecastRoutes');
 const liveTripRoutes = require('./routes/liveTripRoutes');
 const loyaltyRoutes = require('./routes/loyaltyRoutes');
+const recoveryCaseRoutes = require('./routes/recoveryCaseRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -114,6 +115,7 @@ app.use('/api/weather', weatherRoutes);
 app.use('/api/forecast', forecastRoutes);
 app.use('/api/live', liveTripRoutes);
 app.use('/api/loyalty', loyaltyRoutes);
+app.use('/api/recovery-cases', recoveryCaseRoutes);
 
 // Render demo deployment can serve the Vite build from the same origin as the
 // API. Keeping the SPA and API together preserves cookie-based authentication

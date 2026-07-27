@@ -290,6 +290,36 @@ describe('processRefundRequest', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  test('waits for the Rescue difference refund before approving replacement cancellation', async () => {
+    const request = refundFixture({
+      requestKey: 'recovery-customer:booking-replacement',
+      targetBookingId: 'booking-replacement',
+      booking: {
+        ...refundFixture().booking,
+        id: 'booking-vnpay-root',
+        status: 'CANCELLED',
+      },
+      targetBooking: {
+        id: 'booking-replacement',
+        status: 'REFUND_REQUESTED',
+        user: { fullName: 'Nguyen Van A', email: 'a@example.com' },
+      },
+    });
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    prisma.refundRequest.count.mockResolvedValue(1);
+    const { req, res, next } = makeReqRes({
+      params: { refundId: request.id },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(prisma.refundRequest.updateMany).not.toHaveBeenCalled();
+    expect(refundViaVnpay).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   test('calls VNPay refund for an online payment before updating the DB', async () => {
     const request = refundFixture({
       booking: {

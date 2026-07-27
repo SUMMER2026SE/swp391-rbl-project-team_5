@@ -11,23 +11,35 @@ function getCapturedPayment(booking) {
   )) || null;
 }
 
-async function queueMandatoryRefund(
+async function queueRefund(
   tx,
   booking,
-  { reason, type = 'SYSTEM_CANCELLATION', now = new Date() },
+  {
+    reason,
+    type,
+    now,
+    requestKey,
+    requestedAmount = null,
+    targetBookingId = null,
+  },
 ) {
   const payment = getCapturedPayment(booking);
   if (!payment) return { queued: false, refundRequest: null, refundTransaction: null };
 
   const capturedAmount = toVndAmount(payment.amount, 'Số tiền thanh toán gốc');
   const bookingAmount = toVndAmount(booking.totalAmount, 'Tổng tiền booking');
-  const refundAmount = Math.min(capturedAmount, bookingAmount);
-  const requestKey = `mandatory:${type}:${booking.id}`;
+  const refundAmount = Math.min(
+    capturedAmount,
+    bookingAmount,
+    requestedAmount == null ? Number.MAX_SAFE_INTEGER : requestedAmount,
+  );
+
   const refundRequest = await tx.refundRequest.upsert({
     where: { requestKey },
     update: {},
     create: {
       bookingId: booking.id,
+      targetBookingId,
       requestKey,
       requestedById: booking.userId,
       type,
@@ -75,7 +87,80 @@ async function queueMandatoryRefund(
   return { queued: true, refundRequest, refundTransaction };
 }
 
+async function queueMandatoryRefund(
+  tx,
+  booking,
+  { reason, type = 'SYSTEM_CANCELLATION', now = new Date() },
+) {
+  return queueRefund(tx, booking, {
+    reason,
+    type,
+    now,
+    requestKey: `mandatory:${type}:${booking.id}`,
+  });
+}
+
+async function queueRecoveryDifferenceRefund(
+  tx,
+  booking,
+  {
+    recoveryCaseId,
+    targetBookingId = null,
+    amount,
+    reason,
+    type = 'PARTNER_CANCELLATION',
+    now = new Date(),
+  },
+) {
+  const requestedAmount = toVndAmount(amount, 'Số tiền hoàn chênh lệch');
+  if (requestedAmount <= 0) {
+    return { queued: false, refundRequest: null, refundTransaction: null };
+  }
+
+  return queueRefund(tx, booking, {
+    reason,
+    type,
+    now,
+    requestedAmount,
+    targetBookingId,
+    requestKey: `recovery-difference:${recoveryCaseId}`,
+  });
+}
+
+async function queueRecoveryFullRefund(
+  tx,
+  booking,
+  {
+    recoveryCaseId = null,
+    cancelledBookingId = null,
+    targetBookingId = null,
+    amount,
+    reason,
+    type = 'PARTNER_CANCELLATION',
+    now = new Date(),
+  },
+) {
+  const requestedAmount = toVndAmount(amount, 'Số tiền hoàn toàn bộ');
+  const reference = recoveryCaseId
+    ? `recovery-full:${recoveryCaseId}`
+    : `recovery-full-booking:${cancelledBookingId}`;
+  if (!recoveryCaseId && !cancelledBookingId) {
+    throw new Error('A recovery case or cancelled booking reference is required.');
+  }
+
+  return queueRefund(tx, booking, {
+    reason,
+    type,
+    now,
+    requestedAmount,
+    targetBookingId: targetBookingId || cancelledBookingId,
+    requestKey: reference,
+  });
+}
+
 module.exports = {
   getCapturedPayment,
   queueMandatoryRefund,
+  queueRecoveryDifferenceRefund,
+  queueRecoveryFullRefund,
 };

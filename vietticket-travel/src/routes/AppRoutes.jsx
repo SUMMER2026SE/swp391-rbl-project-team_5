@@ -35,6 +35,7 @@ const PartnerTicketsPage = lazy(() => import('../pages/PartnerTicketsPage.jsx'))
 const ProfilePage = lazy(() => import('../pages/ProfilePage.jsx'))
 const RegisterPage = lazy(() => import('../pages/RegisterPage.jsx'))
 const ResetPasswordPage = lazy(() => import('../pages/ResetPasswordPage.jsx'))
+const RecoveryCenterPage = lazy(() => import('../pages/RecoveryCenterPage.jsx'))
 const SearchAttractionsPage = lazy(() => import('../pages/SearchAttractionsPage.jsx'))
 const SupportCenterPage = lazy(() => import('../pages/SupportCenterPage.jsx'))
 const MySupportTicketsPage = lazy(() => import('../pages/MySupportTicketsPage.jsx'))
@@ -385,6 +386,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <MyTicketsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/rescue"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <RecoveryCenterPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/rescue/:id"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <RecoveryCenterPage />
           </ProtectedRoute>
         }
       />

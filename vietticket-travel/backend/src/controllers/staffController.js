@@ -149,6 +149,9 @@ async function listRefundRequests(req, res, next) {
         { booking: { fullName: { contains: search, mode: 'insensitive' } } },
         { booking: { user: { fullName: { contains: search, mode: 'insensitive' } } } },
         { booking: { snapshotAttractionTitle: { contains: search, mode: 'insensitive' } } },
+        { targetBookingId: { contains: search, mode: 'insensitive' } },
+        { targetBooking: { fullName: { contains: search, mode: 'insensitive' } } },
+        { targetBooking: { snapshotAttractionTitle: { contains: search, mode: 'insensitive' } } },
       ];
     }
 
@@ -201,6 +204,21 @@ async function listRefundRequests(req, res, next) {
               },
             },
           },
+          targetBooking: {
+            include: {
+              user: { select: { fullName: true, email: true } },
+              reservation: {
+                include: {
+                  timeSlot: true,
+                  ticketProduct: {
+                    include: {
+                      attraction: { select: { title: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       }),
       prisma.refundRequest.count({ where }),
@@ -240,6 +258,7 @@ async function listRefundRequests(req, res, next) {
         processingEligibility: getRefundProcessingEligibility(
           findRefundTargetPayment(request),
         ),
+        customerBooking: request.targetBooking || request.booking,
       })),
       pagination: { page, limit, total, totalPages },
       stats,
@@ -283,6 +302,11 @@ async function processRefundRequest(req, res, next) {
             refundTransactions: true,
           },
         },
+        targetBooking: {
+          include: {
+            user: { select: { fullName: true, email: true } },
+          },
+        },
         refundTransactions: {
           orderBy: { createdAt: 'desc' },
           include: { payment: true },
@@ -294,11 +318,31 @@ async function processRefundRequest(req, res, next) {
     if (refundRequest.status !== 'PENDING') {
       throw httpError(409, 'Yêu cầu này không còn ở trạng thái chờ xử lý.');
     }
-    if (refundRequest.booking.status === 'REFUNDED' && refundRequest.type !== 'DUPLICATE_PAYMENT') {
+    const customerBooking = refundRequest.targetBooking || refundRequest.booking;
+    if (customerBooking.status === 'REFUNDED' && refundRequest.type !== 'DUPLICATE_PAYMENT') {
       throw httpError(409, 'Đơn đặt vé này đã được hoàn tiền.');
     }
     if (action === 'REJECTED' && isMandatoryRefundRequest(refundRequest)) {
       throw httpError(400, 'Không thể từ chối yêu cầu hoàn tiền bắt buộc.');
+    }
+    if (
+      action === 'APPROVED'
+      && String(refundRequest.requestKey || '').startsWith('recovery-customer:')
+    ) {
+      const earlierMandatoryRefunds = await prisma.refundRequest.count({
+        where: {
+          bookingId: refundRequest.bookingId,
+          id: { not: refundRequest.id },
+          mandatory: true,
+          status: { in: ['PENDING', 'PROCESSING'] },
+        },
+      });
+      if (earlierMandatoryRefunds > 0) {
+        throw httpError(
+          409,
+          'Cần hoàn tất khoản hoàn chênh lệch Rescue trước khi xử lý yêu cầu hủy vé thay thế.',
+        );
+      }
     }
 
     const claimed = await prisma.refundRequest.updateMany({
@@ -319,7 +363,7 @@ async function processRefundRequest(req, res, next) {
       const updated = await prisma.$transaction(async (tx) => {
         const fresh = await tx.refundRequest.findUnique({
           where: { id: refundId },
-          include: { booking: true },
+          include: { booking: true, targetBooking: true },
         });
         if (!fresh || fresh.status !== 'PROCESSING') {
           throw httpError(409, 'Yêu cầu không còn ở trạng thái đang xử lý.');
@@ -327,9 +371,10 @@ async function processRefundRequest(req, res, next) {
         if (isMandatoryRefundRequest(fresh)) {
           throw httpError(400, 'Không thể từ chối yêu cầu hoàn tiền bắt buộc.');
         }
-        if (fresh.booking.status === 'REFUND_REQUESTED') {
+        const freshCustomerBooking = fresh.targetBooking || fresh.booking;
+        if (freshCustomerBooking.status === 'REFUND_REQUESTED') {
           await tx.booking.update({
-            where: { id: fresh.bookingId },
+            where: { id: freshCustomerBooking.id },
             data: {
               status: fresh.bookingStatusBeforeRequest || 'CONFIRMED',
               refundRequired: false,
@@ -357,9 +402,9 @@ async function processRefundRequest(req, res, next) {
         metadata: { bookingId: refundRequest.bookingId, staffNotes },
       });
       await sendRefundStatusEmail({
-        to: refundRequest.booking.user.email,
-        fullName: refundRequest.booking.user.fullName,
-        bookingId: refundRequest.booking.id,
+        to: customerBooking.user.email,
+        fullName: customerBooking.user.fullName,
+        bookingId: customerBooking.id,
         action: 'REJECTED',
         refundAmount: Number(refundRequest.amount),
         staffNotes,
@@ -588,9 +633,9 @@ async function processRefundRequest(req, res, next) {
       },
     });
     await sendRefundStatusEmail({
-      to: refundRequest.booking.user.email,
-      fullName: refundRequest.booking.user.fullName,
-      bookingId: refundRequest.booking.id,
+      to: customerBooking.user.email,
+      fullName: customerBooking.user.fullName,
+      bookingId: customerBooking.id,
       action: 'APPROVED',
       refundAmount: Number(refundRequest.amount),
       staffNotes,
@@ -630,6 +675,7 @@ async function reconcileRefundRequest(req, res, next) {
       where: { id: refundId },
       include: {
         booking: { include: { user: { select: { fullName: true, email: true } } } },
+        targetBooking: { include: { user: { select: { fullName: true, email: true } } } },
         refundTransactions: {
           where: { status: { in: ['PROCESSING', 'NEEDS_RECONCILIATION'] } },
           orderBy: { createdAt: 'desc' },
@@ -739,10 +785,11 @@ async function reconcileRefundRequest(req, res, next) {
         amount: Number(refundRequest.amount),
       },
     });
+    const customerBooking = refundRequest.targetBooking || refundRequest.booking;
     await sendRefundStatusEmail({
-      to: refundRequest.booking.user.email,
-      fullName: refundRequest.booking.user.fullName,
-      bookingId: refundRequest.bookingId,
+      to: customerBooking.user.email,
+      fullName: customerBooking.user.fullName,
+      bookingId: customerBooking.id,
       action: 'APPROVED',
       refundAmount: Number(refundRequest.amount),
       staffNotes: 'Khoản hoàn đã được VNPay xác nhận thành công.',

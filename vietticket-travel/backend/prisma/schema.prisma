@@ -72,6 +72,7 @@ model User {
   smartQueuePolicies      SmartQueuePolicy[]          @relation("SmartQueuePolicyUpdatedBy")
   calledQueueEntries      SmartQueueEntry[]           @relation("SmartQueueCalledBy")
   pausedQueuePolicies     SmartQueuePolicy[]          @relation("SmartQueuePolicyPausedBy")
+  recoveryCases           RecoveryCase[]
 
   @@index([employerPartnerId])
 }
@@ -628,18 +629,22 @@ model Booking {
   createdAt                  DateTime         @default(now())
   updatedAt                  DateTime         @updatedAt
 
-  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reservation        Reservation             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  voucher            Voucher?                @relation(fields: [voucherId], references: [id])
-  payments           Payment[]
-  ticketInstances    TicketInstance[]
-  refundRequests     RefundRequest[]
-  refundTransactions RefundTransaction[]
-  review             Review?
-  settlementItems    PartnerSettlementItem[]
-  liveTripItems      LiveTripItem[]
-  smartQueueEntries  SmartQueueEntry[]
-  loyaltyTransactions LoyaltyTransaction[]
+  user                      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation               Reservation             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  voucher                   Voucher?                @relation(fields: [voucherId], references: [id])
+  payments                  Payment[]
+  ticketInstances           TicketInstance[]
+  refundRequests            RefundRequest[]
+  refundRequestsTargeting   RefundRequest[]         @relation("RefundTargetBooking")
+  refundTransactions        RefundTransaction[]
+  review                    Review?
+  settlementItems           PartnerSettlementItem[]
+  liveTripItems             LiveTripItem[]
+  smartQueueEntries         SmartQueueEntry[]
+  loyaltyTransactions       LoyaltyTransaction[]
+  recoveryCaseAsOriginal    RecoveryCase?           @relation("RecoveryOriginalBooking")
+  recoveryCaseAsReplacement RecoveryCase?           @relation("RecoveryReplacementBooking")
+  recoveryCasesAsFunding    RecoveryCase[]          @relation("RecoveryFundingBooking")
 
   @@index([userId])
   @@index([voucherId])
@@ -648,6 +653,41 @@ model Booking {
   @@index([snapshotVisitDate])
   @@index([isForecastTrainingSample])
   @@index([cancelledAt])
+}
+
+// Customer-consented recovery after a provider/system cancellation. Candidate
+// options are computed from live inventory and therefore are deliberately not
+// persisted; only the original and finally selected snapshots are durable.
+model RecoveryCase {
+  id                     String             @id @default(uuid())
+  userId                 String
+  originalBookingId      String             @unique
+  fundingBookingId       String
+  replacementBookingId   String?            @unique
+  status                 RecoveryCaseStatus @default(OPEN)
+  trigger                RecoveryTrigger
+  reason                 String             @db.Text
+  creditAmount           Decimal            @db.Decimal(12, 2)
+  replacementAmount      Decimal?           @db.Decimal(12, 2)
+  refundAmount           Decimal            @default(0.0) @db.Decimal(12, 2)
+  expiresAt              DateTime
+  originalSnapshot       Json
+  selectedOptionSnapshot Json?
+  acceptedAt             DateTime?
+  declinedAt             DateTime?
+  completedAt            DateTime?
+  version                Int                @default(0)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalBooking    Booking  @relation("RecoveryOriginalBooking", fields: [originalBookingId], references: [id], onDelete: Restrict)
+  fundingBooking     Booking  @relation("RecoveryFundingBooking", fields: [fundingBookingId], references: [id], onDelete: Restrict)
+  replacementBooking Booking? @relation("RecoveryReplacementBooking", fields: [replacementBookingId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, createdAt])
+  @@index([fundingBookingId])
+  @@index([status, expiresAt])
 }
 
 model PartnerSettlement {
@@ -842,6 +882,18 @@ enum RefundTransactionStatus {
   NEEDS_RECONCILIATION
 }
 
+enum RecoveryCaseStatus {
+  OPEN
+  REPLACED
+  REFUND_PENDING
+  REFUNDED
+}
+
+enum RecoveryTrigger {
+  PARTNER_CANCELLATION
+  SYSTEM_CANCELLATION
+}
+
 enum SupportStatus {
   OPEN
   IN_PROGRESS
@@ -858,6 +910,7 @@ enum SupportPriority {
 model RefundRequest {
   id                         String            @id @default(uuid())
   bookingId                  String
+  targetBookingId            String?
   requestKey                 String            @unique
   requestedById              String
   type                       RefundRequestType @default(CUSTOMER_CANCELLATION)
@@ -878,9 +931,11 @@ model RefundRequest {
   updatedAt                  DateTime          @updatedAt
 
   booking            Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  targetBooking      Booking?            @relation("RefundTargetBooking", fields: [targetBookingId], references: [id], onDelete: Restrict)
   refundTransactions RefundTransaction[]
 
   @@index([bookingId])
+  @@index([targetBookingId])
   @@index([status])
   @@index([requestedById])
   @@index([type, status])

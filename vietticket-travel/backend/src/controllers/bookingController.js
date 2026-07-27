@@ -47,6 +47,7 @@ const bookingInclude = {
   voucher: true,
   payments: { orderBy: { createdAt: 'desc' } },
   refundRequests: { orderBy: { createdAt: 'desc' } },
+  refundRequestsTargeting: { orderBy: { createdAt: 'desc' } },
   // Thứ tự cố định để "Vé #1, #2..." trên vé của khách không đổi sau mỗi lần
   // check-in và khớp đúng với danh sách vé bên cổng soát vé của nhân viên.
   ticketInstances: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
@@ -226,6 +227,12 @@ function toBookingResponse(booking) {
   const product = reservation.ticketProduct;
   const snapshot = getBookingSnapshotView(booking);
   const paymentStatus = resolveBookingPaymentStatus(booking.payments);
+  const latestRefundRequest = [
+    ...(booking.refundRequests || []),
+    ...(booking.refundRequestsTargeting || []),
+  ].sort((left, right) => (
+    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  ))[0] || null;
 
   return {
     id: booking.id,
@@ -271,17 +278,17 @@ function toBookingResponse(booking) {
     rating: booking.review?.rating || 0,
     // Yêu cầu hoàn tiền gần nhất; một booking có thể có thêm yêu cầu riêng
     // cho từng giao dịch thanh toán trùng.
-    refundRequest: booking.refundRequests?.[0]
+    refundRequest: latestRefundRequest
       ? {
-          id: booking.refundRequests[0].id,
-          type: booking.refundRequests[0].type,
-          mandatory: booking.refundRequests[0].mandatory,
-          status: booking.refundRequests[0].status,
-          amount: decimalToNumber(booking.refundRequests[0].amount),
-          reason: booking.refundRequests[0].reason,
-          staffNotes: booking.refundRequests[0].staffNotes || '',
-          createdAt: booking.refundRequests[0].createdAt,
-          processedAt: booking.refundRequests[0].processedAt,
+          id: latestRefundRequest.id,
+          type: latestRefundRequest.type,
+          mandatory: latestRefundRequest.mandatory,
+          status: latestRefundRequest.status,
+          amount: decimalToNumber(latestRefundRequest.amount),
+          reason: latestRefundRequest.reason,
+          staffNotes: latestRefundRequest.staffNotes || '',
+          createdAt: latestRefundRequest.createdAt,
+          processedAt: latestRefundRequest.processedAt,
         }
       : null,
     ticketInstances: booking.ticketInstances.map((ticket) => ({

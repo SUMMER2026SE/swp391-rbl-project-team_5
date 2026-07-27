@@ -102,6 +102,30 @@ function emitLiveTripUpdated({
   return true;
 }
 
+function emitRecoveryCaseEvent({
+  customerId,
+  recoveryCaseId,
+  eventName = 'RECOVERY_CASE_UPDATED',
+  status,
+  message,
+  originalBookingId = null,
+  replacementBookingId = null,
+  expiresAt = null,
+}) {
+  if (!socketServer || !customerId || !recoveryCaseId) return false;
+
+  socketServer.to(`user:${customerId}`).emit(eventName, {
+    recoveryCaseId,
+    status,
+    message,
+    originalBookingId,
+    replacementBookingId,
+    expiresAt,
+    occurredAt: new Date().toISOString(),
+  });
+  return true;
+}
+
 // --- Support ticket (Module 5) ---
 // Phát tin nhắn mới tới phòng chat của ticket. Quyền vào phòng được kiểm soát
 // ở socketServer.js (handler JOIN_SUPPORT_TICKET), nên ở đây chỉ cần broadcast.
@@ -147,6 +171,7 @@ module.exports = {
   emitBookingStatusUpdated,
   emitLiveTripUpdated,
   emitNewBooking,
+  emitRecoveryCaseEvent,
   emitSupportMessage,
   emitSupportTicketUpdated,
   publishNewBookingById,

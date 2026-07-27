@@ -8,6 +8,7 @@ const defaultLinks = [
   { label: 'Trang chủ', href: '/' },
   { label: 'Điểm tham quan', href: '/attractions' },
   { label: 'Vé của tôi', href: '/my-tickets', activeKey: 'My Tickets' },
+  { label: 'Rescue', href: '/rescue', activeKey: 'VietTicket Rescue' },
   { label: 'Hỗ trợ', href: '/support' },
 ]
 
@@ -33,7 +34,7 @@ function Header({ links = defaultLinks, activeLink = '' }) {
   const isHomePage = location.pathname === '/'
 
   const isOperationalUser = hasRole(user, 'ADMIN') || hasRole(user, 'STAFF') || hasRole(user, 'PARTNER')
-  const customerOnlyPaths = new Set(['/my-tickets', '/favorites', '/support', '/my-support'])
+  const customerOnlyPaths = new Set(['/my-tickets', '/rescue', '/favorites', '/support', '/my-support'])
   const visibleLinks = isOperationalUser
     ? links.filter((link) => !customerOnlyPaths.has(link.href))
     : links
