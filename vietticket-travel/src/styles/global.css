@@ -1357,6 +1357,11 @@ h3 {
     min-height: 0;
     display: grid;
     gap: 16px;
+    overflow: hidden;
+    padding-block: 0;
+  }
+
+  .mobile-menu--open .mobile-menu__inner {
     padding-block: 20px 24px;
   }
 

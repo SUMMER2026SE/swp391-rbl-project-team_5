@@ -635,6 +635,42 @@ describe('generateItinerary', () => {
     expect(activities[0].visitDate).toBe('2099-01-10');
   });
 
+  test('schedules a fixed 16:30 ticket inside the afternoon planning window', async () => {
+    const sunset = makeAttraction('sunset', 280000, 4.8);
+    sunset.closeTime = '22:00';
+    const fixedSlot = {
+      id: 'slot-sunset-1630',
+      startTime: '16:30',
+      endTime: '18:00',
+      maxCapacity: 45,
+    };
+    mockPrisma.attraction.findMany.mockResolvedValue([sunset]);
+    mockPrisma.ticketProduct.findUnique.mockImplementation(({ where }) => {
+      const product = makeBookableProduct(where.id, 'sunset', 90, [fixedSlot]);
+      product.attraction.closeTime = '22:00';
+      return Promise.resolve(product);
+    });
+    mockPrisma.dailyStock.findUnique.mockResolvedValue(null);
+    mockPrisma.attractionDailyStock.findUnique.mockResolvedValue(null);
+    mockPrisma.timeSlotStock.findMany.mockResolvedValue([]);
+
+    const result = await generateItinerary({
+      city: 'Da Nang',
+      days: 1,
+      people: 2,
+      pace: 'normal',
+      startDate: '2099-01-10',
+    });
+
+    const activity = result.data.days[0].activities[0];
+    expect(activity.attractionId).toBe('sunset');
+    expect(activity.suggestedTime).toBe('16:30 - 18:00');
+    expect(activity.ticketItems[0].suggestedTimeSlot).toMatchObject({
+      startTime: '16:30',
+      endTime: '18:00',
+    });
+  });
+
   test('date-aware itinerary excludes split tickets beyond shared slot capacity', async () => {
     const sharedSlot = {
       id: 'slot-a1-morning',

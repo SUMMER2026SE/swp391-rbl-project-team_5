@@ -73,6 +73,8 @@ model User {
   calledQueueEntries      SmartQueueEntry[]           @relation("SmartQueueCalledBy")
   pausedQueuePolicies     SmartQueuePolicy[]          @relation("SmartQueuePolicyPausedBy")
   recoveryCases           RecoveryCase[]
+  partyRoomsHosted        PartyRoom[]                 @relation("PartyRoomHost")
+  partyMemberships        PartyMember[]               @relation("PartyMemberUser")
 
   @@index([employerPartnerId])
 }
@@ -394,6 +396,7 @@ model Attraction {
   smartQueuePolicy    SmartQueuePolicy?
   arrivalObservations ArrivalObservation[]
   livePredictions     LivePrediction[]
+  partyCandidates     PartyCandidate[]
 
   @@index([city])
   @@index([status])
@@ -1058,10 +1061,139 @@ model SavedItinerary {
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   liveTrip LiveTrip?
+  partyRoom PartyRoom? @relation("PartyRoomSavedItinerary")
 
   @@unique([userId, planId])
   @@index([userId])
   @@index([createdAt])
+}
+
+enum PartyRoomStatus {
+  OPEN
+  FINALIZED
+  CLOSED
+  EXPIRED
+}
+
+enum PartyMemberRole {
+  HOST
+  GUEST
+}
+
+enum PartyVoteValue {
+  LIKE
+  LOVE
+  VETO
+}
+
+// PartySync is a pre-booking collaboration surface. The host remains the
+// owner of the resulting SavedItinerary and every downstream booking.
+model PartyRoom {
+  id               String          @id @default(uuid())
+  hostUserId       String
+  savedItineraryId String?         @unique
+  title            String
+  city             String
+  startDate        DateTime        @db.Date
+  dayCount         Int
+  adults           Int
+  children         Int
+  totalBudget      Decimal         @db.Decimal(14, 2)
+  pace             String          @default("normal")
+  maxMembers       Int             @default(10)
+  inviteTokenHash  String          @unique @db.VarChar(64)
+  inviteExpiresAt  DateTime
+  status           PartyRoomStatus @default(OPEN)
+  version          Int             @default(1)
+  finalizedAt      DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  host           User            @relation("PartyRoomHost", fields: [hostUserId], references: [id], onDelete: Cascade)
+  savedItinerary SavedItinerary? @relation("PartyRoomSavedItinerary", fields: [savedItineraryId], references: [id], onDelete: SetNull)
+  members        PartyMember[]
+  candidates     PartyCandidate[]
+  decisions      PartyDecision[]
+
+  @@index([hostUserId, status, updatedAt])
+  @@index([status, inviteExpiresAt])
+}
+
+model PartyMember {
+  id               String          @id @default(uuid())
+  roomId           String
+  userId           String?
+  role             PartyMemberRole @default(GUEST)
+  displayName      String
+  displayNameNormalized String
+  avatarKey        String          @default("teal")
+  budgetCap        Decimal?        @db.Decimal(14, 2)
+  preferences      Json?
+  sessionTokenHash String?         @unique @db.VarChar(64)
+  sessionExpiresAt DateTime?
+  joinedAt         DateTime        @default(now())
+  lastSeenAt       DateTime        @default(now())
+  removedAt        DateTime?
+  updatedAt        DateTime        @updatedAt
+
+  room  PartyRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user  User?      @relation("PartyMemberUser", fields: [userId], references: [id], onDelete: SetNull)
+  votes PartyVote[]
+
+  @@unique([roomId, userId])
+  @@unique([roomId, displayNameNormalized])
+  @@index([roomId, removedAt, joinedAt])
+  @@index([sessionExpiresAt])
+}
+
+model PartyCandidate {
+  id           String   @id @default(uuid())
+  roomId       String
+  attractionId String
+  snapshot     Json
+  position     Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  room       PartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  votes      PartyVote[]
+
+  @@unique([roomId, attractionId])
+  @@index([roomId, position])
+  @@index([attractionId])
+}
+
+model PartyVote {
+  id          String         @id @default(uuid())
+  memberId    String
+  candidateId String
+  value       PartyVoteValue
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  member    PartyMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  candidate PartyCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, candidateId])
+  @@index([candidateId, value])
+}
+
+model PartyDecision {
+  id                  String   @id @default(uuid())
+  roomId              String
+  inputVersion        Int
+  algorithmVersion    String
+  consensusScore      Decimal  @db.Decimal(5, 2)
+  averageSatisfaction Decimal  @db.Decimal(5, 2)
+  minimumSatisfaction Decimal  @db.Decimal(5, 2)
+  snapshot            Json
+  metrics             Json
+  createdAt           DateTime @default(now())
+
+  room PartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
 }
 
 enum LiveTripStatus {
