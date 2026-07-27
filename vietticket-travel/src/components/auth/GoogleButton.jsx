@@ -1,14 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
-import { GoogleLogin } from '@react-oauth/google'
+import { useGoogleOAuth } from '@react-oauth/google'
 import { toast } from 'react-toastify'
 
-function GoogleButton({ onSuccess, onError }) {
-  const hasClientId = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
+// Google Identity Services keeps a single global client configuration. The
+// third-party GoogleLogin component initializes it on every mount, which
+// produces duplicate initialize() warnings under React StrictMode and during
+// route transitions. Keep the client initialization stable and route the
+// latest callbacks through refs.
+const googleClientState = {
+  clientId: '',
+  onSuccess: null,
+  onError: null,
+}
+
+function GoogleOAuthButton({ onSuccess, onError }) {
+  const { clientId, locale, scriptLoadedSuccessfully } = useGoogleOAuth()
   const wrapperRef = useRef(null)
+  const onSuccessRef = useRef(onSuccess)
+  const onErrorRef = useRef(onError)
   const [buttonWidth, setButtonWidth] = useState(320)
+  const [isReady, setIsReady] = useState(false)
 
   useEffect(() => {
-    if (!hasClientId || !wrapperRef.current) return undefined
+    onSuccessRef.current = onSuccess
+    onErrorRef.current = onError
+  }, [onError, onSuccess])
+
+  useEffect(() => {
+    if (!wrapperRef.current) return undefined
 
     const updateButtonWidth = () => {
       const width = wrapperRef.current?.getBoundingClientRect().width || 320
@@ -16,6 +35,7 @@ function GoogleButton({ onSuccess, onError }) {
     }
 
     updateButtonWidth()
+    setIsReady(true)
 
     if (typeof ResizeObserver === 'undefined') {
       window.addEventListener('resize', updateButtonWidth)
@@ -26,23 +46,71 @@ function GoogleButton({ onSuccess, onError }) {
     resizeObserver.observe(wrapperRef.current)
 
     return () => resizeObserver.disconnect()
-  }, [hasClientId])
+  }, [])
+
+  useEffect(() => {
+    if (!isReady || !scriptLoadedSuccessfully || !wrapperRef.current) return undefined
+
+    const googleId = window.google?.accounts?.id
+    if (!googleId || !clientId) return undefined
+    const container = wrapperRef.current
+
+    googleClientState.onSuccess = (credentialResponse) => {
+      onSuccessRef.current?.(credentialResponse)
+    }
+    googleClientState.onError = () => {
+      onErrorRef.current?.()
+    }
+
+    if (googleClientState.clientId !== clientId) {
+      googleId.initialize({
+        client_id: clientId,
+        callback: (credentialResponse) => {
+          if (credentialResponse?.credential) {
+            googleClientState.onSuccess?.(credentialResponse)
+          } else {
+            googleClientState.onError?.()
+          }
+        },
+      })
+      googleClientState.clientId = clientId
+    }
+
+    container.innerHTML = ''
+    googleId.renderButton(container, {
+      shape: 'pill',
+      size: 'large',
+      text: 'continue_with',
+      width: String(buttonWidth),
+      locale,
+    })
+
+    return () => {
+      container.innerHTML = ''
+    }
+  }, [buttonWidth, clientId, isReady, locale, scriptLoadedSuccessfully])
+
+  return <div className="google-login-wrapper" ref={wrapperRef} aria-busy={!isReady} />
+}
+
+function GoogleButton({ onSuccess, onError }) {
+  const hasClientId = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID)
 
   const handleFallbackClick = () => {
     if (import.meta.env.DEV) {
-      toast.warning('[DEV MODE] Vui lòng cấu hình VITE_GOOGLE_CLIENT_ID trong file .env để sử dụng Google Login.')
+      toast.warning(
+        '[DEV MODE] Vui lòng cấu hình VITE_GOOGLE_CLIENT_ID trong file .env để sử dụng Google Login.',
+      )
     } else {
-      toast.info('Đăng nhập bằng Google hiện không khả dụng. Vui lòng sử dụng Email và Mật khẩu.')
+      toast.info(
+        'Đăng nhập bằng Google hiện không khả dụng. Vui lòng sử dụng Email và Mật khẩu.',
+      )
     }
   }
 
   if (!hasClientId) {
     return (
-      <button 
-        className="google-button" 
-        type="button"
-        onClick={handleFallbackClick}
-      >
+      <button className="google-button" type="button" onClick={handleFallbackClick}>
         <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
           <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -54,18 +122,7 @@ function GoogleButton({ onSuccess, onError }) {
     )
   }
 
-  return (
-    <div className="google-login-wrapper" ref={wrapperRef}>
-      <GoogleLogin
-        shape="pill"
-        size="large"
-        text="continue_with"
-        width={String(buttonWidth)}
-        onError={onError}
-        onSuccess={(credentialResponse) => onSuccess?.(credentialResponse)}
-      />
-    </div>
-  )
+  return <GoogleOAuthButton onSuccess={onSuccess} onError={onError} />
 }
 
 export default GoogleButton
