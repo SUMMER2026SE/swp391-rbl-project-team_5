@@ -1,0 +1,28 @@
+@startuml
+title 3.2.6 View Profile (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|User|
+start
+:Select "Ho so" -> open /profile;
+|System|
+:Load profile\nGET /api/users/profile (or /api/auth/me) - BR-09;
+:Display account info read-only\n(avatar, name, email, role, phone, ...);
+|User|
+if (Next action?) then (Edit profile)
+  |System|
+  :Navigate to /edit-profile;
+elseif (Change password) then (Change password)
+  |System|
+  :Navigate to /change-password;
+else (Just view)
+  |User|
+  :Read the profile;
+endif
+|System|
+stop
+@enduml

@@ -11,7 +11,7 @@ export const navLinks = [
   { label: 'Điểm tham quan', href: '/attractions' },
   { label: 'Điểm đến', href: '#destinations' },
   { label: 'Vé', href: '#services' },
-  { label: 'Đặt chỗ', href: '#steps' },
+  { label: 'PartySync', href: '/party' },
   { label: 'Hỗ trợ', href: '#support' },
 ]
 

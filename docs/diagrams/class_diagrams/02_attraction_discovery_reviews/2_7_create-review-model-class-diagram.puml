@@ -1,0 +1,110 @@
+@startuml
+title Create Review - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -status: UserStatus = ACTIVE
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -status: BookingStatus = PENDING_PAYMENT
+  -refundRequired: Boolean = false
+  --
+  +isPaid(): Boolean
+  +isRefundable(at: DateTime): Boolean
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -ticketProductId: String
+  -timeSlotId: String [0..1]
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  --
+  +isOnSale(): Boolean
+}
+
+class TimeSlot <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String [0..1]
+  -attractionId: String [0..1]
+  -endTime: String
+  -isActive: Boolean = true
+  --
+  +isActive(): Boolean
+}
+
+class Review <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -attractionId: String
+  -bookingId: String {unique} [0..1]
+  -rating: Int
+  -comment: String [0..1]
+  -isHidden: Boolean = false
+  --
+  {static} +post(userId: String, attractionId: String, rating: Int): Review
+  +isVisible(): Boolean
+  +isAuthoredBy(userId: String): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -averageRating: Float = 0.0
+  -totalReviews: Int = 0
+  -status: AttractionStatus = DRAFT
+  --
+  +recalculateRating(rating: Float, total: Int): void
+}
+
+User "1" -- "0..*" Booking : bookings
+Reservation "1" -- "0..1" Booking : booking
+User "1" -- "0..*" Reservation : reservations
+TicketProduct "1" -- "0..*" Reservation : reservations
+TimeSlot "0..1" -- "0..*" Reservation : reservations
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+TicketProduct "0..1" *-- "0..*" TimeSlot : timeSlots
+Attraction "0..1" -- "0..*" TimeSlot : timeSlots
+User "1" -- "0..*" Review : reviews
+Attraction "1" -- "0..*" Review : reviews
+Booking "0..1" -- "0..1" Review : review
+Attraction "0..1" -- "0..*" Booking : snapshotBookings
+
+@enduml

@@ -1,0 +1,53 @@
+@startuml
+title Get My Partner Profile - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 240
+skinparam ranksep 200
+hide circle
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -status: UserStatus = ACTIVE
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class AuthSession <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -tokenHash: String {unique, hashed} [0..1]
+  -expiresAt: DateTime
+  --
+  +matches(tokenHash: String): Boolean
+  +isExpired(at: DateTime): Boolean
+}
+
+class UserProfile <<model>> {
+  -id: String {UUID}
+  -userId: String {unique}
+  -phoneNumber: String [0..1]
+  -avatarUrl: String [0..1]
+  --
+  +isComplete(): Boolean
+}
+
+User "1" *-- "0..*" AuthSession : authSessions
+User "1" *-- "0..1" UserProfile : profile
+
+@enduml

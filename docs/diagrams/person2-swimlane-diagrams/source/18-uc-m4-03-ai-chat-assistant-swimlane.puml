@@ -1,0 +1,56 @@
+@startuml
+title UC-M4.03 - Chat with AI Travel Assistant Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Guest / Customer|
+start
+:Open chatbot widget;
+:Type and send travel question;
+
+|VietTicket System|
+:Validate message length\nand rate limit;
+
+if (Message accepted?) then (Yes)
+  |Attraction Catalogue|
+  :Load relevant published\nattraction context;
+
+  |AI Service|
+  :Generate grounded answer;
+
+  |VietTicket System|
+  if (Reply generated?) then (Yes)
+    :Append reply to conversation;
+
+    |Guest / Customer|
+    :Read answer;
+    :Continue chatting or\nclear local history;
+  else (No)
+    |Guest / Customer|
+    :Display request or\nservice error;
+  endif
+else (No)
+  |Guest / Customer|
+  :Display message-length\nor rate-limit warning;
+endif
+
+|Guest / Customer|
+stop
+@enduml

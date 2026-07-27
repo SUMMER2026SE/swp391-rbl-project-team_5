@@ -1,0 +1,33 @@
+@startuml
+title Refund Request State Diagram
+
+top to bottom direction
+hide empty description
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam linetype polyline
+skinparam ArrowColor black
+skinparam state {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  StartColor black
+  EndColor black
+}
+
+state "Pending" as PENDING
+state "Processing" as PROCESSING
+state "Approved" as APPROVED
+state "Rejected" as REJECTED
+
+[*] -down-> PENDING : Refund requested
+
+PENDING -down-> PROCESSING : [staff accepts request]
+PROCESSING -left-> REJECTED : [request rejected]
+PROCESSING -right-> APPROVED : [refund completed]
+
+APPROVED --> [*]
+REJECTED --> [*]
+
+@enduml

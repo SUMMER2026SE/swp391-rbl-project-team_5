@@ -1,0 +1,22 @@
+@startuml
+title Review Moderation Lifecycle - 3.9 (isHidden)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+state "VISIBLE (isHidden = false)" as VISIBLE
+state "HIDDEN (isHidden = true)" as HIDDEN
+
+[*] --> VISIBLE : Customer posts review\n(completed booking)
+VISIBLE --> HIDDEN : Admin hides (policy violation)
+HIDDEN --> VISIBLE : Admin unhides
+
+VISIBLE : Shown on attraction detail
+HIDDEN : Removed from public view
+@enduml

@@ -1,0 +1,56 @@
+@startuml
+title Booking State Diagram
+
+top to bottom direction
+hide empty description
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 55
+skinparam ranksep 55
+skinparam ArrowColor black
+skinparam state {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  StartColor black
+  EndColor black
+}
+
+state "Pending Payment" as PENDING_PAYMENT
+state "Pending Partner" as PENDING_PARTNER
+state "Confirmed" as CONFIRMED
+state "Refund Requested" as REFUND_REQUESTED
+state "Cancelled" as CANCELLED
+state "Completed" as COMPLETED
+state "No Show" as NO_SHOW
+state "Refunded" as REFUNDED
+state FINAL <<end>>
+
+[*] -down-> PENDING_PAYMENT : Booking created
+
+PENDING_PAYMENT --> PENDING_PARTNER : [approval required]
+PENDING_PAYMENT --> CONFIRMED : [auto-approved]
+PENDING_PAYMENT --> CANCELLED : [payment expired]
+
+PENDING_PARTNER -right-> CONFIRMED : [approved]
+PENDING_PARTNER -down-> CANCELLED : [rejected or timeout]
+
+CONFIRMED -down-> REFUND_REQUESTED : [refund requested]
+CONFIRMED --> CANCELLED : [cancelled]
+CONFIRMED --> COMPLETED : [visit completed]
+CONFIRMED --> NO_SHOW : [visit missed]
+
+COMPLETED -[hidden]right-> NO_SHOW
+
+REFUND_REQUESTED -up-> CONFIRMED : [rejected]
+REFUND_REQUESTED -down-> REFUNDED : [approved]
+CANCELLED -right-> REFUNDED : [refund required]
+
+COMPLETED --> FINAL
+NO_SHOW --> FINAL
+REFUNDED --> FINAL
+CANCELLED --> FINAL : [no refund]
+
+@enduml

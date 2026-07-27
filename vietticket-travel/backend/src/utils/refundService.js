@@ -112,13 +112,20 @@ function getRefundEligibility(booking, now = new Date()) {
       ?? DEFAULT_REFUND_CUTOFF_HOURS,
   );
   const deadline = getRefundDeadline(booking);
-  const customerRequest = (booking?.refundRequests || []).find((request) => (
+  const customerRequest = [
+    ...(booking?.refundRequests || []),
+    ...(booking?.refundRequestsTargeting || []),
+  ].find((request) => (
     !request.type || request.type === 'CUSTOMER_CANCELLATION'
   ));
   const hasUsedTicket = (booking?.ticketInstances || []).some(
     (ticket) => ticket.status === 'USED',
   );
-  const hasCapturedPayment = (booking?.payments || []).some((payment) => (
+  const paymentCandidates = [
+    ...(booking?.payments || []),
+    ...(booking?.recoveryCaseAsReplacement?.fundingBooking?.payments || []),
+  ];
+  const hasCapturedPayment = paymentCandidates.some((payment) => (
     payment.status === 'SUCCESS'
     && !payment.isDuplicate
     && /vnpay/i.test(payment.paymentGateway || '')

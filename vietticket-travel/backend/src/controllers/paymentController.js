@@ -25,6 +25,7 @@ const {
 const { sendRefundRequestReceivedEmail } = require('../utils/mailer');
 const { formatBookingReference } = require('../utils/bookingReference');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
+const { awardPointsForBooking } = require('../services/loyaltyService');
 const { getFrontendUrl } = require('../config/runtimeConfig');
 const {
   MIN_VNPAY_AMOUNT,
@@ -545,6 +546,13 @@ async function reconcileVnpayPayment(query) {
                 reservation.ticketProductId,
                 reservation.quantity,
               );
+              // Cộng điểm thưởng cho khách khi đơn được xác nhận ngay sau thanh toán.
+              await awardPointsForBooking(tx, {
+                id: current.id,
+                userId: current.userId,
+                totalAmount: current.totalAmount,
+                isForecastTrainingSample: current.isForecastTrainingSample,
+              });
               bookingStatus = 'CONFIRMED';
             }
             return {
@@ -776,6 +784,28 @@ async function createRefundRequest(req, res, next) {
             refundRequests: {
               select: { id: true, type: true, status: true },
             },
+            refundRequestsTargeting: {
+              select: { id: true, type: true, status: true },
+            },
+            recoveryCaseAsReplacement: {
+              select: {
+                fundingBooking: {
+                  select: {
+                    id: true,
+                    payments: {
+                      where: { status: 'SUCCESS', isDuplicate: false },
+                      select: {
+                        id: true,
+                        amount: true,
+                        status: true,
+                        isDuplicate: true,
+                        paymentGateway: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         });
 
@@ -786,10 +816,22 @@ async function createRefundRequest(req, res, next) {
         if (!eligibility.refundable) {
           throw httpError(409, eligibility.notRefundableReason);
         }
-        const capturedPayment = booking.payments[0];
+        const directPayment = booking.payments.find((payment) => (
+          /vnpay/i.test(payment.paymentGateway || '')
+        ));
+        const fundingBooking = booking.recoveryCaseAsReplacement?.fundingBooking || null;
+        const fundingPayment = fundingBooking?.payments?.find((payment) => (
+          /vnpay/i.test(payment.paymentGateway || '')
+        ));
+        const paymentOwnerBooking = directPayment ? booking : fundingBooking;
+        const capturedPayment = directPayment || fundingPayment;
+        if (!paymentOwnerBooking || !capturedPayment) {
+          throw httpError(409, 'Không tìm thấy giao dịch thanh toán gốc.');
+        }
         if (eligibility.refundAmount > Number(capturedPayment.amount)) {
           throw httpError(409, 'Số tiền hoàn vượt quá giao dịch thanh toán gốc.');
         }
+        const isRecoveryFunded = paymentOwnerBooking.id !== booking.id;
 
         const claimed = await tx.booking.updateMany({
           where: { id: bookingId, status: 'CONFIRMED' },
@@ -801,8 +843,11 @@ async function createRefundRequest(req, res, next) {
 
         const refundRequest = await tx.refundRequest.create({
           data: {
-            bookingId,
-            requestKey: `customer:${bookingId}`,
+            bookingId: paymentOwnerBooking.id,
+            targetBookingId: isRecoveryFunded ? booking.id : null,
+            requestKey: isRecoveryFunded
+              ? `recovery-customer:${booking.id}`
+              : `customer:${booking.id}`,
             requestedById: req.user.id,
             type: 'CUSTOMER_CANCELLATION',
             mandatory: false,
@@ -881,6 +926,25 @@ async function getRefundPreview(req, res, next) {
         },
         ticketInstances: { select: { status: true } },
         refundRequests: { select: { id: true, type: true, status: true } },
+        refundRequestsTargeting: { select: { id: true, type: true, status: true } },
+        recoveryCaseAsReplacement: {
+          select: {
+            fundingBooking: {
+              select: {
+                id: true,
+                payments: {
+                  where: { status: 'SUCCESS', isDuplicate: false },
+                  select: {
+                    amount: true,
+                    status: true,
+                    isDuplicate: true,
+                    paymentGateway: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 

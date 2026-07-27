@@ -121,6 +121,7 @@ const mockPrisma = {
   booking: {
     create: jest.fn(),
     findMany: jest.fn(),
+    findFirst: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
@@ -154,6 +155,7 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
+    upsert: jest.fn(),
     aggregate: jest.fn(),
   },
   refundTransaction: {
@@ -314,6 +316,13 @@ const mockPrisma = {
   liveTripEvent: {
     findMany: jest.fn(),
     create: jest.fn(),
+  },
+  loyaltyTransaction: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    aggregate: jest.fn(),
   },
   $transaction: jest.fn(),
   $queryRaw: jest.fn(),

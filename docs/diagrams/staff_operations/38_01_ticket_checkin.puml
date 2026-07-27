@@ -1,0 +1,33 @@
+@startuml
+title 3.8.1 Ticket Check-in (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner Staff|
+start
+:Open /staff/checkin at the gate;
+|System|
+:Load today's bookings for assigned attractions\nGET /api/staff/bookings/today;
+|Partner Staff|
+repeat :Check in a ticket;
+  :Scan / enter ticket QR token;
+  |System|
+  :Look up ticket\nGET /api/staff/checkin/:token (BR-22, BR-23);
+  if (Ticket valid & assigned & not used?) then (No)
+    |Partner Staff|
+    :Error toast\n(not found / already used / unassigned);
+  else (Yes)
+    |Partner Staff|
+    :Confirm ticket + booking;
+    |System|
+    :POST /api/staff/checkin/:token\nmark TicketInstance = USED;
+    :Toast "Check-in thanh cong.";
+  endif
+repeat while (Check in another ticket?) is (Yes) not (No)
+
+|System|
+stop
+@enduml

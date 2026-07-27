@@ -1,0 +1,34 @@
+@startuml
+title 3.6.8 Ticket Product Management (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/attractions/:id/tickets;
+|System|
+:Load ticket products\nGET /api/partners/attractions/:id/tickets;
+:Render list (name, type, price, status) - BR-17;
+|Partner|
+switch (Row action?)
+case (New)
+  :Open ticket product form;
+case (Edit)
+  :Open ticket product form (prefilled);
+case (Activate / Deactivate)
+  |System|
+  :Toggle ticket status;
+  :Toast "Da kich hoat goi ve." /\n"Da tam dung goi ve.";
+case (Delete)
+  |Partner|
+  :Confirm delete;
+  |System|
+  :Remove package;
+  :Toast "Da xoa goi ve.";
+endswitch
+|System|
+stop
+@enduml

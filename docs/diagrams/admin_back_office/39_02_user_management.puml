@@ -1,0 +1,34 @@
+@startuml
+title 3.9.2 User Management (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin/users;
+|System|
+:Load users\nGET /api/admin/users;
+|Admin|
+:Search / filter (keyword, role);
+if (Lock / Unlock an account?) then (Yes)
+  |System|
+  if (Target is own account?) then (Yes)
+    |Admin|
+    :Show "Ban khong the tu khoa\ntai khoan cua chinh minh." (BR-25);
+  else (No)
+    |Admin|
+    :Confirm action;
+    |System|
+    :PATCH /api/admin/users/:id/status (BR-24);
+    :Toast "Da khoa / mo khoa tai khoan thanh cong";
+  endif
+else (No)
+  |Admin|
+  :Browse the user list;
+endif
+|System|
+stop
+@enduml

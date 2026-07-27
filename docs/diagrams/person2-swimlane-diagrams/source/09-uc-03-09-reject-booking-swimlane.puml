@@ -1,0 +1,65 @@
+@startuml
+title UC-03-09 - Reject Booking Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Partner|
+start
+:Select a PENDING_PARTNER booking;
+:Enter reason and click Reject;
+
+|VietTicket System|
+:Validate ownership, status\nand rejection reason;
+
+if (Rejection valid?) then (Yes)
+  |Booking Database|
+  :Begin transaction;
+  :Check successful VNPay payment;
+  :Release committed inventory\nwhen applicable;
+  :Set Reservation and Booking CANCELLED;
+
+  if (Customer already paid?) then (Yes)
+    :Set refundRequired;
+    :Create a full PENDING\nRefundRequest when absent;
+  else (No)
+    :Skip refund-request creation;
+  endif
+
+  :Commit transaction;
+
+  |Email Service|
+  :Send booking-rejected notice;
+
+  |VietTicket System|
+  :Emit realtime update;
+
+  |Partner|
+  :View rejection success;
+else (No)
+  |VietTicket System|
+  :Return validation or\naccess error;
+
+  |Partner|
+  :Correct the request;
+endif
+
+|Partner|
+stop
+@enduml

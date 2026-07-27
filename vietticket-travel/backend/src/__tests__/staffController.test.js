@@ -222,6 +222,11 @@ describe('processRefundRequest', () => {
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     // Đọc trước (ngoài transaction) để quyết định có gọi cổng VNPay không.
     prisma.refundRequest.findUnique.mockResolvedValue(request);
@@ -285,6 +290,36 @@ describe('processRefundRequest', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  test('waits for the Rescue difference refund before approving replacement cancellation', async () => {
+    const request = refundFixture({
+      requestKey: 'recovery-customer:booking-replacement',
+      targetBookingId: 'booking-replacement',
+      booking: {
+        ...refundFixture().booking,
+        id: 'booking-vnpay-root',
+        status: 'CANCELLED',
+      },
+      targetBooking: {
+        id: 'booking-replacement',
+        status: 'REFUND_REQUESTED',
+        user: { fullName: 'Nguyen Van A', email: 'a@example.com' },
+      },
+    });
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    prisma.refundRequest.count.mockResolvedValue(1);
+    const { req, res, next } = makeReqRes({
+      params: { refundId: request.id },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(prisma.refundRequest.updateMany).not.toHaveBeenCalled();
+    expect(refundViaVnpay).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   test('calls VNPay refund for an online payment before updating the DB', async () => {
     const request = refundFixture({
       booking: {
@@ -305,6 +340,11 @@ describe('processRefundRequest', () => {
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     prisma.refundRequest.findUnique.mockResolvedValue(request);
     prisma.$transaction.mockImplementation((callback) => callback(tx));
@@ -406,6 +446,11 @@ describe('processRefundRequest', () => {
       reservation: { update: jest.fn() },
       ticketInstance: { updateMany: jest.fn() },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     prisma.refundRequest.findUnique.mockResolvedValue(request);
     prisma.refundTransaction.update
@@ -517,6 +562,11 @@ describe('reconcileRefundRequest', () => {
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+      },
+      user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
     };
     prisma.$transaction.mockImplementation((callback) => callback(tx));
     const { req, res, next } = makeReqRes({

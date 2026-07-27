@@ -3,3 +3,10 @@ scratch/
 outputs/
 __pycache__/
 VietTicket_Software_Design_Specification.md
+
+# Ban nen trung lap cua docs/diagrams/class_diagrams/ - giu tren may de gui nhom,
+# khong dua vao repo de tranh thua 11MB va nhap nhang dau la ban goc.
+docs/diagrams/*.zip
+
+# Cau hinh Claude Code rieng tung may (launch.json van duoc commit de ca nhom dung).
+.claude/settings.local.json

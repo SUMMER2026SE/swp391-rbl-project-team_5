@@ -1,0 +1,22 @@
+@startuml
+title Attraction Publication - 3.6 (AttractionPublicationStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> PAUSED : Attraction created (default)
+PAUSED --> ACTIVE : First approval /\nPartner opens selling
+ACTIVE --> PAUSED : Partner pauses selling
+ACTIVE --> ARCHIVED : Partner archives
+PAUSED --> ARCHIVED : Partner archives
+ARCHIVED --> [*]
+
+ACTIVE : On public listings\n(if status = APPROVED)
+PAUSED : Hidden from sale
+@enduml

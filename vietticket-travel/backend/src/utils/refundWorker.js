@@ -11,6 +11,7 @@ const {
   classifyVnpayReconciliationResult,
   classifyVnpayRefundResult,
   finalizeSuccessfulRefund,
+  isLocalDemoPayment,
   toVndAmount,
 } = require('../services/refundLifecycleService');
 const { runWithJobLease } = require('./jobLease');
@@ -148,17 +149,36 @@ async function sweepPendingRefundTransactions({ limit = 20 } = {}) {
         where: { id: transaction.id },
         data: { submittedAt },
       });
-      const gatewayResult = await refundViaVnpay({
-        payment: transaction.payment,
-        amount,
-        transactionType: transaction.transactionType || (amount >= capturedAmount ? '02' : '03'),
-        createBy: 'refund-worker',
-        ipAddr: '127.0.0.1',
-        orderInfo: transaction.refundRequest?.type === 'DUPLICATE_PAYMENT'
-          ? `Hoan tien giao dich trung don hang ${transaction.bookingId}`
-          : `Hoan tien don hang ${transaction.bookingId}`,
-        requestId: transaction.gatewayRequestId,
-      });
+      const transactionType = transaction.transactionType
+        || (amount >= capturedAmount ? '02' : '03');
+      const gatewayResult = isLocalDemoPayment(transaction.payment)
+        ? {
+          success: true,
+          responseCode: '00',
+          transactionStatus: '00',
+          message: 'Giao dịch hoàn tiền demo thành công.',
+          rawRequest: {
+            vnp_RequestId: transaction.gatewayRequestId,
+            vnp_TxnRef: transaction.payment.transactionId,
+            vnp_Amount: amount * 100,
+          },
+          raw: {
+            vnp_ResponseCode: '00',
+            vnp_TransactionStatus: '00',
+            vnp_TransactionNo: `DEMO${Date.now()}`,
+          },
+        }
+        : await refundViaVnpay({
+          payment: transaction.payment,
+          amount,
+          transactionType,
+          createBy: 'refund-worker',
+          ipAddr: '127.0.0.1',
+          orderInfo: transaction.refundRequest?.type === 'DUPLICATE_PAYMENT'
+            ? `Hoan tien giao dich trung don hang ${transaction.bookingId}`
+            : `Hoan tien don hang ${transaction.bookingId}`,
+          requestId: transaction.gatewayRequestId,
+        });
       const outcome = classifyVnpayRefundResult(gatewayResult);
 
       if (outcome === REFUND_GATEWAY_OUTCOME.SUCCESS) {

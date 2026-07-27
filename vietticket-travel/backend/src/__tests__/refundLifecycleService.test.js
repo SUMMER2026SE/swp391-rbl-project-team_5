@@ -9,9 +9,11 @@ const {
   assertRefundCanBeSubmitted,
   classifyVnpayReconciliationResult,
   classifyVnpayRefundResult,
+  finalizeSuccessfulRefund,
   getRefundProcessingEligibility,
   getPaymentRefundBalance,
 } = require('../services/refundLifecycleService');
+const { releaseInventory } = require('../utils/refundService');
 
 describe('refund processing eligibility', () => {
   test('blocks legacy payments that cannot be safely refunded through VNPay', () => {
@@ -129,5 +131,306 @@ describe('refund balance', () => {
         status: 'SUCCESS',
       }],
     })).toThrow(/vượt quá số dư/i);
+  });
+});
+
+describe('VietTicket Rescue refund finalization', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  function makeTx(refundRequest) {
+    return {
+      refundRequest: {
+        findUnique: jest.fn().mockResolvedValue(refundRequest),
+        count: jest.fn().mockResolvedValue(0),
+        update: jest.fn().mockResolvedValue({ ...refundRequest, status: 'APPROVED' }),
+      },
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
+      booking: {
+        findUnique: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      recoveryCase: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'case-1',
+          originalBookingId: refundRequest.booking.id,
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+  }
+
+  test('a difference refund does not mislabel the source booking as fully refunded', async () => {
+    const refundRequest = {
+      id: 'refund-difference',
+      requestKey: 'recovery-difference:case-1',
+      type: 'PARTNER_CANCELLATION',
+      status: 'PROCESSING',
+      booking: {
+        id: 'booking-old',
+        status: 'CANCELLED',
+        ticketInstances: [{ id: 'ticket-old', status: 'EXPIRED' }],
+        reservation: { status: 'CANCELLED', ticketProduct: {} },
+      },
+    };
+    const tx = makeTx(refundRequest);
+
+    await finalizeSuccessfulRefund(tx, {
+      refundRequestId: refundRequest.id,
+      refundTransactionId: 'transaction-1',
+    });
+
+    expect(releaseInventory).not.toHaveBeenCalled();
+    expect(tx.ticketInstance.updateMany).not.toHaveBeenCalled();
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-old' },
+      data: { refundRequired: false },
+    });
+    expect(tx.recoveryCase.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('a customer cancellation refunds and releases the Rescue replacement', async () => {
+    const refundRequest = {
+      id: 'refund-recovery-customer',
+      requestKey: 'recovery-customer:booking-replacement',
+      targetBookingId: 'booking-replacement',
+      type: 'CUSTOMER_CANCELLATION',
+      status: 'PROCESSING',
+      amount: 27000,
+      booking: {
+        id: 'booking-vnpay-root',
+        status: 'CANCELLED',
+        ticketInstances: [{ id: 'ticket-root', status: 'EXPIRED' }],
+        reservation: { status: 'CANCELLED', ticketProduct: {} },
+      },
+    };
+    const replacement = {
+      id: 'booking-replacement',
+      status: 'REFUND_REQUESTED',
+      ticketInstances: [{ id: 'ticket-replacement', status: 'VALID' }],
+      reservation: {
+        id: 'reservation-replacement',
+        status: 'CONFIRMED',
+        ticketProduct: { attractionId: 'attraction-replacement' },
+      },
+    };
+    const tx = makeTx(refundRequest);
+    tx.booking.findUnique.mockResolvedValue(replacement);
+
+    await finalizeSuccessfulRefund(tx, {
+      refundRequestId: refundRequest.id,
+      refundTransactionId: 'transaction-recovery-customer',
+    });
+
+    expect(releaseInventory).toHaveBeenCalledWith(tx, replacement);
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-replacement' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-vnpay-root' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+  });
+
+  test('a full Rescue refund closes the RecoveryCase after gateway success', async () => {
+    const refundRequest = {
+      id: 'refund-full',
+      requestKey: 'recovery-full:case-1',
+      type: 'PARTNER_CANCELLATION',
+      status: 'PROCESSING',
+      amount: 500000,
+      booking: {
+        id: 'booking-old',
+        status: 'CANCELLED',
+        ticketInstances: [{ id: 'ticket-old', status: 'EXPIRED' }],
+        payments: [{
+          id: 'payment-old',
+          amount: 500000,
+          status: 'SUCCESS',
+          isDuplicate: false,
+          paymentGateway: 'VNPAY',
+        }],
+        refundTransactions: [],
+        reservation: { status: 'CANCELLED', ticketProduct: {} },
+      },
+    };
+    const tx = makeTx(refundRequest);
+
+    await finalizeSuccessfulRefund(tx, {
+      refundRequestId: refundRequest.id,
+      refundTransactionId: 'transaction-1',
+      now: new Date('2026-07-26T12:00:00.000Z'),
+    });
+
+    expect(tx.recoveryCase.updateMany).toHaveBeenCalledWith({
+      where: { id: 'case-1', status: 'REFUND_PENDING' },
+      data: {
+        status: 'REFUNDED',
+        completedAt: new Date('2026-07-26T12:00:00.000Z'),
+        version: { increment: 1 },
+      },
+    });
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-old' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+  });
+
+  test('a repeated Rescue cancellation closes only its replacement while older money is pending', async () => {
+    const refundRequest = {
+      id: 'refund-current-value',
+      requestKey: 'recovery-full:case-repeat',
+      type: 'PARTNER_CANCELLATION',
+      status: 'PROCESSING',
+      amount: 30000,
+      booking: {
+        id: 'booking-vnpay-root',
+        status: 'CANCELLED',
+        ticketInstances: [{ id: 'ticket-root', status: 'EXPIRED' }],
+        payments: [{
+          id: 'payment-root',
+          amount: 520000,
+          status: 'SUCCESS',
+          isDuplicate: false,
+          paymentGateway: 'VNPAY',
+        }],
+        refundTransactions: [],
+        reservation: { status: 'CANCELLED', ticketProduct: {} },
+      },
+    };
+    const tx = makeTx(refundRequest);
+    tx.refundRequest.count.mockResolvedValue(1);
+    tx.recoveryCase.findUnique.mockResolvedValue({
+      id: 'case-repeat',
+      originalBookingId: 'booking-replacement',
+    });
+    tx.booking.findUnique.mockResolvedValue({
+      id: 'booking-replacement',
+      status: 'CANCELLED',
+      ticketInstances: [{ id: 'ticket-replacement', status: 'EXPIRED' }],
+    });
+
+    await finalizeSuccessfulRefund(tx, {
+      refundRequestId: refundRequest.id,
+      refundTransactionId: 'transaction-current-value',
+    });
+
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-replacement' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-vnpay-root' },
+      data: { refundRequired: true },
+    });
+    expect(tx.recoveryCase.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'case-repeat', status: 'REFUND_PENDING' },
+    }));
+  });
+
+  test('marks the VNPay root fully refunded when chain refunds reach the captured amount', async () => {
+    const refundRequest = {
+      id: 'refund-final-value',
+      requestKey: 'recovery-full:case-final',
+      type: 'PARTNER_CANCELLATION',
+      status: 'PROCESSING',
+      amount: 30000,
+      booking: {
+        id: 'booking-vnpay-root',
+        status: 'CANCELLED',
+        ticketInstances: [{ id: 'ticket-root', status: 'EXPIRED' }],
+        payments: [{
+          id: 'payment-root',
+          amount: 520000,
+          status: 'SUCCESS',
+          isDuplicate: false,
+          paymentGateway: 'VNPAY',
+        }],
+        refundTransactions: [{
+          paymentId: 'payment-root',
+          amount: 490000,
+          status: 'SUCCESS',
+        }],
+        reservation: { status: 'CANCELLED', ticketProduct: {} },
+      },
+    };
+    const tx = makeTx(refundRequest);
+    tx.recoveryCase.findUnique.mockResolvedValue({
+      id: 'case-final',
+      originalBookingId: 'booking-replacement',
+    });
+    tx.booking.findUnique.mockResolvedValue({
+      id: 'booking-replacement',
+      status: 'CANCELLED',
+      ticketInstances: [{ id: 'ticket-replacement', status: 'EXPIRED' }],
+    });
+
+    await finalizeSuccessfulRefund(tx, {
+      refundRequestId: refundRequest.id,
+      refundTransactionId: 'transaction-final-value',
+    });
+
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-vnpay-root' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+    expect(tx.ticketInstance.updateMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking-vnpay-root',
+        status: { in: ['VALID', 'EXPIRED'] },
+      },
+      data: { status: 'REFUNDED' },
+    });
+  });
+
+  test('finalizes an immediate fallback refund even when no RecoveryCase was created', async () => {
+    const refundRequest = {
+      id: 'refund-no-option',
+      requestKey: 'recovery-full-booking:booking-replacement',
+      type: 'PARTNER_CANCELLATION',
+      status: 'PROCESSING',
+      amount: 30000,
+      booking: {
+        id: 'booking-vnpay-root',
+        status: 'CANCELLED',
+        ticketInstances: [{ id: 'ticket-root', status: 'EXPIRED' }],
+        payments: [{
+          id: 'payment-root',
+          amount: 520000,
+          status: 'SUCCESS',
+          isDuplicate: false,
+          paymentGateway: 'VNPAY',
+        }],
+        refundTransactions: [{
+          paymentId: 'payment-root',
+          amount: 490000,
+          status: 'SUCCESS',
+        }],
+        reservation: { status: 'CANCELLED', ticketProduct: {} },
+      },
+    };
+    const tx = makeTx(refundRequest);
+    tx.booking.findUnique.mockResolvedValue({
+      id: 'booking-replacement',
+      status: 'CANCELLED',
+      ticketInstances: [{ id: 'ticket-replacement', status: 'EXPIRED' }],
+    });
+
+    await finalizeSuccessfulRefund(tx, {
+      refundRequestId: refundRequest.id,
+      refundTransactionId: 'transaction-no-option',
+    });
+
+    expect(tx.recoveryCase.findUnique).not.toHaveBeenCalled();
+    expect(tx.recoveryCase.updateMany).not.toHaveBeenCalled();
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-replacement' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-vnpay-root' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
   });
 });

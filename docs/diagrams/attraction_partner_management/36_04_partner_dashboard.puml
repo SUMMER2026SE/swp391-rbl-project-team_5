@@ -1,0 +1,39 @@
+@startuml
+title 3.6.4 Partner Dashboard (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/dashboard;
+|System|
+:Load summary\nGET /api/partners/dashboard;
+if (Load ok?) then (No)
+  |Partner|
+  :Show error toast;
+else (Yes)
+  |System|
+  :Render KPI cards, recent bookings,\npending bookings, quick links;
+  |Partner|
+  if (Act on a pending booking?) then (Approve)
+    :Click Approve\nPATCH /api/partners/bookings/:id/approve;
+    |System|
+    :Set booking = CONFIRMED\n+ confirm stock + create QR ticket (BR-16);
+    :Notify customer (approved);
+  elseif (Reject) then (Reject)
+    |Partner|
+    :Click Reject (enter reason);
+    |System|
+    :Set booking = CANCELLED + release stock;
+    :Refund paid customer 100% + notify;
+  else (Just view)
+    |Partner|
+    :Browse metrics / open quick links;
+  endif
+endif
+|System|
+stop
+@enduml

@@ -1,0 +1,60 @@
+@startuml
+title Hide Attraction - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -reviewedById: String [0..1]
+  -title: String
+  -rejectionReason: String [0..1]
+  -status: AttractionStatus = DRAFT
+  -publicationStatus: AttractionPublicationStatus = PAUSED
+  -reviewedAt: DateTime [0..1]
+  --
+  +suspend(reason: String, reviewerId: String): void
+  +changePublication(status: AttractionPublicationStatus): void
+  +isPublished(): Boolean
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -status: UserStatus = ACTIVE
+  --
+  +isVerified(): Boolean
+  +isActive(): Boolean
+}
+
+class AuditLog <<model>> {
+  -id: String {UUID}
+  -actorId: String [0..1]
+  -entityId: String [0..1]
+  -action: String
+  -entityType: String
+  -metadata: Json [0..1]
+  --
+  +concerns(entityType: String, entityId: String): Boolean
+}
+
+User "0..1" -- "0..*" AuditLog : auditLogs
+User "0..1" -- "0..*" Attraction : reviewedAttractions
+
+@enduml

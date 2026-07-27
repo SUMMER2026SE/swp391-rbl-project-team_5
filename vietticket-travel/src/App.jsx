@@ -6,13 +6,15 @@ import { SocketProvider } from './context/SocketContext.jsx'
 import { useLocation } from 'react-router-dom'
 import AppRoutes from './routes/AppRoutes.jsx'
 import ChatbotWidget from './components/ChatbotWidget.jsx'
+import RecoveryAlert from './components/RecoveryAlert.jsx'
 
 function ChatbotWithRouteCheck() {
   const location = useLocation()
   const isHiddenRoute =
     location.pathname.startsWith('/admin') ||
     location.pathname.startsWith('/partner') ||
-    location.pathname.startsWith('/staff')
+    location.pathname.startsWith('/staff') ||
+    location.pathname.startsWith('/rescue')
   
   if (isHiddenRoute) return null
   return <ChatbotWidget />
@@ -25,6 +27,7 @@ function App() {
       <AuthProvider>
         <SocketProvider>
           <AppRoutes />
+          <RecoveryAlert />
           <ChatbotWithRouteCheck />
           <ToastContainer
             autoClose={2600}

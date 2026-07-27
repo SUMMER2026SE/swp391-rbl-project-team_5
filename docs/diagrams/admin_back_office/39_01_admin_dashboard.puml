@@ -1,0 +1,25 @@
+@startuml
+title 3.9.1 Admin Dashboard (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Admin|
+start
+:Open /admin;
+|System|
+:Load aggregated metrics\nGET /api/admin/dashboard;
+if (Load ok?) then (No)
+  |Admin|
+  :Show error toast;
+else (Yes)
+  |System|
+  :Render KPI cards + trend charts\n(users, partners, attractions, bookings, revenue);
+  |Admin|
+  :Navigate to a management page (optional);
+endif
+|System|
+stop
+@enduml

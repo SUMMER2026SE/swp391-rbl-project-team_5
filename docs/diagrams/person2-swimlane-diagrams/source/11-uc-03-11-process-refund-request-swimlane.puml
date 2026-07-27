@@ -1,0 +1,69 @@
+@startuml
+title UC-03-11 - Process Refund Request Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|Staff / Admin|
+start
+:Open refund queue;
+:Select a PENDING request;
+:Choose Approve or Reject\nand enter notes;
+
+|VietTicket System|
+:Validate role, request status,\naction, notes and refund amount;
+
+if (Action can be processed?) then (Yes)
+  if (Approve?) then (Yes)
+    |Booking Database|
+    :Load original successful\nVNPay payment data;
+
+    |VietTicket System|
+    :Create signed refund request;
+
+    |VNPay|
+    :Process full or partial refund;
+    :Return gateway result;
+
+    |Booking Database|
+    :Record gateway transaction result;
+    :When accepted, approve request,\nrefund booking and tickets,\nand release inventory;
+    :When failed, mark for\nreconciliation or manual handling;
+  else (No)
+    |Booking Database|
+    :Reject RefundRequest;
+    :Restore customer-initiated\nBooking to CONFIRMED;
+  endif
+
+  |VietTicket System|
+  :Send refund-result email;
+
+  |Staff / Admin|
+  :View processing result;
+else (No)
+  |VietTicket System|
+  :Return status, data\nor authorization error;
+
+  |Staff / Admin|
+  :Display actionable error;
+endif
+
+|Staff / Admin|
+stop
+@enduml

@@ -3,11 +3,12 @@ const { Prisma } = require('@prisma/client');
 const { sanitizeUser } = require('./authController');
 const { validateKyc } = require('../utils/partnerValidators');
 const { isValidPhoneNumber } = require('../utils/validators');
-const { emitBookingStatusUpdated } = require('../realtime/events');
+const { emitBookingStatusUpdated, emitRecoveryCaseEvent } = require('../realtime/events');
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
 const {
   sendBookingCancelledByPartnerEmail,
   sendBookingRejectedEmail,
+  sendRecoveryCaseCreatedEmail,
 } = require('../utils/mailer');
 const {
   confirmReservationAndStock,
@@ -20,7 +21,15 @@ const {
   getManualApprovalDeadline,
 } = require('../utils/activityTime');
 const { expirePendingPartnerBooking } = require('../utils/pendingPartnerWorker');
-const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
+const {
+  queueMandatoryRefund,
+  queueRecoveryFullRefund,
+} = require('../services/mandatoryRefundService');
+const {
+  createRecoveryCaseForCancellation,
+  resolveRecoveryFundingBooking,
+} = require('../services/recoveryService');
+const { awardPointsForBooking } = require('../services/loyaltyService');
 const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
 const { formatBookingReference } = require('../utils/bookingReference');
 const {
@@ -1153,6 +1162,14 @@ async function approveBooking(req, res, next) {
           reservation.quantity,
         );
       }
+
+      // Cộng điểm thưởng khi đối tác duyệt đơn (đơn chuyển sang CONFIRMED).
+      await awardPointsForBooking(tx, {
+        id: current.id,
+        userId: current.userId,
+        totalAmount: current.totalAmount,
+        isForecastTrainingSample: current.isForecastTrainingSample,
+      });
     });
 
     emitBookingStatusUpdated({
@@ -1423,6 +1440,15 @@ async function cancelConfirmedBooking(req, res, next) {
                   partnerId: true,
                   openTime: true,
                   closeTime: true,
+                  address: true,
+                  city: true,
+                  district: true,
+                  latitude: true,
+                  longitude: true,
+                  environment: true,
+                  images: {
+                    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+                  },
                 },
               },
             },
@@ -1455,7 +1481,7 @@ async function cancelConfirmedBooking(req, res, next) {
       });
     }
 
-    await prisma.$transaction(async (tx) => {
+    const cancellationResult = await prisma.$transaction(async (tx) => {
       const current = await tx.booking.findUnique({ where: { id: bookingId }, include });
       if (!current || current.isForecastTrainingSample || current.status !== 'CONFIRMED') {
         throw bookingConflict();
@@ -1495,12 +1521,40 @@ async function cancelConfirmedBooking(req, res, next) {
           data: { usedCount: { decrement: 1 } },
         });
       }
+      let recoveryCase = null;
       if (hasPaid) {
-        await queueMandatoryRefund(tx, current, {
-          type: 'PARTNER_CANCELLATION',
-          reason: `Đối tác hủy đơn đã xác nhận. Lý do: ${reason}`,
+        recoveryCase = await createRecoveryCaseForCancellation(tx, current, {
+          trigger: 'PARTNER_CANCELLATION',
+          reason,
           now,
         });
+        if (!recoveryCase) {
+          const fundingBooking = await resolveRecoveryFundingBooking(tx, current);
+          if (fundingBooking) {
+            const queuedRefund = await queueRecoveryFullRefund(tx, fundingBooking, {
+              cancelledBookingId: current.id,
+              amount: Number(current.totalAmount),
+              type: 'PARTNER_CANCELLATION',
+              reason: `Đối tác hủy đơn đã xác nhận và không còn phương án thay thế phù hợp. Lý do: ${reason}`,
+              now,
+            });
+            if (!queuedRefund.refundRequest) {
+              throw bookingConflict('Không tìm thấy giao dịch thanh toán gốc để hoàn tiền an toàn.');
+            }
+            if (fundingBooking.id !== current.id) {
+              await tx.booking.update({
+                where: { id: fundingBooking.id },
+                data: { refundRequired: true },
+              });
+            }
+          } else {
+            await queueMandatoryRefund(tx, current, {
+              type: 'PARTNER_CANCELLATION',
+              reason: `Đối tác hủy đơn đã xác nhận. Lý do: ${reason}`,
+              now,
+            });
+          }
+        }
       }
       await writeAuditLog({
         client: tx,
@@ -1508,30 +1562,69 @@ async function cancelConfirmedBooking(req, res, next) {
         action: 'PARTNER_CANCELLED_CONFIRMED_BOOKING',
         entityType: 'Booking',
         entityId: bookingId,
-        metadata: { reason, refundRequired: hasPaid },
+        metadata: {
+          reason,
+          refundRequired: hasPaid,
+          recoveryCaseId: recoveryCase?.id || null,
+          refundQueuedImmediately: hasPaid && !recoveryCase,
+        },
       });
+      return { hasPaid, recoveryCase };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
+    const recoveryCase = cancellationResult.recoveryCase;
     emitBookingStatusUpdated({
       customerId: booking.userId,
       bookingId,
       status: 'CANCELLED',
-      message: `Đơn ${formatBookingReference(bookingId)} đã bị đối tác hủy. Yêu cầu hoàn tiền 100% đang được xử lý tự động.`,
+      message: recoveryCase
+        ? `Đơn ${formatBookingReference(bookingId)} đã bị đối tác hủy. VietTicket đã tìm thấy phương án thay thế; bạn vẫn có thể chọn hoàn 100%.`
+        : `Đơn ${formatBookingReference(bookingId)} đã bị đối tác hủy. Yêu cầu hoàn tiền 100% đang được xử lý tự động.`,
     });
-    sendBookingCancelledByPartnerEmail({
-      to: booking.email,
-      fullName: booking.fullName,
-      bookingId,
-      reason,
-      refundAmount: Number(booking.totalAmount),
-    }).catch((error) => {
-      console.error('[partner-cancel] Không thể gửi email:', error.message);
-    });
+    if (recoveryCase) {
+      emitRecoveryCaseEvent({
+        customerId: booking.userId,
+        recoveryCaseId: recoveryCase.id,
+        eventName: 'RECOVERY_CASE_CREATED',
+        status: 'OPEN',
+        message: 'VietTicket Rescue đã tìm thấy vé thay thế phù hợp cho kế hoạch bị hủy.',
+        originalBookingId: bookingId,
+        expiresAt: recoveryCase.expiresAt,
+      });
+      sendRecoveryCaseCreatedEmail({
+        to: booking.email,
+        fullName: booking.fullName,
+        bookingId,
+        recoveryCaseId: recoveryCase.id,
+        reason,
+        expiresAt: recoveryCase.expiresAt,
+      }).catch((error) => {
+        console.error('[partner-cancel] Không thể gửi email Rescue:', error.message);
+      });
+    } else {
+      sendBookingCancelledByPartnerEmail({
+        to: booking.email,
+        fullName: booking.fullName,
+        bookingId,
+        reason,
+        refundAmount: Number(booking.totalAmount),
+      }).catch((error) => {
+        console.error('[partner-cancel] Không thể gửi email:', error.message);
+      });
+    }
 
     return res.json({
       success: true,
-      message: 'Đã hủy đơn, hoàn kho và chuyển khoản hoàn 100% sang xử lý tự động.',
-      data: { id: bookingId, status: 'cancelled', refundRequired: booking.payments.length > 0 },
+      message: recoveryCase
+        ? 'Đã hủy vé cũ, hoàn kho và mở VietTicket Rescue để khách chọn vé thay thế hoặc hoàn 100%.'
+        : 'Đã hủy đơn, hoàn kho và chuyển khoản hoàn 100% sang xử lý tự động.',
+      data: {
+        id: bookingId,
+        status: 'cancelled',
+        refundRequired: booking.payments.length > 0,
+        recoveryCaseId: recoveryCase?.id || null,
+        recoveryStatus: recoveryCase?.status || null,
+      },
     });
   } catch (error) {
     next(error);

@@ -1,0 +1,1481 @@
+@startuml
+title Sequence Diagram - Check Availability (GET /api/tickets/:ticketProductId/availability)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "TicketRouter\n<<Express Router>>" as Router
+control "TicketController\n<<Controller>>" as Ticket
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+note over Browser, Router
+  Public route. No auth middleware.
+end note
+
+Browser -> Router : GET /api/tickets/:ticketProductId/availability?date=YYYY-MM-DD
+activate Router
+Router -> Ticket : checkAvailability(req, res, next)
+activate Ticket
+
+alt Invalid date format
+  Ticket --> Browser : 400 VALIDATION_ERROR
+else date valid
+  Ticket -> Ticket : continue processing
+end
+
+Ticket -> Prisma : load bookable schedule (ticketProduct + slots + specialDate + capacity)
+activate Prisma
+Prisma -> DB : SELECT TicketProduct schedule
+activate DB
+DB --> Prisma : schedule
+deactivate DB
+Prisma --> Ticket : schedule
+deactivate Prisma
+
+alt schedule.isClosed
+  Ticket --> Browser : 200 OK { data: [], meta:{ closed:true } }
+else Open
+  Ticket -> Ticket : continue processing
+end
+
+group Promise.all
+  Ticket -> Prisma : dailyStock.findUnique({ ticketProductId_date })
+  activate Prisma
+  Prisma -> DB : SELECT DailyStock
+  activate DB
+  DB --> Prisma : dailyStock
+  deactivate DB
+  Prisma --> Ticket : dailyStock
+  deactivate Prisma
+
+  Ticket -> Prisma : attractionDailyStock.findUnique({ attractionId_date })
+  activate Prisma
+  Prisma -> DB : SELECT AttractionDailyStock
+  activate DB
+  DB --> Prisma : attractionStock
+  deactivate DB
+  Prisma --> Ticket : attractionStock
+  deactivate Prisma
+
+  opt schedule has time slots
+    Ticket -> Prisma : timeSlotStock.findMany({ timeSlotId in slots, date })
+    activate Prisma
+    Prisma -> DB : SELECT TimeSlotStock[]
+    activate DB
+    DB --> Prisma : slotStocks
+    deactivate DB
+    Prisma --> Ticket : slotStocks
+    deactivate Prisma
+  end
+end
+
+Ticket -> Ticket : compute productAvailable / attractionAvailable / per-slot availableTickets
+Ticket --> Browser : 200 OK { data: results, meta:{ closed:false, dayCapacity } }
+note right of Ticket
+  On NOT_FOUND (statusCode 404) -> 404 NOT_FOUND.
+end note
+deactivate Ticket
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Reserve Tickets / Hold (POST /api/tickets/:ticketProductId/reserve)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "TicketRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "TicketController\n<<Controller>>" as Ticket
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/tickets/:ticketProductId/reserve\nbody: date, quantity, timeSlotId?
+activate Router
+
+== Middleware ==
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next() (req.user set)
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+alt req.user.role != CUSTOMER
+  RestrictTo --> Browser : 403 Forbidden
+else Role is CUSTOMER
+  RestrictTo --> Router : next()
+end
+deactivate RestrictTo
+
+Router -> Ticket : reserveTickets(req, res, next)
+activate Ticket
+
+== Input Validation ==
+alt Missing userId
+  Ticket --> Browser : 401 UNAUTHENTICATED
+else Authenticated
+  Ticket -> Ticket : continue processing
+end
+alt Missing date
+  Ticket --> Browser : 400 VALIDATION_ERROR (date is required)
+else date present
+  Ticket -> Ticket : continue processing
+end
+alt quantity not positive integer
+  Ticket --> Browser : 400 VALIDATION_ERROR
+else quantity valid
+  Ticket -> Ticket : continue processing
+end
+alt Invalid date format / past day / beyond 1 year
+  Ticket --> Browser : 400 VALIDATION_ERROR
+else date within range
+  Ticket -> Ticket : expiresAt = now + 10 minutes
+end
+
+== Database Operation (retry on P2034 / P2002) ==
+group Prisma transaction (Serializable)
+  Ticket -> Prisma : load bookable schedule (ticketProduct + timeSlots + specialDate + capacity)
+  activate Prisma
+  Prisma -> DB : SELECT TicketProduct schedule
+  activate DB
+  DB --> Prisma : schedule
+  deactivate DB
+  Prisma --> Ticket : schedule
+  deactivate Prisma
+
+  alt schedule.isClosed
+    Ticket --> Browser : 409 CONFLICT (dia diem dong cua)
+  else Open
+    Ticket -> Ticket : continue processing
+  end
+
+  alt timeSlotId provided but not in schedule
+    Ticket --> Browser : 404 NOT_FOUND (khung gio khong hop le)
+  else slots exist but none selected
+    Ticket --> Browser : 400 VALIDATION_ERROR (vui long chon khung gio)
+  else slot selection valid
+    Ticket -> Ticket : continue processing
+  end
+
+  Ticket -> Prisma : dailyStock.findUnique / create({ ticketProductId, date, capacity })
+  activate Prisma
+  Prisma -> DB : SELECT / INSERT DailyStock
+  activate DB
+  DB --> Prisma : daily
+  deactivate DB
+  Prisma --> Ticket : daily
+  deactivate Prisma
+
+  Ticket -> Prisma : attractionDailyStock.findUnique / create({ attractionId, date, capacity })
+  activate Prisma
+  Prisma -> DB : SELECT / INSERT AttractionDailyStock
+  activate DB
+  DB --> Prisma : attractionStock
+  deactivate DB
+  Prisma --> Ticket : attractionStock
+  deactivate Prisma
+
+  alt availableForDay < quantity
+    Ticket --> Browser : 409 CONFLICT (khong du ve)
+  else Enough daily/attraction stock
+    Ticket -> Ticket : continue processing
+  end
+
+  opt selectedSlot present
+    Ticket -> Prisma : timeSlotStock.findUnique / create({ timeSlotId, date })
+    activate Prisma
+    Prisma -> DB : SELECT / INSERT TimeSlotStock
+    activate DB
+    DB --> Prisma : tstock
+    deactivate DB
+    Prisma --> Ticket : tstock
+    deactivate Prisma
+    alt availableSlot < quantity
+      Ticket --> Browser : 409 CONFLICT (khong du ve khung gio)
+    else Enough slot stock
+      Ticket -> Ticket : continue processing
+    end
+  end
+
+  Ticket -> Prisma : dailyStock.update({ heldQuantity: increment(quantity) })
+  activate Prisma
+  Prisma -> DB : UPDATE DailyStock heldQuantity++
+  activate DB
+  DB --> Prisma : ok
+  deactivate DB
+  Prisma --> Ticket : ok
+  deactivate Prisma
+
+  Ticket -> Prisma : attractionDailyStock.update({ heldQty: increment(quantity) })
+  activate Prisma
+  Prisma -> DB : UPDATE AttractionDailyStock heldQty++
+  activate DB
+  DB --> Prisma : ok
+  deactivate DB
+  Prisma --> Ticket : ok
+  deactivate Prisma
+
+  opt timeSlot stock present
+    Ticket -> Prisma : timeSlotStock.update({ heldQty: increment(quantity) })
+    activate Prisma
+    Prisma -> DB : UPDATE TimeSlotStock heldQty++
+    activate DB
+    DB --> Prisma : ok
+    deactivate DB
+    Prisma --> Ticket : ok
+    deactivate Prisma
+  end
+
+  Ticket -> Prisma : reservation.create({ status:'HELD', expiresAt, paymentDeadline })
+  activate Prisma
+  Prisma -> DB : INSERT Reservation (HELD)
+  activate DB
+  DB --> Prisma : reservation
+  deactivate DB
+  Prisma --> Ticket : reservation
+  deactivate Prisma
+end
+
+== Response ==
+Ticket --> Browser : 200 OK { reservationId, ticketProductId, quantity, expiresAt }
+deactivate Ticket
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Apply Voucher (POST /api/bookings/apply-voucher)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "BookingRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "BookingController\n<<Controller>>" as Booking
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/bookings/apply-voucher\nbody: voucherCode, subtotalAmount
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Booking : validateAndApplyVoucher(req, res, next)
+activate Booking
+
+alt Missing voucherCode
+  Booking --> Browser : 400 Bad Request (vui long nhap ma uu dai)
+else voucherCode present
+  Booking -> Booking : continue processing
+end
+alt subtotalAmount not a valid Decimal
+  Booking --> Browser : 400 Bad Request (tam tinh khong hop le)
+else Parsed
+  Booking -> Booking : continue processing
+end
+alt subtotalAmount <= 0
+  Booking --> Browser : 400 Bad Request (tam tinh phai > 0)
+else Positive
+  Booking -> Booking : continue processing
+end
+
+Booking -> Booking : findVoucher(prisma, code, subtotal, now)
+activate Booking
+Booking -> Prisma : voucher.findUnique({ where:{ code } })
+activate Prisma
+Prisma -> DB : SELECT Voucher by code
+activate DB
+DB --> Prisma : voucher | null
+deactivate DB
+Prisma --> Booking : voucher
+deactivate Prisma
+alt Voucher invalid / inactive / expired / used up / below minSpend
+  Booking --> Browser : 400 Bad Request (ma khong hop le)
+else Voucher valid
+  Booking -> Booking : calculateDiscount(voucher, subtotal)
+end
+Booking --> Booking : { voucher, discountAmount }
+deactivate Booking
+
+alt totalAmount (subtotal - discount) <= 0
+  Booking --> Browser : 400 Bad Request (tong sau uu dai phai > 0)
+else Positive
+  Booking -> Booking : continue processing
+end
+
+Booking --> Browser : 200 OK { voucher, discountAmount, totalAmount }
+deactivate Booking
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Create Booking (POST /api/bookings)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "BookingRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "BookingController\n<<Controller>>" as Booking
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/bookings\nbody: reservationId, fullName?, email?, phone?, note?, voucherCode?, paymentMethod?
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Booking : createBooking(req, res, next)
+activate Booking
+
+== Input Validation ==
+alt Missing reservationId
+  Booking --> Browser : 400 Bad Request
+else reservationId present
+  Booking -> Booking : continue processing
+end
+alt Missing fullName or email
+  Booking --> Browser : 400 Bad Request
+else Present
+  Booking -> Booking : continue processing
+end
+alt Invalid email format
+  Booking --> Browser : 400 Bad Request
+else Valid email
+  Booking -> Booking : continue processing
+end
+alt paymentMethod not in {vnpay}
+  Booking --> Browser : 400 Bad Request
+else Valid method
+  Booking -> Booking : continue processing
+end
+
+== Business Logic ==
+group Prisma transaction (Serializable)
+  Booking -> Prisma : reservation.findUnique({ id }, include timeSlot + ticketProduct.attraction.images )
+  activate Prisma
+  Prisma -> DB : SELECT Reservation (+ product + attraction)
+  activate DB
+  DB --> Prisma : reservation | null
+  deactivate DB
+  Prisma --> Booking : reservation
+  deactivate Prisma
+
+  alt Reservation missing or not owned by user
+    Booking --> Browser : 404 Not Found
+  else Owned
+    Booking -> Booking : continue processing
+  end
+  alt reservation.status != HELD
+    Booking --> Browser : 409 Conflict (khong con cho thanh toan)
+  else HELD
+    Booking -> Booking : continue processing
+  end
+  alt reservation.expiresAt <= now
+    Booking --> Browser : 409 Conflict (da het han)
+  else Not expired
+    Booking -> Booking : continue processing
+  end
+
+  Booking -> Prisma : booking.findUnique({ where:{ reservationId } })
+  activate Prisma
+  Prisma -> DB : SELECT Booking by reservationId
+  activate DB
+  DB --> Prisma : existingBooking | null
+  deactivate DB
+  Prisma --> Booking : existingBooking
+  deactivate Prisma
+  alt existingBooking present
+    Booking --> Browser : 409 Conflict (da tao booking)
+  else No booking yet
+    Booking -> Booking : subtotal = sellingPrice * quantity
+  end
+
+  Booking -> Booking : findVoucher(tx, voucherCode, subtotal, now)
+  activate Booking
+  Booking -> Prisma : voucher.findUnique({ where:{ code } })
+  activate Prisma
+  Prisma -> DB : SELECT Voucher by code
+  activate DB
+  DB --> Prisma : voucher | null
+  deactivate DB
+  Prisma --> Booking : voucher
+  deactivate Prisma
+  Booking --> Booking : { voucher, discountAmount }
+  deactivate Booking
+  alt totalAmount <= 0
+    Booking --> Browser : 400 Bad Request
+  else Positive
+    Booking -> Booking : continue processing
+  end
+
+  opt voucher applied
+    Booking -> Prisma : voucher.updateMany({ where: active+not expired+usedCount<limit, data: usedCount++ })
+    activate Prisma
+    Prisma -> DB : UPDATE Voucher usedCount++
+    activate DB
+    DB --> Prisma : count
+    deactivate DB
+    Prisma --> Booking : claimed
+    deactivate Prisma
+    alt claimed.count != 1
+      Booking --> Browser : 409 Conflict (ma vua het luot)
+    else Claimed
+      Booking -> Booking : continue processing
+    end
+  end
+
+  Booking -> Prisma : booking.create({ status:'PENDING_PAYMENT', subtotal, discount, total, snapshot... })
+  activate Prisma
+  Prisma -> DB : INSERT Booking (PENDING_PAYMENT)
+  activate DB
+  DB --> Prisma : created
+  deactivate DB
+  Prisma --> Booking : created
+  deactivate Prisma
+
+  Booking -> Prisma : booking.findUnique({ id }, include bookingInclude)
+  activate Prisma
+  Prisma -> DB : SELECT Booking (full)
+  activate DB
+  DB --> Prisma : booking
+  deactivate DB
+  Prisma --> Booking : booking
+  deactivate Prisma
+end
+
+== Response ==
+Booking --> Browser : 201 Created { data: toBookingResponse(booking) }
+note right of Booking
+  On unique-constraint P2002 -> 409 Conflict
+  (reservation already has a booking).
+end note
+deactivate Booking
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Create VNPay URL (POST /api/payments/create-vnpay-url)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PaymentRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "PaymentController\n<<Controller>>" as Payment
+control "VnpayUtil\n<<Utility>>" as VnpayUtil
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/payments/create-vnpay-url\nbody: bookingId
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Payment : createVNPayUrl(req, res, next)
+activate Payment
+
+alt Missing bookingId
+  Payment --> Browser : 400 Bad Request
+else bookingId present
+  Payment -> Payment : continue processing
+end
+
+Payment -> Prisma : booking.findUnique({ id }, include reservation + payments)
+activate Prisma
+Prisma -> DB : SELECT Booking (+ reservation + payments)
+activate DB
+DB --> Prisma : booking | null
+deactivate DB
+Prisma --> Payment : booking
+deactivate Prisma
+
+alt Booking missing or not owned by user
+  Payment --> Browser : 404 Not Found
+else Owned
+  Payment -> Payment : continue processing
+end
+alt booking.paymentMethod != vnpay
+  Payment --> Browser : 400 Bad Request
+else vnpay
+  Payment -> Payment : continue processing
+end
+alt booking.status != PENDING_PAYMENT
+  Payment --> Browser : 409 Conflict
+else PENDING_PAYMENT
+  Payment -> Payment : continue processing
+end
+alt totalAmount <= 0
+  Payment --> Browser : 400 Bad Request
+else Positive
+  Payment -> Payment : continue processing
+end
+alt Already has SUCCESS (non-duplicate) payment
+  Payment --> Browser : 409 Conflict (da thanh toan)
+else Not paid
+  Payment -> Payment : continue processing
+end
+alt No reservation or payment deadline passed
+  Payment --> Browser : 409 Conflict (het han thanh toan)
+else Within deadline
+  Payment -> Payment : continue processing
+end
+alt paymentAttemptCount >= 3
+  Payment --> Browser : 429 Too Many Requests
+else Attempts left
+  Payment -> Payment : continue processing
+end
+alt Missing VNP_TMNCODE / VNP_HASHSECRET / VNP_URL / VNP_RETURNURL
+  Payment --> Browser : 500 Internal Server Error
+else Config present
+  Payment -> Payment : txnRef = bookingId(no dash) + timestamp; expiresAt = min(now+10m, deadline)
+end
+
+== Database Operation ==
+group Prisma transaction
+  Payment -> Prisma : reservation.updateMany({ where: HELD + not expired + attempts<3, data: paymentAttemptCount++ })
+  activate Prisma
+  Prisma -> DB : UPDATE Reservation paymentAttemptCount++
+  activate DB
+  DB --> Prisma : count
+  deactivate DB
+  Prisma --> Payment : claimedAttempt
+  deactivate Prisma
+  alt claimedAttempt.count != 1
+    Payment --> Browser : 409 Conflict (het han / vuot so lan)
+  else Claimed
+    Payment -> Prisma : payment.create({ status:'PENDING', gateway:'VNPAY', transactionId: txnRef, expiresAt })
+    activate Prisma
+    Prisma -> DB : INSERT Payment (PENDING)
+    activate DB
+    DB --> Prisma : payment
+    deactivate DB
+    Prisma --> Payment : payment
+    deactivate Prisma
+  end
+end
+
+Payment -> VnpayUtil : buildVnpayUrl(params, { vnpUrl, secret })
+activate VnpayUtil
+VnpayUtil --> Payment : paymentUrl (HMAC-SHA512 signed)
+deactivate VnpayUtil
+
+Payment --> Browser : 200 OK { data: { paymentUrl } }
+deactivate Payment
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Reconcile VNPay Payment (shared by IPN & Return)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+control "PaymentController\n<<Controller>>" as Payment
+control "BookingController\n<<Controller>>" as Booking
+collections "Socket Server\n<<Realtime>>" as Socket
+control "TicketEmailService\n<<Email Service>>" as TicketEmail
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Payment -> Payment : reconcileVnpayPayment(query)
+activate Payment
+
+Payment -> Prisma : payment.findUnique({ transactionId: txnRef }, include booking.reservation.ticketProduct.attraction)
+activate Prisma
+Prisma -> DB : SELECT Payment (+ booking chain)
+activate DB
+DB --> Prisma : payment | null
+deactivate DB
+Prisma --> Payment : payment
+deactivate Prisma
+
+alt Payment or booking not found
+  Payment --> Payment : return { code:'01', msg:'Order not found' }
+else Found
+  Payment -> Payment : continue processing
+end
+alt vnp_Amount != totalAmount * 100
+  Payment --> Payment : return { code:'04', msg:'Invalid amount' }
+else Amount matches
+  Payment -> Payment : isSuccess = responseCode=='00' && transactionStatus=='00'
+end
+
+== Database Operation ==
+group Prisma transaction (Serializable)
+  Payment -> Prisma : booking.findUnique({ id }, include payments + reservation)
+  activate Prisma
+  Prisma -> DB : SELECT Booking (+ payments + reservation)
+  activate DB
+  DB --> Prisma : current
+  deactivate DB
+  Prisma --> Payment : current
+  deactivate Prisma
+
+  alt currentPayment.status == SUCCESS (already processed)
+    Payment --> Payment : return { code:'02', msg:'Order already confirmed' }
+  else Not yet processed
+    Payment -> Payment : continue processing
+  end
+
+  alt isSuccess AND another SUCCESS payment exists (duplicate)
+    Payment -> Prisma : payment.update({ SUCCESS, isDuplicate:true, duplicateOfPaymentId })
+    activate Prisma
+    Prisma -> DB : UPDATE Payment (mark duplicate)
+    DB --> Prisma : ok
+    Prisma --> Payment : ok
+    deactivate Prisma
+    Payment -> Prisma : booking.update({ refundRequired:true })
+    activate Prisma
+    Prisma -> DB : UPDATE Booking refundRequired
+    DB --> Prisma : ok
+    Prisma --> Payment : ok
+    deactivate Prisma
+    Payment -> Prisma : refundRequest.findUnique / create (PENDING)
+    activate Prisma
+    Prisma -> DB : SELECT / INSERT RefundRequest
+    DB --> Prisma : refundRequest
+    Prisma --> Payment : refundRequest
+    deactivate Prisma
+    Payment -> Prisma : refundTransaction.upsert(NEEDS_RECONCILIATION)
+    activate Prisma
+    Prisma -> DB : UPSERT RefundTransaction
+    DB --> Prisma : ok
+    Prisma --> Payment : ok
+    deactivate Prisma
+    Payment --> Payment : return { code:'00', msg:'Duplicate payment recorded' }
+  else isSuccess AND first success
+    Payment -> Prisma : payment.update({ SUCCESS, paidAt, rawResponse })
+    activate Prisma
+    Prisma -> DB : UPDATE Payment SUCCESS
+    DB --> Prisma : ok
+    Prisma --> Payment : ok
+    deactivate Prisma
+
+    alt status==PENDING_PAYMENT AND reservation==HELD
+      Payment -> Booking : confirmReservationAndStock(tx, reservation)
+      activate Booking
+      Booking -> Prisma : dailyStock / attractionDailyStock / timeSlotStock.updateMany (held-> booked, guard count==1)
+      activate Prisma
+      Prisma -> DB : UPDATE stocks (decrement held, increment booked)
+      DB --> Prisma : counts
+      Prisma --> Booking : ok
+      deactivate Prisma
+      Booking -> Prisma : reservation.update({ status:'CONFIRMED' })
+      activate Prisma
+      Prisma -> DB : UPDATE Reservation CONFIRMED
+      DB --> Prisma : ok
+      Prisma --> Booking : ok
+      deactivate Prisma
+      Booking --> Payment : confirmed
+      deactivate Booking
+
+      alt attraction.requiresManualApproval == true
+        Payment -> Prisma : booking.update({ status:'PENDING_PARTNER' })
+        activate Prisma
+        Prisma -> DB : UPDATE Booking PENDING_PARTNER
+        DB --> Prisma : ok
+        Prisma --> Payment : ok
+        deactivate Prisma
+      else Auto-confirm
+        Payment -> Prisma : booking.update({ status:'CONFIRMED' })
+        activate Prisma
+        Prisma -> DB : UPDATE Booking CONFIRMED
+        DB --> Prisma : ok
+        Prisma --> Payment : ok
+        deactivate Prisma
+        Payment -> Booking : createTicketInstances(tx, bookingId, ticketProductId, quantity)
+        activate Booking
+        Booking -> Prisma : ticketInstance.createMany({ qrCodeToken per ticket })
+        activate Prisma
+        Prisma -> DB : INSERT TicketInstance x quantity
+        DB --> Prisma : ok
+        Prisma --> Booking : ok
+        deactivate Prisma
+        Booking --> Payment : created
+        deactivate Booking
+      end
+    else Stale (reservation revoked / booking cancelled)
+      Payment -> Prisma : booking.update({ status:'CANCELLED', refundRequired:true })
+      activate Prisma
+      Prisma -> DB : UPDATE Booking CANCELLED
+      DB --> Prisma : ok
+      Prisma --> Payment : ok
+      deactivate Prisma
+      Payment -> Prisma : refundRequest.findUnique / create (PENDING)
+      activate Prisma
+      Prisma -> DB : SELECT / INSERT RefundRequest
+      DB --> Prisma : ok
+      Prisma --> Payment : ok
+      deactivate Prisma
+    end
+  else Payment failed
+    Payment -> Prisma : payment.update({ status:'FAILED', failureReason, rawResponse })
+    activate Prisma
+    Prisma -> DB : UPDATE Payment FAILED (booking stays PENDING_PAYMENT)
+    DB --> Prisma : ok
+    Prisma --> Payment : ok
+    deactivate Prisma
+  end
+end
+
+== Side Effects (after commit) ==
+opt bookingStatus in {PENDING_PARTNER, CONFIRMED}
+  Payment ->> Socket : queueNewBookingNotification(bookingId) -> emit NEW_BOOKING (partner room)
+  Payment ->> Socket : emitBookingStatusUpdated(user room) BOOKING_STATUS_UPDATED
+  opt bookingStatus == CONFIRMED
+    Payment -> TicketEmail : queueConfirmedTicketEmail(bookingId)
+    activate TicketEmail
+    TicketEmail --> Payment : queued (generate PDF + send email async)
+    deactivate TicketEmail
+  end
+end
+
+Payment --> Payment : return { code, msg, bookingStatus, bookingId }
+deactivate Payment
+@enduml
+
+@startuml
+title Sequence Diagram - VNPay IPN (GET /api/payments/vnpay-ipn)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+participant "VNPay\n<<Payment Gateway>>" as VNPay
+control "PaymentRouter\n<<Express Router>>" as Router
+control "PaymentController\n<<Controller>>" as Payment
+control "VnpayUtil\n<<Utility>>" as VnpayUtil
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+note over VNPay, Router
+  Server-to-server callback. No auth middleware.
+  Always responds HTTP 200 with { RspCode, Message }.
+end note
+
+VNPay -> Router : GET /api/payments/vnpay-ipn?vnp_* (signed query)
+activate Router
+Router -> Payment : vnpayIpn(req, res)
+activate Payment
+
+Payment -> VnpayUtil : verifyVnpaySignature(query, secret)
+activate VnpayUtil
+VnpayUtil --> Payment : boolean (timing-safe HMAC compare)
+deactivate VnpayUtil
+alt Invalid signature
+  Payment --> VNPay : 200 { RspCode:'97', Message:'Invalid signature' }
+else Signature valid
+  Payment -> Payment : continue processing
+end
+
+ref over Payment, DB : reconcileVnpayPayment(query) (see Reconcile diagram)
+
+alt Unexpected error / serialization failure
+  Payment --> VNPay : 200 { RspCode:'99', Message:'Unknown error' }
+else Reconciled
+  Payment --> VNPay : 200 { RspCode: result.code, Message: result.msg }
+end
+deactivate Payment
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - VNPay Return (GET /api/payments/vnpay-return)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PaymentRouter\n<<Express Router>>" as Router
+control "PaymentController\n<<Controller>>" as Payment
+control "VnpayUtil\n<<Utility>>" as VnpayUtil
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+note over Browser, Router
+  VNPay redirects the customer's browser here. No auth middleware.
+  Acts as an idempotent fallback for reconciliation.
+end note
+
+Browser -> Router : GET /api/payments/vnpay-return?vnp_* (signed query)
+activate Router
+Router -> Payment : vnpayReturn(req, res, next)
+activate Payment
+
+Payment -> VnpayUtil : verifyVnpaySignature(query, secret)
+activate VnpayUtil
+VnpayUtil --> Payment : valid (boolean)
+deactivate VnpayUtil
+
+opt valid AND vnp_TxnRef present
+  ref over Payment, DB : reconcileVnpayPayment(query) (see Reconcile diagram)
+  Payment -> Payment : bookingId = reconciliation.bookingId
+end
+
+Payment -> Payment : compute status = invalid | success | failed
+Payment --> Browser : 302 Redirect -> {frontend}/booking-success?bookingId&status&vnp_ResponseCode
+deactivate Payment
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Cleanup Worker (auto-expire held reservations)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+participant "Timer\n<<Scheduled Job, 60s>>" as Timer
+control "CleanupWorker\n<<Background Worker>>" as Cleanup
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Timer -> Cleanup : tick()
+activate Cleanup
+
+== Distributed Lock ==
+Cleanup -> Prisma : acquireJobLock('cleanup_expired_reservations', TTL)
+activate Prisma
+Prisma -> DB : UPSERT + UPDATE ScheduledJobLock (guard lockedUntil<now)
+activate DB
+DB --> Prisma : count
+deactivate DB
+Prisma --> Cleanup : acquired (boolean)
+deactivate Prisma
+alt Lock not acquired (another instance running)
+  Cleanup --> Timer : skip this cycle
+else Lock acquired
+  Cleanup -> Cleanup : continue processing
+end
+
+== Sweep ==
+Cleanup -> Prisma : reservation.findMany({ status:'HELD', expiresAt < now - grace })
+activate Prisma
+Prisma -> DB : SELECT expired reservations
+activate DB
+DB --> Prisma : expired[]
+deactivate DB
+Prisma --> Cleanup : expired[]
+deactivate Prisma
+
+loop for each expired reservation
+  group Prisma transaction (Serializable)
+    Cleanup -> Prisma : reservation.findUnique({ id }, include booking + ticketProduct)
+    activate Prisma
+    Prisma -> DB : SELECT Reservation (re-check)
+    DB --> Prisma : r
+    Prisma --> Cleanup : r
+    deactivate Prisma
+    alt r missing or status != HELD (IPN already handled)
+      Cleanup -> Cleanup : skip
+    else Still HELD
+      Cleanup -> Prisma : reservation.update({ status:'EXPIRED' })
+      activate Prisma
+      Prisma -> DB : UPDATE Reservation EXPIRED
+      DB --> Prisma : ok
+      Prisma --> Cleanup : ok
+      deactivate Prisma
+      Cleanup -> Prisma : dailyStock / attractionDailyStock / timeSlotStock.updateMany (release held)
+      activate Prisma
+      Prisma -> DB : UPDATE stocks (decrement held, guard gte)
+      DB --> Prisma : ok
+      Prisma --> Cleanup : ok
+      deactivate Prisma
+      opt booking exists AND status == PENDING_PAYMENT (orphan)
+        Cleanup -> Prisma : booking.update({ status:'CANCELLED' })
+        activate Prisma
+        Prisma -> DB : UPDATE Booking CANCELLED
+        DB --> Prisma : ok
+        Prisma --> Cleanup : ok
+        deactivate Prisma
+        opt booking has voucherId
+          Cleanup -> Prisma : voucher.updateMany({ usedCount: decrement })
+          activate Prisma
+          Prisma -> DB : UPDATE Voucher usedCount--
+          DB --> Prisma : ok
+          Prisma --> Cleanup : ok
+          deactivate Prisma
+        end
+        Cleanup -> Prisma : payment.updateMany({ PENDING -> FAILED })
+        activate Prisma
+        Prisma -> DB : UPDATE Payment FAILED
+        DB --> Prisma : ok
+        Prisma --> Cleanup : ok
+        deactivate Prisma
+        Cleanup -> Cleanup : collect booking for expiry email
+      end
+    end
+  end
+end
+
+== Notify (after transactions, non-blocking) ==
+loop for each cancelled booking
+  Cleanup -> Mailer : sendHoldExpiredEmail({ to, fullName, bookingId, attractionTitle })
+  activate Mailer
+  Mailer --> Cleanup : send result (errors logged only)
+  deactivate Mailer
+end
+
+Cleanup -> Prisma : releaseJobLock('cleanup_expired_reservations')
+activate Prisma
+Prisma -> DB : UPDATE ScheduledJobLock (release if owner)
+DB --> Prisma : ok
+Prisma --> Cleanup : ok
+deactivate Prisma
+deactivate Cleanup
+@enduml
+
+@startuml
+title Sequence Diagram - Completion Worker (auto-complete / no-show)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+participant "Timer\n<<Scheduled Job, 10m>>" as Timer
+control "CompletionWorker\n<<Background Worker>>" as Completion
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Timer -> Completion : tick()
+activate Completion
+
+Completion -> Prisma : acquireJobLock('completion_bookings', TTL)
+activate Prisma
+Prisma -> DB : UPSERT + UPDATE ScheduledJobLock
+DB --> Prisma : count
+Prisma --> Completion : acquired (boolean)
+deactivate Prisma
+alt Lock not acquired
+  Completion --> Timer : skip this cycle
+else Lock acquired
+  Completion -> Completion : cutoff = start of today (VN)
+end
+
+Completion -> Prisma : booking.findMany({ CONFIRMED, reservation.date < cutoff, ticketInstances some USED })
+activate Prisma
+Prisma -> DB : SELECT completed booking ids
+DB --> Prisma : completed[]
+Prisma --> Completion : completed[]
+deactivate Prisma
+
+Completion -> Prisma : booking.findMany({ CONFIRMED, reservation.date < cutoff, ticketInstances none USED })
+activate Prisma
+Prisma -> DB : SELECT no-show booking ids
+DB --> Prisma : noShows[]
+Prisma --> Completion : noShows[]
+deactivate Prisma
+
+group Prisma transaction (batch)
+  Completion -> Prisma : booking.updateMany({ completed ids, CONFIRMED -> COMPLETED })
+  activate Prisma
+  Prisma -> DB : UPDATE Booking COMPLETED
+  DB --> Prisma : count
+  Prisma --> Completion : ok
+  deactivate Prisma
+  Completion -> Prisma : booking.updateMany({ noShow ids, CONFIRMED -> NO_SHOW })
+  activate Prisma
+  Prisma -> DB : UPDATE Booking NO_SHOW
+  DB --> Prisma : count
+  Prisma --> Completion : ok
+  deactivate Prisma
+  Completion -> Prisma : ticketInstance.updateMany({ VALID -> EXPIRED })
+  activate Prisma
+  Prisma -> DB : UPDATE TicketInstance EXPIRED
+  DB --> Prisma : count
+  Prisma --> Completion : ok
+  deactivate Prisma
+end
+
+Completion -> Prisma : releaseJobLock('completion_bookings')
+activate Prisma
+Prisma -> DB : UPDATE ScheduledJobLock (release)
+DB --> Prisma : ok
+Prisma --> Completion : ok
+deactivate Prisma
+deactivate Completion
+@enduml
+
+@startuml
+title Sequence Diagram - Create Refund Request (POST /api/payments/refund-request)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PaymentRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "PaymentController\n<<Controller>>" as Payment
+control "RefundService\n<<Utility>>" as Refund
+control "Mailer\n<<Email Service>>" as Mailer
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/payments/refund-request\nbody: bookingId, reason
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Payment : createRefundRequest(req, res, next)
+activate Payment
+
+alt Missing bookingId
+  Payment --> Browser : 400 Bad Request
+else Present
+  Payment -> Payment : continue processing
+end
+alt reason length < 5
+  Payment --> Browser : 400 Bad Request (ly do toi thieu 5 ky tu)
+else reason valid
+  Payment -> Payment : continue processing
+end
+
+group Prisma transaction (Serializable)
+  Payment -> Prisma : booking.findUnique({ id }, include reservation.ticketProduct + refundRequests)
+  activate Prisma
+  Prisma -> DB : SELECT Booking (+ product + refundRequests)
+  activate DB
+  DB --> Prisma : booking | null
+  deactivate DB
+  Prisma --> Payment : booking
+  deactivate Prisma
+
+  alt Booking missing or not owned by user
+    Payment --> Browser : 404 Not Found
+  else Owned
+    Payment -> Payment : continue processing
+  end
+  alt booking.status != CONFIRMED
+    Payment --> Browser : 409 Conflict (chi don da xac nhan)
+  else CONFIRMED
+    Payment -> Payment : continue processing
+  end
+  alt refundPolicy == NON_REFUNDABLE
+    Payment --> Browser : 400 Bad Request (khong ap dung hoan tien)
+  else Refundable policy
+    Payment -> Payment : continue processing
+  end
+  Payment -> Refund : isBeforeRefundCutoff(booking)
+  activate Refund
+  Refund --> Payment : boolean
+  deactivate Refund
+  alt Past refund cutoff (>= visit date)
+    Payment --> Browser : 409 Conflict (qua thoi han hoan tien)
+  else Before cutoff
+    Payment -> Payment : continue processing
+  end
+  alt refundRequests already exists
+    Payment --> Browser : 409 Conflict (da co yeu cau hoan tien)
+  else No prior request
+    Payment -> Refund : calculateRefundAmount(booking)
+    activate Refund
+    Refund --> Payment : { refundAmount, feeAmount }
+    deactivate Refund
+  end
+
+  Payment -> Prisma : refundRequest.create({ status:'PENDING', amount: refundAmount, reason })
+  activate Prisma
+  Prisma -> DB : INSERT RefundRequest (PENDING)
+  activate DB
+  DB --> Prisma : refundRequest
+  deactivate DB
+  Prisma --> Payment : refundRequest
+  deactivate Prisma
+
+  Payment -> Prisma : booking.update({ status:'REFUND_REQUESTED' })
+  activate Prisma
+  Prisma -> DB : UPDATE Booking REFUND_REQUESTED
+  activate DB
+  DB --> Prisma : ok
+  deactivate DB
+  Prisma --> Payment : ok
+  deactivate Prisma
+end
+
+opt email send (non-blocking; errors are logged only)
+  Payment -> Mailer : sendRefundRequestReceivedEmail({ to, fullName, bookingId, refundAmount })
+  activate Mailer
+  Mailer --> Payment : send result
+  deactivate Mailer
+end
+
+Payment --> Browser : 201 Created { data: refundRequest }
+deactivate Payment
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Refund Preview (GET /api/payments/refund-preview/:bookingId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PaymentRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "PaymentController\n<<Controller>>" as Payment
+control "RefundService\n<<Utility>>" as Refund
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/payments/refund-preview/:bookingId
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Payment : getRefundPreview(req, res, next)
+activate Payment
+
+Payment -> Prisma : booking.findUnique({ id }, include reservation.ticketProduct + refundRequests)
+activate Prisma
+Prisma -> DB : SELECT Booking (+ product + refundRequests)
+activate DB
+DB --> Prisma : booking | null
+deactivate DB
+Prisma --> Payment : booking
+deactivate Prisma
+
+alt Booking missing or not owned by user
+  Payment --> Browser : 404 Not Found
+else Owned
+  Payment -> Payment : continue processing
+end
+
+Payment -> Refund : calculateRefundAmount(booking)
+activate Refund
+Refund --> Payment : { refundAmount, feeAmount }
+deactivate Refund
+Payment -> Refund : isBeforeRefundCutoff(booking)
+activate Refund
+Refund --> Payment : beforeCutoff (boolean)
+deactivate Refund
+
+Payment -> Payment : derive notRefundableReason (status / policy / existing request / cutoff)
+Payment --> Browser : 200 OK { totalAmount, refundFeeRate, feeAmount, refundAmount, refundable, notRefundableReason, ... }
+deactivate Payment
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Refund Worker (process refund transactions via VNPay)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+participant "Timer\n<<Scheduled Job, 60s>>" as Timer
+control "RefundWorker\n<<Background Worker>>" as Worker
+control "PaymentController\n<<Controller>>" as Payment
+control "VnpayUtil\n<<Utility>>" as VnpayUtil
+participant "VNPay\n<<Payment Gateway>>" as VNPay
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Timer -> Worker : tick() (runWithJobLease 'refund-reconciliation')
+activate Worker
+
+Worker -> Prisma : refundTransaction.findMany({ status:'PENDING' }, include payment, take 20)
+activate Prisma
+Prisma -> DB : SELECT pending RefundTransaction[]
+activate DB
+DB --> Prisma : pending[]
+deactivate DB
+Prisma --> Worker : pending[]
+deactivate Prisma
+
+loop for each pending transaction
+  Worker -> Prisma : refundTransaction.updateMany({ id, PENDING -> PROCESSING })
+  activate Prisma
+  Prisma -> DB : UPDATE RefundTransaction PROCESSING
+  DB --> Prisma : count
+  Prisma --> Worker : claimed
+  deactivate Prisma
+  alt claimed.count != 1 (already taken)
+    Worker -> Worker : continue (skip)
+  else Claimed
+    alt transaction.payment missing
+      Worker -> Prisma : refundTransaction.update({ NEEDS_RECONCILIATION })
+      activate Prisma
+      Prisma -> DB : UPDATE RefundTransaction NEEDS_RECONCILIATION
+      DB --> Prisma : ok
+      Prisma --> Worker : ok
+      deactivate Prisma
+    else Payment present
+      Worker -> Payment : refundViaVnpay({ payment, amount, transactionType, requestId })
+      activate Payment
+      Payment -> VnpayUtil : signRefundData(params, secret)
+      activate VnpayUtil
+      VnpayUtil --> Payment : vnp_SecureHash
+      deactivate VnpayUtil
+      Payment -> VNPay : POST VNP_API (refund request, signed)
+      activate VNPay
+      VNPay --> Payment : { vnp_ResponseCode, vnp_Message }
+      deactivate VNPay
+      Payment --> Worker : { success, responseCode, message, raw }
+      deactivate Payment
+
+      group Prisma transaction
+        Worker -> Prisma : refundTransaction.update({ SUCCESS | FAILED, processedAt, rawResponse })
+        activate Prisma
+        Prisma -> DB : UPDATE RefundTransaction result
+        DB --> Prisma : ok
+        Prisma --> Worker : ok
+        deactivate Prisma
+        opt success AND no remaining refund transactions
+          Worker -> Prisma : booking.update({ refundRequired:false })
+          activate Prisma
+          Prisma -> DB : UPDATE Booking refundRequired=false
+          DB --> Prisma : ok
+          Prisma --> Worker : ok
+          deactivate Prisma
+        end
+      end
+    end
+  end
+end
+
+deactivate Worker
+@enduml
+
+@startuml
+title Sequence Diagram - Get Reservation (GET /api/bookings/reservations/:reservationId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "BookingRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "BookingController\n<<Controller>>" as Booking
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/bookings/reservations/:reservationId
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Booking : getReservation(req, res, next)
+activate Booking
+Booking -> Prisma : reservation.findUnique({ id }, include reservationInclude)
+activate Prisma
+Prisma -> DB : SELECT Reservation (+ user + product + attraction)
+activate DB
+DB --> Prisma : reservation | null
+deactivate DB
+Prisma --> Booking : reservation
+deactivate Prisma
+
+alt Reservation missing or not owned by user
+  Booking --> Browser : 404 Not Found
+else Owned
+  Booking --> Browser : 200 OK { data: toReservationResponse(reservation) }
+end
+deactivate Booking
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - Get Booking (GET /api/bookings/:bookingId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "BookingRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "BookingController\n<<Controller>>" as Booking
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/bookings/:bookingId
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Booking : getBooking(req, res, next)
+activate Booking
+Booking -> Prisma : booking.findUnique({ id }, include bookingInclude)
+activate Prisma
+Prisma -> DB : SELECT Booking (+ reservation + payments + refundRequests + ticketInstances)
+activate DB
+DB --> Prisma : booking | null
+deactivate DB
+Prisma --> Booking : booking
+deactivate Prisma
+
+alt Booking missing or not owned by user
+  Booking --> Browser : 404 Not Found
+else Owned
+  Booking --> Browser : 200 OK { data: toBookingResponse(booking) }
+end
+deactivate Booking
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - List Bookings (GET /api/bookings)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "BookingRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "restrictTo('CUSTOMER')\n<<Role Middleware>>" as RestrictTo
+control "BookingController\n<<Controller>>" as Booking
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/bookings
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next()
+deactivate Protect
+Router -> RestrictTo : restrictTo('CUSTOMER')
+activate RestrictTo
+RestrictTo --> Router : next()
+deactivate RestrictTo
+
+Router -> Booking : listBookings(req, res, next)
+activate Booking
+Booking -> Prisma : booking.findMany({ where:{ userId }, include bookingInclude, orderBy: createdAt desc })
+activate Prisma
+Prisma -> DB : SELECT Booking[] by userId
+activate DB
+DB --> Prisma : bookings
+deactivate DB
+Prisma --> Booking : bookings
+deactivate Prisma
+
+Booking --> Browser : 200 OK { data: bookings.map(toBookingResponse) }
+deactivate Booking
+deactivate Router
+@enduml

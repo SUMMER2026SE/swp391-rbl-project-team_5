@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
+import QrCameraScanner from '../../components/staff/QrCameraScanner.jsx'
 import {
   checkInTicket,
   listOperationalBookings,
   listTodayBookings,
-  lookupTicketByQr,
+  lookupCheckinTarget,
   reissueTicket,
 } from '../../services/staffApi.js'
-import { formatBookingReference } from '../../utils/bookingReference.js'
+import {
+  formatBookingReference,
+  formatTicketReference,
+} from '../../utils/bookingReference.js'
 
 const REISSUE_REASON_OPTIONS = [
   { value: 'LOST_BY_CUSTOMER', label: 'Khách làm mất vé' },
@@ -24,52 +28,129 @@ const REISSUE_REASON_OPTIONS = [
 // - Tra cứu trước, hiển thị thông tin đơn, rồi mới bấm check-in.
 // - Danh sách đơn của hôm nay để đối chiếu khách walk-in.
 
-function TicketResultCard({ ticket, onCheckin, isChecking }) {
-  const ok = ticket.canCheckIn
+const TICKET_STATUS_META = {
+  VALID: { label: 'Chưa sử dụng', className: 'bg-primary-fixed-dim/20 text-primary' },
+  USED: { label: 'Đã check-in', className: 'bg-surface-container text-on-surface-variant' },
+  EXPIRED: { label: 'Đã thu hồi', className: 'bg-error/10 text-error' },
+  REFUNDED: { label: 'Đã hoàn tiền', className: 'bg-error/10 text-error' },
+}
+
+// Kết quả tra cứu: thông tin đơn + danh sách TẤT CẢ vé để soát lần lượt.
+// Dùng chung cho cả khi quét QR một vé lẫn khi tra bằng mã đặt chỗ.
+function BookingCheckinCard({ result, onCheckinTicket, onCheckinAll, checkingTicketId, isCheckingAll }) {
+  const tickets = Array.isArray(result.tickets) ? result.tickets : []
+  const summary = result.summary || { total: tickets.length, valid: 0, used: 0, checkable: 0 }
+  const anyCheckable = summary.checkable > 0
+  const busy = Boolean(checkingTicketId) || isCheckingAll
+
   return (
     <div
       className={`rounded-xl border-2 p-5 ${
-        ok ? 'border-primary bg-primary-fixed-dim/10' : 'border-error bg-error-container/20'
+        anyCheckable ? 'border-primary bg-primary-fixed-dim/10' : 'border-error bg-error-container/20'
       }`}
     >
       <div className="flex items-center gap-3">
         <span
-          className={`material-symbols-outlined text-4xl ${ok ? 'text-primary' : 'text-error'}`}
+          className={`material-symbols-outlined text-4xl ${anyCheckable ? 'text-primary' : 'text-error'}`}
           aria-hidden="true"
         >
-          {ok ? 'verified' : 'block'}
+          {anyCheckable ? 'verified' : 'block'}
         </span>
-        <div>
-          <p className={`text-lg font-bold ${ok ? 'text-primary' : 'text-error'}`}>
-            {ok ? 'Vé hợp lệ — sẵn sàng check-in' : 'Không thể check-in'}
+        <div className="min-w-0">
+          <p className={`text-lg font-bold ${anyCheckable ? 'text-primary' : 'text-error'}`}>
+            {anyCheckable
+              ? `Còn ${summary.checkable}/${summary.total} vé có thể check-in`
+              : 'Không có vé nào đủ điều kiện check-in'}
           </p>
-          {!ok && <p className="text-sm font-semibold text-error">{ticket.blockReason}</p>}
+          <p className="text-sm text-on-surface-variant">
+            {result.matchType === 'BOOKING'
+              ? 'Tra theo mã đặt chỗ — chọn từng vé để cho khách vào cổng.'
+              : 'Quét theo mã QR — vé được quét đã được đánh dấu bên dưới.'}
+          </p>
         </div>
       </div>
 
       <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-        <InfoRow label="Mã đơn" value={formatBookingReference(ticket.bookingId)} mono />
-        <InfoRow label="Khách hàng" value={ticket.customer} />
-        <InfoRow label="Số điện thoại" value={ticket.phone || '—'} />
-        <InfoRow label="Địa điểm" value={ticket.attraction} />
-        <InfoRow label="Vé đang quét" value={`${ticket.ticketName} × 1`} />
-        <InfoRow label="Tổng vé trong đơn" value={ticket.bookingQuantity} />
-        <InfoRow label="Ngày tham quan" value={ticket.visitDate} />
-        <InfoRow label="Khung giờ" value={ticket.timeSlot || 'Cả ngày'} />
-        <InfoRow label="Trạng thái vé" value={ticket.ticketStatus} />
+        <InfoRow label="Mã đơn" value={formatBookingReference(result.bookingId)} mono />
+        <InfoRow label="Khách hàng" value={result.customer} />
+        <InfoRow label="Số điện thoại" value={result.phone || '—'} />
+        <InfoRow label="Địa điểm" value={result.attraction} />
+        <InfoRow label="Loại vé" value={result.ticketName} />
+        <InfoRow label="Tổng vé trong đơn" value={summary.total} />
+        <InfoRow label="Ngày tham quan" value={result.visitDate} />
+        <InfoRow label="Khung giờ" value={result.timeSlot || 'Cả ngày'} />
+        <InfoRow label="Trạng thái đơn" value={result.bookingStatus} />
+        <InfoRow label="Đã vào cổng" value={`${summary.used}/${summary.total}`} />
       </dl>
 
-      {ok && (
+      {summary.checkable > 1 && (
         <button
           type="button"
-          onClick={onCheckin}
-          disabled={isChecking}
+          onClick={onCheckinAll}
+          disabled={busy}
           className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-4 text-base font-bold text-on-primary hover:opacity-90 disabled:opacity-50"
         >
-          <span className="material-symbols-outlined" aria-hidden="true">how_to_reg</span>
-          {isChecking ? 'Đang check-in…' : 'Check-in vé này'}
+          <span className="material-symbols-outlined" aria-hidden="true">group_add</span>
+          {isCheckingAll
+            ? 'Đang check-in cả nhóm…'
+            : `Check-in tất cả ${summary.checkable} vé còn lại`}
         </button>
       )}
+
+      <ul className="mt-5 space-y-2">
+        {tickets.map((ticket) => {
+          const meta = TICKET_STATUS_META[ticket.status] || {
+            label: ticket.status,
+            className: 'bg-surface-container text-on-surface-variant',
+          }
+          const isBusy = checkingTicketId === ticket.ticketId
+          return (
+            <li
+              key={ticket.ticketId}
+              className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${
+                ticket.isMatched
+                  ? 'border-primary bg-primary/5'
+                  : 'border-outline-variant bg-surface-container-lowest'
+              }`}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-on-surface">
+                  Vé #{ticket.index}
+                  <span className="ml-2 font-mono text-xs font-semibold text-on-surface-variant">
+                    {formatTicketReference(ticket.ticketId)}
+                  </span>
+                  {ticket.isMatched && (
+                    <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-on-primary">
+                      VỪA QUÉT
+                    </span>
+                  )}
+                </p>
+                {!ticket.canCheckIn && ticket.blockReason && (
+                  <p className="mt-1 text-xs font-semibold text-error">{ticket.blockReason}</p>
+                )}
+              </div>
+
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${meta.className}`}>
+                {meta.label}
+              </span>
+
+              {ticket.canCheckIn && (
+                <button
+                  type="button"
+                  onClick={() => onCheckinTicket(ticket)}
+                  disabled={busy}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3.5 py-2 text-xs font-bold text-on-primary hover:opacity-90 disabled:opacity-50"
+                >
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    how_to_reg
+                  </span>
+                  {isBusy ? 'Đang check-in…' : 'Check-in'}
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }
@@ -87,10 +168,12 @@ function InfoRow({ label, value, mono = false }) {
 
 export default function CheckinPage() {
   const [tokenInput, setTokenInput] = useState('')
-  const [ticket, setTicket] = useState(null)
+  const [lookupResult, setLookupResult] = useState(null)
   const [lastCheckin, setLastCheckin] = useState(null)
   const [isLooking, setIsLooking] = useState(false)
-  const [isChecking, setIsChecking] = useState(false)
+  const [checkingTicketId, setCheckingTicketId] = useState('')
+  const [isCheckingAll, setIsCheckingAll] = useState(false)
+  const [isScannerOpen, setIsScannerOpen] = useState(false)
   const [todayBookings, setTodayBookings] = useState([])
   const [todayMeta, setTodayMeta] = useState({ date: '', total: 0, checkedIn: 0 })
   const [todaySearch, setTodaySearch] = useState('')
@@ -140,43 +223,92 @@ export default function CheckinPage() {
     return () => window.clearTimeout(timer)
   }, [fetchOperational])
 
-  async function handleLookup(event) {
-    event?.preventDefault()
-    const token = tokenInput.trim()
-    if (!token) return
+  // Tra cứu bằng mã QR, mã vé hoặc mã đặt chỗ VT-XXXX (backend tự nhận dạng).
+  const runLookup = useCallback(async (rawValue, { silent = false } = {}) => {
+    const query = String(rawValue || '').trim()
+    if (!query) return null
     setIsLooking(true)
-    setTicket(null)
-    setLastCheckin(null)
     try {
-      const response = await lookupTicketByQr(token)
-      setTicket({ ...response.data, token })
+      const response = await lookupCheckinTarget(query)
+      setLookupResult(response.data)
+      return response.data
     } catch (error) {
-      toast.error(error.message || 'Không tìm thấy vé.')
+      setLookupResult(null)
+      if (!silent) toast.error(error.message || 'Không tìm thấy vé.')
+      return null
     } finally {
       setIsLooking(false)
-      inputRef.current?.select()
     }
+  }, [])
+
+  async function handleLookup(event) {
+    event?.preventDefault()
+    if (!tokenInput.trim()) return
+    setLastCheckin(null)
+    await runLookup(tokenInput)
+    inputRef.current?.select()
   }
 
-  async function handleCheckin() {
-    if (!ticket?.canCheckIn) return
-    setIsChecking(true)
+  // Mã quét được từ camera: điền vào ô nhập rồi tra cứu ngay.
+  async function handleScanned(value) {
+    setIsScannerOpen(false)
+    setTokenInput(value)
+    setLastCheckin(null)
+    await runLookup(value)
+  }
+
+  // Làm mới kết quả sau khi check-in để hiển thị trạng thái mới nhất.
+  async function refreshLookup() {
+    const key = lookupResult?.bookingId || tokenInput
+    if (key) await runLookup(key, { silent: true })
+  }
+
+  async function handleCheckinTicket(ticket) {
+    if (!ticket?.canCheckIn || checkingTicketId) return
+    setCheckingTicketId(ticket.ticketId)
     try {
       const response = await checkInTicket(ticket.token)
       setLastCheckin(response.data)
-      setTicket(null)
-      setTokenInput('')
       toast.success(response.message || 'Check-in thành công.')
-      void fetchToday()
-      void fetchOperational(operationalSearch)
-      inputRef.current?.focus()
     } catch (error) {
       toast.error(error.message || 'Check-in thất bại.')
-      // Tra cứu lại để hiển thị trạng thái mới nhất (ví dụ vé vừa bị quét nơi khác)
-      void handleLookup()
     } finally {
-      setIsChecking(false)
+      setCheckingTicketId('')
+      // Luôn tra cứu lại: kể cả khi lỗi (ví dụ vé vừa bị quét ở cổng khác).
+      await refreshLookup()
+      void fetchToday()
+      void fetchOperational(operationalSearch)
     }
+  }
+
+  // Check-in cả nhóm: lần lượt từng vé, không dừng khi một vé lỗi.
+  async function handleCheckinAll() {
+    const targets = (lookupResult?.tickets || []).filter((item) => item.canCheckIn)
+    if (targets.length === 0 || isCheckingAll) return
+
+    setIsCheckingAll(true)
+    let succeeded = 0
+    const failures = []
+    try {
+      for (const target of targets) {
+        try {
+          // Tuần tự để tránh tranh chấp tồn kho/trạng thái ở cổng.
+          const response = await checkInTicket(target.token)
+          succeeded += 1
+          setLastCheckin(response.data)
+        } catch (error) {
+          failures.push(`Vé #${target.index}: ${error.message || 'lỗi không xác định'}`)
+        }
+      }
+    } finally {
+      setIsCheckingAll(false)
+      await refreshLookup()
+      void fetchToday()
+      void fetchOperational(operationalSearch)
+    }
+
+    if (succeeded > 0) toast.success(`Đã check-in ${succeeded} vé.`)
+    if (failures.length > 0) toast.error(`Không check-in được ${failures.length} vé. ${failures[0]}`)
   }
 
   async function handleReissue() {
@@ -243,7 +375,7 @@ export default function CheckinPage() {
             </span>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_188px]">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
             <div className="relative min-w-0">
               <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[22px] text-on-surface-variant">
                 qr_code_scanner
@@ -254,11 +386,21 @@ export default function CheckinPage() {
                 ref={inputRef}
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="Quét mã QR hoặc nhập mã vé..."
+                placeholder="Quét QR, nhập mã vé hoặc mã đặt chỗ VT-…"
                 autoComplete="off"
                 className="h-14 w-full rounded-xl border border-outline-variant bg-surface pl-11 pr-4 text-base outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
             </div>
+            <button
+              type="button"
+              onClick={() => setIsScannerOpen(true)}
+              className="flex h-14 items-center justify-center gap-2 rounded-xl border-2 border-primary px-5 text-sm font-bold text-primary transition hover:bg-primary/5 active:scale-[0.99]"
+            >
+              <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                photo_camera
+              </span>
+              Quét bằng camera
+            </button>
             <button
               type="submit"
               disabled={isLooking || !tokenInput.trim()}
@@ -270,19 +412,26 @@ export default function CheckinPage() {
           </div>
 
           <p id="staff-checkin-token-hint" className="mt-3 text-xs text-on-surface-variant">
-            Đưa mã QR vào máy quét hoặc nhập mã vé do khách cung cấp, sau đó tra cứu trước khi xác nhận.
+            Chấp nhận: mã QR trên vé, mã vé nhập tay, hoặc <strong>mã đặt chỗ dạng VT-XXXXXXXXXXXX</strong> in
+            trên vé của khách. Tra bằng mã đặt chỗ sẽ hiện toàn bộ vé trong đơn để soát cho cả nhóm.
           </p>
         </form>
 
         {/* Kết quả tra cứu */}
-        {ticket && (
+        {lookupResult && (
           <div className="mb-6">
-            <TicketResultCard ticket={ticket} onCheckin={handleCheckin} isChecking={isChecking} />
+            <BookingCheckinCard
+              result={lookupResult}
+              onCheckinTicket={handleCheckinTicket}
+              onCheckinAll={handleCheckinAll}
+              checkingTicketId={checkingTicketId}
+              isCheckingAll={isCheckingAll}
+            />
           </div>
         )}
 
         {/* Xác nhận check-in gần nhất */}
-        {lastCheckin && !ticket && (
+        {lastCheckin && (
           <div className="mb-6 flex items-center gap-3 rounded-xl border-2 border-primary bg-primary-fixed-dim/15 p-5">
             <span className="material-symbols-outlined text-4xl text-primary" aria-hidden="true">
               task_alt
@@ -457,18 +606,34 @@ export default function CheckinPage() {
                           </span>
                         )}
                         {b.bookingStatus === 'CONFIRMED' && b.validCount > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setReissueTarget(b)
-                              setReissueReason('')
-                              setReissueReasonCode('LOST_BY_CUSTOMER')
-                            }}
-                            className="flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/5"
-                          >
-                            <span className="material-symbols-outlined text-[15px]" aria-hidden="true">autorenew</span>
-                            Cấp lại vé
-                          </button>
+                          <div className="flex flex-wrap gap-2">
+                            {/* Phương án dự phòng khi khách không xuất trình được mã QR. */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTokenInput(formatBookingReference(b.bookingId))
+                                setLastCheckin(null)
+                                void runLookup(b.bookingId)
+                                window.scrollTo({ top: 0, behavior: 'smooth' })
+                              }}
+                              className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-xs font-bold text-on-primary hover:opacity-90"
+                            >
+                              <span className="material-symbols-outlined text-[15px]" aria-hidden="true">how_to_reg</span>
+                              Check-in
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReissueTarget(b)
+                                setReissueReason('')
+                                setReissueReasonCode('LOST_BY_CUSTOMER')
+                              }}
+                              className="flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/5"
+                            >
+                              <span className="material-symbols-outlined text-[15px]" aria-hidden="true">autorenew</span>
+                              Cấp lại vé
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -478,6 +643,13 @@ export default function CheckinPage() {
             </table>
           </div>
         </div>
+
+        {isScannerOpen && (
+          <QrCameraScanner
+            onDetected={(value) => void handleScanned(value)}
+            onClose={() => setIsScannerOpen(false)}
+          />
+        )}
 
         {reissueTarget && (
           <div

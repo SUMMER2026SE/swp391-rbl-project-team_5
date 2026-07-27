@@ -112,6 +112,11 @@ function finalizationTx(requestOverrides = {}) {
     reservation: { update: jest.fn().mockResolvedValue({}) },
     ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     booking: { update: jest.fn().mockResolvedValue({}) },
+    loyaltyTransaction: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'lt-rev' }),
+    },
+    user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 0 }) },
   };
 }
 
@@ -158,6 +163,32 @@ test('chỉ hoàn tất booking và vé sau khi VNPay xác nhận 00/00', async 
   });
   expect(tx.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
     data: expect.objectContaining({ status: 'SUCCESS' }),
+  }));
+});
+
+test('fixture bảo vệ dùng adapter local và không gọi VNPay thật', async () => {
+  const transaction = pendingTransaction({
+    payment: payment({
+      rawResponse: {
+        source: 'operational_fixture_v2',
+        vnp_TransactionNo: '123456',
+        vnp_CreateDate: '20260710120000',
+      },
+    }),
+  });
+  const tx = finalizationTx();
+  prisma.refundTransaction.findMany.mockResolvedValue([transaction]);
+  prisma.$transaction.mockImplementation((callback) => callback(tx));
+
+  await expect(sweepPendingRefundTransactions()).resolves.toBe(1);
+
+  expect(refundViaVnpay).not.toHaveBeenCalled();
+  expect(tx.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
+    data: expect.objectContaining({
+      status: 'SUCCESS',
+      gatewayResponseCode: '00',
+      gatewayTransactionStatus: '00',
+    }),
   }));
 });
 

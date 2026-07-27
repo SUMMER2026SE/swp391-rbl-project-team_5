@@ -586,6 +586,45 @@ async function sendBookingCancelledByPartnerEmail({
   });
 }
 
+async function sendRecoveryCaseCreatedEmail({
+  to,
+  fullName,
+  bookingId,
+  recoveryCaseId,
+  reason,
+  expiresAt,
+}) {
+  const frontendUrl = getFrontendUrl();
+  const link = `${frontendUrl}/rescue/${recoveryCaseId}`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const safeReason = escapeHtml(reason || 'Sự cố vận hành từ đối tác.');
+  const shortId = formatBookingReference(bookingId);
+  const deadline = new Date(expiresAt).toLocaleTimeString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Ho_Chi_Minh',
+  });
+
+  return sendMail({
+    to,
+    subject: `VietTicket Rescue đã tìm thấy vé thay thế cho #${shortId}`,
+    text:
+      `Xin chào ${fullName || 'bạn'}, đơn ${bookingId} bị đối tác hủy vì: ${reason}. `
+      + `Bạn có thể chọn vé thay thế mà không thanh toán lại hoặc nhận hoàn 100% trước ${deadline}.`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Kế hoạch của bạn vẫn có thể được cứu',
+      preview:
+        `Xin chào ${safeName}, đơn <strong>#${shortId}</strong> đã bị hủy vì: ${safeReason}.`
+        + '<br /><br />VietTicket đã kiểm tra tồn kho thật và tìm thấy lựa chọn thay thế. '
+        + 'Bạn có thể <strong>đổi vé không cần thanh toán lại</strong> hoặc '
+        + `<strong>nhận hoàn tiền 100%</strong>. Vui lòng chọn trước ${deadline}.`,
+      buttonText: 'Xem phương án cứu chuyến',
+      link,
+    }),
+  });
+}
+
 async function sendHoldExpiredEmail({ to, fullName, bookingId, attractionTitle }) {
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/attractions`;
@@ -628,6 +667,7 @@ module.exports = {
   sendReissueTicketEmail,
   sendBookingRejectedEmail,
   sendBookingCancelledByPartnerEmail,
+  sendRecoveryCaseCreatedEmail,
   sendPendingApprovalExpiredEmail,
   sendHoldExpiredEmail,
 };

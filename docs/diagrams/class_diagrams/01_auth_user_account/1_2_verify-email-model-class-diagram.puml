@@ -1,0 +1,54 @@
+@startuml
+title Verify Email - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class EmailVerificationToken <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -token: String {unique, hashed}
+  -expiresAt: DateTime
+  --
+  +matches(tokenHash: String): Boolean
+  +isExpired(at: DateTime): Boolean
+  +consume(): void
+}
+
+class User <<model>> {
+  -id: String {UUID}
+  -email: String {unique}
+  -isEmailVerified: Boolean = false
+  -status: UserStatus = ACTIVE
+  --
+  +markEmailVerified(): void
+}
+
+class UserProfile <<model>> {
+  -id: String {UUID}
+  -userId: String {unique}
+  -phoneNumber: String [0..1]
+  -avatarUrl: String [0..1]
+  --
+  +isComplete(): Boolean
+}
+
+User "1" *-- "0..1" EmailVerificationToken : emailVerificationTokens
+User "1" *-- "0..1" UserProfile : profile
+
+@enduml

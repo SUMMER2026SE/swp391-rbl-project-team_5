@@ -1,0 +1,133 @@
+<mxfile host="app.diagrams.net" modified="2026-07-19T00:00:00.000Z" agent="claude" version="24.0.0">
+  <diagram name="Module1-Auth-Profile" id="module1-auth-profile">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="1350" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="boundary" value="Module 1 — Authentication &amp; Profile" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;fontSize=20;fontStyle=1;fillColor=none;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="280" y="40" width="820" height="1420" as="geometry" />
+        </mxCell>
+
+        <mxCell id="g_guest" value="Guest" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="90" y="300" width="50" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="g_ruser" value="Người dùng đã đăng nhập&#10;{abstract}" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontStyle=3;" vertex="1" parent="1">
+          <mxGeometry x="90" y="780" width="50" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="g_cust" value="Customer" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="1030" width="50" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="g_staff" value="Staff" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1030" width="50" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="g_admin" value="Admin" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="180" y="1030" width="50" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="g_google" value="Google Identity Provider" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="240" width="50" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="g_email" value="Email / SMTP Service" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="440" width="50" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc_register" value="Register Account with Email &amp; Password" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="90" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_login" value="Log In with Email &amp; Password" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="180" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_glogin" value="Log In with Google (OAuth)" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="270" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_confirm" value="Confirm Email Address via Token" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="360" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_resend" value="Resend Email Verification Link" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="450" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_reqreset" value="Request Password-Reset Link" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="540" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_reset" value="Reset Password via Token" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="630" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="uc_viewprofile" value="View Own Profile" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="760" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_editprofile" value="Edit Profile Details" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="850" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_avatar" value="Upload Avatar Image" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="940" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_changepw" value="Change Password While Logged In" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1030" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_logout" value="Log Out &amp; Revoke Current Session" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1120" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="inc_sendverif" value="Send Verification Email" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="720" y="90" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="inc_validgoogle" value="Validate Google ID Token" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="720" y="270" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ext_autoprov" value="Auto-Provision Account on First Google Login" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="720" y="380" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="inc_sendreset" value="Send Password-Reset Email" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="720" y="540" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="inc_revoke" value="Revoke Active Sessions" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="720" y="820" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a1" style="endArrow=none;html=1;" edge="1" parent="1" source="g_guest" target="uc_register"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a2" style="endArrow=none;html=1;" edge="1" parent="1" source="g_guest" target="uc_login"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a3" style="endArrow=none;html=1;" edge="1" parent="1" source="g_guest" target="uc_glogin"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a4" style="endArrow=none;html=1;" edge="1" parent="1" source="g_guest" target="uc_confirm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a5" style="endArrow=none;html=1;" edge="1" parent="1" source="g_guest" target="uc_resend"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a6" style="endArrow=none;html=1;" edge="1" parent="1" source="g_guest" target="uc_reqreset"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a7" style="endArrow=none;html=1;" edge="1" parent="1" source="g_guest" target="uc_reset"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="a8" style="endArrow=none;html=1;" edge="1" parent="1" source="g_ruser" target="uc_viewprofile"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a9" style="endArrow=none;html=1;" edge="1" parent="1" source="g_ruser" target="uc_editprofile"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a10" style="endArrow=none;html=1;" edge="1" parent="1" source="g_ruser" target="uc_avatar"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a11" style="endArrow=none;html=1;" edge="1" parent="1" source="g_ruser" target="uc_changepw"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a12" style="endArrow=none;html=1;" edge="1" parent="1" source="g_ruser" target="uc_logout"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="a13" style="endArrow=none;html=1;" edge="1" parent="1" source="g_google" target="inc_validgoogle"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a14" style="endArrow=none;html=1;" edge="1" parent="1" source="g_email" target="inc_sendverif"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a15" style="endArrow=none;html=1;" edge="1" parent="1" source="g_email" target="inc_sendreset"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="gen1" value="" style="endArrow=block;endFill=0;html=1;" edge="1" parent="1" source="g_cust" target="g_ruser"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="gen2" value="" style="endArrow=block;endFill=0;html=1;" edge="1" parent="1" source="g_staff" target="g_ruser"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="i1" value="&#171;include&#187;" style="endArrow=open;dashed=1;html=1;fontStyle=2;" edge="1" parent="1" source="uc_register" target="inc_sendverif"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="i2" value="&#171;include&#187;" style="endArrow=open;dashed=1;html=1;fontStyle=2;" edge="1" parent="1" source="uc_resend" target="inc_sendverif"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="i3" value="&#171;include&#187;" style="endArrow=open;dashed=1;html=1;fontStyle=2;" edge="1" parent="1" source="uc_glogin" target="inc_validgoogle"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="i4" value="&#171;include&#187;" style="endArrow=open;dashed=1;html=1;fontStyle=2;" edge="1" parent="1" source="uc_reqreset" target="inc_sendreset"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="i5" value="&#171;include&#187;" style="endArrow=open;dashed=1;html=1;fontStyle=2;" edge="1" parent="1" source="uc_reset" target="inc_revoke"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="i6" value="&#171;include&#187;" style="endArrow=open;dashed=1;html=1;fontStyle=2;" edge="1" parent="1" source="uc_changepw" target="inc_revoke"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="x1" value="&#171;extend&#187;" style="endArrow=open;dashed=1;html=1;fontStyle=2;" edge="1" parent="1" source="ext_autoprov" target="uc_glogin"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="uc_viewusers" value="View User List" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1290" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="uc_lockuser" value="Lock or Unlock User Account" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="340" y="1380" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="a16" style="endArrow=none;html=1;" edge="1" parent="1" source="g_admin" target="uc_viewusers"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a17" style="endArrow=none;html=1;" edge="1" parent="1" source="g_admin" target="uc_lockuser"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="gen3" value="" style="endArrow=block;endFill=0;html=1;" edge="1" parent="1" source="g_admin" target="g_ruser"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

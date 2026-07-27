@@ -22,14 +22,30 @@ function Test-HttpEndpoint([string]$Label, [string]$Uri) {
   }
 }
 
+# Optional check: khong lam preflight fail neu dich vu chua chay.
+function Test-HttpEndpointOptional([string]$Label, [string]$Uri, [string]$Note) {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $Uri -TimeoutSec 8
+    if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 400) {
+      throw "HTTP $($response.StatusCode)"
+    }
+    Write-Host "[PASS] $Label - $Uri" -ForegroundColor Green
+  }
+  catch {
+    Write-Host "[WARN] $Label khong chay - $Uri - $($_.Exception.Message)" -ForegroundColor Yellow
+    if ($Note) { Write-Host "       $Note" -ForegroundColor Yellow }
+  }
+}
+
 $branch = (& git branch --show-current).Trim()
 Assert-CommandSucceeded 'Read Git branch'
-if ($branch -notin @('HAnh', 'codex/vietticket-live-autopilot')) {
-  throw "Current branch is '$branch'. Checkout the prepared demo branch before the demo."
+$allowedBranches = @('Karma', 'HAnh', 'codex/vietticket-live-autopilot')
+if ($allowedBranches -notcontains $branch) {
+  throw "Current branch is '$branch'. Checkout one of: $($allowedBranches -join ', ') before the demo."
 }
-Write-Host "[PASS] Prepared demo branch: $branch" -ForegroundColor Green
+Write-Host "[PASS] Current branch is $branch" -ForegroundColor Green
 
-Test-HttpEndpoint 'ML forecast service' 'http://127.0.0.1:8000/health'
+Test-HttpEndpointOptional 'ML forecast service' 'http://127.0.0.1:8000/health' 'ML khong bat buoc: panel forecast se hien tu cache RevenueForecast da seed. Khong bam "lam moi forecast" khi ML tat.'
 Test-HttpEndpoint 'Backend API' 'http://localhost:5000/api/health'
 Test-HttpEndpoint 'Frontend Vite' 'http://localhost:5173/'
 
@@ -46,5 +62,5 @@ finally {
 }
 
 Write-Host ''
-Write-Host "PRE-FLIGHT PASS: services, operational data, AI itinerary, and branch $branch are ready." -ForegroundColor Green
+Write-Host "PRE-FLIGHT PASS: backend, frontend, demo data, AI, and branch $branch are ready (ML optional - dung cache neu tat)." -ForegroundColor Green
 Write-Host 'Do not run demo:prepare/demo:smoke after signing in to the demo browser profiles.' -ForegroundColor Yellow

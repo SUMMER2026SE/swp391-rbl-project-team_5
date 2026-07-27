@@ -1,0 +1,24 @@
+@startuml
+title Refund Request Lifecycle - 3.8 (RefundStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> PENDING : Customer requests refund /\nsystem queues mandatory refund
+PENDING --> PROCESSING : Staff takes the request\n(PATCH /api/staff/refunds/:id)
+PROCESSING --> APPROVED : Approved +\ngateway refund success
+PROCESSING --> REJECTED : Staff rejects (+ reason,\nnon-mandatory only)
+APPROVED --> [*]
+REJECTED --> [*]
+
+note right of PROCESSING
+  Mandatory refunds
+  cannot be rejected
+end note
+@enduml

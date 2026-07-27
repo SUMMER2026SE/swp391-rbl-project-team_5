@@ -1,0 +1,34 @@
+@startuml
+title 3.6.12 Partner Reviews (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Partner|
+start
+:Open /partner/reviews;
+|System|
+:Load reviews + stats\nGET /api/partners/reviews and /reviews/stats;
+:Render review list + rating stats;
+|Partner|
+if (Reply to a review?) then (Yes)
+  :Write reply and submit;
+  |System|
+  :Validate reply not empty;
+  if (Reply empty?) then (Yes)
+    |Partner|
+    :Toast "Noi dung phan hoi khong duoc de trong!";
+  else (No)
+    |System|
+    :Save public reply;
+    :Toast "Gui phan hoi thanh cong!";
+  endif
+else (No)
+  |Partner|
+  :Read reviews and statistics;
+endif
+|System|
+stop
+@enduml

@@ -11,7 +11,19 @@ const {
 
 
 const { Decimal } = Prisma;
-const PAYMENT_METHODS = new Set(['vnpay']);
+const {
+  BANK_TRANSFER_METHOD,
+  getBankTransferHoldMs,
+} = require('../utils/bankTransferPolicy');
+const { getBankTransferConfig } = require('../config/runtimeConfig');
+
+// Chỉ mở phương thức chuyển khoản khi nền tảng đã cấu hình tài khoản nhận tiền,
+// tránh việc khách chọn được rồi lại không có mã QR để chuyển.
+function getAllowedPaymentMethods() {
+  const methods = new Set(['vnpay']);
+  if (getBankTransferConfig().configured) methods.add(BANK_TRANSFER_METHOD);
+  return methods;
+}
 
 const reservationInclude = {
   user: { include: { profile: true } },
@@ -35,7 +47,10 @@ const bookingInclude = {
   voucher: true,
   payments: { orderBy: { createdAt: 'desc' } },
   refundRequests: { orderBy: { createdAt: 'desc' } },
-  ticketInstances: true,
+  refundRequestsTargeting: { orderBy: { createdAt: 'desc' } },
+  // Thứ tự cố định để "Vé #1, #2..." trên vé của khách không đổi sau mỗi lần
+  // check-in và khớp đúng với danh sách vé bên cổng soát vé của nhân viên.
+  ticketInstances: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
   reservation: {
     include: {
       timeSlot: true,
@@ -212,6 +227,12 @@ function toBookingResponse(booking) {
   const product = reservation.ticketProduct;
   const snapshot = getBookingSnapshotView(booking);
   const paymentStatus = resolveBookingPaymentStatus(booking.payments);
+  const latestRefundRequest = [
+    ...(booking.refundRequests || []),
+    ...(booking.refundRequestsTargeting || []),
+  ].sort((left, right) => (
+    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  ))[0] || null;
 
   return {
     id: booking.id,
@@ -257,17 +278,17 @@ function toBookingResponse(booking) {
     rating: booking.review?.rating || 0,
     // Yêu cầu hoàn tiền gần nhất; một booking có thể có thêm yêu cầu riêng
     // cho từng giao dịch thanh toán trùng.
-    refundRequest: booking.refundRequests?.[0]
+    refundRequest: latestRefundRequest
       ? {
-          id: booking.refundRequests[0].id,
-          type: booking.refundRequests[0].type,
-          mandatory: booking.refundRequests[0].mandatory,
-          status: booking.refundRequests[0].status,
-          amount: decimalToNumber(booking.refundRequests[0].amount),
-          reason: booking.refundRequests[0].reason,
-          staffNotes: booking.refundRequests[0].staffNotes || '',
-          createdAt: booking.refundRequests[0].createdAt,
-          processedAt: booking.refundRequests[0].processedAt,
+          id: latestRefundRequest.id,
+          type: latestRefundRequest.type,
+          mandatory: latestRefundRequest.mandatory,
+          status: latestRefundRequest.status,
+          amount: decimalToNumber(latestRefundRequest.amount),
+          reason: latestRefundRequest.reason,
+          staffNotes: latestRefundRequest.staffNotes || '',
+          createdAt: latestRefundRequest.createdAt,
+          processedAt: latestRefundRequest.processedAt,
         }
       : null,
     ticketInstances: booking.ticketInstances.map((ticket) => ({
@@ -278,9 +299,16 @@ function toBookingResponse(booking) {
   };
 }
 
-function validateVoucher(voucher, subtotalAmount, now = new Date()) {
+function validateVoucher(voucher, subtotalAmount, now = new Date(), userId = null) {
   if (!voucher || !voucher.isActive || voucher.expiryDate <= now) {
     const error = new Error('Mã ưu đãi không hợp lệ hoặc đã hết hạn.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Voucher cá nhân (đổi điểm) chỉ chủ sở hữu mới được dùng.
+  if (voucher.userId && voucher.userId !== userId) {
+    const error = new Error('Mã ưu đãi này không thuộc về tài khoản của bạn.');
     error.statusCode = 400;
     throw error;
   }
@@ -361,12 +389,12 @@ function calculateDiscount(voucher, subtotalAmount) {
   return Decimal.min(discountAmount, subtotalAmount);
 }
 
-async function findVoucher(client, voucherCode, subtotalAmount, now) {
+async function findVoucher(client, voucherCode, subtotalAmount, now, userId = null) {
   const code = normalizeVoucherCode(voucherCode);
   if (!code) return { voucher: null, discountAmount: new Decimal(0) };
 
   const voucher = await client.voucher.findUnique({ where: { code } });
-  validateVoucher(voucher, subtotalAmount, now);
+  validateVoucher(voucher, subtotalAmount, now, userId);
 
   return {
     voucher,
@@ -534,6 +562,7 @@ async function validateAndApplyVoucher(req, res, next) {
       voucherCode,
       subtotalAmount,
       new Date(),
+      req.user?.id || null,
     );
     const totalAmount = subtotalAmount.minus(discountAmount);
     const parsedTotal = parseVndInteger(totalAmount);
@@ -599,7 +628,7 @@ async function createBooking(req, res, next) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ message: 'Email không hợp lệ.' });
     }
-    if (!PAYMENT_METHODS.has(paymentMethod)) {
+    if (!getAllowedPaymentMethods().has(paymentMethod)) {
       return res.status(400).json({ message: 'Phương thức thanh toán không hợp lệ.' });
     }
 
@@ -686,6 +715,7 @@ async function createBooking(req, res, next) {
           voucherCode,
           subtotalAmount,
           now,
+          userId,
         );
         const totalAmount = subtotalAmount.minus(discountAmount);
         const parsedTotal = parseVndInteger(totalAmount);
@@ -756,6 +786,22 @@ async function createBooking(req, res, next) {
             ...buildBookingSnapshot(reservation, now),
           },
         });
+
+        // Chuyển khoản ngân hàng cần thời gian cho khách chuyển tiền và cho
+        // Admin đối chiếu sao kê. Giữ chỗ mặc định 10 phút sẽ khiến worker hủy
+        // đơn dù khách đã chuyển tiền -> nới hạn giữ chỗ cho riêng đơn này.
+        if (paymentMethod === BANK_TRANSFER_METHOD) {
+          const bankHoldExpiresAt = new Date(now.getTime() + getBankTransferHoldMs());
+          if (bankHoldExpiresAt > reservation.expiresAt) {
+            await tx.reservation.update({
+              where: { id: reservationId },
+              data: {
+                expiresAt: bankHoldExpiresAt,
+                paymentDeadline: bankHoldExpiresAt,
+              },
+            });
+          }
+        }
 
         return tx.booking.findUnique({
           where: { id: created.id },

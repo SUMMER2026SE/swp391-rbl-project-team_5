@@ -12,6 +12,7 @@ const {
   reconcileRefundRequest,
   reissueTicket,
   lookupTicketByQr,
+  lookupCheckinTarget,
   checkInTicket,
   listTodayBookings,
   listOperationalBookings,
@@ -34,6 +35,8 @@ router.post('/refunds/:refundId/reconcile', requirePlatformStaff, reconcileRefun
 router.post('/bookings/:bookingId/reissue', requireCheckInEmployer, reissueTicket);
 router.get('/bookings/today', requireCheckInEmployer, listTodayBookings);
 router.get('/bookings', requireCheckInEmployer, listOperationalBookings);
+// Tra cứu hợp nhất: nhận mã QR hoặc mã đặt chỗ VT-XXXX, trả về mọi vé trong đơn.
+router.get('/lookup', requireCheckInEmployer, lookupCheckinTarget);
 router.get('/checkin/:token', requireCheckInEmployer, lookupTicketByQr);
 router.post('/checkin/:token', requireCheckInEmployer, checkInTicket);
 

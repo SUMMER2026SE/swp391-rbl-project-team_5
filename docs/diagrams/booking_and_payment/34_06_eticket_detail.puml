@@ -1,0 +1,44 @@
+@startuml
+title 3.4.6 E-Ticket Detail (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Customer|
+start
+:Open /tickets/:bookingId;
+|System|
+:Load booking + ticket instances (QR)\nGET /api/bookings/:bookingId;
+:Preview refund eligibility\nGET /api/payments/refund-preview/:bookingId;
+:Render summary + QR e-tickets\n(BR-16, BR-17, BR-19, BR-22);
+|Customer|
+switch (Action?)
+case (Download)
+  :Download e-ticket (PDF);
+case (Request refund)
+  |System|
+  if (Refund allowed by policy?) then (Yes)
+    |Customer|
+    :Open refund request modal (see 3.4.7);
+  else (No)
+    |System|
+    :Refund button hidden / blocked;
+  endif
+case (Write review)
+  |System|
+  if (Booking completed?) then (Yes)
+    |Customer|
+    :Open review modal + submit\nPOST /api/reviews;
+  else (No)
+    |System|
+    :Review disabled;
+  endif
+case (Just view)
+  |Customer|
+  :Read booking detail;
+endswitch
+|System|
+stop
+@enduml

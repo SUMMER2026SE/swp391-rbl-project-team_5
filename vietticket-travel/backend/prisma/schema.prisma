@@ -33,6 +33,9 @@ model User {
   isEmailVerified   Boolean      @default(false)
   status            UserStatus   @default(ACTIVE)
   tokenVersion      Int          @default(0)
+  // Số dư điểm thưởng (cache). Nguồn chân lý là tổng LoyaltyTransaction.points;
+  // cột này được cập nhật nguyên tử cùng mỗi giao dịch điểm để đọc nhanh.
+  loyaltyPoints     Int          @default(0)
   termsAcceptedAt   DateTime?
   termsVersion      String?
   privacyVersion    String?
@@ -61,12 +64,17 @@ model User {
   checkedInTickets        TicketInstance[]            @relation("TicketCheckedInBy")
   auditLogs               AuditLog[]
   savedItineraries        SavedItinerary[]
+  loyaltyTransactions     LoyaltyTransaction[]
+  loyaltyVouchers         Voucher[]                   @relation("VoucherOwner")
   liveTrips               LiveTrip[]
   smartQueueEntries       SmartQueueEntry[]
   liveTripEvents          LiveTripEvent[]
   smartQueuePolicies      SmartQueuePolicy[]          @relation("SmartQueuePolicyUpdatedBy")
   calledQueueEntries      SmartQueueEntry[]           @relation("SmartQueueCalledBy")
   pausedQueuePolicies     SmartQueuePolicy[]          @relation("SmartQueuePolicyPausedBy")
+  recoveryCases           RecoveryCase[]
+  partyRoomsHosted        PartyRoom[]                 @relation("PartyRoomHost")
+  partyMemberships        PartyMember[]               @relation("PartyMemberUser")
 
   @@index([employerPartnerId])
 }
@@ -388,6 +396,7 @@ model Attraction {
   smartQueuePolicy    SmartQueuePolicy?
   arrivalObservations ArrivalObservation[]
   livePredictions     LivePrediction[]
+  partyCandidates     PartyCandidate[]
 
   @@index([city])
   @@index([status])
@@ -623,17 +632,22 @@ model Booking {
   createdAt                  DateTime         @default(now())
   updatedAt                  DateTime         @updatedAt
 
-  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reservation        Reservation             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  voucher            Voucher?                @relation(fields: [voucherId], references: [id])
-  payments           Payment[]
-  ticketInstances    TicketInstance[]
-  refundRequests     RefundRequest[]
-  refundTransactions RefundTransaction[]
-  review             Review?
-  settlementItems    PartnerSettlementItem[]
-  liveTripItems      LiveTripItem[]
-  smartQueueEntries  SmartQueueEntry[]
+  user                      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation               Reservation             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  voucher                   Voucher?                @relation(fields: [voucherId], references: [id])
+  payments                  Payment[]
+  ticketInstances           TicketInstance[]
+  refundRequests            RefundRequest[]
+  refundRequestsTargeting   RefundRequest[]         @relation("RefundTargetBooking")
+  refundTransactions        RefundTransaction[]
+  review                    Review?
+  settlementItems           PartnerSettlementItem[]
+  liveTripItems             LiveTripItem[]
+  smartQueueEntries         SmartQueueEntry[]
+  loyaltyTransactions       LoyaltyTransaction[]
+  recoveryCaseAsOriginal    RecoveryCase?           @relation("RecoveryOriginalBooking")
+  recoveryCaseAsReplacement RecoveryCase?           @relation("RecoveryReplacementBooking")
+  recoveryCasesAsFunding    RecoveryCase[]          @relation("RecoveryFundingBooking")
 
   @@index([userId])
   @@index([voucherId])
@@ -642,6 +656,41 @@ model Booking {
   @@index([snapshotVisitDate])
   @@index([isForecastTrainingSample])
   @@index([cancelledAt])
+}
+
+// Customer-consented recovery after a provider/system cancellation. Candidate
+// options are computed from live inventory and therefore are deliberately not
+// persisted; only the original and finally selected snapshots are durable.
+model RecoveryCase {
+  id                     String             @id @default(uuid())
+  userId                 String
+  originalBookingId      String             @unique
+  fundingBookingId       String
+  replacementBookingId   String?            @unique
+  status                 RecoveryCaseStatus @default(OPEN)
+  trigger                RecoveryTrigger
+  reason                 String             @db.Text
+  creditAmount           Decimal            @db.Decimal(12, 2)
+  replacementAmount      Decimal?           @db.Decimal(12, 2)
+  refundAmount           Decimal            @default(0.0) @db.Decimal(12, 2)
+  expiresAt              DateTime
+  originalSnapshot       Json
+  selectedOptionSnapshot Json?
+  acceptedAt             DateTime?
+  declinedAt             DateTime?
+  completedAt            DateTime?
+  version                Int                @default(0)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalBooking    Booking  @relation("RecoveryOriginalBooking", fields: [originalBookingId], references: [id], onDelete: Restrict)
+  fundingBooking     Booking  @relation("RecoveryFundingBooking", fields: [fundingBookingId], references: [id], onDelete: Restrict)
+  replacementBooking Booking? @relation("RecoveryReplacementBooking", fields: [replacementBookingId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, createdAt])
+  @@index([fundingBookingId])
+  @@index([status, expiresAt])
 }
 
 model PartnerSettlement {
@@ -749,6 +798,11 @@ model TicketInstance {
   @@index([checkedInAt])
 }
 
+enum VoucherSource {
+  PROMOTION // Mã khuyến mãi công khai do Admin tạo (dùng chung)
+  LOYALTY   // Voucher cá nhân sinh ra khi khách đổi điểm thưởng
+}
+
 model Voucher {
   id            String              @id @default(uuid())
   code          String              @unique
@@ -760,12 +814,53 @@ model Voucher {
   isActive      Boolean             @default(true)
   usageLimit    Int?
   usedCount     Int                 @default(0)
+  // Chủ sở hữu voucher. NULL = mã công khai; có giá trị = voucher cá nhân
+  // (đổi điểm) và CHỈ tài khoản này được dùng.
+  userId        String?
+  source        VoucherSource       @default(PROMOTION)
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
-  bookings Booking[]
+  bookings            Booking[]
+  owner               User?                @relation("VoucherOwner", fields: [userId], references: [id], onDelete: Cascade)
+  loyaltyTransactions LoyaltyTransaction[]
 
   @@index([isActive, expiryDate])
+  @@index([userId])
+}
+
+enum LoyaltyTransactionType {
+  EARN       // Cộng điểm khi đơn CONFIRMED
+  REVERSAL   // Thu hồi điểm khi đơn đã cộng điểm bị hoàn tiền
+  REDEEM     // Trừ điểm khi đổi lấy voucher
+  ADJUSTMENT // Điều chỉnh thủ công (dự phòng)
+}
+
+// Sổ cái điểm thưởng: mỗi dòng là một biến động điểm bất biến.
+// points > 0 (EARN), points < 0 (REDEEM/REVERSAL). balanceAfter là số dư
+// ngay sau giao dịch, phục vụ hiển thị sao kê mà không cần tính lũy kế.
+model LoyaltyTransaction {
+  id           String                 @id @default(uuid())
+  userId       String
+  bookingId    String?
+  voucherId    String?
+  type         LoyaltyTransactionType
+  points       Int
+  balanceAfter Int
+  description  String
+  metadata     Json?
+  createdAt    DateTime               @default(now())
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  voucher Voucher? @relation(fields: [voucherId], references: [id], onDelete: SetNull)
+
+  // Đảm bảo mỗi đơn chỉ cộng điểm 1 lần và thu hồi 1 lần (idempotent).
+  // Postgres coi các NULL là khác nhau nên REDEEM/ADJUSTMENT (bookingId NULL)
+  // không bị ràng buộc này.
+  @@unique([bookingId, type])
+  @@index([userId, createdAt])
+  @@index([voucherId])
 }
 
 enum RefundStatus {
@@ -790,6 +885,18 @@ enum RefundTransactionStatus {
   NEEDS_RECONCILIATION
 }
 
+enum RecoveryCaseStatus {
+  OPEN
+  REPLACED
+  REFUND_PENDING
+  REFUNDED
+}
+
+enum RecoveryTrigger {
+  PARTNER_CANCELLATION
+  SYSTEM_CANCELLATION
+}
+
 enum SupportStatus {
   OPEN
   IN_PROGRESS
@@ -806,6 +913,7 @@ enum SupportPriority {
 model RefundRequest {
   id                         String            @id @default(uuid())
   bookingId                  String
+  targetBookingId            String?
   requestKey                 String            @unique
   requestedById              String
   type                       RefundRequestType @default(CUSTOMER_CANCELLATION)
@@ -826,9 +934,11 @@ model RefundRequest {
   updatedAt                  DateTime          @updatedAt
 
   booking            Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  targetBooking      Booking?            @relation("RefundTargetBooking", fields: [targetBookingId], references: [id], onDelete: Restrict)
   refundTransactions RefundTransaction[]
 
   @@index([bookingId])
+  @@index([targetBookingId])
   @@index([status])
   @@index([requestedById])
   @@index([type, status])
@@ -951,10 +1061,139 @@ model SavedItinerary {
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   liveTrip LiveTrip?
+  partyRoom PartyRoom? @relation("PartyRoomSavedItinerary")
 
   @@unique([userId, planId])
   @@index([userId])
   @@index([createdAt])
+}
+
+enum PartyRoomStatus {
+  OPEN
+  FINALIZED
+  CLOSED
+  EXPIRED
+}
+
+enum PartyMemberRole {
+  HOST
+  GUEST
+}
+
+enum PartyVoteValue {
+  LIKE
+  LOVE
+  VETO
+}
+
+// PartySync is a pre-booking collaboration surface. The host remains the
+// owner of the resulting SavedItinerary and every downstream booking.
+model PartyRoom {
+  id               String          @id @default(uuid())
+  hostUserId       String
+  savedItineraryId String?         @unique
+  title            String
+  city             String
+  startDate        DateTime        @db.Date
+  dayCount         Int
+  adults           Int
+  children         Int
+  totalBudget      Decimal         @db.Decimal(14, 2)
+  pace             String          @default("normal")
+  maxMembers       Int             @default(10)
+  inviteTokenHash  String          @unique @db.VarChar(64)
+  inviteExpiresAt  DateTime
+  status           PartyRoomStatus @default(OPEN)
+  version          Int             @default(1)
+  finalizedAt      DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  host           User            @relation("PartyRoomHost", fields: [hostUserId], references: [id], onDelete: Cascade)
+  savedItinerary SavedItinerary? @relation("PartyRoomSavedItinerary", fields: [savedItineraryId], references: [id], onDelete: SetNull)
+  members        PartyMember[]
+  candidates     PartyCandidate[]
+  decisions      PartyDecision[]
+
+  @@index([hostUserId, status, updatedAt])
+  @@index([status, inviteExpiresAt])
+}
+
+model PartyMember {
+  id               String          @id @default(uuid())
+  roomId           String
+  userId           String?
+  role             PartyMemberRole @default(GUEST)
+  displayName      String
+  displayNameNormalized String
+  avatarKey        String          @default("teal")
+  budgetCap        Decimal?        @db.Decimal(14, 2)
+  preferences      Json?
+  sessionTokenHash String?         @unique @db.VarChar(64)
+  sessionExpiresAt DateTime?
+  joinedAt         DateTime        @default(now())
+  lastSeenAt       DateTime        @default(now())
+  removedAt        DateTime?
+  updatedAt        DateTime        @updatedAt
+
+  room  PartyRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user  User?      @relation("PartyMemberUser", fields: [userId], references: [id], onDelete: SetNull)
+  votes PartyVote[]
+
+  @@unique([roomId, userId])
+  @@unique([roomId, displayNameNormalized])
+  @@index([roomId, removedAt, joinedAt])
+  @@index([sessionExpiresAt])
+}
+
+model PartyCandidate {
+  id           String   @id @default(uuid())
+  roomId       String
+  attractionId String
+  snapshot     Json
+  position     Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  room       PartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  votes      PartyVote[]
+
+  @@unique([roomId, attractionId])
+  @@index([roomId, position])
+  @@index([attractionId])
+}
+
+model PartyVote {
+  id          String         @id @default(uuid())
+  memberId    String
+  candidateId String
+  value       PartyVoteValue
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  member    PartyMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  candidate PartyCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, candidateId])
+  @@index([candidateId, value])
+}
+
+model PartyDecision {
+  id                  String   @id @default(uuid())
+  roomId              String
+  inputVersion        Int
+  algorithmVersion    String
+  consensusScore      Decimal  @db.Decimal(5, 2)
+  averageSatisfaction Decimal  @db.Decimal(5, 2)
+  minimumSatisfaction Decimal  @db.Decimal(5, 2)
+  snapshot            Json
+  metrics             Json
+  createdAt           DateTime @default(now())
+
+  room PartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
 }
 
 enum LiveTripStatus {

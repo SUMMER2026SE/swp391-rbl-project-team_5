@@ -1,0 +1,98 @@
+@startuml
+title Process Refund Request - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class RefundRequest <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -processedById: String [0..1]
+  -amount: Decimal
+  -status: RefundStatus = PENDING
+  -processingStartedAt: DateTime [0..1]
+  --
+  +startProcessing(staffId: String, at: DateTime): void
+  +resetProcessing(): void
+  +changeStatus(status: RefundStatus): void
+  +isPending(): Boolean
+  +isApproved(): Boolean
+}
+
+class RefundTransaction <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -paymentId: String [0..1]
+  -refundRequestId: String [0..1]
+  -gatewayRequestId: String {unique}
+  -processedById: String [0..1]
+  -gateway: String = "VNPAY"
+  -transactionType: String [0..1]
+  --
+  +recordGatewayResult(code: String, transactionId: String): void
+  +isSettled(): Boolean
+}
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -status: BookingStatus = PENDING_PAYMENT
+  -refundRequired: Boolean = false
+  --
+  +clearRefundFlag(): void
+  +changeStatus(status: BookingStatus): void
+}
+
+class TicketInstance <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -qrCodeToken: String {unique}
+  -status: TicketInstanceStatus = VALID
+  --
+  +changeStatus(status: TicketInstanceStatus): void
+}
+
+class Payment <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -duplicateOfPaymentId: String [0..1]
+  -amount: Decimal
+  -status: PaymentStatus = PENDING
+  --
+  +isSucceeded(): Boolean
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  --
+  +isExpired(at: DateTime): Boolean
+}
+
+Booking "1" -- "0..*" RefundRequest : refundRequests
+Booking "1" -- "0..*" RefundTransaction : refundTransactions
+Payment "0..1" -- "0..*" RefundTransaction : refundTransactions
+RefundRequest "0..1" *-- "0..*" RefundTransaction : refundTransactions
+Reservation "1" -- "0..1" Booking : booking
+Booking "1" *-- "0..*" TicketInstance : ticketInstances
+Booking "1" *-- "0..*" Payment : payments
+Payment "0..1" -- "0..*" Payment : duplicatePayments
+
+@enduml

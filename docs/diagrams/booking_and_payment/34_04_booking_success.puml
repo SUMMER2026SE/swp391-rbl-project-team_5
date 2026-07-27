@@ -1,0 +1,26 @@
+@startuml
+title 3.4.4 Booking Success (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|Customer|
+start
+:Redirected to /booking-success\nafter successful payment;
+|System|
+:Display confirmed booking summary\n(attraction, visit date, quantity, total);
+:Show next-step actions;
+|Customer|
+if (Where to go?) then (View tickets)
+  :Click "Ve cua toi";
+  |System|
+  :Navigate to /my-tickets or the e-ticket page;
+else (Stay)
+  |Customer|
+  :Read confirmation;
+endif
+|System|
+stop
+@enduml

@@ -56,6 +56,12 @@ export function lookupTicketByQr(token) {
   return apiRequest(`/staff/checkin/${encodeURIComponent(token)}`, { method: 'GET' })
 }
 
+// Tra cứu hợp nhất: nhận mã QR, mã vé, hoặc mã đặt chỗ VT-XXXX.
+// Trả về toàn bộ vé trong đơn kèm trạng thái từng vé.
+export function lookupCheckinTarget(query) {
+  return apiRequest(`/staff/lookup?q=${encodeURIComponent(query)}`, { method: 'GET' })
+}
+
 // Check-in đúng một TicketInstance ứng với mã QR được quét.
 export function checkInTicket(token) {
   return apiRequest(`/staff/checkin/${encodeURIComponent(token)}`, { method: 'POST' })
@@ -115,6 +121,7 @@ const staffApi = {
   listTodayBookings,
   listOperationalBookings,
   lookupTicketByQr,
+  lookupCheckinTarget,
   checkInTicket,
   getStaffAssignments,
   replaceStaffAssignments,

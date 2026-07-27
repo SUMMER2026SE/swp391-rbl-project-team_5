@@ -1,0 +1,7 @@
+stateDiagram-v2
+    [*] --> PAUSED : Created (default)
+    PAUSED --> ACTIVE : First approval / Partner publishes
+    ACTIVE --> PAUSED : Partner pauses / Admin suspends
+    PAUSED --> ARCHIVED : Partner deletes
+    ACTIVE --> ARCHIVED : Partner deletes
+    ARCHIVED --> [*]

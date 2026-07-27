@@ -1,0 +1,81 @@
+@startuml 03_partner
+' ============================================================
+'  KHU VUC 3 - DOI TAC (Partner)
+'  Nguon: AppRoutes.jsx + dieu huong thuc te (navigate / <Link>)
+'  Cac hop mau xam <<ext>> la man hinh o khu vuc khac (diem vao / ra).
+' ============================================================
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam nodesep 42
+skinparam ranksep 78
+skinparam ArrowColor #78909C
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #37474F
+skinparam state {
+  FontSize 12
+  FontColor #12232B
+  BorderColor #90A4AE
+  BackgroundColor #FFFFFF
+}
+skinparam StateFontStyle bold
+skinparam state<<ext>> {
+  BackgroundColor #ECEFF1
+  BorderColor #B0BEC5
+  FontColor #607D8B
+}
+
+title 3 - DOI TAC  (Partner)
+
+state "3 - DOI TAC  (Partner)" as Partner #FFF3E0 {
+  state "Tong quan doi tac\n(/partner/dashboard)" as PDash
+  state "Diem tham quan\n(/partner/attractions)" as PAttr
+  state "Them diem tham quan\n(/partner/attractions/new)" as PAdd
+  state "Sua diem tham quan\n(/partner/attractions/:id/edit)" as PEdit
+  state "Quan ly ve\n(/.../:id/tickets)" as PTickets
+  state "Them / Sua loai ve\n(/.../tickets/new | :ticketId/edit)" as PTicketForm
+  state "Lich mo cua\n(/.../:id/schedule)" as PSchedule
+  state "Quan ly dat ve\n(/partner/bookings)" as PBookings
+  state "Quan ly nhan vien\n(/partner/staff)" as PStaff
+  state "Danh gia\n(/partner/reviews)" as PReviews
+  state "Bao cao doanh thu\n(/partner/reports)" as PReports
+  state "Cai dat doi tac\n(/partner/settings)" as PSettings
+
+  PDash --> PAttr     : Diem tham quan
+  PDash --> PBookings : Quan ly dat ve
+  PDash --> PStaff    : Quan ly nhan vien
+  PDash --> PReviews  : Danh gia
+  PDash --> PReports  : Bao cao doanh thu
+  PDash --> PSettings : Cai dat
+  PAttr --> PAdd      : Them diem
+  PAttr --> PEdit     : Sua diem
+  PAttr --> PTickets  : Quan ly ve
+  PTickets --> PTicketForm : Them / Sua loai ve
+  PTickets --> PSchedule   : Lich mo cua
+}
+
+' -- Diem vao / ra sang khu vuc khac (ghost states) --
+state "Dang nhap\n(/login)  [Guest]" as X_Login <<ext>>
+state "Dang ky doi tac\n(/partner/register)  [Guest]" as X_PartnerReg <<ext>>
+state "Nop ho so KYC\n(/partner/kyc)  [Customer]" as X_Kyc <<ext>>
+state "Cho duyet doi tac\n(/partner/pending)  [Customer]" as X_Pending <<ext>>
+
+' Diem vao khu vuc Partner
+X_Login      --> PDash : PARTNER dang nhap
+X_PartnerReg --> PDash : Da la doi tac
+X_Pending    --> PDash : Ho so duoc duyet
+
+' Diem ra (chua hoan tat KYC)
+PDash --> X_Kyc      : Chua nop KYC
+PDash --> X_Pending  : Dang cho duyet
+
+legend right
+  |= Mau |= Y nghia |
+  |<#FFF3E0>   | Man hinh khu vuc Partner |
+  |<#ECEFF1>   | Man hinh khu vuc khac (diem vao / ra) |
+  ==
+  * PDash la trung tam dieu huong; sidebar co dinh mo moi muc.
+  * Chuoi quan ly san pham: Diem tham quan -> Ve -> Loai ve / Lich mo cua.
+endlegend
+
+@enduml

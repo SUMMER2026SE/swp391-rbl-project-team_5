@@ -1,0 +1,31 @@
+@startuml
+title Payment State Diagram
+
+top to bottom direction
+hide empty description
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam linetype polyline
+skinparam ArrowColor black
+skinparam state {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  StartColor black
+  EndColor black
+}
+
+state "Pending" as PENDING
+state "Successful" as SUCCESS
+state "Failed" as FAILED
+
+[*] -down-> PENDING : Payment initiated
+
+PENDING -left-> FAILED : [rejected or timed out]
+PENDING -right-> SUCCESS : [gateway approved]
+
+SUCCESS --> [*]
+FAILED --> [*]
+
+@enduml

@@ -1,0 +1,26 @@
+@startuml
+title Attraction Operational - 3.6/3.9 (AttractionOperationalStatus)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam state {
+  BackgroundColor #EEECFB
+  BorderColor #8B7FD6
+  FontColor #1A1A1A
+  ArrowColor #444444
+}
+hide empty description
+
+[*] --> ACTIVE : Attraction created (default)
+ACTIVE --> SUSPENDED : Admin hides (violation)\n[publishedAt set & operationalStatus=ACTIVE]\n(PUT /api/admin/attractions/:id/hide)
+SUSPENDED --> ACTIVE : Admin restores\n(PUT /api/admin/attractions/:id/restore)
+
+ACTIVE : Normal operation\n(status & publication unaffected)
+SUSPENDED : Admin sanction\n(also forces publicationStatus = PAUSED,\nsets suspensionReason + suspendedAt)
+
+note bottom
+  Orthogonal to AttractionStatus and
+  AttractionPublicationStatus. Suspending or
+  restoring never changes status; both actions
+  set publicationStatus = PAUSED.
+end note
+@enduml

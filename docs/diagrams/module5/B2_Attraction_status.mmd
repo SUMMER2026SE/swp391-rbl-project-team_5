@@ -1,0 +1,10 @@
+stateDiagram-v2
+    [*] --> DRAFT : Partner creates
+    DRAFT --> PENDING : Submit for review
+    REJECTED --> PENDING : Edit and resubmit
+    PENDING --> APPROVED : Admin approves
+    PENDING --> REJECTED : Admin rejects
+    DRAFT --> Archived : Partner deletes
+    REJECTED --> Archived : Partner deletes
+    APPROVED --> Archived : Partner deletes
+    Archived --> [*]

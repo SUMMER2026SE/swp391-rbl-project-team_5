@@ -1,6 +1,7 @@
 'use strict';
 
 const { releaseInventory } = require('../utils/refundService');
+const { reversePointsForBooking } = require('./loyaltyService');
 
 const REFUND_GATEWAY_OUTCOME = Object.freeze({
   SUCCESS: 'SUCCESS',
@@ -238,6 +239,20 @@ async function finalizeSuccessfulRefund(
         include: {
           reservation: { include: { ticketProduct: true } },
           ticketInstances: { select: { id: true, status: true } },
+          payments: {
+            where: { status: 'SUCCESS', isDuplicate: false },
+            select: {
+              id: true,
+              amount: true,
+              status: true,
+              isDuplicate: true,
+              paymentGateway: true,
+            },
+          },
+          refundTransactions: {
+            where: { status: 'SUCCESS' },
+            select: { paymentId: true, amount: true, status: true },
+          },
         },
       },
     },
@@ -250,6 +265,18 @@ async function finalizeSuccessfulRefund(
   }
 
   const booking = refundRequest.booking;
+  const requestKey = String(refundRequest.requestKey || '');
+  const isRecoveryDifference = requestKey.startsWith('recovery-difference:');
+  const recoveryCustomerBookingId = requestKey.startsWith('recovery-customer:')
+    ? requestKey.slice('recovery-customer:'.length)
+    : null;
+  const recoveryCaseId = requestKey.startsWith('recovery-full:')
+    ? requestKey.slice('recovery-full:'.length)
+    : null;
+  const directRecoveryBookingId = requestKey.startsWith('recovery-full-booking:')
+    ? requestKey.slice('recovery-full-booking:'.length)
+    : null;
+  const isRecoveryFull = Boolean(recoveryCaseId || directRecoveryBookingId);
   if (refundRequest.type === 'DUPLICATE_PAYMENT') {
     const hasOtherOutstanding = await hasOtherOutstandingMandatoryRefund(
       tx,
@@ -260,6 +287,162 @@ async function finalizeSuccessfulRefund(
       where: { id: booking.id },
       data: { refundRequired: hasOtherOutstanding },
     });
+  } else if (isRecoveryDifference) {
+    // This is a partial cash refund after the original booking value was
+    // transferred to a confirmed replacement booking. The source booking
+    // remains CANCELLED and its old QR remains EXPIRED; marking it REFUNDED
+    // would incorrectly imply that the customer received the full amount.
+    const hasOtherOutstanding = await hasOtherOutstandingMandatoryRefund(
+      tx,
+      booking.id,
+      refundRequest.id,
+    );
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: { refundRequired: hasOtherOutstanding },
+    });
+  } else if (recoveryCustomerBookingId) {
+    const targetBookingId = refundRequest.targetBookingId || recoveryCustomerBookingId;
+    const targetBooking = await tx.booking.findUnique({
+      where: { id: targetBookingId },
+      include: {
+        reservation: { include: { ticketProduct: true } },
+        ticketInstances: { select: { id: true, status: true } },
+      },
+    });
+    if (!targetBooking) {
+      throw httpError(409, 'Không tìm thấy vé thay thế thuộc yêu cầu hoàn tiền.');
+    }
+    if (targetBooking.ticketInstances.some((ticket) => ticket.status === 'USED')) {
+      throw httpError(409, 'Không thể hoàn tiền cho đơn đã có vé được sử dụng.');
+    }
+
+    await releaseInventory(tx, targetBooking);
+    await tx.ticketInstance.updateMany({
+      where: {
+        bookingId: targetBooking.id,
+        status: { in: ['VALID', 'EXPIRED'] },
+      },
+      data: { status: 'REFUNDED' },
+    });
+    await tx.booking.update({
+      where: { id: targetBooking.id },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+
+    const hasOtherOutstanding = await hasOtherOutstandingMandatoryRefund(
+      tx,
+      booking.id,
+      refundRequest.id,
+    );
+    if (!hasOtherOutstanding) {
+      await tx.ticketInstance.updateMany({
+        where: {
+          bookingId: booking.id,
+          status: { in: ['VALID', 'EXPIRED'] },
+        },
+        data: { status: 'REFUNDED' },
+      });
+    }
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        ...(!hasOtherOutstanding ? { status: 'REFUNDED' } : {}),
+        refundRequired: hasOtherOutstanding,
+      },
+    });
+  } else if (isRecoveryFull) {
+    const recoveryCase = recoveryCaseId && tx.recoveryCase?.findUnique
+      ? await tx.recoveryCase.findUnique({
+        where: { id: recoveryCaseId },
+        select: { id: true, originalBookingId: true },
+      })
+      : null;
+    const targetBookingId = refundRequest.targetBookingId
+      || recoveryCase?.originalBookingId
+      || directRecoveryBookingId;
+    const targetBooking = targetBookingId === booking.id
+      ? booking
+      : await tx.booking.findUnique({
+        where: { id: targetBookingId },
+        include: {
+          ticketInstances: { select: { id: true, status: true } },
+        },
+      });
+    if (!targetBooking) {
+      throw httpError(409, 'Không tìm thấy booking bị hủy thuộc yêu cầu Rescue.');
+    }
+    if (targetBooking.ticketInstances.some((ticket) => ticket.status === 'USED')) {
+      throw httpError(409, 'Không thể hoàn tiền cho đơn đã có vé được sử dụng.');
+    }
+
+    const capturedPayment = (booking.payments || []).find((payment) => (
+      payment.status === 'SUCCESS'
+      && !payment.isDuplicate
+      && /vnpay/i.test(payment.paymentGateway || '')
+    ));
+    if (!capturedPayment) {
+      throw httpError(409, 'Không tìm thấy giao dịch VNPay gốc của yêu cầu Rescue.');
+    }
+    const successfulAmount = (booking.refundTransactions || [])
+      .filter((transaction) => transaction.paymentId === capturedPayment.id)
+      .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+    const totalRefundedAfterThisRequest = successfulAmount + Number(refundRequest.amount);
+    const hasOtherOutstanding = await hasOtherOutstandingMandatoryRefund(
+      tx,
+      booking.id,
+      refundRequest.id,
+    );
+    const sourceFullyRefunded = (
+      totalRefundedAfterThisRequest >= Number(capturedPayment.amount)
+      && !hasOtherOutstanding
+    );
+
+    await tx.ticketInstance.updateMany({
+      where: {
+        bookingId: targetBooking.id,
+        status: { in: ['VALID', 'EXPIRED'] },
+      },
+      data: { status: 'REFUNDED' },
+    });
+    await tx.booking.update({
+      where: { id: targetBooking.id },
+      data: {
+        status: targetBooking.id === booking.id && !sourceFullyRefunded
+          ? targetBooking.status
+          : 'REFUNDED',
+        refundRequired: targetBooking.id === booking.id && !sourceFullyRefunded,
+      },
+    });
+
+    if (targetBooking.id !== booking.id) {
+      if (sourceFullyRefunded) {
+        await tx.ticketInstance.updateMany({
+          where: {
+            bookingId: booking.id,
+            status: { in: ['VALID', 'EXPIRED'] },
+          },
+          data: { status: 'REFUNDED' },
+        });
+      }
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          ...(sourceFullyRefunded ? { status: 'REFUNDED' } : {}),
+          refundRequired: !sourceFullyRefunded,
+        },
+      });
+    }
+    if (recoveryCaseId && tx.recoveryCase?.updateMany) {
+      await tx.recoveryCase.updateMany({
+        where: { id: recoveryCaseId, status: 'REFUND_PENDING' },
+        data: {
+          status: 'REFUNDED',
+          completedAt: now,
+          version: { increment: 1 },
+        },
+      });
+    }
   } else {
     if (booking.ticketInstances.some((ticket) => ticket.status === 'USED')) {
       throw httpError(409, 'Không thể hoàn tiền cho đơn đã có vé được sử dụng.');
@@ -277,6 +460,21 @@ async function finalizeSuccessfulRefund(
       where: { id: booking.id },
       data: { status: 'REFUNDED', refundRequired: false },
     });
+    // Thu hồi điểm thưởng đã cộng cho đơn này (nếu có) khi hoàn tiền thành công.
+    await reversePointsForBooking(tx, { id: booking.id });
+    if (tx.recoveryCase?.updateMany) {
+      await tx.recoveryCase.updateMany({
+        where: {
+          originalBookingId: booking.id,
+          status: 'REFUND_PENDING',
+        },
+        data: {
+          status: 'REFUNDED',
+          completedAt: now,
+          version: { increment: 1 },
+        },
+      });
+    }
   }
 
   const updated = await tx.refundRequest.update({

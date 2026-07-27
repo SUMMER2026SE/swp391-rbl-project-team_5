@@ -1,0 +1,1151 @@
+@startuml
+title Sequence Diagram - 3.1 Submit Partner KYC (POST /api/partners/register)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "PartnerController\n<<Controller>>" as Partner
+control "PartnerValidators\n<<Utility>>" as Validators
+control "UploadMiddleware\n<<Utility>>" as Upload
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/partners/register\nbody: businessName, businessLicenseUrl, taxCode, bank info...
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next() (req.user set)
+deactivate Protect
+
+Router -> Partner : submitKyc(req, res, next)
+activate Partner
+
+== Input Validation ==
+Partner -> Validators : validateKyc(req.body)
+activate Validators
+Validators --> Partner : error message | null
+deactivate Validators
+alt Validation error
+  Partner --> Browser : 400 Bad Request
+else Valid
+  Partner -> Partner : continue processing
+end
+
+Partner -> Upload : isDocumentOwnedByUser(businessLicenseUrl, req.user.id)
+activate Upload
+Upload --> Partner : boolean
+deactivate Upload
+alt Document not uploaded via system
+  Partner --> Browser : 400 Bad Request (tai lieu phap ly khong hop le)
+else Owned
+  Partner -> Partner : continue processing
+end
+
+== Business Logic ==
+Partner -> Prisma : partnerProfile.findUnique({ where:{ userId } })
+activate Prisma
+Prisma -> DB : SELECT PartnerProfile by userId
+activate DB
+DB --> Prisma : existing | null
+deactivate DB
+Prisma --> Partner : existing
+deactivate Prisma
+
+Partner -> Partner : isResubmission = existing && status in {REJECTED, SUSPENDED}
+alt existing AND not resubmission
+  Partner --> Browser : 409 Conflict (da nop ho so truoc do)
+else New or resubmission
+  Partner -> Partner : continue processing
+end
+
+alt isResubmission
+  Partner -> Prisma : partnerProfile.update({ status:'PENDING', rejectionReason:null, ...data })
+  activate Prisma
+  Prisma -> DB : UPDATE PartnerProfile (re-submit)
+  activate DB
+  DB --> Prisma : partner
+  deactivate DB
+  Prisma --> Partner : partner
+  deactivate Prisma
+else New submission
+  Partner -> Prisma : partnerProfile.create({ userId, ...data, status:'PENDING' })
+  activate Prisma
+  Prisma -> DB : INSERT PartnerProfile (PENDING)
+  activate DB
+  DB --> Prisma : partner
+  deactivate DB
+  Prisma --> Partner : partner
+  deactivate Prisma
+end
+
+Partner -> Prisma : user.findUnique({ id }, include profile)
+activate Prisma
+Prisma -> DB : SELECT User (+ profile)
+activate DB
+DB --> Prisma : refreshedUser
+deactivate DB
+Prisma --> Partner : refreshedUser
+deactivate Prisma
+
+== Response ==
+Partner --> Browser : 200 (resubmit) / 201 (new) { partner, user }
+deactivate Partner
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.2 Get My Partner Profile (GET /api/partners/me)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect\n<<Auth Middleware>>" as Protect
+control "requirePartner\n<<Partner Middleware>>" as RequirePartner
+control "PartnerController\n<<Controller>>" as Partner
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/me
+activate Router
+Router -> Protect : protect(req, res, next)
+activate Protect
+ref over Protect, DB : protect middleware (see Module 1 - Auth Middleware)
+Protect --> Router : next() (req.user set)
+deactivate Protect
+
+== Partner Guard ==
+Router -> RequirePartner : requirePartner(req, res, next)
+activate RequirePartner
+RequirePartner -> Prisma : partnerProfile.findUnique({ where:{ userId } })
+activate Prisma
+Prisma -> DB : SELECT PartnerProfile by userId
+activate DB
+DB --> Prisma : partner | null
+deactivate DB
+Prisma --> RequirePartner : partner
+deactivate Prisma
+alt No partner profile
+  RequirePartner --> Browser : 403 PARTNER_PROFILE_REQUIRED
+else Partner exists (any status)
+  RequirePartner --> Router : next() (req.partner set)
+end
+deactivate RequirePartner
+
+Router -> Partner : getMyPartner(req, res, next)
+activate Partner
+Partner -> Prisma : user.findUnique({ id }, include profile)
+activate Prisma
+Prisma -> DB : SELECT User (+ profile)
+activate DB
+DB --> Prisma : user
+deactivate DB
+Prisma --> Partner : user
+deactivate Prisma
+Partner --> Browser : 200 OK { data: toPartnerResponse(partner, user) }
+deactivate Partner
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.3 Update Partner Settings (PUT /api/partners/settings)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "PartnerController\n<<Controller>>" as Partner
+control "Validators\n<<Utility>>" as Validators
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/partners/settings\nbody: businessName?, website?, description?, bank...?, displayName?, phone?
+activate Router
+
+== Middleware ==
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : protect (Module 1) + load PartnerProfile by userId
+alt No partner profile
+  Guard --> Browser : 403 PARTNER_PROFILE_REQUIRED
+else partner.status != APPROVED
+  Guard --> Browser : 403 PARTNER_APPROVAL_REQUIRED
+else Approved
+  Guard --> Router : next() (req.partner set)
+end
+deactivate Guard
+
+Router -> Partner : updateSettings(req, res, next)
+activate Partner
+
+alt businessName provided but empty
+  Partner --> Browser : 400 Bad Request (ten hien thi khong duoc trong)
+else Valid / not provided
+  Partner -> Partner : build partnerUpdate (website, description, bank fields)
+end
+opt phone provided
+  Partner -> Validators : isValidPhoneNumber(phone)
+  activate Validators
+  Validators --> Partner : boolean
+  deactivate Validators
+  alt Invalid phone
+    Partner --> Browser : 400 Bad Request
+  else Valid
+    Partner -> Partner : profileUpdate.phoneNumber = phone
+  end
+end
+
+Partner -> Prisma : partnerProfile.update({ where:{ id: req.partner.id }, data: partnerUpdate })
+activate Prisma
+Prisma -> DB : UPDATE PartnerProfile
+activate DB
+DB --> Prisma : partner
+deactivate DB
+Prisma --> Partner : partner
+deactivate Prisma
+
+Partner -> Prisma : user.findUnique({ id }, include profile)
+activate Prisma
+Prisma -> DB : SELECT User (+ profile)
+DB --> Prisma : user
+Prisma --> Partner : user
+deactivate Prisma
+
+opt userUpdate or profileUpdate not empty
+  Partner -> Prisma : user.update({ ...userUpdate, profile:{ upsert } }, include profile)
+  activate Prisma
+  Prisma -> DB : UPDATE User + upsert UserProfile
+  DB --> Prisma : user
+  Prisma --> Partner : user
+  deactivate Prisma
+end
+
+Partner --> Browser : 200 OK { message, partner }
+deactivate Partner
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.4 Partner Dashboard (GET /api/partners/dashboard)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "PartnerController\n<<Controller>>" as Partner
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/dashboard
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Partner : getDashboard(req, res, next)
+activate Partner
+
+Partner -> Prisma : attraction.findMany({ partnerId, archivedAt:null }, select id/status/publicationStatus)
+activate Prisma
+Prisma -> DB : SELECT Attraction[] of partner
+DB --> Prisma : attractions
+Prisma --> Partner : attractions
+deactivate Prisma
+
+Partner -> Prisma : ticketProduct.count({ attractionId in ids, archivedAt:null })
+activate Prisma
+Prisma -> DB : COUNT TicketProduct
+DB --> Prisma : totalTickets
+Prisma --> Partner : totalTickets
+deactivate Prisma
+
+Partner -> Prisma : booking.findMany({ CONFIRMED/COMPLETED/NO_SHOW, payments SUCCESS non-dup, partner })
+activate Prisma
+Prisma -> DB : SELECT revenue bookings (+ payments + quantity)
+DB --> Prisma : revenueBookings
+Prisma --> Partner : revenueBookings
+deactivate Prisma
+Partner -> Partner : aggregate totalRevenue / ticketsSold / this-month figures
+
+opt partner has attractions
+  Partner -> Prisma : ticketProduct.findMany -> reservation.findMany -> booking.count(PENDING_PARTNER)
+  activate Prisma
+  Prisma -> DB : SELECT productIds / reservationIds / COUNT pending
+  DB --> Prisma : ids + pendingBookings
+  Prisma --> Partner : pendingBookings
+  deactivate Prisma
+  Partner -> Prisma : dailyStock.findMany({ productIds, month }) -> occupancyRate
+  activate Prisma
+  Prisma -> DB : SELECT DailyStock (booked / capacity)
+  DB --> Prisma : dailyStocks
+  Prisma --> Partner : occupancyRate
+  deactivate Prisma
+  Partner -> Prisma : booking.findMany({ reservationIds }, orderBy desc, take 5, include...)
+  activate Prisma
+  Prisma -> DB : SELECT recent bookings
+  DB --> Prisma : recentRaw
+  Prisma --> Partner : recentBookings
+  deactivate Prisma
+end
+
+Partner --> Browser : 200 OK { stats, recentBookings, partnerStatus }
+deactivate Partner
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.5 Partner Reports (GET /api/partners/reports)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "PartnerController\n<<Controller>>" as Partner
+control "AnalyticsService\n<<Service>>" as Analytics
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/reports?period=...
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Partner : getReports(req, res, next)
+activate Partner
+Partner -> Analytics : normalizePeriod(query.period) / getPeriodStart(period)
+activate Analytics
+Analytics --> Partner : period, startDate
+deactivate Analytics
+
+Partner -> Prisma : booking.findMany({ createdAt>=startDate, CONFIRMED/COMPLETED/NO_SHOW, payments SUCCESS, partner })
+activate Prisma
+Prisma -> DB : SELECT bookings (+ payments + attraction)
+activate DB
+DB --> Prisma : bookings
+deactivate DB
+Prisma --> Partner : bookings
+deactivate Prisma
+
+Partner -> Partner : aggregate grossRevenue / ticketsSold / group by attraction
+Partner -> Analytics : buildTimeline(bookings, period, revenueOf)
+activate Analytics
+Analytics --> Partner : timeline
+deactivate Analytics
+
+Partner --> Browser : 200 OK { period, summary, timeline, attractions }
+deactivate Partner
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.6 List Partner Attractions (GET /api/partners/attractions)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/attractions?page&limit&search&status&city
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : listAttractions(req, res, next)
+activate Attraction
+Attraction -> Attraction : build where { partnerId, archivedAt:null, search?, status?, city? }
+group Prisma transaction
+  Attraction -> Prisma : attraction.findMany({ where, include, orderBy desc, skip, take })
+  activate Prisma
+  Prisma -> DB : SELECT Attraction[]
+  DB --> Prisma : items
+  Prisma --> Attraction : items
+  deactivate Prisma
+  Attraction -> Prisma : attraction.count({ where })
+  activate Prisma
+  Prisma -> DB : COUNT Attraction
+  DB --> Prisma : total
+  Prisma --> Attraction : total
+  deactivate Prisma
+end
+Attraction --> Browser : 200 OK { attractions: items.map(toAttractionListItem), pagination }
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.7 View Partner Attraction Detail (GET /api/partners/attractions/:id)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/attractions/:id
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : getAttraction(req, res, next)
+activate Attraction
+Attraction -> Prisma : findOwnedAttraction(id, partnerId) -> attraction.findUnique({ id }, include)
+activate Prisma
+Prisma -> DB : SELECT Attraction (+ images + categories + tickets + slots)
+activate DB
+DB --> Prisma : attraction | null
+deactivate DB
+Prisma --> Attraction : attraction
+deactivate Prisma
+
+alt Not found / archived / not owned by partner
+  Attraction --> Browser : 404 Not Found
+else Owned
+  Attraction --> Browser : 200 OK { attraction: toAttractionDetail(attraction) }
+end
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.8 Create Attraction Draft (POST /api/partners/attractions)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+control "PartnerValidators\n<<Utility>>" as Validators
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/partners/attractions\nbody: name, description, address, province, category, images...
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : createAttraction(req, res, next)
+activate Attraction
+Attraction -> Attraction : normalizeAttractionInput(body)
+Attraction -> Validators : validateAttraction(input, { partial:false })
+activate Validators
+Validators --> Attraction : error | null
+deactivate Validators
+alt Validation error
+  Attraction --> Browser : 400 Bad Request
+else Valid
+  Attraction -> Attraction : data = buildAttractionData(input); data.status = 'DRAFT'
+end
+
+group Prisma transaction
+  Attraction -> Prisma : attraction.create({ ...data, partnerId })
+  activate Prisma
+  Prisma -> DB : INSERT Attraction (DRAFT)
+  DB --> Prisma : attraction
+  Prisma --> Attraction : attraction
+  deactivate Prisma
+  opt category or categoryIds provided
+    Attraction -> Prisma : setCategory / attractionCategory.createMany
+    activate Prisma
+    Prisma -> DB : UPSERT Category + INSERT AttractionCategory
+    DB --> Prisma : ok
+    Prisma --> Attraction : ok
+    deactivate Prisma
+  end
+  opt images provided
+    Attraction -> Prisma : attractionImage.createMany({ data: images })
+    activate Prisma
+    Prisma -> DB : INSERT AttractionImage[]
+    DB --> Prisma : ok
+    Prisma --> Attraction : ok
+    deactivate Prisma
+  end
+end
+
+Attraction -> Prisma : attraction.findUnique({ id }, include)
+activate Prisma
+Prisma -> DB : SELECT Attraction (full)
+DB --> Prisma : full
+Prisma --> Attraction : full
+deactivate Prisma
+
+Attraction --> Browser : 201 Created { data:{ id, title, status }, attraction }
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.9 Update Attraction (PUT /api/partners/attractions/:id)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+control "PartnerValidators\n<<Utility>>" as Validators
+control "AttractionWorkflowService\n<<Service>>" as Workflow
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/partners/attractions/:id\nbody: partial attraction fields
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : updateAttraction(req, res, next)
+activate Attraction
+Attraction -> Prisma : findOwnedAttraction(id, partnerId, include)
+activate Prisma
+Prisma -> DB : SELECT Attraction
+DB --> Prisma : existing | null
+Prisma --> Attraction : existing
+deactivate Prisma
+alt Not found / not owned
+  Attraction --> Browser : 404 Not Found
+else Found
+  Attraction -> Workflow : assertPartnerCanEdit(existing)
+  activate Workflow
+  Workflow --> Attraction : ok | throw
+  deactivate Workflow
+end
+alt status == PENDING
+  Attraction --> Browser : 409 Conflict (dang cho duyet)
+else status == SUSPENDED
+  Attraction --> Browser : 403 Forbidden (dang bi dinh chi)
+else Editable (DRAFT / APPROVED / REJECTED)
+  Attraction -> Attraction : continue processing
+end
+
+Attraction -> Validators : validateAttraction(body, { partial:true })
+activate Validators
+Validators --> Attraction : error | null
+deactivate Validators
+alt Validation error
+  Attraction --> Browser : 400 Bad Request
+else Valid
+  Attraction -> Attraction : data = buildAttractionData(body); extract operationalData
+end
+
+alt hasPublishedVersion(existing) (edit becomes a new draft over published)
+  Attraction -> Workflow : mergeSnapshot(existing.draftData|snapshot, data, category)
+  activate Workflow
+  Workflow --> Attraction : merged snapshot
+  deactivate Workflow
+  Attraction -> Prisma : attraction.update({ draftData: merged, status:'DRAFT', rejectionReason:null })
+  activate Prisma
+  Prisma -> DB : UPDATE Attraction (draftData)
+  DB --> Prisma : ok
+  Prisma --> Attraction : ok
+  deactivate Prisma
+else No published version (direct edit)
+  group Prisma transaction
+    Attraction -> Prisma : attraction.update({ ...data, status:'DRAFT', rejectionReason:null })
+    activate Prisma
+    Prisma -> DB : UPDATE Attraction
+    DB --> Prisma : ok
+    Prisma --> Attraction : ok
+    deactivate Prisma
+    opt category provided
+      Attraction -> Prisma : setCategory(tx, id, category)
+      activate Prisma
+      Prisma -> DB : UPSERT Category + reset AttractionCategory
+      DB --> Prisma : ok
+      Prisma --> Attraction : ok
+      deactivate Prisma
+    end
+  end
+end
+
+Attraction -> Prisma : attraction.findUnique({ id }, include)
+activate Prisma
+Prisma -> DB : SELECT Attraction (full)
+DB --> Prisma : full
+Prisma --> Attraction : full
+deactivate Prisma
+Attraction --> Browser : 200 OK { message, attraction: toAttractionDetail(full) }
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.10 Archive Attraction (DELETE /api/partners/attractions/:id)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : DELETE /api/partners/attractions/:id
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : deleteAttraction(req, res, next)
+activate Attraction
+Attraction -> Prisma : findOwnedAttraction(id, partnerId)
+activate Prisma
+Prisma -> DB : SELECT Attraction
+DB --> Prisma : existing | null
+Prisma --> Attraction : existing
+deactivate Prisma
+alt Not found / not owned
+  Attraction --> Browser : 404 Not Found
+else Found
+  Attraction -> Prisma : booking.count({ snapshotAttractionId, visitDate>=today, status in CONFIRMED/PENDING_PARTNER })
+  activate Prisma
+  Prisma -> DB : COUNT future active bookings
+  DB --> Prisma : bookingCount
+  Prisma --> Attraction : bookingCount
+  deactivate Prisma
+end
+alt bookingCount > 0
+  Attraction --> Browser : 409 Conflict (con don chua su dung)
+else No active future bookings
+  Attraction -> Prisma : attraction.update({ archivedAt: now, publicationStatus:'ARCHIVED' })
+  activate Prisma
+  Prisma -> DB : UPDATE Attraction (soft archive)
+  DB --> Prisma : ok
+  Prisma --> Attraction : ok
+  deactivate Prisma
+  Attraction --> Browser : 200 OK { message }
+end
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.11 Upload Attraction Images (POST /api/partners/attractions/:id/images)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "uploadAttractionImages.array + validateUploadedFiles\n<<Upload Middleware>>" as Upload
+control "AttractionController\n<<Controller>>" as Attraction
+control "AttractionWorkflowService\n<<Service>>" as Workflow
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : POST /api/partners/attractions/:id/images\nmultipart: images[] (max 10)
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Upload : uploadAttractionImages.array('images',10) + validateUploadedFiles
+activate Upload
+alt Invalid mimetype / size / signature
+  Upload --> Browser : 400 Bad Request
+else Files accepted
+  Upload --> Router : next() (req.files set)
+end
+deactivate Upload
+
+Router -> Attraction : uploadImages(req, res, next)
+activate Attraction
+Attraction -> Prisma : findOwnedAttraction(id, partnerId, include)
+activate Prisma
+Prisma -> DB : SELECT Attraction
+DB --> Prisma : existing | null
+Prisma --> Attraction : existing
+deactivate Prisma
+alt Not found / not owned
+  Attraction --> Browser : 404 Not Found
+else Found
+  Attraction -> Workflow : assertPartnerCanEdit(existing)
+  activate Workflow
+  Workflow --> Attraction : ok | throw (409/403)
+  deactivate Workflow
+end
+alt No files
+  Attraction --> Browser : 400 Bad Request (vui long chon anh)
+else Files present
+  Attraction -> Attraction : continue processing
+end
+
+alt hasPublishedVersion(existing) (write into draftData)
+  Attraction -> Attraction : getWorkingDraft(existing); build created images (draft-<uuid>)
+  Attraction -> Prisma : saveDraftImages -> attraction.update({ draftData, status:'DRAFT' })
+  activate Prisma
+  Prisma -> DB : UPDATE Attraction (draft images)
+  DB --> Prisma : ok
+  Prisma --> Attraction : ok
+  deactivate Prisma
+  Attraction --> Browser : 201 Created { images }
+else No published version (persist rows)
+  group Prisma transaction
+    Attraction -> Prisma : attractionImage.create x files (first is primary if none)
+    activate Prisma
+    Prisma -> DB : INSERT AttractionImage[]
+    DB --> Prisma : created
+    Prisma --> Attraction : created
+    deactivate Prisma
+  end
+  Attraction --> Browser : 201 Created { images }
+end
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.12 Delete Attraction Image (DELETE /api/partners/attractions/:id/images/:imageId)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+control "AttractionWorkflowService\n<<Service>>" as Workflow
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : DELETE /api/partners/attractions/:id/images/:imageId
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : deleteImage(req, res, next)
+activate Attraction
+Attraction -> Prisma : findOwnedAttraction(id, partnerId, ordered images)
+activate Prisma
+Prisma -> DB : SELECT Attraction (+ images)
+DB --> Prisma : attraction | null
+Prisma --> Attraction : attraction
+deactivate Prisma
+alt Not found / not owned
+  Attraction --> Browser : 404 Not Found
+else Found
+  Attraction -> Workflow : assertPartnerCanEdit(attraction)
+  activate Workflow
+  Workflow --> Attraction : ok | throw
+  deactivate Workflow
+end
+
+alt hasPublishedVersion(attraction) (edit draftData)
+  Attraction -> Attraction : find image in draft.images
+  alt Image not in draft
+    Attraction --> Browser : 404 Not Found (khong tim thay anh)
+  else Found
+    Attraction -> Attraction : remove image; reassign primary if needed
+    Attraction -> Prisma : saveDraftImages -> attraction.update({ draftData })
+    activate Prisma
+    Prisma -> DB : UPDATE Attraction (draft images)
+    DB --> Prisma : ok
+    Prisma --> Attraction : ok
+    deactivate Prisma
+    Attraction --> Browser : 200 OK { message }
+  end
+else No published version (delete row)
+  Attraction -> Attraction : find image in attraction.images
+  alt Image not found
+    Attraction --> Browser : 404 Not Found
+  else Found
+    group Prisma transaction
+      Attraction -> Prisma : attractionImage.delete({ id })
+      activate Prisma
+      Prisma -> DB : DELETE AttractionImage
+      DB --> Prisma : ok
+      Prisma --> Attraction : ok
+      deactivate Prisma
+      opt deleted image was primary
+        Attraction -> Prisma : attractionImage.update({ replacement, isPrimary:true })
+        activate Prisma
+        Prisma -> DB : UPDATE AttractionImage (new primary)
+        DB --> Prisma : ok
+        Prisma --> Attraction : ok
+        deactivate Prisma
+      end
+    end
+    Attraction --> Browser : 200 OK { message }
+  end
+end
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.13 Set Primary Attraction Image (PATCH /api/partners/attractions/:id/images/:imageId/primary)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+control "AttractionWorkflowService\n<<Service>>" as Workflow
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PATCH /api/partners/attractions/:id/images/:imageId/primary
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : setPrimaryImage(req, res, next)
+activate Attraction
+Attraction -> Prisma : findOwnedAttraction(id, partnerId, include)
+activate Prisma
+Prisma -> DB : SELECT Attraction (+ images)
+DB --> Prisma : attraction | null
+Prisma --> Attraction : attraction
+deactivate Prisma
+alt Not found / not owned
+  Attraction --> Browser : 404 Not Found
+else Found
+  Attraction -> Workflow : assertPartnerCanEdit(attraction)
+  activate Workflow
+  Workflow --> Attraction : ok | throw
+  deactivate Workflow
+end
+
+alt hasPublishedVersion(attraction) (edit draftData)
+  Attraction -> Attraction : find image in draft.images
+  alt Image not in draft
+    Attraction --> Browser : 404 Not Found
+  else Found
+    Attraction -> Prisma : saveDraftImages -> attraction.update({ draftData: images map isPrimary })
+    activate Prisma
+    Prisma -> DB : UPDATE Attraction (draft primary)
+    DB --> Prisma : ok
+    Prisma --> Attraction : ok
+    deactivate Prisma
+    Attraction --> Browser : 200 OK { message }
+  end
+else No published version (update rows)
+  Attraction -> Attraction : find image in attraction.images
+  alt Image not found
+    Attraction --> Browser : 404 Not Found
+  else Found
+    group Prisma transaction
+      Attraction -> Prisma : attractionImage.updateMany({ isPrimary:true -> false })
+      activate Prisma
+      Prisma -> DB : UPDATE clear old primary
+      DB --> Prisma : ok
+      Prisma --> Attraction : ok
+      deactivate Prisma
+      Attraction -> Prisma : attractionImage.update({ id, isPrimary:true })
+      activate Prisma
+      Prisma -> DB : UPDATE set new primary
+      DB --> Prisma : ok
+      Prisma --> Attraction : ok
+      deactivate Prisma
+    end
+    Attraction --> Browser : 200 OK { message }
+  end
+end
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.14 List Active Categories (GET /api/partners/categories)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : GET /api/partners/categories
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : listCategories(req, res, next)
+activate Attraction
+Attraction -> Prisma : category.findMany({ where:{ isActive:true }, orderBy:{ name:'asc' } })
+activate Prisma
+Prisma -> DB : SELECT active Category[]
+activate DB
+DB --> Prisma : categories
+deactivate DB
+Prisma --> Attraction : categories
+deactivate Prisma
+Attraction --> Browser : 200 OK { categories: [{ id, name }] }
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.15 Submit Attraction for Admin Review (PUT /api/attractions/:id/submit)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "AttractionRouter\n<<Express Router>>" as Router
+control "protect + restrictTo('PARTNER') + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+control "AttractionWorkflowService\n<<Service>>" as Workflow
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PUT /api/attractions/:id/submit
+activate Router
+Router -> Guard : protect -> restrictTo('PARTNER') -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : role + approved-partner guard
+Guard --> Router : next() (req.user, req.partner set)
+deactivate Guard
+
+Router -> Attraction : submitAttraction(req, res, next)
+activate Attraction
+alt Missing userId
+  Attraction --> Browser : 401 UNAUTHENTICATED
+else Authenticated
+  Attraction -> Prisma : partnerProfile.findUnique({ where:{ userId } })
+  activate Prisma
+  Prisma -> DB : SELECT PartnerProfile
+  DB --> Prisma : partner | null
+  Prisma --> Attraction : partner
+  deactivate Prisma
+end
+alt No partner profile
+  Attraction --> Browser : 403 NO_PARTNER_PROFILE
+else Partner found
+  Attraction -> Prisma : attraction.findUnique({ id }, include)
+  activate Prisma
+  Prisma -> DB : SELECT Attraction (+ tickets + slots + special dates)
+  DB --> Prisma : attraction | null
+  Prisma --> Attraction : attraction
+  deactivate Prisma
+end
+alt Not found / archived
+  Attraction --> Browser : 404 Not Found
+else attraction.partnerId != partner.id
+  Attraction --> Browser : 403 FORBIDDEN
+else Owned
+  Attraction -> Attraction : continue processing
+end
+alt status not in {DRAFT, REJECTED}
+  Attraction --> Browser : 400 INVALID_STATUS
+else Submittable
+  Attraction -> Workflow : snapshot = draftData || buildAttractionSnapshot(attraction)
+  activate Workflow
+  Workflow --> Attraction : snapshot
+  deactivate Workflow
+  Attraction -> Workflow : validateSubmissionSnapshot(snapshot)
+  activate Workflow
+  Workflow --> Attraction : missing[]
+  deactivate Workflow
+end
+alt missing.length > 0
+  Attraction --> Browser : 400 INCOMPLETE_ATTRACTION (thieu: ...)
+else Complete
+  group Prisma transaction
+    Attraction -> Prisma : attraction.updateMany({ DRAFT/REJECTED -> PENDING, revision++, submittedAt, submittedData })
+    activate Prisma
+    Prisma -> DB : UPDATE Attraction (PENDING)
+    DB --> Prisma : count
+    Prisma --> Attraction : ok
+    deactivate Prisma
+    Attraction -> Prisma : attraction.findUnique({ id })
+    activate Prisma
+    Prisma -> DB : SELECT Attraction (updated)
+    DB --> Prisma : updated
+    Prisma --> Attraction : updated
+    deactivate Prisma
+    Attraction -> Prisma : auditLog.create({ action:'ATTRACTION_SUBMITTED', entityId, metadata })
+    activate Prisma
+    Prisma -> DB : INSERT AuditLog
+    DB --> Prisma : ok
+    Prisma --> Attraction : ok
+    deactivate Prisma
+  end
+  Attraction --> Browser : 200 OK { data:{ id, status:'PENDING' } }
+end
+deactivate Attraction
+deactivate Router
+@enduml
+
+@startuml
+title Sequence Diagram - 3.16 Set Attraction Publication Status (PATCH /api/partners/attractions/:id/publication)
+
+autonumber
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 25
+skinparam BoxPadding 10
+
+boundary "Browser / Frontend" as Browser
+control "PartnerRouter\n<<Express Router>>" as Router
+control "protect + requirePartner + requireApprovedPartner\n<<Middleware Chain>>" as Guard
+control "AttractionController\n<<Controller>>" as Attraction
+database "PrismaClient\n<<ORM>>" as Prisma
+database "PostgreSQL\nDatabase" as DB
+
+Browser -> Router : PATCH /api/partners/attractions/:id/publication\nbody: publicationStatus (ACTIVE | PAUSED)
+activate Router
+Router -> Guard : protect -> requirePartner -> requireApprovedPartner
+activate Guard
+ref over Guard, DB : approved-partner guard (see 3.3)
+Guard --> Router : next() (req.partner set)
+deactivate Guard
+
+Router -> Attraction : setPublicationStatus(req, res, next)
+activate Attraction
+Attraction -> Prisma : findOwnedAttraction(id, partnerId)
+activate Prisma
+Prisma -> DB : SELECT Attraction
+DB --> Prisma : attraction | null
+Prisma --> Attraction : attraction
+deactivate Prisma
+
+alt Not found / not owned
+  Attraction --> Browser : 404 NOT_FOUND
+else Found
+  Attraction -> Attraction : continue processing
+end
+alt !attraction.publishedAt (never approved)
+  Attraction --> Browser : 400 INVALID_STATE (chua tung duoc phe duyet)
+else Published before
+  Attraction -> Attraction : continue processing
+end
+alt attraction.status == SUSPENDED
+  Attraction --> Browser : 403 FORBIDDEN (dang bi dinh chi)
+else Not suspended
+  Attraction -> Attraction : continue processing
+end
+alt publicationStatus not in {ACTIVE, PAUSED}
+  Attraction --> Browser : 400 VALIDATION_ERROR
+else Valid value
+  Attraction -> Prisma : attraction.update({ publicationStatus })
+  activate Prisma
+  Prisma -> DB : UPDATE Attraction publicationStatus
+  DB --> Prisma : ok
+  Prisma --> Attraction : ok
+  deactivate Prisma
+  Attraction --> Browser : 200 OK { message }
+end
+deactivate Attraction
+deactivate Router
+@enduml

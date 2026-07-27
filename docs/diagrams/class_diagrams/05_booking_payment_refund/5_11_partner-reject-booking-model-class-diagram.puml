@@ -1,0 +1,140 @@
+@startuml
+title Partner Reject Booking - Model Class Diagram
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam dpi 170
+skinparam defaultFontName Arial
+skinparam classFontName Arial
+skinparam classAttributeFontName Consolas
+skinparam classAttributeIconSize 0
+skinparam classBorderColor #263238
+skinparam classBackgroundColor #FAFCFD
+skinparam classHeaderBackgroundColor #DCEEF8
+skinparam ArrowColor #263238
+skinparam ArrowThickness 1.2
+skinparam linetype ortho
+skinparam nodesep 160
+skinparam ranksep 140
+hide circle
+
+class Booking <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -reservationId: String {unique}
+  -voucherId: String [0..1]
+  -totalAmount: Decimal
+  -status: BookingStatus = PENDING_PAYMENT
+  -refundRequired: Boolean = false
+  --
+  +flagRefundRequired(): void
+  +changeStatus(status: BookingStatus): void
+  +isPaid(): Boolean
+  +isRefundable(at: DateTime): Boolean
+}
+
+class RefundRequest <<model>> {
+  -id: String {UUID}
+  -bookingId: String
+  -requestedById: String
+  -reason: String
+  -amount: Decimal
+  -type: RefundRequestType = CUSTOMER_CANCELLATION
+  -status: RefundStatus = PENDING
+  --
+  {static} +open(bookingId: String, type: RefundRequestType, amount: Decimal): RefundRequest
+}
+
+class Reservation <<model>> {
+  -id: String {UUID}
+  -userId: String
+  -ticketProductId: String
+  -timeSlotId: String [0..1]
+  -status: ReservationStatus = HELD
+  -expiresAt: DateTime
+  --
+  +changeStatus(status: ReservationStatus): void
+}
+
+class DailyStock <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String
+  -bookedQuantity: Int = 0
+  -heldQuantity: Int = 0
+  --
+  +release(quantity: Int): void
+  +remaining(): Int
+}
+
+class AttractionDailyStock <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -bookedQty: Int = 0
+  -heldQty: Int = 0
+  --
+  +release(quantity: Int): void
+  +remaining(): Int
+}
+
+class TimeSlotStock <<model>> {
+  -id: String {UUID}
+  -timeSlotId: String
+  -bookedQty: Int = 0
+  -heldQty: Int = 0
+  --
+  +release(quantity: Int): void
+  +remaining(): Int
+}
+
+class Voucher <<model>> {
+  -id: String {UUID}
+  -code: String {unique}
+  -usedCount: Int = 0
+  --
+  +releaseOne(): void
+  +isApplicable(amount: Decimal, at: DateTime): Boolean
+}
+
+class Attraction <<model>> {
+  -id: String {UUID}
+  -partnerId: String
+  -title: String
+  -status: AttractionStatus = DRAFT
+  --
+  +isPublished(): Boolean
+}
+
+class TicketProduct <<model>> {
+  -id: String {UUID}
+  -attractionId: String
+  -name: String
+  -status: TicketStatus = ACTIVE
+  --
+  +isOnSale(): Boolean
+}
+
+class TimeSlot <<model>> {
+  -id: String {UUID}
+  -ticketProductId: String [0..1]
+  -attractionId: String [0..1]
+  -startTime: String
+  -isActive: Boolean = true
+  --
+  +isActive(): Boolean
+}
+
+Reservation "1" -- "0..1" Booking : booking
+Voucher "0..1" -- "0..*" Booking : bookings
+Booking "1" -- "0..*" RefundRequest : refundRequests
+TicketProduct "1" -- "0..*" Reservation : reservations
+TimeSlot "0..1" -- "0..*" Reservation : reservations
+TicketProduct "1" *-- "0..*" DailyStock : dailyStocks
+Attraction "1" *-- "0..*" AttractionDailyStock : dailyStocks
+TimeSlot "1" *-- "0..*" TimeSlotStock : timeSlotStocks
+Attraction "1" *-- "0..*" TicketProduct : ticketProducts
+TicketProduct "0..1" *-- "0..*" TimeSlot : timeSlots
+Attraction "0..1" -- "0..*" TimeSlot : timeSlots
+Attraction "0..1" -- "0..*" Booking : snapshotBookings
+
+@enduml

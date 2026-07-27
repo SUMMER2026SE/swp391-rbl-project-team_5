@@ -1,0 +1,68 @@
+@startuml
+title UC-03-05 - Process VNPay Result Swimlane Diagram
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam ArrowColor black
+skinparam defaultFontName Arial
+skinparam activity {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+  DiamondBackgroundColor white
+  DiamondBorderColor black
+  StartColor black
+  EndColor black
+}
+skinparam partition {
+  BackgroundColor white
+  BorderColor black
+  FontColor black
+}
+
+|VNPay|
+start
+:Send IPN transaction result;
+
+|VietTicket System|
+:Verify secure hash,\ntransaction reference and amount;
+
+|Booking Database|
+:Find matching Payment\nand Booking;
+
+|VietTicket System|
+if (Callback valid?) then (Yes)
+  |Booking Database|
+  :Load current processing state;
+
+  |VietTicket System|
+  :Apply idempotency guard\nand interpret response code;
+
+  if (Effective payment result successful?) then (Yes)
+    |Booking Database|
+    :Update only when not finalized;
+    :Mark Payment SUCCESS;
+    :Commit held inventory;
+    :Set Booking CONFIRMED and create tickets,\nor set PENDING_PARTNER when approval is required;
+
+    |VietTicket System|
+    :Emit realtime status update;
+    :Queue ticket email when confirmed;
+    :Prepare success response;
+  else (No)
+    |Booking Database|
+    :Mark Payment FAILED;
+    :Keep Booking PENDING_PAYMENT\nfor retry or cleanup;
+
+    |VietTicket System|
+    :Emit failed-payment status update;
+    :Prepare failure response;
+  endif
+else (No)
+  :Prepare signature, amount\nor order-not-found response;
+endif
+
+|VNPay|
+:Receive RspCode and Message;
+stop
+@enduml

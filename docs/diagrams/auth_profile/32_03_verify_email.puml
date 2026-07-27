@@ -1,0 +1,36 @@
+@startuml
+title 3.2.3 Verify Email (VietTicket)
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam ActivityBackgroundColor #FDFDFD
+skinparam ActivityBorderColor #555555
+skinparam ActivityDiamondBackgroundColor #FFF6DA
+
+|User|
+start
+:Open /verify-email (or follow email link);
+repeat :Verify email;
+  if (Action?) then (Resend link)
+    |System|
+    :POST /api/auth/resend-verification;
+    |Notification Service|
+    :Send a new verification email;
+  else (Submit token)
+    |User|
+    :Provide verification token;
+    |System|
+    :POST /api/auth/verify-email (BR-07);
+    if (Token valid & not expired?) then (No)
+      |User|
+      :Show error + offer to resend link;
+    else (Yes)
+      |System|
+      :Set isEmailVerified = true;
+      :Success toast (account can now sign in);
+    endif
+  endif
+repeat while (Email verified?) is (No) not (Yes)
+
+|System|
+stop
+@enduml

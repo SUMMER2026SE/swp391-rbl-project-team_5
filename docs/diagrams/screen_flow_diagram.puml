@@ -1,0 +1,202 @@
+@startuml screen_flow_diagram
+' ============================================================
+'  VietTicket - SCREEN FLOW DIAGRAM
+'  Nguon: vietticket-travel/src/routes/AppRoutes.jsx + dieu huong thuc te (navigate / <Link>)
+'  Quy uoc: 1 diem bat dau; moi man hinh la 1 hop bo goc; mui ten co nhan chuyen tiep.
+' ============================================================
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Segoe UI"
+skinparam nodesep 30
+skinparam ranksep 55
+left to right direction
+skinparam ArrowColor #78909C
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #37474F
+skinparam state {
+  FontSize 12
+  FontColor #12232B
+  BorderColor #90A4AE
+  BackgroundColor #FFFFFF
+  AttributeFontColor #455A64
+  AttributeFontSize 11
+}
+skinparam StateFontStyle bold
+
+[*] --> Home
+
+' ==========================================================
+' 1. KHACH (Public / Guest - chua dang nhap)
+' ==========================================================
+state "1 - KHACH  (Public / Guest)" as Public #E3F2FD {
+  state "Trang chu\n(/)" as Home
+  state "Tim kiem diem tham quan\n(/attractions)" as Search
+  state "Chi tiet diem tham quan\n(/attractions/:id)" as Detail
+  state "Trang tinh: Gioi thieu / FAQ /\nDieu khoan / Bao mat" as Static
+  state "Dang nhap\n(/login)" as Login
+  state "Dang ky\n(/register)" as Register
+  state "Xac thuc email\n(/verify-email)" as Verify
+  state "Quen mat khau\n(/forgot-password)" as Forgot
+  state "Dat lai mat khau\n(/reset-password)" as Reset
+  state "Dang ky doi tac\n(/partner/register)" as PartnerReg
+  state "404 - Khong tim thay\n(*)" as NotFound
+
+  Home --> Search : Kham pha / Tim kiem
+  Home --> Static : Gioi thieu / FAQ
+  Home --> Login : Dang nhap
+  Home --> Register : Dang ky
+  Home --> PartnerReg : Tro thanh doi tac
+  Search --> Detail : Chon diem tham quan
+  Login --> Register : Chua co tai khoan
+  Register --> Login : Da co tai khoan
+  Login --> Forgot : Quen mat khau
+  Forgot --> Reset : Mo link trong email
+  Reset --> Login : Dat lai thanh cong
+  Register --> Verify : Gui email xac thuc
+  Verify --> Login : Xac thuc xong (tu chuyen)
+}
+
+' ==========================================================
+' 2. KHACH HANG (Customer - da dang nhap)
+' ==========================================================
+state "2 - KHACH HANG  (Customer)" as Customer #E8F5E9 {
+  state "Ho so cua toi\n(/profile)" as Profile
+  state "Chinh sua ho so\n(/edit-profile)" as EditProfile
+  state "Doi mat khau\n(/change-password)" as ChangePwd
+  state "Diem da luu\n(/favorites)" as Favorites
+  state "Thanh toan / Checkout\n(/checkout/:reservationId)" as Checkout
+  state "Dat ve thanh cong\n(/booking-success)" as BookingOK
+  state "Ve cua toi\n(/my-tickets)" as MyTickets
+  state "Ve dien tu (QR)\n(/tickets/:bookingId)" as ETicket
+  state "Trung tam ho tro\n(/support)" as Support
+  state "Lich su ho tro\n(/my-support)" as MySupport
+  state "Nop ho so KYC doi tac\n(/partner/kyc)" as Kyc
+  state "Cho duyet doi tac\n(/partner/pending)" as Pending
+
+  Profile --> EditProfile : Chinh sua
+  EditProfile --> Profile : Luu / Huy
+  Profile --> ChangePwd : Doi mat khau
+  ChangePwd --> Profile : Luu / Huy
+  Profile --> MyTickets : Ve cua toi
+  Profile --> Favorites : Diem da luu
+  Profile --> MySupport : Lich su ho tro
+  Support --> MySupport : Gui yeu cau ho tro
+  Checkout --> BookingOK : Thanh toan VNPay thanh cong
+  BookingOK --> ETicket : Xem ve dien tu
+  BookingOK --> MyTickets : Ve ban dau
+  MyTickets --> ETicket : Xem ve
+  MyTickets --> Checkout : Thanh toan lai (don dang giu)
+  Kyc --> Pending : Nop KYC xong
+  Pending --> Kyc : Can bo sung ho so
+}
+
+' ==========================================================
+' 3. DOI TAC (Partner)
+' ==========================================================
+state "3 - DOI TAC  (Partner)" as Partner #FFF3E0 {
+  state "Tong quan doi tac\n(/partner/dashboard)" as PDash
+  state "Diem tham quan\n(/partner/attractions)" as PAttr
+  state "Them diem tham quan\n(/partner/attractions/new)" as PAdd
+  state "Sua diem tham quan\n(/partner/attractions/:id/edit)" as PEdit
+  state "Quan ly ve\n(/.../:id/tickets)" as PTickets
+  state "Them / Sua loai ve\n(/.../tickets/new | :ticketId/edit)" as PTicketForm
+  state "Lich mo cua\n(/.../:id/schedule)" as PSchedule
+  state "Quan ly dat ve\n(/partner/bookings)" as PBookings
+  state "Quan ly nhan vien\n(/partner/staff)" as PStaff
+  state "Danh gia\n(/partner/reviews)" as PReviews
+  state "Bao cao doanh thu\n(/partner/reports)" as PReports
+  state "Cai dat doi tac\n(/partner/settings)" as PSettings
+
+  PDash --> PAttr
+  PDash --> PBookings
+  PDash --> PStaff
+  PDash --> PReviews
+  PDash --> PReports
+  PDash --> PSettings
+  PAttr --> PAdd : Them diem
+  PAttr --> PEdit : Sua diem
+  PAttr --> PTickets : Quan ly ve
+  PTickets --> PTicketForm : Them / Sua loai ve
+  PTickets --> PSchedule : Lich mo cua
+}
+
+' ==========================================================
+' 4. NHAN VIEN (Staff)
+' ==========================================================
+state "4 - NHAN VIEN  (Staff)" as Staff #F3E5F5 {
+  state "Check-in ve (QR)\n(/staff/checkin)" as SCheckin
+  state "Ho tro khach hang\n(/staff/tickets)" as STickets
+  state "Quan ly hoan tien\n(/staff/refunds)" as SRefunds
+
+  SCheckin --> STickets
+  STickets --> SRefunds
+}
+
+' ==========================================================
+' 5. QUAN TRI VIEN (Admin)
+' ==========================================================
+state "5 - QUAN TRI VIEN  (Admin)" as Admin #FFEBEE {
+  state "Bang dieu khien Admin\n(/admin)" as ADash
+  state "Dat ve & Thanh toan\n(/admin/bookings)" as ABookings
+  state "Bao cao tai chinh\n(/admin/reports)" as AReports
+  state "Duyet ho so KYC\n(/admin/kyc-approval)" as AKyc
+  state "Duyet dia diem\n(/admin/attraction-approval)" as AAttr
+  state "Quan ly vi pham\n(/admin/violations)" as AViol
+  state "Quan ly danh muc\n(/admin/categories)" as ACat
+  state "Kiem duyet danh gia\n(/admin/reviews)" as AReviews
+  state "Quan ly nguoi dung\n(/admin/users)" as AUsers
+
+  ADash --> ABookings
+  ADash --> AReports
+  ADash --> AKyc
+  ADash --> AAttr
+  ADash --> AViol
+  ADash --> ACat
+  ADash --> AReviews
+  ADash --> AUsers
+}
+
+' ==========================================================
+' CHUYEN TIEP GIUA CAC KHU VUC (cross-zone)
+' ==========================================================
+' -- Login la bo dinh tuyen theo vai tro sau khi dang nhap --
+Login --> Profile : CUSTOMER dang nhap
+Login --> PDash   : PARTNER dang nhap
+Login --> ADash   : ADMIN dang nhap
+Login --> SCheckin : STAFF dang nhap
+
+' -- Luong dat ve (booking) --
+Detail --> Login    : Dat ve khi chua dang nhap
+Detail --> Checkout : Giu cho ve (da dang nhap)
+Favorites --> Detail : Xem lai diem
+MyTickets --> Search : Kham pha them
+Detail --> Support   : Can ho tro
+
+' -- Luong tro thanh doi tac --
+PartnerReg --> Verify  : Can xac thuc email
+PartnerReg --> Kyc     : Nop ho so KYC
+PartnerReg --> Pending : Ho so dang cho duyet
+PartnerReg --> PDash   : Da la doi tac
+Pending --> PDash      : Ho so duoc duyet
+PDash --> Kyc          : Chua nop KYC
+PDash --> Pending      : Dang cho duyet
+
+' -- Lien ket nghiep vu giua Admin & Staff --
+AKyc --> Pending      : Admin duyet / tu choi KYC
+ABookings --> SRefunds : Tao yeu cau hoan tien
+
+legend right
+  |= Mau |= Khu vuc / Vai tro |
+  |<#E3F2FD>   | Khach  (Public / Guest) |
+  |<#E8F5E9>   | Khach hang  (Customer) |
+  |<#FFF3E0>   | Doi tac  (Partner) |
+  |<#F3E5F5>   | Nhan vien  (Staff) |
+  |<#FFEBEE>   | Quan tri vien  (Admin) |
+  ==
+  * Trong moi khu vuc, cac trang dieu huong qua lai bang
+    sidebar / menu co dinh (khong ve het mui ten cho de nhin).
+  * Nut "Dang xuat" o moi khu vuc deu quay ve trang Dang nhap.
+  * Admin co the truy cap ca khu vuc Nhan vien (Staff).
+endlegend
+
+@enduml
