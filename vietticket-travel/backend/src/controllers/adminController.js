@@ -1435,9 +1435,23 @@ const ALLOWED_BOOKING_STATUSES = [
   'REFUNDED',
 ];
 
+// Mã đặt chỗ hiển thị cho khách là "VT-" + 12 ký tự cuối của Booking.id VIẾT HOA,
+// và nội dung chuyển khoản trên sao kê ngân hàng là cùng chuỗi đó bỏ dấu gạch
+// ("VT1234567890AB"). Booking.id lại là UUID chữ thường, nên dán thẳng chuỗi từ
+// sao kê vào ô tìm kiếm sẽ không bao giờ ra kết quả. Chuẩn hóa trước khi tra id:
+// bỏ tiền tố VT/VT-, bỏ khoảng trắng và hạ về chữ thường.
+function normalizeBookingIdSearch(value) {
+  const compact = String(value || '').trim().replace(/\s+/gu, '');
+  const withoutPrefix = compact.replace(/^VT[-–—]?/iu, '');
+  // Chỉ coi là mã đơn khi phần còn lại đúng dạng hex/UUID, để không phá các
+  // truy vấn theo tên khách hay email.
+  return /^[0-9a-f-]{6,36}$/iu.test(withoutPrefix) ? withoutPrefix.toLowerCase() : null;
+}
+
 // GET /api/admin/bookings — danh sách đặt vé toàn sàn cho admin.
-// Hỗ trợ: ?status= ?search= (mã đơn / tên KH / email / địa điểm) ?refundRequired=true
-//         ?page= ?limit=. Kèm thống kê tổng quan để vẽ thẻ trên dashboard.
+// Hỗ trợ: ?status= ?search= (mã đơn / nội dung chuyển khoản / tên KH / email /
+//         địa điểm) ?refundRequired=true ?page= ?limit=.
+// Kèm thống kê tổng quan để vẽ thẻ trên dashboard.
 async function getAdminBookings(req, res, next) {
   try {
     const page = parsePositiveInteger(req.query.page, DEFAULT_PAGE);
@@ -1454,13 +1468,18 @@ async function getAdminBookings(req, res, next) {
     if (status) where.status = status;
     if (onlyRefundRequired) where.refundRequired = true;
     if (search) {
+      const bookingIdSearch = normalizeBookingIdSearch(search);
       where.OR = [
-        { id: { contains: search } },
-        { fullName: { contains: search } },
-        { email: { contains: search } },
+        // Chuỗi gốc vẫn được thử để không đổi hành vi tìm theo id đầy đủ.
+        { id: { contains: search, mode: 'insensitive' } },
+        ...(bookingIdSearch && bookingIdSearch !== search.toLowerCase()
+          ? [{ id: { contains: bookingIdSearch, mode: 'insensitive' } }]
+          : []),
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
         {
           reservation: {
-            ticketProduct: { attraction: { title: { contains: search } } },
+            ticketProduct: { attraction: { title: { contains: search, mode: 'insensitive' } } },
           },
         },
       ];

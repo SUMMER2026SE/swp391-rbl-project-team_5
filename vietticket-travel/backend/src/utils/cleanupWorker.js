@@ -4,6 +4,8 @@ const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { sendHoldExpiredEmail } = require('./mailer');
+const { BANK_TRANSFER_METHOD } = require('./bankTransferPolicy');
+const { writeAuditLog } = require('./auditLog');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000; // chạy mỗi 1 phút
 const DEFAULT_GRACE_MS = 3 * 60 * 1000; // chừa 3 phút cho IPN trả trễ
@@ -102,6 +104,8 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
                   email: true,
                   fullName: true,
                   voucherId: true,
+                  paymentMethod: true,
+                  totalAmount: true,
                 },
               },
               ticketProduct: {
@@ -147,10 +151,45 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
 
           // Dọn đơn mồ côi: booking đã tạo nhưng chưa thanh toán.
           if (r.booking && r.booking.status === 'PENDING_PAYMENT') {
+            // Chuyển khoản ngân hàng KHÔNG có callback như VNPay, nên tại đây
+            // hệ thống không thể biết khách đã chuyển tiền hay chưa. Nếu chỉ
+            // hủy đơn, tiền của khách sẽ biến mất khỏi mọi hàng đợi: màn đối
+            // chiếu sao kê chỉ liệt kê đơn còn PENDING_PAYMENT. Gắn
+            // refundRequired để đơn nổi lên bộ lọc "Cần hoàn tiền" của Admin.
+            const needsManualRefundReview =
+              r.booking.paymentMethod === BANK_TRANSFER_METHOD;
+            const cancelledAt = new Date();
+
             await tx.booking.update({
               where: { id: r.booking.id },
-              data: { status: 'CANCELLED' },
+              data: {
+                status: 'CANCELLED',
+                cancelledAt,
+                cancellationSource: 'PAYMENT_TIMEOUT',
+                cancellationReason: needsManualRefundReview
+                  ? 'Hết hạn giữ chỗ khi chờ đối chiếu chuyển khoản. '
+                    + 'Kiểm tra sao kê ngân hàng và hoàn tiền thủ công nếu khách đã chuyển.'
+                  : 'Khách không hoàn tất thanh toán trong thời hạn giữ chỗ.',
+                ...(needsManualRefundReview ? { refundRequired: true } : {}),
+              },
             });
+
+            if (needsManualRefundReview) {
+              await writeAuditLog({
+                client: tx,
+                actorId: null,
+                action: 'BANK_TRANSFER_HOLD_EXPIRED',
+                entityType: 'Booking',
+                entityId: r.booking.id,
+                metadata: {
+                  bookingId: r.booking.id,
+                  amount: Number(r.booking.totalAmount),
+                  reason: 'Hết hạn giữ chỗ trước khi được đối chiếu sao kê.',
+                  requiresManualRefundCheck: true,
+                },
+              });
+            }
+
             if (r.booking.voucherId) {
               await tx.voucher.updateMany({
                 where: { id: r.booking.voucherId, usedCount: { gt: 0 } },
