@@ -2,13 +2,13 @@
 
 const { toVndAmount } = require('./refundLifecycleService');
 const { createVnpRequestId } = require('../utils/vnpay');
+const {
+  getRefundMode,
+  isRefundableCapturedPayment,
+} = require('../utils/paymentGateway');
 
 function getCapturedPayment(booking) {
-  return (booking?.payments || []).find((payment) => (
-    payment.status === 'SUCCESS'
-    && !payment.isDuplicate
-    && /vnpay/i.test(payment.paymentGateway || '')
-  )) || null;
+  return (booking?.payments || []).find(isRefundableCapturedPayment) || null;
 }
 
 async function queueRefund(
@@ -25,6 +25,8 @@ async function queueRefund(
 ) {
   const payment = getCapturedPayment(booking);
   if (!payment) return { queued: false, refundRequest: null, refundTransaction: null };
+  const refundMode = getRefundMode(payment);
+  const isAutomatic = refundMode === 'VNPAY';
 
   const capturedAmount = toVndAmount(payment.amount, 'Số tiền thanh toán gốc');
   const bookingAmount = toVndAmount(booking.totalAmount, 'Tổng tiền booking');
@@ -51,10 +53,19 @@ async function queueRefund(
       policySnapshot: booking.snapshotRefundPolicy || null,
       feeRateSnapshot: 0,
       bookingStatusBeforeRequest: booking.status,
-      status: 'PROCESSING',
-      processingStartedAt: now,
+      status: isAutomatic ? 'PROCESSING' : 'PENDING',
+      processingStartedAt: isAutomatic ? now : null,
     },
   });
+
+  if (!isAutomatic) {
+    return {
+      queued: true,
+      refundRequest,
+      refundTransaction: null,
+      processingMode: refundMode,
+    };
+  }
 
   const existingTransaction = await tx.refundTransaction.findFirst({
     where: {
@@ -75,7 +86,7 @@ async function queueRefund(
       bookingId: booking.id,
       paymentId: payment.id,
       refundRequestId: refundRequest.id,
-      gateway: 'VNPAY',
+      gateway: refundMode,
       gatewayRequestId: createVnpRequestId(),
       transactionType: refundAmount >= capturedAmount ? '02' : '03',
       amount: refundAmount,
@@ -84,7 +95,12 @@ async function queueRefund(
     },
   });
 
-  return { queued: true, refundRequest, refundTransaction };
+  return {
+    queued: true,
+    refundRequest,
+    refundTransaction,
+    processingMode: refundMode,
+  };
 }
 
 async function queueMandatoryRefund(

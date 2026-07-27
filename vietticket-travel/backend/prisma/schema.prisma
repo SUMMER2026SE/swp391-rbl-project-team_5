@@ -594,6 +594,9 @@ model Booking {
   userId                     String
   reservationId              String           @unique
   voucherId                  String?
+  itineraryId                String?
+  itineraryVersion           Int?
+  itineraryItemId            String?
   subtotalAmount             Decimal          @db.Decimal(12, 2)
   discountAmount             Decimal          @default(0.0) @db.Decimal(12, 2)
   totalAmount                Decimal          @db.Decimal(12, 2)
@@ -635,6 +638,7 @@ model Booking {
   user                      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   reservation               Reservation             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   voucher                   Voucher?                @relation(fields: [voucherId], references: [id])
+  itinerary                 SavedItinerary?         @relation("ItineraryBookings", fields: [itineraryId], references: [id], onDelete: SetNull)
   payments                  Payment[]
   ticketInstances           TicketInstance[]
   refundRequests            RefundRequest[]
@@ -651,6 +655,8 @@ model Booking {
 
   @@index([userId])
   @@index([voucherId])
+  @@index([itineraryId, itineraryVersion])
+  @@index([itineraryItemId])
   @@index([status])
   @@index([snapshotAttractionId])
   @@index([snapshotVisitDate])
@@ -800,7 +806,7 @@ model TicketInstance {
 
 enum VoucherSource {
   PROMOTION // Mã khuyến mãi công khai do Admin tạo (dùng chung)
-  LOYALTY   // Voucher cá nhân sinh ra khi khách đổi điểm thưởng
+  LOYALTY // Voucher cá nhân sinh ra khi khách đổi điểm thưởng
 }
 
 model Voucher {
@@ -830,9 +836,9 @@ model Voucher {
 }
 
 enum LoyaltyTransactionType {
-  EARN       // Cộng điểm khi đơn CONFIRMED
-  REVERSAL   // Thu hồi điểm khi đơn đã cộng điểm bị hoàn tiền
-  REDEEM     // Trừ điểm khi đổi lấy voucher
+  EARN // Cộng điểm khi đơn CONFIRMED
+  REVERSAL // Thu hồi điểm khi đơn đã cộng điểm bị hoàn tiền
+  REDEEM // Trừ điểm khi đổi lấy voucher
   ADJUSTMENT // Điều chỉnh thủ công (dự phòng)
 }
 
@@ -1059,9 +1065,10 @@ model SavedItinerary {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  liveTrip LiveTrip?
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  liveTrip  LiveTrip?
   partyRoom PartyRoom? @relation("PartyRoomSavedItinerary")
+  bookings  Booking[]  @relation("ItineraryBookings")
 
   @@unique([userId, planId])
   @@index([userId])
@@ -1106,12 +1113,14 @@ model PartyRoom {
   status           PartyRoomStatus @default(OPEN)
   version          Int             @default(1)
   finalizedAt      DateTime?
+  bookingStartedAt DateTime?
+  bookingVersion   Int?
   closedAt         DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
-  host           User            @relation("PartyRoomHost", fields: [hostUserId], references: [id], onDelete: Cascade)
-  savedItinerary SavedItinerary? @relation("PartyRoomSavedItinerary", fields: [savedItineraryId], references: [id], onDelete: SetNull)
+  host           User             @relation("PartyRoomHost", fields: [hostUserId], references: [id], onDelete: Cascade)
+  savedItinerary SavedItinerary?  @relation("PartyRoomSavedItinerary", fields: [savedItineraryId], references: [id], onDelete: SetNull)
   members        PartyMember[]
   candidates     PartyCandidate[]
   decisions      PartyDecision[]
@@ -1121,24 +1130,24 @@ model PartyRoom {
 }
 
 model PartyMember {
-  id               String          @id @default(uuid())
-  roomId           String
-  userId           String?
-  role             PartyMemberRole @default(GUEST)
-  displayName      String
+  id                    String          @id @default(uuid())
+  roomId                String
+  userId                String?
+  role                  PartyMemberRole @default(GUEST)
+  displayName           String
   displayNameNormalized String
-  avatarKey        String          @default("teal")
-  budgetCap        Decimal?        @db.Decimal(14, 2)
-  preferences      Json?
-  sessionTokenHash String?         @unique @db.VarChar(64)
-  sessionExpiresAt DateTime?
-  joinedAt         DateTime        @default(now())
-  lastSeenAt       DateTime        @default(now())
-  removedAt        DateTime?
-  updatedAt        DateTime        @updatedAt
+  avatarKey             String          @default("teal")
+  budgetCap             Decimal?        @db.Decimal(14, 2)
+  preferences           Json?
+  sessionTokenHash      String?         @unique @db.VarChar(64)
+  sessionExpiresAt      DateTime?
+  joinedAt              DateTime        @default(now())
+  lastSeenAt            DateTime        @default(now())
+  removedAt             DateTime?
+  updatedAt             DateTime        @updatedAt
 
-  room  PartyRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user  User?      @relation("PartyMemberUser", fields: [userId], references: [id], onDelete: SetNull)
+  room  PartyRoom   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user  User?       @relation("PartyMemberUser", fields: [userId], references: [id], onDelete: SetNull)
   votes PartyVote[]
 
   @@unique([roomId, userId])
@@ -1155,8 +1164,8 @@ model PartyCandidate {
   position     Int      @default(0)
   createdAt    DateTime @default(now())
 
-  room       PartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  room       PartyRoom   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  attraction Attraction  @relation(fields: [attractionId], references: [id], onDelete: Cascade)
   votes      PartyVote[]
 
   @@unique([roomId, attractionId])

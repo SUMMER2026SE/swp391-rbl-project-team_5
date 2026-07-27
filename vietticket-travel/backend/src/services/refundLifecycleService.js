@@ -2,6 +2,10 @@
 
 const { releaseInventory } = require('../utils/refundService');
 const { reversePointsForBooking } = require('./loyaltyService');
+const {
+  getRefundMode,
+  isRefundableCapturedPayment,
+} = require('../utils/paymentGateway');
 
 const REFUND_GATEWAY_OUTCOME = Object.freeze({
   SUCCESS: 'SUCCESS',
@@ -105,11 +109,7 @@ function findRefundTargetPayment(refundRequest) {
   const payments = Array.isArray(refundRequest?.booking?.payments)
     ? refundRequest.booking.payments
     : [];
-  return payments.find((payment) => (
-    payment.status === 'SUCCESS'
-    && !payment.isDuplicate
-    && /vnpay/i.test(payment.paymentGateway || '')
-  )) || null;
+  return payments.find(isRefundableCapturedPayment) || null;
 }
 
 function isLocalDemoPayment(payment) {
@@ -126,7 +126,15 @@ function getRefundProcessingEligibility(payment) {
     return {
       canApprove: false,
       mode: 'BLOCKED',
-      blockReason: 'Không tìm thấy giao dịch VNPay đã thu tiền để thực hiện hoàn tiền.',
+      blockReason: 'Không tìm thấy giao dịch thanh toán đã thu tiền để thực hiện hoàn tiền.',
+    };
+  }
+  if (getRefundMode(payment) === 'MANUAL_BANK_TRANSFER') {
+    return {
+      canApprove: true,
+      mode: 'MANUAL_BANK_TRANSFER',
+      blockReason: null,
+      requiresManualReference: true,
     };
   }
   if (isLocalDemoPayment(payment)) {
@@ -329,6 +337,7 @@ async function finalizeSuccessfulRefund(
       where: { id: targetBooking.id },
       data: { status: 'REFUNDED', refundRequired: false },
     });
+    await reversePointsForBooking(tx, { id: targetBooking.id });
 
     const hasOtherOutstanding = await hasOtherOutstandingMandatoryRefund(
       tx,
@@ -351,6 +360,7 @@ async function finalizeSuccessfulRefund(
         refundRequired: hasOtherOutstanding,
       },
     });
+    await reversePointsForBooking(tx, { id: booking.id });
   } else if (isRecoveryFull) {
     const recoveryCase = recoveryCaseId && tx.recoveryCase?.findUnique
       ? await tx.recoveryCase.findUnique({
@@ -376,13 +386,9 @@ async function finalizeSuccessfulRefund(
       throw httpError(409, 'Không thể hoàn tiền cho đơn đã có vé được sử dụng.');
     }
 
-    const capturedPayment = (booking.payments || []).find((payment) => (
-      payment.status === 'SUCCESS'
-      && !payment.isDuplicate
-      && /vnpay/i.test(payment.paymentGateway || '')
-    ));
+    const capturedPayment = (booking.payments || []).find(isRefundableCapturedPayment);
     if (!capturedPayment) {
-      throw httpError(409, 'Không tìm thấy giao dịch VNPay gốc của yêu cầu Rescue.');
+      throw httpError(409, 'Không tìm thấy giao dịch thanh toán gốc của yêu cầu Rescue.');
     }
     const successfulAmount = (booking.refundTransactions || [])
       .filter((transaction) => transaction.paymentId === capturedPayment.id)
@@ -414,6 +420,9 @@ async function finalizeSuccessfulRefund(
         refundRequired: targetBooking.id === booking.id && !sourceFullyRefunded,
       },
     });
+    if (targetBooking.id !== booking.id || sourceFullyRefunded) {
+      await reversePointsForBooking(tx, { id: targetBooking.id });
+    }
 
     if (targetBooking.id !== booking.id) {
       if (sourceFullyRefunded) {
@@ -432,6 +441,9 @@ async function finalizeSuccessfulRefund(
           refundRequired: !sourceFullyRefunded,
         },
       });
+      if (sourceFullyRefunded) {
+        await reversePointsForBooking(tx, { id: booking.id });
+      }
     }
     if (recoveryCaseId && tx.recoveryCase?.updateMany) {
       await tx.recoveryCase.updateMany({

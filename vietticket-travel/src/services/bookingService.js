@@ -51,6 +51,14 @@ export const getBookingDetails = async (bookingId) => {
   return result.data
 }
 
+export const getItineraryBookingProgress = async (itineraryId) => {
+  const result = await apiRequest(
+    `/bookings/itineraries/${encodeURIComponent(itineraryId)}/progress`,
+    { method: 'GET' },
+  )
+  return result.data
+}
+
 export const applyVoucher = async (
   bookingId,
   voucherCode,
@@ -102,6 +110,7 @@ const bookingService = {
   createRefundRequest,
   createVNPayUrl,
   getBookingDetails,
+  getItineraryBookingProgress,
   getBookings,
   getLastReservationId,
   getRefundPreview,

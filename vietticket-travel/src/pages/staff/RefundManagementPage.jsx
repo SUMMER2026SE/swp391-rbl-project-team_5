@@ -121,6 +121,8 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
   const latestTransaction = selected.refundTransactions?.[0]
   const canApprove = selected.processingEligibility?.canApprove !== false
   const approvalBlockReason = selected.processingEligibility?.blockReason
+  const isManualBankTransfer =
+    selected.processingEligibility?.mode === 'MANUAL_BANK_TRANSFER'
 
   return (
     <aside className="absolute inset-y-0 right-0 z-20 flex w-full max-w-[400px] flex-col border-l border-outline-variant bg-surface-container-lowest shadow-2xl xl:static xl:w-[400px] xl:shrink-0">
@@ -240,7 +242,8 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
             <div className="rounded-lg border border-outline-variant bg-surface-container-low p-3 text-sm text-on-surface">
               <p className="font-semibold">{latestTransaction.status}</p>
               <p className="mt-1 text-xs text-on-surface-variant">
-                VNPay: {latestTransaction.gatewayResponseCode || 'N/A'} / {latestTransaction.gatewayTransactionStatus || 'N/A'}
+                {latestTransaction.gateway || 'Cổng thanh toán'}:{' '}
+                {latestTransaction.gatewayResponseCode || 'N/A'} / {latestTransaction.gatewayTransactionStatus || 'N/A'}
               </p>
             </div>
           </div>
@@ -281,7 +284,9 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
               )}
             </div>
             <p className="mt-4 text-center text-[11px] text-on-surface-variant">
-              {selected.type === 'DUPLICATE_PAYMENT'
+              {isManualBankTransfer
+                ? 'Nhân viên chỉ xác nhận sau khi đã chuyển khoản hoàn thực tế và có mã tham chiếu ngân hàng.'
+                : selected.type === 'DUPLICATE_PAYMENT'
                 ? 'Khoản hoàn này chỉ xử lý giao dịch thu trùng, không hủy booking hoặc vé hợp lệ.'
                 : selected.type === 'CUSTOMER_CANCELLATION'
                   ? 'Booking và mã QR chỉ bị hủy sau khi VNPay xác nhận hoàn tiền thành công.'
@@ -296,7 +301,11 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
             disabled={isProcessing}
           >
             <span className="material-symbols-outlined text-[20px]">sync</span>
-            {isProcessing ? 'Đang đối soát...' : 'Đối soát với VNPay'}
+            {isProcessing
+              ? 'Đang đối soát...'
+              : isManualBankTransfer
+                ? 'Khôi phục ghi nhận hoàn chuyển khoản'
+                : 'Đối soát với VNPay'}
           </button>
         ) : (
           <p className="text-center text-sm font-semibold text-on-surface-variant">
@@ -325,7 +334,11 @@ export default function RefundManagementPage() {
   // theo trang/bộ lọc hiện tại.
   const [stats, setStats] = useState({ total: 0, pending: 0, processing: 0, approved: 0, rejected: 0 })
   const [rejectModal, setRejectModal] = useState({ open: false, notes: '' })
-  const [approveModal, setApproveModal] = useState({ open: false, notes: '' })
+  const [approveModal, setApproveModal] = useState({
+    open: false,
+    notes: '',
+    manualReference: '',
+  })
 
   // Bộ đếm để bỏ qua response cũ đến muộn (tránh race khi đổi trang/gõ tìm kiếm
   // liên tục làm dữ liệu cũ ghi đè dữ liệu mới).
@@ -397,18 +410,30 @@ export default function RefundManagementPage() {
     if (!selected) return
     if (selected.processingEligibility?.canApprove === false) {
       toast.error(selected.processingEligibility.blockReason)
-      setApproveModal({ open: false, notes: '' })
+      setApproveModal({ open: false, notes: '', manualReference: '' })
+      return
+    }
+    const requiresManualReference =
+      selected.processingEligibility?.requiresManualReference === true
+    const manualReference = approveModal.manualReference.trim()
+    if (requiresManualReference && !/^[A-Za-z0-9][A-Za-z0-9._/-]{5,99}$/.test(manualReference)) {
+      toast.warning('Vui lòng nhập mã tham chiếu giao dịch hoàn tiền hợp lệ.')
       return
     }
     setIsProcessing(true)
     try {
-      const response = await processRefundRequest(selected.id, 'APPROVED', approveModal.notes.trim())
+      const response = await processRefundRequest(
+        selected.id,
+        'APPROVED',
+        approveModal.notes.trim(),
+        manualReference,
+      )
       toast.success(
         response.data?.requiresReconciliation
           ? 'Khoản hoàn đã chuyển sang đối soát VNPay.'
           : 'Đã duyệt yêu cầu hoàn tiền.',
       )
-      setApproveModal({ open: false, notes: '' })
+      setApproveModal({ open: false, notes: '', manualReference: '' })
       setSelected(null)
       await fetchRequests()
     } catch (error) {
@@ -668,7 +693,7 @@ export default function RefundManagementPage() {
             selected={selected}
             isProcessing={isProcessing}
             onClose={() => setSelected(null)}
-            onApprove={() => setApproveModal({ open: true, notes: '' })}
+            onApprove={() => setApproveModal({ open: true, notes: '', manualReference: '' })}
             onReject={() => setRejectModal({ open: true, notes: '' })}
             onReconcile={() => void handleReconcile()}
           />
@@ -681,7 +706,7 @@ export default function RefundManagementPage() {
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !isProcessing) {
-              setApproveModal({ open: false, notes: '' })
+              setApproveModal({ open: false, notes: '', manualReference: '' })
             }
           }}
         >
@@ -703,13 +728,39 @@ export default function RefundManagementPage() {
               <button
                 type="button"
                 className="rounded-full border-0 bg-transparent p-1 hover:bg-surface-container-high"
-                onClick={() => setApproveModal({ open: false, notes: '' })}
+                onClick={() => setApproveModal({ open: false, notes: '', manualReference: '' })}
                 disabled={isProcessing}
                 aria-label="Đóng"
               >
                 <span className="material-symbols-outlined">close</span>
               </button>
             </div>
+
+            {selected.processingEligibility?.requiresManualReference && (
+              <>
+                <label
+                  className="mb-2 mt-4 block text-sm font-semibold text-on-surface"
+                  htmlFor="refund-manual-reference"
+                >
+                  Mã tham chiếu giao dịch hoàn tiền
+                </label>
+                <input
+                  id="refund-manual-reference"
+                  className="w-full rounded-xl border border-outline-variant bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  placeholder="Ví dụ: FT260727123456"
+                  value={approveModal.manualReference}
+                  onChange={(event) =>
+                    setApproveModal((current) => ({
+                      ...current,
+                      manualReference: event.target.value,
+                    }))
+                  }
+                />
+                <p className="mt-2 text-xs leading-5 text-on-surface-variant">
+                  Chỉ nhập sau khi tiền đã được chuyển thực tế về tài khoản khách. Mã này được lưu trong sổ đối soát và nhật ký kiểm toán.
+                </p>
+              </>
+            )}
 
             <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
               <div className="flex items-center justify-between gap-4">
@@ -762,7 +813,7 @@ export default function RefundManagementPage() {
               <button
                 type="button"
                 className="rounded-lg border border-outline-variant bg-white px-4 py-2 text-sm font-semibold text-on-surface"
-                onClick={() => setApproveModal({ open: false, notes: '' })}
+                onClick={() => setApproveModal({ open: false, notes: '', manualReference: '' })}
                 disabled={isProcessing}
               >
                 Hủy
@@ -771,7 +822,15 @@ export default function RefundManagementPage() {
                 type="button"
                 className="flex items-center gap-2 rounded-lg border-0 bg-primary px-4 py-2 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={() => void handleApprove()}
-                disabled={isProcessing}
+                disabled={
+                  isProcessing
+                  || (
+                    selected.processingEligibility?.requiresManualReference
+                    && !/^[A-Za-z0-9][A-Za-z0-9._/-]{5,99}$/.test(
+                      approveModal.manualReference.trim(),
+                    )
+                  )
+                }
               >
                 <span className="material-symbols-outlined text-[18px]">check_circle</span>
                 {isProcessing ? 'Đang hoàn tiền...' : 'Xác nhận hoàn tiền'}

@@ -10,6 +10,7 @@ import {
   loadItineraryBookingQueue,
   markItineraryQueueItemReserved,
   saveItineraryBookingQueue,
+  syncItineraryBookingQueueProgress,
 } from './aiItineraryBookingQueue.js'
 
 function makeStorage() {
@@ -142,6 +143,43 @@ describe('AI itinerary booking queue helpers', () => {
       nextIndex: 1,
       remaining: 1,
       total: 2,
+    })
+  })
+
+  it('syncs across devices but does not mark a cancelled late payment as fulfilled', () => {
+    const storage = makeStorage()
+    const queue = createItineraryBookingQueue(samplePlan, {
+      now: 1784102400000,
+      itineraryId: 'itinerary-1',
+      itineraryVersion: 8,
+    })
+    saveItineraryBookingQueue(queue, storage)
+
+    const cancelled = syncItineraryBookingQueueProgress([{
+      itemId: queue.items[0].id,
+      bookingId: 'booking-late',
+      bookingStatus: 'CANCELLED',
+      paid: true,
+      fulfilled: false,
+    }], storage)
+    expect(cancelled.items[0]).toMatchObject({
+      bookingId: 'booking-late',
+      status: 'action_required',
+    })
+    expect(getItineraryQueueProgress(cancelled).completed).toBe(0)
+
+    const confirmed = syncItineraryBookingQueueProgress([{
+      itemId: queue.items[0].id,
+      bookingId: 'booking-confirmed',
+      bookingStatus: 'CONFIRMED',
+      paid: true,
+      fulfilled: true,
+      paidAt: '2026-07-27T10:00:00.000Z',
+    }], storage)
+    expect(confirmed.items[0]).toMatchObject({
+      bookingId: 'booking-confirmed',
+      status: 'completed',
+      completedAt: '2026-07-27T10:00:00.000Z',
     })
   })
 })

@@ -18,6 +18,7 @@ const {
   releaseHeldInventory,
   releaseInventory,
 } = require('../utils/refundService');
+const { isRefundableCapturedPayment } = require('../utils/paymentGateway');
 const {
   isTicketProductSaleEnabled,
   publicAttractionWhere,
@@ -816,13 +817,9 @@ async function createRefundRequest(req, res, next) {
         if (!eligibility.refundable) {
           throw httpError(409, eligibility.notRefundableReason);
         }
-        const directPayment = booking.payments.find((payment) => (
-          /vnpay/i.test(payment.paymentGateway || '')
-        ));
+        const directPayment = booking.payments.find(isRefundableCapturedPayment);
         const fundingBooking = booking.recoveryCaseAsReplacement?.fundingBooking || null;
-        const fundingPayment = fundingBooking?.payments?.find((payment) => (
-          /vnpay/i.test(payment.paymentGateway || '')
-        ));
+        const fundingPayment = fundingBooking?.payments?.find(isRefundableCapturedPayment);
         const paymentOwnerBooking = directPayment ? booking : fundingBooking;
         const capturedPayment = directPayment || fundingPayment;
         if (!paymentOwnerBooking || !capturedPayment) {

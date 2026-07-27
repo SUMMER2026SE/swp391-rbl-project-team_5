@@ -4,7 +4,10 @@ const { Prisma } = require('@prisma/client');
 const mockPrisma = require('./helpers/mockPrisma');
 const {
   createBooking,
+  extractItineraryTicketItems,
+  itineraryContainsReservation,
   resolveBookingPaymentStatus,
+  validateItineraryBookingContext,
   validateAndApplyVoucher,
 } = require('../controllers/bookingController');
 
@@ -32,6 +35,95 @@ describe('resolveBookingPaymentStatus', () => {
       { id: 'duplicate', status: 'SUCCESS', isDuplicate: true },
       { id: 'failed-attempt', status: 'FAILED', isDuplicate: false },
     ])).toBe('FAILED');
+  });
+});
+
+describe('itinerary booking context', () => {
+  const itinerary = {
+    id: 'itinerary-1',
+    data: {
+      startDate: '2026-08-20',
+      days: [{
+        day: 1,
+        visitDate: '2026-08-20',
+        activities: [{
+          attractionId: 'attraction-1',
+          ticketItems: [{
+            ticketId: 'ticket-1',
+            quantity: 2,
+            suggestedTimeSlot: { timeSlotId: 'slot-1' },
+          }],
+        }],
+      }],
+    },
+    partyRoom: {
+      id: 'room-1',
+      status: 'FINALIZED',
+      version: 7,
+      bookingStartedAt: null,
+      bookingVersion: null,
+    },
+  };
+  const reservation = {
+    ticketProductId: 'ticket-1',
+    timeSlotId: 'slot-1',
+    date: new Date('2026-08-20T00:00:00.000Z'),
+    quantity: 2,
+    ticketProduct: { attractionId: 'attraction-1' },
+  };
+
+  test('chỉ chấp nhận đúng dòng vé đã chốt, gồm ngày, slot và số lượng', () => {
+    const [item] = extractItineraryTicketItems(itinerary);
+
+    expect(item.id).toBe('attraction-1__ticket-1__2026-08-20__slot-1__0');
+    expect(itineraryContainsReservation(itinerary, reservation)).toBe(true);
+    expect(itineraryContainsReservation(itinerary, {
+      ...reservation,
+      quantity: 3,
+    })).toBe(false);
+  });
+
+  test('khóa phiên bản phòng ở lần tạo booking đầu tiên', async () => {
+    const [item] = extractItineraryTicketItems(itinerary);
+    const tx = {
+      savedItinerary: { findFirst: jest.fn().mockResolvedValue(itinerary) },
+      booking: { findFirst: jest.fn().mockResolvedValue(null) },
+      partyRoom: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const now = new Date('2026-08-01T00:00:00.000Z');
+
+    await expect(validateItineraryBookingContext(tx, {
+      context: { itineraryId: itinerary.id, itemId: item.id, version: 7 },
+      reservation,
+      userId: 'user-1',
+      now,
+    })).resolves.toBe(itinerary);
+    expect(tx.partyRoom.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'room-1',
+        status: 'FINALIZED',
+        version: 7,
+        bookingStartedAt: null,
+      },
+      data: { bookingStartedAt: now, bookingVersion: 7 },
+    });
+  });
+
+  test('không cho giả mạo itemId của một dòng vé khác', async () => {
+    const tx = {
+      savedItinerary: { findFirst: jest.fn().mockResolvedValue(itinerary) },
+      booking: { findFirst: jest.fn() },
+      partyRoom: { updateMany: jest.fn() },
+    };
+
+    await expect(validateItineraryBookingContext(tx, {
+      context: { itineraryId: itinerary.id, itemId: 'forged-item', version: 7 },
+      reservation,
+      userId: 'user-1',
+      now: new Date(),
+    })).rejects.toMatchObject({ statusCode: 409 });
+    expect(tx.booking.findFirst).not.toHaveBeenCalled();
+    expect(tx.partyRoom.updateMany).not.toHaveBeenCalled();
   });
 });
 
