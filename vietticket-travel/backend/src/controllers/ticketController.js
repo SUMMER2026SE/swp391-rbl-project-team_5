@@ -24,6 +24,11 @@ const { writeAuditLog } = require('../utils/auditLog');
 const { isBookingCutoffPassed } = require('../utils/activityTime');
 const { MAX_TICKETS_PER_ORDER } = require('../config/bookingPolicy');
 const { parseVndInteger } = require('../utils/money');
+const {
+  quoteForSlot,
+  quoteSchedule,
+  toPublicQuote,
+} = require('../services/dynamicPricingService');
 
 const attractionInclude = {
   images: true,
@@ -799,7 +804,7 @@ async function checkAvailability(req, res, next) {
       });
     }
 
-    const [dailyStock, attractionStock, slotStocks] = await Promise.all([
+    const [dailyStock, attractionStock, slotStocks, priceQuotes] = await Promise.all([
       prisma.dailyStock.findUnique({
         where: { ticketProductId_date: { ticketProductId, date } },
       }),
@@ -813,7 +818,23 @@ async function checkAvailability(req, res, next) {
             where: { timeSlotId: { in: schedule.slots.map((slot) => slot.id) }, date },
           })
         : Promise.resolve([]),
+      // Giá động chỉ để hiển thị ở bước này; giá chốt luôn được tính lại phía
+      // server khi giữ chỗ nên client không thể ép giá rẻ hơn.
+      quoteSchedule(prisma, { schedule, date }),
     ]);
+    // Giá hiển thị luôn là một con số. Gói vé có giá không phải số nguyên VND
+    // sẽ bị chặn ở bước giữ chỗ, nhưng tới lúc đó vẫn phải cho khách thấy đúng
+    // giá niêm yết thay vì một ô trống.
+    const listedPrice = parseVndInteger(schedule.product.sellingPrice)
+      ?? Number(schedule.product.sellingPrice);
+    const pricingOf = (timeSlotId) => {
+      const quote = quoteForSlot(priceQuotes, timeSlotId);
+      return {
+        unitPrice: quote?.applied ? quote.finalPrice : listedPrice,
+        listedPrice,
+        dynamicPricing: toPublicQuote(quote),
+      };
+    };
 
     const productAvailable = Math.max(
       0,
@@ -855,6 +876,7 @@ async function checkAvailability(req, res, next) {
               bookingClosed ? 0 : attractionAvailable,
             ),
             bookingClosed,
+            ...pricingOf(slot.id),
           };
         })
       : [{
@@ -874,6 +896,7 @@ async function checkAvailability(req, res, next) {
             date,
             attraction: schedule.attraction,
           }),
+          ...pricingOf(null),
         }];
 
     return res.status(200).json({
@@ -883,6 +906,7 @@ async function checkAvailability(req, res, next) {
         closed: false,
         slotSource: schedule.slotSource,
         dayCapacity: schedule.dayCapacity,
+        listedPrice,
       },
     });
   } catch (error) {
@@ -919,8 +943,18 @@ async function reserveTickets(req, res, next) {
     if (!userId) return res.status(401).json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Unauthorized' } });
 
     const ticketProductId = req.params.ticketProductId;
-    const { date: dateStr, quantity: qtyRaw, timeSlotId } = req.body || {};
+    const {
+      date: dateStr,
+      quantity: qtyRaw,
+      timeSlotId,
+      expectedUnitPrice: expectedUnitPriceRaw,
+    } = req.body || {};
     const quantity = Number(qtyRaw);
+    // Giá khách nhìn thấy lúc bấm đặt. Chỉ dùng để CHẶN việc thu cao hơn mức đã
+    // hiển thị — không bao giờ được dùng làm giá bán (client có thể sửa).
+    const expectedUnitPrice = expectedUnitPriceRaw == null
+      ? null
+      : parseVndInteger(expectedUnitPriceRaw);
     if (!dateStr) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'date is required' } });
     if (
       !Number.isSafeInteger(quantity)
@@ -995,8 +1029,8 @@ async function reserveTickets(req, res, next) {
         err.statusCode = 409;
         throw err;
       }
-      const snapshotUnitPrice = parseVndInteger(schedule.product.sellingPrice);
-      if (snapshotUnitPrice === null) {
+      const listedUnitPrice = parseVndInteger(schedule.product.sellingPrice);
+      if (listedUnitPrice === null) {
         const err = new Error('Giá bán của gói vé phải là số nguyên VND hợp lệ.');
         err.statusCode = 409;
         throw err;
@@ -1117,6 +1151,33 @@ async function reserveTickets(req, res, next) {
         }
       }
 
+      // Giá động được tính TRƯỚC khi cộng heldQty của chính lượt giữ chỗ này,
+      // nếu không khách sẽ tự đẩy mức lấp đầy lên rồi bị phụ thu vì chính mình.
+      // Đây cũng là nơi duy nhất quyết định giá khách phải trả: báo giá do
+      // client gửi lên hoàn toàn không được dùng.
+      const priceQuotes = await quoteSchedule(tx, {
+        schedule,
+        date,
+        now: holdStartedAt,
+      });
+      const priceQuote = quoteForSlot(priceQuotes, selectedSlot?.id || null);
+      const snapshotUnitPrice = priceQuote?.applied
+        ? parseVndInteger(priceQuote.finalPrice) ?? listedUnitPrice
+        : listedUnitPrice;
+
+      // Nhu cầu có thể tăng giữa lúc khách xem giá và lúc bấm đặt, khiến giá
+      // cao điểm nhích lên. Không bao giờ thu cao hơn mức đã hiển thị mà không
+      // hỏi lại; thu thấp hơn thì cứ áp cho khách.
+      if (expectedUnitPrice !== null && snapshotUnitPrice > expectedUnitPrice) {
+        const err = new Error(
+          `Giá vé vừa thay đổi thành ${snapshotUnitPrice.toLocaleString('vi-VN')} VND do nhu cầu tăng. Vui lòng xem lại trước khi tiếp tục.`,
+        );
+        err.statusCode = 409;
+        err.code = 'PRICE_CHANGED';
+        err.unitPrice = snapshotUnitPrice;
+        throw err;
+      }
+
       await tx.dailyStock.update({
         where: { id: daily.id },
         data: { heldQuantity: { increment: quantity } },
@@ -1150,14 +1211,60 @@ async function reserveTickets(req, res, next) {
         },
       });
 
-      return { reservationId: reservation.id, ticketProductId, quantity, expiresAt };
+      // Chỉ ghi sổ khi AI thực sự đổi giá. Dòng này là bằng chứng đối soát:
+      // vì sao đơn của khách lệch giá niêm yết, dựa trên tín hiệu nào.
+      if (priceQuote?.applied && priceQuotes.policy.id) {
+        await tx.dynamicPriceAdjustment.create({
+          data: {
+            policyId: priceQuotes.policy.id,
+            attractionId: schedule.attraction.id,
+            ticketProductId,
+            reservationId: reservation.id,
+            timeSlotId: selectedSlot?.id || null,
+            visitDate: date,
+            basePrice: priceQuote.basePrice,
+            finalPrice: snapshotUnitPrice,
+            adjustmentPercent: priceQuote.adjustmentPercent,
+            quantity,
+            demandLevel: priceQuote.demandLevel,
+            demandIndex: priceQuote.demandIndex,
+            forecastRatio: priceQuote.forecastRatio,
+            realizedRatio: priceQuote.realizedRatio,
+            signalSource: priceQuote.signalSource,
+            confidence: priceQuote.confidence,
+            leadTimeDays: priceQuote.leadTimeDays,
+            modelVersion: priceQuote.modelVersion,
+            forecastGeneratedAt: priceQuote.forecastGeneratedAt,
+            reason: priceQuote.reason,
+          },
+        });
+      }
+
+      return {
+        reservationId: reservation.id,
+        ticketProductId,
+        quantity,
+        expiresAt,
+        unitPrice: snapshotUnitPrice,
+        listedPrice: listedUnitPrice,
+        dynamicPricing: toPublicQuote(priceQuote),
+      };
     });
 
     return res.status(200).json({ success: true, data: result });
   } catch (error) {
     if (error.statusCode === 404) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: error.message } });
     if (error.statusCode === 400) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: error.message } });
-    if (error.statusCode === 409) return res.status(409).json({ success: false, error: { code: 'CONFLICT', message: error.message } });
+    if (error.statusCode === 409) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: error.code || 'CONFLICT',
+          message: error.message,
+          ...(error.unitPrice ? { unitPrice: error.unitPrice } : {}),
+        },
+      });
+    }
     if (error.statusCode === 429) return res.status(429).json({ success: false, error: { code: 'HOLD_LIMIT_EXCEEDED', message: error.message } });
     return next(error);
   }

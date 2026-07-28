@@ -179,6 +179,29 @@ export function updateSmartQueuePolicy(attractionId, payload) {
   return apiRequest(`/partners/attractions/${encodeURIComponent(attractionId)}/smart-queue-policy`, { method: 'PUT', body: payload })
 }
 
+// ----- Giá động theo dự báo AI -----
+export function getPricingPolicy(attractionId) {
+  return apiRequest(`/partners/attractions/${encodeURIComponent(attractionId)}/pricing-policy`, { method: 'GET' })
+}
+
+export function updatePricingPolicy(attractionId, payload) {
+  return apiRequest(`/partners/attractions/${encodeURIComponent(attractionId)}/pricing-policy`, { method: 'PUT', body: payload })
+}
+
+export function getPricingPreview(attractionId, days = 14) {
+  return apiRequest(
+    `/partners/attractions/${encodeURIComponent(attractionId)}/pricing-preview?days=${encodeURIComponent(days)}`,
+    { method: 'GET' },
+  )
+}
+
+export function getPricingImpact(attractionId, days = 30) {
+  return apiRequest(
+    `/partners/attractions/${encodeURIComponent(attractionId)}/pricing-impact?days=${encodeURIComponent(days)}`,
+    { method: 'GET' },
+  )
+}
+
 // ----- Đặt vé (quản lý phía đối tác) -----
 export function getPartnerBookings(params = {}) {
   const query = new URLSearchParams()

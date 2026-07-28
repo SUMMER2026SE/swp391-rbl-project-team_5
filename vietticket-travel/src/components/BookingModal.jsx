@@ -114,6 +114,8 @@ export default function BookingModal({
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [fetchError, setFetchError] = useState('')
   const [actionError, setActionError] = useState('')
+  // Tăng lên để buộc tải lại khung giờ & giá khi server báo giá vừa đổi.
+  const [reloadToken, setReloadToken] = useState(0)
 
   const [currentMonth, setCurrentMonth] = useState(() => getCalendarDate(normalizedInitialDate).getMonth())
   const [currentYear, setCurrentYear] = useState(() => getCalendarDate(normalizedInitialDate).getFullYear())
@@ -124,8 +126,6 @@ export default function BookingModal({
     'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
   ]
 
-  const unitPrice = Number(ticketProduct?.sellingPrice || ticketProduct?.price || 0)
-  const totalPrice = quantity * unitPrice
   const ticketTypeMeta =
     TICKET_TYPE_META[String(ticketProduct?.type || 'ADULT').toUpperCase()]
     || TICKET_TYPE_META.ADULT
@@ -133,6 +133,17 @@ export default function BookingModal({
 
   // Số vé còn lại của khung giờ đang chọn — dùng để chặn chọn quá số lượng.
   const selectedSlot = timeSlots.find((slot) => getSlotId(slot) === selectedTimeSlotId)
+
+  // Giá động do server tính cho từng khung giờ. Giá niêm yết cũng lấy theo
+  // response của server thay vì prop ticketProduct — prop có thể là dữ liệu cũ
+  // từ trang chi tiết nếu đối tác vừa đổi giá.
+  const slotPricing = selectedSlot?.dynamicPricing || null
+  const listedPrice = Number(
+    selectedSlot?.listedPrice ?? ticketProduct?.sellingPrice ?? ticketProduct?.price ?? 0,
+  )
+  const unitPrice = Number(selectedSlot?.unitPrice ?? listedPrice)
+  const totalPrice = quantity * unitPrice
+  const listedTotalPrice = quantity * listedPrice
   const maxQuantity =
     typeof selectedSlot?.availableTickets === 'number' ? selectedSlot.availableTickets : null
   const checkoutDisabled =
@@ -188,7 +199,10 @@ export default function BookingModal({
       cells.push(
         <button
           key={`day-${d}`}
-          onClick={() => setSelectedDate(dateStr)}
+          onClick={() => {
+            setSelectedDate(dateStr)
+            setActionError('')
+          }}
           disabled={isPast}
           type="button"
           className={`h-10 flex items-center justify-center rounded-xl text-sm font-semibold transition active:scale-90 ${
@@ -261,7 +275,9 @@ export default function BookingModal({
     const fetchAvailability = async () => {
       setIsLoadingSlots(true)
       setFetchError('')
-      setActionError('')
+      // Cố ý KHÔNG xoá actionError ở đây: lần tải lại này có thể do server báo
+      // giá vừa đổi, và thông báo đó phải còn trên màn hình để khách đọc.
+      // Lỗi thao tác được xoá khi khách đổi ngày hoặc đổi khung giờ.
 
       try {
         const result = await checkAvailability(ticketId, selectedDate, {
@@ -302,7 +318,7 @@ export default function BookingModal({
     return () => {
       controller.abort()
     }
-  }, [initialTimeSlotId, isOpen, selectedDate, ticketId])
+  }, [initialTimeSlotId, isOpen, reloadToken, selectedDate, ticketId])
 
   const handleSelectSlot = (slot) => {
     setSelectedTimeSlotId(getSlotId(slot))
@@ -385,6 +401,9 @@ export default function BookingModal({
         date: selectedDate,
         timeSlotId: selectedSlot?.timeSlotId || null,
         quantity,
+        // Giá đang hiển thị: server từ chối giữ chỗ nếu giá vừa tăng cao hơn
+        // mức này, để khách không bị thu nhiều hơn con số vừa nhìn thấy.
+        expectedUnitPrice: unitPrice,
       })
       const reservationId = result.data?.reservationId || result.data?.id
       bookingService.reserveTicket(reservationId)
@@ -412,6 +431,11 @@ export default function BookingModal({
         onClose()
         navigate('/login', { state: { from: location } })
         return
+      }
+      // Giá vừa tăng: tải lại khung giờ để khách thấy con số mới rồi tự quyết
+      // định, thay vì âm thầm thu thêm tiền.
+      if (error.data?.error?.code === 'PRICE_CHANGED') {
+        setReloadToken((current) => current + 1)
       }
       setActionError(error.message)
     } finally {
@@ -563,6 +587,21 @@ export default function BookingModal({
                               ? `Còn ${slot.availableTickets} vé`
                               : 'Sẵn sàng'}
                         </span>
+                        {!disabled && slot.dynamicPricing && (
+                          <span
+                            className={`mt-2 inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                              slot.dynamicPricing.demandLevel === 'QUIET'
+                                ? 'bg-[#e0f4f5] text-[#00474d]'
+                                : 'bg-[#ffedea] text-[#ba1a1a]'
+                            }`}
+                            title={slot.dynamicPricing.reason}
+                          >
+                            <span className="material-symbols-outlined text-[13px]" aria-hidden="true">
+                              {slot.dynamicPricing.demandLevel === 'QUIET' ? 'trending_down' : 'trending_up'}
+                            </span>
+                            {slot.dynamicPricing.label}
+                          </span>
+                        )}
                       </button>
                     )
                   })}
@@ -606,8 +645,28 @@ export default function BookingModal({
             <div className="mb-4 space-y-1.5 text-sm">
               <div className="flex justify-between text-[#3e494a]">
                 <span>{ticketTypeMeta.label} × {quantity}</span>
-                <span className="font-semibold">{formatCurrency(totalPrice)}</span>
+                <span className="font-semibold">
+                  {slotPricing ? (
+                    <span className="mr-2 font-normal text-[#6e797a] line-through">
+                      {formatCurrency(listedTotalPrice)}
+                    </span>
+                  ) : null}
+                  {formatCurrency(totalPrice)}
+                </span>
               </div>
+              {slotPricing && (
+                <div
+                  className={`flex justify-between text-xs font-semibold ${
+                    slotPricing.demandLevel === 'QUIET' ? 'text-[#006068]' : 'text-[#ba1a1a]'
+                  }`}
+                >
+                  <span>{slotPricing.label}</span>
+                  <span>
+                    {slotPricing.demandLevel === 'QUIET' ? '−' : '+'}
+                    {formatCurrency(Math.abs(totalPrice - listedTotalPrice))}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="mb-4 flex items-end justify-between gap-4 border-t border-dashed border-[#bdc9ca]/60 pt-4">
@@ -619,6 +678,21 @@ export default function BookingModal({
                 Đã bao gồm VAT & phí dịch vụ
               </span>
             </div>
+
+            {slotPricing && (
+              <div
+                className={`mb-4 flex items-start gap-2 rounded-2xl px-4 py-3 text-xs font-semibold ${
+                  slotPricing.demandLevel === 'QUIET'
+                    ? 'bg-[#e0f4f5] text-[#00474d]'
+                    : 'bg-[#fff4ed] text-[#8a3b00]'
+                }`}
+              >
+                <span className="material-symbols-outlined mt-0.5 shrink-0 text-[16px]" aria-hidden="true">
+                  insights
+                </span>
+                {slotPricing.reason}
+              </div>
+            )}
 
             {refundPolicyText && (
               <div className="mb-4 flex items-start gap-2 rounded-2xl bg-[#f3f3f6] px-4 py-3 text-xs font-semibold text-[#3e494a]">

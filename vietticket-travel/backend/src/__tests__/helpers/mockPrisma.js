@@ -253,8 +253,17 @@ const mockPrisma = {
   },
   revenueForecast: {
     findMany: jest.fn(),
+    findUnique: jest.fn(),
     upsert: jest.fn(),
     update: jest.fn(),
+  },
+  dynamicPricingPolicy: {
+    findUnique: jest.fn(),
+    upsert: jest.fn(),
+  },
+  dynamicPriceAdjustment: {
+    findMany: jest.fn(),
+    create: jest.fn(),
   },
   savedItinerary: {
     findUnique: jest.fn(),
