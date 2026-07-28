@@ -49,6 +49,11 @@ afterAll(() => {
 function makeTx() {
   return {
     booking: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
+    reservation: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    voucher: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     payment: {
       upsert: jest.fn().mockResolvedValue({
         id: 'payment-bank-transfer',
@@ -75,9 +80,12 @@ function bookingFixture(overrides = {}) {
       id: 'res-1',
       status: 'HELD',
       ticketProductId: 'tkt-1',
+      timeSlotId: null,
+      date: new Date('2026-08-01T00:00:00.000Z'),
       quantity: 2,
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       ticketProduct: {
+        attractionId: 'attraction-1',
         status: 'ACTIVE',
         archivedAt: null,
         attraction: {
@@ -286,6 +294,7 @@ describe('confirmBankTransfer', () => {
 
   test('tiền đến khi gói vé đã ngừng bán -> không chốt kho và tự mở hồ sơ hoàn', async () => {
     const booking = bookingFixture();
+    booking.voucherId = 'voucher-1';
     booking.reservation.ticketProduct.attraction.partner.status = 'SUSPENDED';
     const tx = makeTx();
     tx.booking.findUnique.mockResolvedValue(booking);
@@ -296,6 +305,20 @@ describe('confirmBankTransfer', () => {
     expect(result.latePayment).toBe(true);
     expect(queueMandatoryRefund).toHaveBeenCalled();
     expect(confirmReservationAndStock).not.toHaveBeenCalled();
+    expect(tx.reservation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'res-1', status: 'HELD' },
+      data: { status: 'CANCELLED' },
+    });
+    expect(tx.dailyStock.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { heldQuantity: { decrement: 2 } },
+    }));
+    expect(tx.attractionDailyStock.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: { heldQty: { decrement: 2 } },
+    }));
+    expect(tx.voucher.updateMany).toHaveBeenCalledWith({
+      where: { id: 'voucher-1', usedCount: { gt: 0 } },
+      data: { usedCount: { decrement: 1 } },
+    });
   });
 
   test('không tìm thấy đơn -> 404', async () => {

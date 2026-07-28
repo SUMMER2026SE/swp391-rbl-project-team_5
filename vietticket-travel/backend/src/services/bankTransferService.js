@@ -31,6 +31,10 @@ const { awardPointsForBooking } = require('../services/loyaltyService');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const { writeAuditLog } = require('../utils/auditLog');
 const {
+  releaseHeldInventory,
+  releaseInventory,
+} = require('../utils/refundService');
+const {
   isBankTransferPayment,
   isCapturedPayment,
 } = require('../utils/paymentGateway');
@@ -173,6 +177,25 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
             },
           },
         });
+        let inventoryReleased = false;
+        if (booking.status === 'PENDING_PAYMENT' && booking.reservation?.status === 'HELD') {
+          inventoryReleased = await releaseHeldInventory(tx, booking.reservation);
+          if (!inventoryReleased) {
+            throw httpError(409, 'Không thể giải phóng lượt giữ chỗ của đơn chuyển khoản.');
+          }
+        } else if (
+          booking.status === 'PENDING_PAYMENT'
+          && booking.reservation?.status === 'CONFIRMED'
+        ) {
+          await releaseInventory(tx, booking);
+          inventoryReleased = true;
+        }
+        if (inventoryReleased && booking.voucherId) {
+          await tx.voucher.updateMany({
+            where: { id: booking.voucherId, usedCount: { gt: 0 } },
+            data: { usedCount: { decrement: 1 } },
+          });
+        }
         await tx.booking.update({
           where: { id: booking.id },
           data: {

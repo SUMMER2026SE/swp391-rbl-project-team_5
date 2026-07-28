@@ -15,6 +15,7 @@ function makeTx({ reservation }) {
     reservation: {
       findUnique: jest.fn().mockResolvedValue(reservation),
       update: jest.fn().mockResolvedValue({}),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -72,9 +73,10 @@ describe('sweepExpiredReservations', () => {
     const cleaned = await sweepExpiredReservations();
 
     expect(cleaned).toBe(1);
-    expect(tx.reservation.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: 'EXPIRED' } }),
-    );
+    expect(tx.reservation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'res-1', status: 'HELD' },
+      data: { status: 'EXPIRED' },
+    });
     expect(tx.dailyStock.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ heldQuantity: { gte: 2 } }),
@@ -193,7 +195,44 @@ describe('sweepExpiredReservations', () => {
     const cleaned = await sweepExpiredReservations();
 
     expect(cleaned).toBe(0);
-    expect(tx.reservation.update).not.toHaveBeenCalled();
+    expect(tx.reservation.updateMany).not.toHaveBeenCalled();
     expect(tx.dailyStock.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('không hủy booking nếu một lớp kho không thể hoàn trả an toàn', async () => {
+    prisma.reservation.findMany.mockResolvedValue([{ id: 'res-stock-drift' }]);
+    const tx = makeTx({
+      reservation: {
+        id: 'res-stock-drift',
+        status: 'HELD',
+        ticketProductId: 'tkt-drift',
+        timeSlotId: null,
+        date: new Date('2026-06-21'),
+        quantity: 2,
+        booking: {
+          id: 'bk-stock-drift',
+          status: 'PENDING_PAYMENT',
+          email: 'a@example.com',
+          fullName: 'A',
+          voucherId: null,
+        },
+        ticketProduct: {
+          attractionId: 'attr-drift',
+          attraction: { title: 'Điểm lỗi kho' },
+        },
+      },
+    });
+    tx.attractionDailyStock.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockImplementation((cb) => cb(tx));
+
+    const cleaned = await sweepExpiredReservations();
+
+    expect(cleaned).toBe(0);
+    expect(tx.booking.update).not.toHaveBeenCalled();
+    expect(tx.payment.updateMany).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('res-stock-drift'),
+      expect.stringContaining('Không thể hoàn trả kho'),
+    );
   });
 });

@@ -6,7 +6,7 @@ const prisma = require('../config/prisma');
 const { sendHoldExpiredEmail } = require('./mailer');
 const { BANK_TRANSFER_METHOD } = require('./bankTransferPolicy');
 const { writeAuditLog } = require('./auditLog');
-const { getInventoryUnits } = require('./ticketCapacity');
+const { releaseHeldInventory } = require('./refundService');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000; // chạy mỗi 1 phút
 const DEFAULT_GRACE_MS = 3 * 60 * 1000; // chừa 3 phút cho IPN trả trễ
@@ -119,40 +119,15 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
             },
           });
           if (!r || r.status !== 'HELD') return;
-          const inventoryUnits = getInventoryUnits(r);
-
-          await tx.reservation.update({
-            where: { id },
-            data: { status: 'EXPIRED' },
-          });
-
-          // Trả kho giữ chỗ (guard gte để không âm / không trừ trùng).
-          await tx.dailyStock.updateMany({
-            where: {
-              ticketProductId: r.ticketProductId,
-              date: r.date,
-              heldQuantity: { gte: inventoryUnits },
-            },
-            data: { heldQuantity: { decrement: inventoryUnits } },
-          });
-          await tx.attractionDailyStock.updateMany({
-            where: {
-              attractionId: r.ticketProduct.attractionId,
-              date: r.date,
-              heldQty: { gte: inventoryUnits },
-            },
-            data: { heldQty: { decrement: inventoryUnits } },
-          });
-
-          if (r.timeSlotId) {
-            await tx.timeSlotStock.updateMany({
-              where: {
-                timeSlotId: r.timeSlotId,
-                date: r.date,
-                heldQty: { gte: inventoryUnits },
-              },
-              data: { heldQty: { decrement: inventoryUnits } },
-            });
+          const released = await releaseHeldInventory(
+            tx,
+            r,
+            { status: 'EXPIRED' },
+          );
+          if (!released) {
+            const error = new Error('Lượt giữ chỗ vừa được xử lý bởi luồng khác.');
+            error.statusCode = 409;
+            throw error;
           }
 
           // Dọn đơn mồ côi: booking đã tạo nhưng chưa thanh toán.
