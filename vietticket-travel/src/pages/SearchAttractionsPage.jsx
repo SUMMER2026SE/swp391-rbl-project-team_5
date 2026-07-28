@@ -428,10 +428,12 @@ export default function SearchAttractionsPage() {
           city: selectedCity && selectedCity !== DEFAULT_CITY ? selectedCity : undefined,
           category: selectedCategory && selectedCategory !== 'All' ? selectedCategory : undefined,
           maxPrice: debouncedPriceRange < DEFAULT_PRICE_RANGE ? debouncedPriceRange : undefined,
-          minRating: selectedStars && selectedStars.length > 0 ? Math.min(...selectedStars) : undefined,
-          search: debouncedSearchQuery || undefined,
-          sort: selectedSort || undefined,
-        })
+           minRating: selectedStars && selectedStars.length > 0 ? Math.min(...selectedStars) : undefined,
+           search: debouncedSearchQuery || undefined,
+           sort: selectedSort || undefined,
+           date: visitDate || undefined,
+           guests: visitDate ? guestCount : undefined,
+         })
         if (!active) return
 
         const nextAttractions = result.data?.attractions || []
@@ -458,7 +460,7 @@ export default function SearchAttractionsPage() {
     return () => {
       active = false
     }
-  }, [selectedCategory, selectedCity, debouncedPriceRange, selectedStars, currentPage, debouncedSearchQuery, selectedSort, refreshKey])
+  }, [selectedCategory, selectedCity, debouncedPriceRange, selectedStars, currentPage, debouncedSearchQuery, selectedSort, visitDate, guestCount, refreshKey])
 
   // Handler lọc đánh giá sao
   const handleStarChange = (star) => {

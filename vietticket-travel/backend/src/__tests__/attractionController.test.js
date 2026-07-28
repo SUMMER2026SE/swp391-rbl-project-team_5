@@ -1,5 +1,9 @@
 jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
+jest.mock('../services/availabilityService', () => ({
+  getTicketAvailabilityBatch: jest.fn(),
+}));
 const mockPrisma = require('./helpers/mockPrisma');
+const { getTicketAvailabilityBatch } = require('../services/availabilityService');
 const { createAttraction, searchAttractions, getAttractionDetail } = require('../controllers/attractionController');
 
 afterEach(() => jest.clearAllMocks());
@@ -132,10 +136,122 @@ describe('searchAttractions', () => {
     expect(mockPrisma.attraction.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          AND: [{ locationTextNormalized: { contains: ' ho chi minh ' } }],
+          AND: expect.arrayContaining([
+            { locationTextNormalized: { contains: ' ho chi minh ' } },
+          ]),
         }),
       }),
     );
+  });
+  test('lọc đúng khả dụng theo ngày và số khách trước khi phân trang', async () => {
+    const candidates = [
+      { id: 'attr-full', ticketProducts: [{ id: 'ticket-full' }] },
+      { id: 'attr-open', ticketProducts: [{ id: 'ticket-open' }] },
+    ];
+    mockPrisma.attraction.findMany
+      .mockResolvedValueOnce(candidates)
+      .mockResolvedValueOnce([{
+        id: 'attr-open',
+        title: 'Điểm còn chỗ',
+        city: 'Đà Nẵng',
+        images: [],
+        minTicketPrice: 200000,
+      }]);
+    getTicketAvailabilityBatch.mockResolvedValue(new Map([
+      ['ticket-full', { availableGuests: 1, availableTickets: 1, admissionCount: 1 }],
+      ['ticket-open', { availableGuests: 6, availableTickets: 6, admissionCount: 1 }],
+    ]));
+
+    const req = {
+      query: {
+        date: '2099-08-10',
+        guests: '4',
+        page: '1',
+        limit: '10',
+      },
+    };
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+
+    await searchAttractions(req, res, jest.fn());
+
+    expect(getTicketAvailabilityBatch).toHaveBeenCalledWith(
+      mockPrisma,
+      ['ticket-full', 'ticket-open'],
+      new Date('2099-08-10T00:00:00.000Z'),
+    );
+    expect(mockPrisma.attraction.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ['attr-open'] } }),
+      }),
+    );
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        attractions: [
+          expect.objectContaining({
+            id: 'attr-open',
+            availability: {
+              date: '2099-08-10',
+              requestedGuests: 4,
+              availableGuests: 6,
+              availableTickets: 6,
+            },
+          }),
+        ],
+        pagination: expect.objectContaining({ totalItems: 1 }),
+        searchContext: {
+          availabilityFiltered: true,
+          date: '2099-08-10',
+          guests: 4,
+          capacityUnit: 'GUEST',
+        },
+      }),
+    }));
+  });
+
+  test('không báo đủ chỗ cho nhóm gia đình nếu phải mua tròn gói vượt sức chứa', async () => {
+    mockPrisma.attraction.findMany.mockResolvedValueOnce([
+      { id: 'attr-family', ticketProducts: [{ id: 'ticket-family' }] },
+    ]);
+    getTicketAvailabilityBatch.mockResolvedValue(new Map([
+      ['ticket-family', {
+        admissionCount: 4,
+        availableGuests: 7,
+        availableTickets: 1,
+      }],
+    ]));
+
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    await searchAttractions({
+      query: { date: '2099-08-10', guests: '5' },
+    }, res, jest.fn());
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        attractions: [],
+        pagination: expect.objectContaining({ totalItems: 0 }),
+      }),
+    }));
+    expect(mockPrisma.attraction.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    [{ date: '2099-02-31' }, 'Ngày tham quan'],
+    [{ date: '2099-08-10', guests: '0' }, 'Số khách'],
+    [{ date: '2099-08-10', guests: '2.5' }, 'Số khách'],
+    [{ date: '2099-08-10', guests: '21' }, 'Số khách'],
+  ])('từ chối bộ lọc khả dụng không hợp lệ %#', async (query, message) => {
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+
+    await searchAttractions({ query }, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({
+        code: 'VALIDATION_ERROR',
+        message: expect.stringContaining(message),
+      }),
+    }));
+    expect(mockPrisma.attraction.findMany).not.toHaveBeenCalled();
   });
 });
 

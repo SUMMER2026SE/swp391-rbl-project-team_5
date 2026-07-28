@@ -21,6 +21,8 @@ const {
   isAttractionSaleEnabled,
   publicAttractionWhere,
 } = require('../services/catalogVisibilityService');
+const { getTicketAvailabilityBatch } = require('../services/availabilityService');
+const { todayInVietnam } = require('../utils/refundService');
 const {
   buildNormalizedContainsConditions,
   normalizeAttractionSearch,
@@ -29,6 +31,7 @@ const {
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
+const MAX_SEARCH_GUESTS = 20;
 
 const attractionInclude = {
   images: true,
@@ -46,6 +49,20 @@ const attractionIncludeWithOrderedImages = {
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= 1 ? parsed : fallback;
+}
+
+function parseDateOnly(value) {
+  if (value == null || value === '') return null;
+  const dateKey = String(value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return undefined;
+  const parsed = new Date(`${dateKey}T00:00:00.000Z`);
+  if (
+    Number.isNaN(parsed.getTime())
+    || parsed.toISOString().slice(0, 10) !== dateKey
+  ) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function parseBoolean(value) {
@@ -700,6 +717,12 @@ async function searchAttractions(req, res, next) {
     const maxPrice = req.query.maxPrice ? Number(req.query.maxPrice) : null;
     const minRating = req.query.minRating ? Number(req.query.minRating) : null;
     const sort = String(req.query.sort || '').trim();
+    const visitDate = parseDateOnly(req.query.date);
+    const visitDateKey = visitDate ? visitDate.toISOString().slice(0, 10) : null;
+    const requestedGuests = req.query.guests ?? req.query.qty;
+    const guests = requestedGuests == null || requestedGuests === ''
+      ? 1
+      : Number(requestedGuests);
 
     if (
       [minPrice, maxPrice, minRating].some(
@@ -712,6 +735,40 @@ async function searchAttractions(req, res, next) {
       });
     }
 
+    if (visitDate === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Ngày tham quan phải có định dạng YYYY-MM-DD và là một ngày hợp lệ.',
+        },
+      });
+    }
+
+    if (
+      !Number.isSafeInteger(guests)
+      || guests < 1
+      || guests > MAX_SEARCH_GUESTS
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: `Số khách phải là số nguyên từ 1 đến ${MAX_SEARCH_GUESTS}.`,
+        },
+      });
+    }
+
+    if (visitDateKey && visitDateKey < todayInVietnam()) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Ngày tham quan không được nằm trong quá khứ.',
+        },
+      });
+    }
+
     if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
       return res.status(400).json({
         success: false,
@@ -719,9 +776,12 @@ async function searchAttractions(req, res, next) {
       });
     }
 
+    const activeTicketWhere = { status: 'ACTIVE', archivedAt: null };
     // Chỉ hiển thị địa điểm đang phát hành công khai (ẩn địa điểm đã tạm dừng bán vé).
     const where = publicAttractionWhere();
-    const andConditions = [];
+    const andConditions = [{
+      ticketProducts: { some: activeTicketWhere },
+    }];
 
     andConditions.push(
       ...buildNormalizedContainsConditions('locationTextNormalized', city),
@@ -741,11 +801,13 @@ async function searchAttractions(req, res, next) {
           prisma.attraction.count({
             where: publicAttractionWhere({
               locationTextNormalized: exactPhraseFilter,
+              ticketProducts: { some: activeTicketWhere },
             }),
           }),
           prisma.attraction.count({
             where: publicAttractionWhere({
               searchTextNormalized: exactPhraseFilter,
+              ticketProducts: { some: activeTicketWhere },
             }),
           }),
         ]);
@@ -807,23 +869,96 @@ async function searchAttractions(req, res, next) {
     const queryIncludes = {
       images: { where: { isPrimary: true }, take: 1 },
       ticketProducts: {
-        where: { status: 'ACTIVE', archivedAt: null },
+        where: activeTicketWhere,
         orderBy: { sellingPrice: 'asc' },
         take: 1,
         select: { sellingPrice: true },
       },
     };
 
-    const [rawItems, total] = await prisma.$transaction([
-      prisma.attraction.findMany({
+    let rawItems;
+    let total;
+    let availabilityByAttraction = new Map();
+
+    if (visitDate) {
+      // Khả dụng phụ thuộc đồng thời vào lịch mở cửa, cutoff, kho cấp sản phẩm,
+      // kho cấp địa điểm và kho từng slot. Prisma không thể biểu diễn phép so
+      // sánh capacity - booked - held chính xác trong `where`, nên phải lọc
+      // toàn bộ tập ứng viên trước khi phân trang để total/page không bị sai.
+      const candidates = await prisma.attraction.findMany({
         where,
-        include: queryIncludes,
+        select: {
+          id: true,
+          ticketProducts: {
+            where: activeTicketWhere,
+            select: { id: true },
+          },
+        },
         orderBy,
-        skip,
-        take: limit,
-      }),
-      prisma.attraction.count({ where }),
-    ]);
+      });
+      const productIds = candidates.flatMap((item) =>
+        item.ticketProducts.map((product) => product.id));
+      const availabilityByProduct = await getTicketAvailabilityBatch(
+        prisma,
+        productIds,
+        visitDate,
+      );
+
+      const availableCandidates = candidates.filter((candidate) => {
+        let bestAvailability = null;
+        candidate.ticketProducts.forEach((product) => {
+          const availability = availabilityByProduct.get(product.id);
+          if (!availability) return;
+
+          const admissionCount = Math.max(
+            1,
+            Number(availability.admissionCount || 1),
+          );
+          const requiredTicketPackages = Math.ceil(guests / admissionCount);
+          const availableTickets = Number(availability.availableTickets || 0);
+          if (availableTickets < requiredTicketPackages) return;
+
+          const availableGuests = Number(availability.availableGuests || 0);
+          if (
+            !bestAvailability
+            || availableGuests > bestAvailability.availableGuests
+          ) {
+            bestAvailability = { availableGuests, availableTickets };
+          }
+        });
+        availabilityByAttraction.set(candidate.id, {
+          date: visitDateKey,
+          requestedGuests: guests,
+          availableGuests: bestAvailability?.availableGuests || 0,
+          availableTickets: bestAvailability?.availableTickets || 0,
+        });
+        return Boolean(bestAvailability);
+      });
+
+      total = availableCandidates.length;
+      const pageCandidates = availableCandidates.slice(skip, skip + limit);
+      const pageIds = pageCandidates.map((item) => item.id);
+      const pageOrder = new Map(pageIds.map((id, index) => [id, index]));
+      rawItems = pageIds.length === 0
+        ? []
+        : await prisma.attraction.findMany({
+            where: { ...where, id: { in: pageIds } },
+            include: queryIncludes,
+          });
+      rawItems.sort((left, right) =>
+        pageOrder.get(left.id) - pageOrder.get(right.id));
+    } else {
+      [rawItems, total] = await prisma.$transaction([
+        prisma.attraction.findMany({
+          where,
+          include: queryIncludes,
+          orderBy,
+          skip,
+          take: limit,
+        }),
+        prisma.attraction.count({ where }),
+      ]);
+    }
 
     const mapped = rawItems.map((a) => ({
       id: a.id,
@@ -836,6 +971,9 @@ async function searchAttractions(req, res, next) {
       averageRating: a.averageRating,
       totalReviews: a.totalReviews,
       minPrice: a.minTicketPrice == null ? null : Number(a.minTicketPrice),
+      ...(visitDate
+        ? { availability: availabilityByAttraction.get(a.id) || null }
+        : {}),
     }));
 
     return res.status(200).json({
@@ -847,6 +985,12 @@ async function searchAttractions(req, res, next) {
           totalPages: Math.ceil(total / limit),
           currentPage: page,
           limit,
+        },
+        searchContext: {
+          availabilityFiltered: Boolean(visitDate),
+          date: visitDateKey,
+          guests: visitDate ? guests : null,
+          capacityUnit: visitDate ? 'GUEST' : null,
         },
       },
     });

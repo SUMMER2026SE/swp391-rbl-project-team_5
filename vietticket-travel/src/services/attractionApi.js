@@ -5,7 +5,7 @@ import { apiRequest } from './api.js'
 // BookingModal để dùng lại nhất quán như các service khác trong dự án.
 
 // ----- Tìm kiếm & chi tiết (Guest) -----
-// params: { search, city, category, minPrice, maxPrice, minRating, sort, page, limit }
+// params: { search, city, category, minPrice, maxPrice, minRating, sort, date, guests, page, limit }
 export function searchAttractions(params = {}) {
   const query = new URLSearchParams()
   if (params.search) query.set('search', params.search)
@@ -15,6 +15,8 @@ export function searchAttractions(params = {}) {
   if (params.maxPrice != null && params.maxPrice !== '') query.set('maxPrice', params.maxPrice)
   if (params.minRating != null && params.minRating !== '') query.set('minRating', params.minRating)
   if (params.sort) query.set('sort', params.sort)
+  if (params.date) query.set('date', params.date)
+  if (params.guests != null && params.guests !== '') query.set('guests', params.guests)
   if (params.page) query.set('page', params.page)
   if (params.limit) query.set('limit', params.limit)
   const qs = query.toString()

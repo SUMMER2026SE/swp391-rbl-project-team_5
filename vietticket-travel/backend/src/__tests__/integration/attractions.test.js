@@ -24,6 +24,15 @@ describe('GET /api/attractions', () => {
     const res = await request(app).get('/api/attractions').query({ city: 'Ho Chi Minh' });
     expect(res.status).toBe(200);
   });
+  test('từ chối ngày tìm kiếm không tồn tại trên lịch', async () => {
+    const res = await request(app)
+      .get('/api/attractions')
+      .query({ date: '2027-02-29', guests: 2 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(mockPrisma.attraction.findMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('GET /api/attractions/:id', () => {
