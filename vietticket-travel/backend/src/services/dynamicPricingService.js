@@ -51,6 +51,38 @@ const DEFAULT_POLICY = Object.freeze({
   minConfidence: 'MEDIUM',
 });
 
+function isAutoApplyAllowed(env = process.env) {
+  return String(env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED || '')
+    .trim()
+    .toLowerCase() === 'true';
+}
+
+function describeRuntimePolicy(raw, env = process.env) {
+  const policy = normalizePolicy(raw);
+  const autoApplyAllowed = isAutoApplyAllowed(env);
+  const runtimeSafetyActive = (
+    policy.mode === 'AUTO_APPLY' && !autoApplyAllowed
+  );
+
+  return {
+    ...policy,
+    autoApplyAllowed,
+    effectiveMode: runtimeSafetyActive ? 'SUGGEST_ONLY' : policy.mode,
+    runtimeSafetyActive,
+    runtimeSafetyReason: runtimeSafetyActive
+      ? 'Chế độ tự áp giá đang bị khóa ở cấp hệ thống; khách vẫn trả giá niêm yết.'
+      : null,
+  };
+}
+
+function applyRuntimeSafety(raw, env = process.env) {
+  const described = describeRuntimePolicy(raw, env);
+  return normalizePolicy({
+    ...described,
+    mode: described.effectiveMode,
+  });
+}
+
 // ------------------------------------------------------------
 // Chuẩn hoá đầu vào
 // ------------------------------------------------------------
@@ -384,7 +416,7 @@ async function getPolicy(attractionId, client = prisma) {
   const stored = await client.dynamicPricingPolicy.findUnique({
     where: { attractionId },
   });
-  return normalizePolicy(stored || { attractionId });
+  return describeRuntimePolicy(stored || { attractionId });
 }
 
 /**
@@ -431,7 +463,10 @@ function occupancyRatio(used, capacity) {
  */
 async function quoteSchedule(client, { schedule, date, now = new Date(), policy = null }) {
   const attractionId = schedule.attraction.id;
-  const resolvedPolicy = policy || (await getPolicy(attractionId, client));
+  const configuredPolicy = policy
+    ? describeRuntimePolicy(policy)
+    : await getPolicy(attractionId, client);
+  const resolvedPolicy = applyRuntimeSafety(configuredPolicy);
   const basePrice = schedule.product.sellingPrice;
   const lead = leadTimeDays(date, now);
 
@@ -480,7 +515,7 @@ async function quoteSchedule(client, { schedule, date, now = new Date(), policy 
       occupancyRatio(productUsed, getProductCapacity(schedule)),
     );
     return {
-      policy: resolvedPolicy,
+      policy: configuredPolicy,
       byTimeSlotId: new Map(),
       allDay: quoteWith(productRatio),
     };
@@ -499,7 +534,7 @@ async function quoteSchedule(client, { schedule, date, now = new Date(), policy 
     byTimeSlotId.set(slot.id, quoteWith(slotRatio));
   });
 
-  return { policy: resolvedPolicy, byTimeSlotId, allDay: null };
+  return { policy: configuredPolicy, byTimeSlotId, allDay: null };
 }
 
 function quoteForSlot(quotes, timeSlotId) {
@@ -533,6 +568,18 @@ async function savePolicy({ attractionId, payload, actorId, client = prisma }) {
   // Field nào không gửi thì giữ nguyên giá trị đang chạy, tránh việc một form
   // thiếu field vô tình reset cả chính sách về mặc định.
   const merged = normalizePolicy({ ...(current || {}), ...(payload || {}), attractionId });
+  if (
+    merged.enabled
+    && merged.mode === 'AUTO_APPLY'
+    && !isAutoApplyAllowed()
+  ) {
+    const error = new Error(
+      'Chế độ tự áp giá đang bị khóa ở cấp hệ thống. Hãy dùng chế độ chỉ đề xuất.',
+    );
+    error.statusCode = 409;
+    error.code = 'DYNAMIC_PRICING_AUTO_APPLY_DISABLED';
+    throw error;
+  }
   const data = {
     enabled: merged.enabled,
     mode: merged.mode,
@@ -553,7 +600,7 @@ async function savePolicy({ attractionId, payload, actorId, client = prisma }) {
     create: { attractionId, ...data },
     update: data,
   });
-  return normalizePolicy(saved);
+  return describeRuntimePolicy(saved);
 }
 
 function addDays(date, days) {
@@ -767,7 +814,7 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
   return {
     policy,
     // Bảng xem trước có đang là giá khách thật sự trả hay không.
-    live: policy.enabled && policy.mode === 'AUTO_APPLY',
+    live: policy.enabled && policy.effectiveMode === 'AUTO_APPLY',
     forecastDays: forecastByDate.size,
     products: previewProducts,
   };
@@ -856,6 +903,8 @@ async function getPricingImpact({ attractionId, days = 30, now = new Date(), cli
 module.exports = {
   DEFAULT_POLICY,
   MIN_ADJUSTED_UNIT_PRICE,
+  applyRuntimeSafety,
+  describeRuntimePolicy,
   getPricingImpact,
   previewPricing,
   savePolicy,
@@ -864,6 +913,7 @@ module.exports = {
   forecastConfidenceOf,
   getForecastForDate,
   getPolicy,
+  isAutoApplyAllowed,
   leadTimeDays,
   normalizePolicy,
   occupancyRatio,

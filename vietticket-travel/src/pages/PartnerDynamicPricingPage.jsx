@@ -141,6 +141,7 @@ function PartnerDynamicPricingPage() {
   }
 
   const isSuggestOnly = form?.mode !== 'AUTO_APPLY'
+  const autoApplyAllowed = Boolean(form?.autoApplyAllowed)
 
   return (
     <PartnerLayout pageTitle="Giá động theo dự báo">
@@ -204,9 +205,18 @@ function PartnerDynamicPricingPage() {
                   onChange={(event) => setField('mode', event.target.value)}
                 >
                   <option value="SUGGEST_ONLY">Chỉ đề xuất — xem trước, khách vẫn trả giá niêm yết</option>
-                  <option value="AUTO_APPLY">Áp dụng tự động — giá đề xuất là giá khách trả</option>
+                  <option disabled={!autoApplyAllowed} value="AUTO_APPLY">
+                    Áp dụng tự động — giá đề xuất là giá khách trả
+                  </option>
                 </select>
               </label>
+
+              {!autoApplyAllowed && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-900" role="status">
+                  Chế độ tự áp giá đang bị khóa bởi quản trị vận hành. AI vẫn phân tích và đề xuất,
+                  nhưng giá khách thanh toán luôn là giá niêm yết.
+                </div>
+              )}
 
               {form.enabled && isSuggestOnly && (
                 <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-xs leading-5 text-sky-900">

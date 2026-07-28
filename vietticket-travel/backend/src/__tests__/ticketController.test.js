@@ -6,6 +6,19 @@ const { reserveTickets, checkAvailability } = require('../controllers/ticketCont
 const { Decimal } = Prisma;
 
 afterEach(() => jest.clearAllMocks());
+const ORIGINAL_AUTO_APPLY_ALLOWED = process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED;
+
+beforeAll(() => {
+  process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED = 'true';
+});
+
+afterAll(() => {
+  if (ORIGINAL_AUTO_APPLY_ALLOWED === undefined) {
+    delete process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED;
+  } else {
+    process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED = ORIGINAL_AUTO_APPLY_ALLOWED;
+  }
+});
 
 // Ngày tham quan động (mai theo giờ VN) để test không phụ thuộc ngày chạy.
 const VISIT_DATE = new Date(Date.now() + 7 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000)
@@ -382,6 +395,41 @@ describe('reserveTickets - chống overbooking', () => {
       data: expect.objectContaining({ snapshotUnitPrice: 125001 }),
     });
     expect(tx.dynamicPriceAdjustment.create).not.toHaveBeenCalled();
+  });
+
+  test('kill switch hệ thống giữ nguyên giá niêm yết dù CSDL còn AUTO_APPLY', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: {
+          id: 'daily-kill-switch',
+          capacity: 100,
+          bookedQuantity: 80,
+          heldQuantity: 10,
+        },
+        attractionStock: {
+          id: 'attr-kill-switch',
+          capacity: 100,
+          bookedQty: 80,
+          heldQty: 10,
+        },
+      }),
+      { predictedTickets: 95 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+    process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED = 'false';
+
+    try {
+      const res = makeRes();
+      await reserveTickets(makeReq(), res, jest.fn());
+
+      expect(res.status).toHaveBeenCalledWith(200);
+      expect(tx.reservation.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ snapshotUnitPrice: 125001 }),
+      });
+      expect(tx.dynamicPriceAdjustment.create).not.toHaveBeenCalled();
+    } finally {
+      process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED = 'true';
+    }
   });
 
   test('hai gói gia đình 4 người giữ 8 chỗ nhưng vẫn chỉ mua 2 gói', async () => {

@@ -1,13 +1,16 @@
 jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 
+const prisma = require('./helpers/mockPrisma');
 const {
   blendDemandIndex,
+  describeRuntimePolicy,
   demandToAdjustmentPercent,
   forecastConfidenceOf,
   normalizePolicy,
   occupancyRatio,
   quotePrice,
   roundWithinBounds,
+  savePolicy,
   toPublicQuote,
 } = require('../services/dynamicPricingService');
 
@@ -64,6 +67,55 @@ describe('normalizePolicy', () => {
     const policy = normalizePolicy({ mode: 'HACK', minConfidence: 'ULTRA' });
     expect(policy.mode).toBe('SUGGEST_ONLY');
     expect(policy.minConfidence).toBe('MEDIUM');
+  });
+});
+
+describe('dynamic pricing operational kill switch', () => {
+  test('defaults AUTO_APPLY to SUGGEST_ONLY at runtime unless explicitly allowed', () => {
+    const guarded = describeRuntimePolicy(BASE_POLICY, {});
+    const allowed = describeRuntimePolicy(BASE_POLICY, {
+      DYNAMIC_PRICING_AUTO_APPLY_ALLOWED: 'true',
+    });
+
+    expect(guarded).toEqual(expect.objectContaining({
+      mode: 'AUTO_APPLY',
+      effectiveMode: 'SUGGEST_ONLY',
+      autoApplyAllowed: false,
+      runtimeSafetyActive: true,
+    }));
+    expect(allowed).toEqual(expect.objectContaining({
+      effectiveMode: 'AUTO_APPLY',
+      autoApplyAllowed: true,
+      runtimeSafetyActive: false,
+    }));
+  });
+
+  test('refuses to enable AUTO_APPLY while the system kill switch is off', async () => {
+    const original = process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED;
+    delete process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED;
+    prisma.dynamicPricingPolicy.findUnique.mockResolvedValue({
+      ...BASE_POLICY,
+      enabled: false,
+    });
+
+    try {
+      await expect(savePolicy({
+        attractionId: 'attraction-1',
+        payload: { enabled: true, mode: 'AUTO_APPLY' },
+        actorId: 'partner-user-1',
+        client: prisma,
+      })).rejects.toEqual(expect.objectContaining({
+        statusCode: 409,
+        code: 'DYNAMIC_PRICING_AUTO_APPLY_DISABLED',
+      }));
+      expect(prisma.dynamicPricingPolicy.upsert).not.toHaveBeenCalled();
+    } finally {
+      if (original === undefined) {
+        delete process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED;
+      } else {
+        process.env.DYNAMIC_PRICING_AUTO_APPLY_ALLOWED = original;
+      }
+    }
   });
 });
 
