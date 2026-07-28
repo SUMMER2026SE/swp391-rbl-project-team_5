@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router'
 import { toast } from 'react-toastify'
 import Header from '../components/Header.jsx'
 import { useAuth } from '../context/useAuth.js'

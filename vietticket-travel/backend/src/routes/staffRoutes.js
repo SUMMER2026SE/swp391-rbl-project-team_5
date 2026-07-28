@@ -7,6 +7,7 @@ const {
   requireCheckInEmployer,
 } = require('../middleware/partnerMiddleware');
 const {
+  adjudicateRefundRequest,
   listRefundRequests,
   processRefundRequest,
   reconcileRefundRequest,
@@ -31,6 +32,14 @@ router.use(restrictTo('STAFF', 'ADMIN'));
 router.get('/refunds', requirePlatformStaff, listRefundRequests);
 router.patch('/refunds/:refundId', requirePlatformStaff, processRefundRequest);
 router.post('/refunds/:refundId/reconcile', requirePlatformStaff, reconcileRefundRequest);
+// Manual adjudication is a last-resort financial control. Platform staff may
+// investigate, but only an ADMIN can bind external evidence to a local refund.
+router.post(
+  '/refunds/:refundId/adjudicate',
+  requirePlatformStaff,
+  restrictTo('ADMIN'),
+  adjudicateRefundRequest,
+);
 // Nhân viên chỉ thao tác được khi đối tác chủ quản còn hoạt động (APPROVED).
 router.post('/bookings/:bookingId/reissue', requireCheckInEmployer, reissueTicket);
 router.get('/bookings/today', requireCheckInEmployer, listTodayBookings);

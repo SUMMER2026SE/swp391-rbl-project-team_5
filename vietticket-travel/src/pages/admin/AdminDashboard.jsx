@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout'
 import RevenueForecastPanel from '../../components/forecast/RevenueForecastPanel'

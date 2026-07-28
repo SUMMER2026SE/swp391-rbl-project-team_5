@@ -5,7 +5,9 @@ jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 const {
   activateLiveTrip,
   extractActivityDescriptors,
+  findMatchingBooking,
   resolveActivityTimes,
+  serializeTrip,
 } = require('../services/liveTripService');
 const mockPrisma = require('./helpers/mockPrisma');
 
@@ -13,6 +15,24 @@ describe('liveTripService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockPrisma.$transaction.mockImplementation((callback) => callback(mockPrisma));
+  });
+
+  test('does not guess between multiple same-day bookings without a slot or ticket match', () => {
+    const descriptor = {
+      attractionId: 'a1',
+      dateInfo: { key: '2099-03-10' },
+      activity: {},
+    };
+    const bookings = [
+      { id: 'booking-1', snapshotAttractionId: 'a1', snapshotVisitDate: new Date('2099-03-10T00:00:00Z'), reservation: { timeSlotId: 'slot-1' } },
+      { id: 'booking-2', snapshotAttractionId: 'a1', snapshotVisitDate: new Date('2099-03-10T00:00:00Z'), reservation: { timeSlotId: 'slot-2' } },
+    ];
+
+    expect(findMatchingBooking(descriptor, bookings, new Set())).toBeNull();
+    expect(findMatchingBooking({
+      ...descriptor,
+      activity: { suggestedTimeSlot: { timeSlotId: 'slot-2' } },
+    }, bookings, new Set())).toMatchObject({ id: 'booking-2' });
   });
 
   test('materialization accepts generated date-aware itinerary activities', () => {
@@ -57,6 +77,35 @@ describe('liveTripService', () => {
       days: [{ activities: [{ attractionId: 'a1', title: 'Điểm tham quan' }] }],
     }, {})).toThrow('chưa có ngày bắt đầu');
   });
+
+  test('hides replaced historical items while exposing the new recovery item', () => {
+    const trip = serializeTrip({
+      id: 'trip-1',
+      userId: 'user-1',
+      savedItineraryId: 'saved-1',
+      title: 'Đà Nẵng',
+      startDate: new Date('2026-08-15T00:00:00.000Z'),
+      endDate: new Date('2026-08-15T00:00:00.000Z'),
+      status: 'ACTIVE',
+      items: [
+        {
+          id: 'item-old',
+          status: 'SKIPPED',
+          snapshot: { title: 'Điểm cũ', hiddenFromPlan: true },
+        },
+        {
+          id: 'item-new',
+          status: 'PLANNED',
+          snapshot: { title: 'Điểm thay thế', recoveredFromLiveTripItemId: 'item-old' },
+        },
+      ],
+      proposals: [],
+      events: [],
+    });
+
+    expect(trip.items.map((item) => item.id)).toEqual(['item-new']);
+  });
+
   test('rejects explicit days outside the trip window or out of order', () => {
     expect(() => extractActivityDescriptors({
       startDate: '2099-03-10',

@@ -7,6 +7,7 @@ const {
   chooseSaferSlot,
   decideProposal,
   refreshTripAutopilot,
+  sweepAutopilotTrips,
 } = require('../services/liveTripAutopilotService');
 
 const NOW = new Date('2099-03-10T01:00:00.000Z'); // 08:00 tại Việt Nam
@@ -137,6 +138,7 @@ test('chooses only a lower-pressure slot with capacity and travel buffer', () =>
 
 test('creates a customer-confirmed proposal but never changes the item automatically', async () => {
   const item = tripItem();
+  mockPrisma.liveTripItem.findUnique.mockResolvedValue(item);
   mockPrisma.liveTrip.findFirst.mockResolvedValue({
     id: 'trip-1',
     userId: 'user-1',
@@ -170,9 +172,88 @@ test('creates a customer-confirmed proposal but never changes the item automatic
   }));
   expect(mockPrisma.liveTripItem.update).not.toHaveBeenCalled();
   expect(mockPrisma.liveTripItem.updateMany).toHaveBeenCalledWith({
-    where: { id: 'item-1', bookingId: null },
+    where: {
+      id: 'item-1',
+      liveTripId: 'trip-1',
+      bookingId: null,
+      scheduledStart: item.scheduledStart,
+      scheduledEnd: item.scheduledEnd,
+      status: { notIn: ['COMPLETED', 'SKIPPED'] },
+    },
     data: { status: 'REVISION_PROPOSED' },
   });
+});
+
+test('does not publish a proposal when a booking is linked after the optimizer read', async () => {
+  const item = tripItem();
+  mockPrisma.liveTrip.findFirst.mockResolvedValue({
+    id: 'trip-1',
+    userId: 'user-1',
+    status: 'ACTIVE',
+    items: [item],
+    proposals: [],
+  });
+  mockPrisma.liveTripProposal.findMany.mockResolvedValue([]);
+  pressureDbMocks();
+  mockPrisma.liveTripItem.findUnique.mockResolvedValue({
+    ...item,
+    bookingId: 'booking-linked-concurrently',
+  });
+
+  const result = await refreshTripAutopilot('trip-1', 'user-1', {
+    prismaClient: mockPrisma,
+    now: NOW,
+  });
+
+  expect(result.stats.proposalsCreated).toBe(0);
+  expect(result.stats.proposalsReused).toBe(0);
+  expect(mockPrisma.liveTripProposal.upsert).not.toHaveBeenCalled();
+});
+
+test('Autopilot rejects a stored HIGH prediction when runtime drift degrades it', async () => {
+  const item = tripItem();
+  mockPrisma.liveTrip.findFirst.mockResolvedValue({
+    id: 'trip-1',
+    userId: 'user-1',
+    status: 'ACTIVE',
+    items: [item],
+    proposals: [],
+  });
+  mockPrisma.liveTripProposal.findMany.mockResolvedValue([]);
+  pressureDbMocks();
+  mockPrisma.liveTripItem.findUnique.mockResolvedValue(item);
+  mockPrisma.livePrediction.findFirst.mockResolvedValue({
+    predictedP50: 10,
+    predictedP90: 12,
+    confidence: 'HIGH',
+    modelVersion: 'arrival_gbr_conformal_v3',
+    trainingSource: 'live_operational_history',
+    usedFallback: false,
+    horizonMinutes: 15,
+    predictedAt: NOW,
+    featureContributions: {},
+    qualityMetrics: {},
+  });
+  mockPrisma.livePrediction.findMany.mockResolvedValue(
+    Array.from({ length: 12 }, () => ({
+      predictedP50: 10,
+      predictedP90: 12,
+      actualValue: 100,
+    })),
+  );
+  mockPrisma.liveTripProposal.upsert.mockImplementation(({ create }) => ({
+    id: 'proposal-1',
+    status: 'PENDING',
+    ...create,
+  }));
+
+  const result = await refreshTripAutopilot('trip-1', 'user-1', {
+    prismaClient: mockPrisma,
+    now: NOW,
+  });
+
+  expect(result.stats.proposalsCreated).toBe(1);
+  expect(result.stats.aiPredictionsUsed).toBe(0);
 });
 
 test('accepting a fresh proposal updates only the live item in one transaction', async () => {
@@ -392,4 +473,97 @@ test('skips an unbooked item after its activity window and completes the trip', 
     data: expect.objectContaining({ type: 'ITEM_SKIPPED' }),
   });
   expect(mockPrisma.attraction.findUnique).not.toHaveBeenCalled();
+});
+
+test('archives an ended trip after flagging an unresolved paid booking for review', async () => {
+  const unresolvedBookingItem = tripItem({
+    scheduledStart: new Date('2099-03-09T23:00:00.000Z'),
+    scheduledEnd: new Date('2099-03-10T00:00:00.000Z'),
+    bookingId: 'booking-unresolved',
+    booking: { id: 'booking-unresolved', status: 'CONFIRMED' },
+  });
+  mockPrisma.liveTrip.findFirst.mockResolvedValue({
+    id: 'trip-ended',
+    userId: 'user-1',
+    status: 'ACTIVE',
+    items: [unresolvedBookingItem],
+    proposals: [],
+  });
+  mockPrisma.liveTripProposal.findMany.mockResolvedValue([]);
+  mockPrisma.liveTripItem.count.mockResolvedValue(1);
+  mockPrisma.liveTrip.updateMany.mockResolvedValue({ count: 1 });
+
+  const result = await refreshTripAutopilot('trip-ended', 'user-1', {
+    prismaClient: mockPrisma,
+    now: NOW,
+  });
+
+  expect(result).toMatchObject({
+    tripCompleted: true,
+    stats: { atRisk: 1 },
+  });
+  expect(mockPrisma.liveTripItem.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    data: { status: 'AT_RISK' },
+  }));
+  expect(mockPrisma.liveTrip.updateMany).toHaveBeenCalledWith({
+    where: { id: 'trip-ended', userId: 'user-1', status: 'ACTIVE' },
+    data: { status: 'COMPLETED' },
+  });
+});
+
+test('sweep closes ACTIVE trips whose items are already terminal', async () => {
+  mockPrisma.liveTrip.updateMany.mockResolvedValue({ count: 2 });
+  mockPrisma.liveTrip.findMany.mockResolvedValue([]);
+
+  const result = await sweepAutopilotTrips({
+    prismaClient: mockPrisma,
+    now: NOW,
+  });
+
+  expect(mockPrisma.liveTrip.updateMany).toHaveBeenCalledWith({
+    where: {
+      status: 'ACTIVE',
+      items: {
+        none: {
+          status: { notIn: ['COMPLETED', 'SKIPPED'] },
+        },
+      },
+    },
+    data: { status: 'COMPLETED' },
+  });
+  expect(result).toEqual({ scanned: 0, refreshed: 0, completed: 2 });
+});
+
+test('sweep cursor-pages every active trip instead of starving trips after the first 25', async () => {
+  const pageOne = Array.from({ length: 25 }, (_, index) => ({
+    id: `trip-${String(index + 1).padStart(2, '0')}`,
+    userId: `user-${index + 1}`,
+  }));
+  const pageTwo = [{ id: 'trip-26', userId: 'user-26' }];
+  mockPrisma.liveTrip.updateMany.mockResolvedValue({ count: 0 });
+  mockPrisma.liveTrip.findMany
+    .mockResolvedValueOnce(pageOne)
+    .mockResolvedValueOnce(pageTwo);
+  mockPrisma.liveTrip.findFirst.mockImplementation(({ where }) => Promise.resolve({
+    id: where.id,
+    userId: where.userId,
+    status: 'ACTIVE',
+    items: [],
+    proposals: [],
+  }));
+  mockPrisma.liveTripProposal.findMany.mockResolvedValue([]);
+  mockPrisma.liveTripItem.count.mockResolvedValue(1);
+
+  const result = await sweepAutopilotTrips({
+    prismaClient: mockPrisma,
+    now: NOW,
+  });
+
+  expect(result).toEqual({ scanned: 26, refreshed: 26, completed: 0 });
+  expect(mockPrisma.liveTrip.findMany).toHaveBeenCalledTimes(2);
+  expect(mockPrisma.liveTrip.findMany.mock.calls[1][0]).toEqual(expect.objectContaining({
+    where: expect.objectContaining({ id: { gt: 'trip-25' } }),
+    orderBy: { id: 'asc' },
+    take: 25,
+  }));
 });

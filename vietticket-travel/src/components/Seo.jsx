@@ -1,4 +1,6 @@
 import { useEffect } from 'react'
+import { useLocation } from 'react-router'
+import { getRouteRobots } from '../utils/routeMetadata.js'
 
 function upsertMeta(selector, attributes) {
   let element = document.head.querySelector(selector)
@@ -10,6 +12,8 @@ function upsertMeta(selector, attributes) {
 }
 
 function Seo({ title, description, noIndex = false }) {
+  const { pathname } = useLocation()
+
   useEffect(() => {
     const fullTitle = title.includes('VietTicket') ? title : `${title} | VietTicket Travel`
     document.title = fullTitle
@@ -22,9 +26,9 @@ function Seo({ title, description, noIndex = false }) {
     upsertMeta('meta[property="og:type"]', { property: 'og:type', content: 'website' })
     upsertMeta('meta[name="robots"]', {
       name: 'robots',
-      content: noIndex ? 'noindex,nofollow' : 'index,follow',
+      content: noIndex ? 'noindex,nofollow' : getRouteRobots(pathname),
     })
-  }, [description, noIndex, title])
+  }, [description, noIndex, pathname, title])
 
   return null
 }

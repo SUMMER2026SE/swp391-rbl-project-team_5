@@ -16,9 +16,14 @@ const REFUND_STATUSES = new Set([
   'NEEDS_RECONCILIATION',
 ]);
 const TRANSACTION_TYPES = new Set(['ALL', 'PAYMENT', 'REFUND']);
+const RECOVERY_CREDIT_GATEWAY = 'RECOVERY_CREDIT';
 
 const bookingTransactionSelect = {
   id: true,
+  snapshotPartnerId: true,
+  snapshotPartnerName: true,
+  snapshotAttractionId: true,
+  snapshotAttractionTitle: true,
   fullName: true,
   email: true,
   status: true,
@@ -58,9 +63,15 @@ function refundOccurredAt(transaction) {
   return transaction.processedAt || transaction.reconciledAt || transaction.createdAt;
 }
 
+function isCashPayment(payment) {
+  return String(payment?.paymentGateway || '').trim().toUpperCase()
+    !== RECOVERY_CREDIT_GATEWAY;
+}
+
 function paymentPeriodWhere(startDate) {
   return {
     status: 'SUCCESS',
+    paymentGateway: { not: RECOVERY_CREDIT_GATEWAY },
     booking: { isForecastTrainingSample: false },
     OR: [
       { paidAt: { gte: startDate } },
@@ -87,6 +98,11 @@ function refundPeriodWhere(startDate) {
 function buildRecognizedBookingPeriodWhere(startDate, now = new Date()) {
   return {
     isForecastTrainingSample: false,
+    // A provider/system-cancelled booking that has entered Rescue no longer
+    // represents a delivered service. Its captured gateway payment remains in
+    // the cash ledger, but its value is recognized only by the eventual
+    // replacement booking (if any).
+    recoveryCaseAsOriginal: { is: null },
     OR: [
       {
         status: { in: ['COMPLETED', 'NO_SHOW'] },
@@ -94,14 +110,32 @@ function buildRecognizedBookingPeriodWhere(startDate, now = new Date()) {
       },
       {
         status: 'REFUNDED',
-        refundTransactions: {
-          some: {
-            ...refundPeriodWhere(startDate),
-            refundRequest: {
-              is: { type: { not: 'DUPLICATE_PAYMENT' } },
+        OR: [
+          {
+            refundTransactions: {
+              some: {
+                ...refundPeriodWhere(startDate),
+                refundRequest: {
+                  is: { type: { not: 'DUPLICATE_PAYMENT' } },
+                },
+              },
             },
           },
-        },
+          {
+            // A Rescue-funded cancellation refunds the original gateway
+            // payment. The transaction therefore belongs to the funding
+            // booking, while targetBookingId identifies the booking whose
+            // recognized revenue must be reduced.
+            refundRequestsTargeting: {
+              some: {
+                type: { not: 'DUPLICATE_PAYMENT' },
+                refundTransactions: {
+                  some: refundPeriodWhere(startDate),
+                },
+              },
+            },
+          },
+        ],
       },
     ],
     payments: { some: { status: 'SUCCESS', isDuplicate: false } },
@@ -110,8 +144,9 @@ function buildRecognizedBookingPeriodWhere(startDate, now = new Date()) {
 
 function buildFinancialTimeline(payments, refunds, period, now = new Date()) {
   const normalizedPeriod = normalizePeriod(period);
+  const cashPayments = payments.filter(isCashPayment);
   const captured = buildTimeline(
-    payments.map((payment) => ({
+    cashPayments.map((payment) => ({
       ...payment,
       createdAt: paymentOccurredAt(payment),
     })),
@@ -149,7 +184,16 @@ function buildFinancialTimeline(payments, refunds, period, now = new Date()) {
 }
 
 function partnerFromBooking(booking) {
-  return booking?.reservation?.ticketProduct?.attraction?.partner || null;
+  const relation = booking?.reservation?.ticketProduct?.attraction?.partner || null;
+  if (booking?.snapshotPartnerId) {
+    return {
+      id: booking.snapshotPartnerId,
+      businessName: booking.snapshotPartnerName || relation?.businessName || 'Đối tác lịch sử',
+      status: relation?.status || 'HISTORICAL',
+      commissionRate: relation?.commissionRate || 0,
+    };
+  }
+  return relation;
 }
 
 function createPartnerMetrics(partner) {
@@ -171,17 +215,62 @@ function createPartnerMetrics(partner) {
   };
 }
 
+function recognizedRefundTransactionsOf(booking) {
+  const transactions = [];
+  const seenIds = new Set();
+  const seenObjects = new Set();
+
+  const addTransaction = (transaction, requestType = null) => {
+    if (!transaction) return;
+    if (transaction.status && transaction.status !== 'SUCCESS') return;
+
+    if (transaction.id) {
+      if (seenIds.has(transaction.id)) return;
+      seenIds.add(transaction.id);
+    } else {
+      // Prisma rows always have an id. Object identity keeps this helper safe
+      // for lightweight callers/tests that omit it.
+      if (seenObjects.has(transaction)) return;
+      seenObjects.add(transaction);
+    }
+
+    const type = transaction.refundRequest?.type || requestType;
+    if (type === 'DUPLICATE_PAYMENT') return;
+    transactions.push({
+      ...transaction,
+      refundRequest: type ? { type } : transaction.refundRequest,
+    });
+  };
+
+  for (const transaction of booking?.refundTransactions || []) {
+    addTransaction(transaction);
+  }
+  for (const refundRequest of booking?.refundRequestsTargeting || []) {
+    for (const transaction of refundRequest.refundTransactions || []) {
+      addTransaction(transaction, refundRequest.type);
+    }
+  }
+
+  return transactions;
+}
+
 function recognizedAmountsOf(booking) {
+  if (booking?.recoveryCaseAsOriginal) {
+    return {
+      grossAmount: 0,
+      refundAmount: 0,
+      netAmount: 0,
+      commissionAmount: 0,
+      partnerPayableAmount: 0,
+    };
+  }
+
   const grossAmount = (booking.payments || []).reduce(
     (sum, payment) => sum + amountOf(payment.amount),
     0,
   );
-  const refundAmount = (booking.refundTransactions || []).reduce(
-    (sum, transaction) => (
-      transaction.refundRequest?.type === 'DUPLICATE_PAYMENT'
-        ? sum
-        : sum + amountOf(transaction.amount)
-    ),
+  const refundAmount = recognizedRefundTransactionsOf(booking).reduce(
+    (sum, transaction) => sum + amountOf(transaction.amount),
     0,
   );
   const netAmount = Math.max(0, grossAmount - refundAmount);
@@ -212,8 +301,7 @@ function recognizedAmountsOf(booking) {
 
 function recognizedAtOf(booking) {
   if (booking.status === 'REFUNDED') {
-    const refund = (booking.refundTransactions || [])
-      .filter((transaction) => transaction.refundRequest?.type !== 'DUPLICATE_PAYMENT')
+    const refund = recognizedRefundTransactionsOf(booking)
       .sort((left, right) => (
         new Date(refundOccurredAt(right)).getTime()
         - new Date(refundOccurredAt(left)).getTime()
@@ -225,11 +313,12 @@ function recognizedAtOf(booking) {
 }
 
 function summarizeFinancialRows({ payments, refunds, recognizedBookings }) {
-  const capturedAmount = payments.reduce(
+  const cashPayments = payments.filter(isCashPayment);
+  const capturedAmount = cashPayments.reduce(
     (sum, payment) => sum + amountOf(payment.amount),
     0,
   );
-  const salesCapturedAmount = payments.reduce(
+  const salesCapturedAmount = cashPayments.reduce(
     (sum, payment) => sum + (payment.isDuplicate ? 0 : amountOf(payment.amount)),
     0,
   );
@@ -264,7 +353,7 @@ function summarizeFinancialRows({ payments, refunds, recognizedBookings }) {
     recognizedNetAmount,
     commissionRevenueAmount,
     partnerPayableAmount,
-    successfulPaymentCount: payments.length,
+    successfulPaymentCount: cashPayments.length,
     successfulRefundCount: refunds.length,
   };
 }
@@ -274,7 +363,7 @@ function buildPartnerBreakdown(partners, payments, refunds, recognizedBookings) 
     partners.map((partner) => [partner.id, createPartnerMetrics(partner)]),
   );
 
-  for (const payment of payments) {
+  for (const payment of payments.filter(isCashPayment)) {
     const partner = partnerFromBooking(payment.booking);
     if (!partner || !byPartner.has(partner.id)) continue;
     const metrics = byPartner.get(partner.id);
@@ -331,6 +420,7 @@ async function getPlatformFinancialReport(period) {
       select: {
         amount: true,
         isDuplicate: true,
+        paymentGateway: true,
         paidAt: true,
         createdAt: true,
         booking: { select: bookingTransactionSelect },
@@ -352,7 +442,10 @@ async function getPlatformFinancialReport(period) {
     prisma.booking.findMany({
       where: buildRecognizedBookingPeriodWhere(startDate),
       select: {
+        snapshotPartnerId: true,
+        snapshotPartnerName: true,
         status: true,
+        recoveryCaseAsOriginal: { select: { id: true, status: true } },
         commissionRateSnapshot: true,
         commissionAmountSnapshot: true,
         partnerNetAmountSnapshot: true,
@@ -363,11 +456,32 @@ async function getPlatformFinancialReport(period) {
         refundTransactions: {
           where: { status: 'SUCCESS' },
           select: {
+            id: true,
             amount: true,
+            status: true,
             processedAt: true,
             reconciledAt: true,
             createdAt: true,
             refundRequest: { select: { type: true } },
+          },
+        },
+        refundRequestsTargeting: {
+          where: {
+            refundTransactions: { some: { status: 'SUCCESS' } },
+          },
+          select: {
+            type: true,
+            refundTransactions: {
+              where: { status: 'SUCCESS' },
+              select: {
+                id: true,
+                amount: true,
+                status: true,
+                processedAt: true,
+                reconciledAt: true,
+                createdAt: true,
+              },
+            },
           },
         },
         reservation: {
@@ -386,7 +500,10 @@ async function getPlatformFinancialReport(period) {
       },
     }),
     prisma.partnerProfile.findMany({
-      where: { status: 'APPROVED' },
+      // Historical payments/refunds remain financially attributable after a
+      // partner is suspended or rejected. Including every profile keeps the
+      // partner table reconcilable with the platform-wide cash totals.
+      where: {},
       orderBy: { businessName: 'asc' },
       select: {
         id: true,
@@ -493,7 +610,9 @@ function transactionSearchFilter(type, search) {
 }
 
 function mapPaymentTransaction(payment) {
-  const attraction = payment.booking?.reservation?.ticketProduct?.attraction;
+  const booking = payment.booking;
+  const attraction = booking?.reservation?.ticketProduct?.attraction;
+  const partner = partnerFromBooking(booking);
   return {
     id: payment.id,
     type: 'PAYMENT',
@@ -504,16 +623,24 @@ function mapPaymentTransaction(payment) {
     status: payment.status,
     occurredAt: paymentOccurredAt(payment),
     isDuplicate: payment.isDuplicate,
-    customer: payment.booking?.fullName || '',
-    customerEmail: payment.booking?.email || '',
-    bookingStatus: payment.booking?.status || null,
-    attraction: attraction?.title || '',
-    partner: attraction?.partner?.businessName || '',
+    customer: booking?.fullName || '',
+    customerEmail: booking?.email || '',
+    bookingStatus: booking?.status || null,
+    attraction: booking?.snapshotAttractionTitle || attraction?.title || '',
+    partner: partner?.businessName || attraction?.partner?.businessName || '',
   };
 }
 
 function mapRefundTransaction(transaction) {
-  const attraction = transaction.booking?.reservation?.ticketProduct?.attraction;
+  const sourceBooking = transaction.booking;
+  const targetBooking = transaction.refundRequest?.targetBooking || null;
+  const attraction = sourceBooking?.reservation?.ticketProduct?.attraction;
+  const targetAttraction = targetBooking?.reservation?.ticketProduct?.attraction;
+  const sourcePartner = partnerFromBooking(sourceBooking);
+  const targetPartner = partnerFromBooking(targetBooking);
+  const targetBookingId = targetBooking?.id
+    || transaction.refundRequest?.targetBookingId
+    || null;
   return {
     id: transaction.id,
     type: 'REFUND',
@@ -530,8 +657,24 @@ function mapRefundTransaction(transaction) {
     customer: transaction.booking?.fullName || '',
     customerEmail: transaction.booking?.email || '',
     bookingStatus: transaction.booking?.status || null,
-    attraction: attraction?.title || '',
-    partner: attraction?.partner?.businessName || '',
+    attraction: sourceBooking?.snapshotAttractionTitle || attraction?.title || '',
+    partner: sourcePartner?.businessName || attraction?.partner?.businessName || '',
+    // Refund cash is charged to the source/funding booking, while the
+    // customer-facing booking may be a Rescue target. Expose both identities
+    // so staff do not reconcile a chain refund against the wrong partner.
+    sourceBookingId: transaction.bookingId,
+    targetBookingId,
+    targetCustomer: targetBooking?.fullName || '',
+    targetCustomerEmail: targetBooking?.email || '',
+    targetBookingStatus: targetBooking?.status || null,
+    targetAttraction: targetBooking?.snapshotAttractionTitle
+      || targetAttraction?.title
+      || '',
+    targetPartner: targetPartner?.businessName
+      || targetAttraction?.partner?.businessName
+      || '',
+    refundType: transaction.refundRequest?.type || null,
+    refundReason: transaction.refundRequest?.reason || transaction.reason || null,
   };
 }
 
@@ -566,6 +709,10 @@ async function listPlatformFinancialTransactions({
           where: {
             AND: paymentFilters,
             booking: { isForecastTrainingSample: false },
+            // RECOVERY_CREDIT is an internal ledger transfer, not a second
+            // cash capture. Keep it out of the cash transaction history so
+            // operators cannot mistake a Rescue replacement for revenue.
+            paymentGateway: { not: RECOVERY_CREDIT_GATEWAY },
             ...(status ? { status } : {}),
           },
           orderBy: { createdAt: 'desc' },
@@ -600,11 +747,20 @@ async function listPlatformFinancialTransactions({
             gateway: true,
             gatewayRequestId: true,
             gatewayTransactionId: true,
+            reason: true,
             status: true,
             processedAt: true,
             reconciledAt: true,
             createdAt: true,
             booking: { select: bookingTransactionSelect },
+            refundRequest: {
+              select: {
+                type: true,
+                reason: true,
+                targetBookingId: true,
+                targetBooking: { select: bookingTransactionSelect },
+              },
+            },
           },
         })
       : Promise.resolve([]),
@@ -642,4 +798,5 @@ module.exports = {
   summarizeFinancialRows,
   recognizedAmountsOf,
   recognizedAtOf,
+  recognizedRefundTransactionsOf,
 };

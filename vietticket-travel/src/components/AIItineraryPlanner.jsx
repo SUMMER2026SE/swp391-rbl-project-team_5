@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { toast } from 'react-toastify'
 import AIItineraryDayWeather from './AIItineraryDayWeather.jsx'
 import AIItineraryRouteMap from './AIItineraryRouteMap.jsx'

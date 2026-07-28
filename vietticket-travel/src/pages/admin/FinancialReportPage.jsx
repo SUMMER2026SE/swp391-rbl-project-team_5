@@ -420,15 +420,43 @@ export default function FinancialReportPage() {
                       {transaction.type === 'PAYMENT' ? 'Thanh toán' : 'Hoàn tiền'}
                     </span>
                     {transaction.isDuplicate && <span className="financial-duplicate">Thanh toán trùng</span>}
+                    {transaction.type === 'REFUND' && transaction.refundType && (
+                      <div className="financial-secondary-text">
+                        {transaction.refundType === 'PARTNER_CANCELLATION'
+                          ? 'Rescue / đối tác hủy'
+                          : transaction.refundType === 'CUSTOMER_CANCELLATION'
+                            ? 'Khách hủy'
+                            : transaction.refundType}
+                      </div>
+                    )}
                   </td>
                   <td className="financial-reference" title={transaction.reference}>{transaction.reference}</td>
                   <td>
-                    <div className="financial-primary-text">{formatBookingReference(transaction.bookingId)}</div>
-                    <div className="financial-secondary-text">{transaction.customer} · {transaction.customerEmail}</div>
+                    <div className="financial-primary-text">
+                      {formatBookingReference(transaction.bookingId)}
+                    </div>
+                    <div className="financial-secondary-text">
+                      {transaction.customer} · {transaction.customerEmail}
+                    </div>
+                    {transaction.type === 'REFUND'
+                      && transaction.targetBookingId
+                      && String(transaction.targetBookingId) !== String(transaction.bookingId) && (
+                        <div className="financial-secondary-text">
+                          Hoàn cho booking {formatBookingReference(transaction.targetBookingId)}
+                          {transaction.targetCustomer ? ` · ${transaction.targetCustomer}` : ''}
+                        </div>
+                    )}
                   </td>
                   <td>
                     <div className="financial-primary-text">{transaction.partner || '—'}</div>
                     <div className="financial-secondary-text">{transaction.attraction || '—'}</div>
+                    {transaction.type === 'REFUND'
+                      && transaction.targetBookingId
+                      && String(transaction.targetBookingId) !== String(transaction.bookingId) && (
+                        <div className="financial-secondary-text">
+                          Đích: {transaction.targetPartner || '—'} · {transaction.targetAttraction || '—'}
+                        </div>
+                    )}
                   </td>
                   <td>
                     <span className={`financial-status financial-status--${transaction.status.toLowerCase()}`}>

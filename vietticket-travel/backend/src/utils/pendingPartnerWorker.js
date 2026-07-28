@@ -94,11 +94,14 @@ async function expirePendingPartnerBooking(
         });
       }
 
-      await queueMandatoryRefund(tx, booking, {
+      const queuedRefund = await queueMandatoryRefund(tx, booking, {
         type: 'SYSTEM_CANCELLATION',
         reason: `Hệ thống tự động hủy đơn. ${EXPIRY_REASON}`,
         now,
       });
+      if (!queuedRefund?.refundRequest) {
+        throw new Error('Không thể tạo yêu cầu hoàn tiền VNPay tự động; cần Staff đối soát.');
+      }
 
       return {
         id: booking.id,

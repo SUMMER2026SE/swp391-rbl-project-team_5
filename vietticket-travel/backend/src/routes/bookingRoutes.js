@@ -4,6 +4,7 @@ const { restrictTo } = require('../middleware/roleMiddleware');
 const {
   createBooking,
   getBooking,
+  getItineraryBookingProgress,
   getReservation,
   listBookings,
   validateAndApplyVoucher,
@@ -19,6 +20,12 @@ router.get(
   protect,
   restrictTo('CUSTOMER'),
   getReservation,
+);
+router.get(
+  '/itineraries/:itineraryId/progress',
+  protect,
+  restrictTo('CUSTOMER'),
+  getItineraryBookingProgress,
 );
 router.get('/:bookingId', protect, restrictTo('CUSTOMER'), getBooking);
 

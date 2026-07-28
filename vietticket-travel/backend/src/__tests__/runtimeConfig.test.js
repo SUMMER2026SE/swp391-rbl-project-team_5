@@ -18,6 +18,8 @@ describe('validateProductionEnv - payment/refund configuration', () => {
     SMTP_USER: 'mailer',
     SMTP_PASS: 'secret',
     MAIL_FROM: 'VietTicket <noreply@vietticket.example>',
+    ML_SERVICE_URL: 'https://ml.vietticket.example',
+    ML_SERVICE_API_KEY: 'a-strong-ml-service-secret-with-32-characters',
   };
   let originalEnv;
 
@@ -37,5 +39,15 @@ describe('validateProductionEnv - payment/refund configuration', () => {
   test('fail fast khi production thiếu VNP_API', () => {
     delete process.env.VNP_API;
     expect(validateProductionEnv).toThrow(/VNP_API/);
+  });
+
+  test('fail fast khi production dùng ML service không được bảo vệ', () => {
+    process.env.ML_SERVICE_API_KEY = 'weak';
+    expect(validateProductionEnv).toThrow(/ML_SERVICE_API_KEY/);
+  });
+
+  test('fail fast khi production trỏ ML service về localhost', () => {
+    process.env.ML_SERVICE_URL = 'http://localhost:8000';
+    expect(validateProductionEnv).toThrow(/ML_SERVICE_URL/);
   });
 });

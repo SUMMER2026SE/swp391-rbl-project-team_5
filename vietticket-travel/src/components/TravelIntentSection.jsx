@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 
 const intentGroups = [
   {
@@ -33,7 +33,7 @@ const intentGroups = [
 
 const trustSignals = [
   { label: 'Vé QR trên điện thoại', icon: 'qr_code_2' },
-  { label: 'Thanh toán VNPay', icon: 'verified_user' },
+  { label: 'VNPay hoặc VietQR', icon: 'verified_user' },
   { label: 'Lọc theo nhu cầu', icon: 'tune' },
 ]
 

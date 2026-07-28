@@ -17,7 +17,7 @@ loạt cho mọi attraction.
 """
 
 import argparse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Tuple
 
 import numpy as np
@@ -81,8 +81,15 @@ def _add_lag_and_rolling_features(revenue_df: pd.DataFrame) -> pd.DataFrame:
     )
     df.drop(columns=["_shifted_revenue"], inplace=True)
 
+    # Missing early lags must use only information available before the target
+    # row. Filling from the full attraction mean would leak future revenue into
+    # training and make the holdout metrics look falsely strong.
+    shifted_revenue = df.groupby("attraction_id")["revenue"].shift(1)
+    past_mean = shifted_revenue.groupby(df["attraction_id"]).transform(
+        lambda values: values.expanding().mean()
+    ).fillna(0.0)
     for col in ["lag_1", "lag_7", "lag_14", "roll_mean_7", "roll_mean_28"]:
-        df[col] = df[col].fillna(df.groupby("attraction_id")["revenue"].transform("mean"))
+        df[col] = df[col].fillna(past_mean)
 
     df["day_offset"] = df.groupby("attraction_id").cumcount()
     return df
@@ -147,8 +154,22 @@ def load_training_csv(path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
         raise ValueError(f"Dataset thiếu cột bắt buộc: {', '.join(missing)}")
 
     raw = raw[list(required)].copy()
+    if raw.empty:
+        raise ValueError(
+            "Dataset không có dòng dữ liệu thật đủ điều kiện để train. "
+            "Hãy export thêm booking đã chốt, không dùng dataset demo cho production."
+        )
+    if raw.isna().any().any():
+        missing_values = sorted(raw.columns[raw.isna().any()].tolist())
+        raise ValueError(
+            f"Dataset có giá trị rỗng ở cột bắt buộc: {', '.join(missing_values)}"
+        )
     raw["date"] = pd.to_datetime(raw["date"], errors="raise").dt.date
     raw = raw.sort_values(["attraction_id", "date"]).reset_index(drop=True)
+    if raw.duplicated(["attraction_id", "date"]).any():
+        raise ValueError("Dataset không được có hai dòng cùng attraction_id và date.")
+    if raw["date"].max() >= date.today():
+        raise ValueError("Dataset chỉ được chứa ngày đã chốt, không gồm hôm nay hoặc tương lai.")
 
     attraction_columns = [
         "attraction_id",
@@ -162,11 +183,39 @@ def load_training_csv(path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     attractions = raw[attraction_columns].drop_duplicates("attraction_id", keep="first")
     revenue = raw[["attraction_id", "date", "revenue", "tickets"]].copy()
 
+    static_columns = [
+        "tier",
+        "city",
+        "capacity",
+        "avg_ticket_price",
+        "rating",
+        "num_reviews",
+    ]
+    inconsistent = (
+        raw.groupby("attraction_id", dropna=False)[static_columns]
+        .nunique(dropna=False)
+        .gt(1)
+    )
+    if inconsistent.any().any():
+        columns = sorted(inconsistent.columns[inconsistent.any()].tolist())
+        raise ValueError(
+            "Thông tin tĩnh của attraction thay đổi giữa các ngày: "
+            + ", ".join(columns)
+            + ". Hãy dùng snapshot catalog nhất quán trước khi train."
+        )
+
     if attractions["attraction_id"].nunique() < 3:
         raise ValueError("Cần dữ liệu của ít nhất 3 điểm tham quan để train model dùng chung.")
     if revenue["date"].nunique() < 90:
         raise ValueError("Cần ít nhất 90 ngày lịch sử thực trước khi retrain.")
-    if (revenue["revenue"] < 0).any() or (revenue["tickets"] < 0).any():
+    if (
+        (revenue["revenue"] < 0).any()
+        or (revenue["tickets"] < 0).any()
+        or (attractions["capacity"] <= 0).any()
+        or (attractions["avg_ticket_price"] < 0).any()
+        or (attractions["rating"] < 0).any()
+        or (attractions["rating"] > 5).any()
+    ):
         raise ValueError("Doanh thu và số vé trong dataset không được âm.")
 
     return attractions, revenue

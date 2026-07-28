@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import HeroSearchBox from './HeroSearchBox.jsx'
 
 function HeroSlider({ slides }) {

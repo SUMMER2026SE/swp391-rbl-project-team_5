@@ -1,10 +1,16 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router'
 import { defaultUser } from '../../context/authConstants.js'
 import { useAuth } from '../../context/useAuth.js'
 import { hasRole } from '../../utils/userRoles.js'
 
 const navItems = [
   { label: 'Hồ sơ của tôi', icon: 'person', to: '/profile', active: 'profile' },
+  {
+    label: 'Trung tâm hành trình',
+    icon: 'travel_explore',
+    to: '/journey',
+    active: 'journey',
+  },
   {
     label: 'Vé của tôi',
     icon: 'confirmation_number',
@@ -46,7 +52,7 @@ function AccountLayout({ active = 'profile', children }) {
     || hasRole(currentUser, 'PARTNER')
   const visibleNavItems = navItems.filter((item) => {
     if (currentUser.provider === 'GOOGLE' && item.active === 'password') return false
-    if (isOperationalUser && ['bookings', 'saved', 'support', 'rewards'].includes(item.active)) return false
+    if (isOperationalUser && ['journey', 'bookings', 'saved', 'support', 'rewards'].includes(item.active)) return false
     return true
   })
 

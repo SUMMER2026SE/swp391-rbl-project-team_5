@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
@@ -28,14 +28,14 @@ const checkoutNavLinks = [
 
 const checkoutMilestones = [
   { label: 'Kiểm tra đơn', icon: 'fact_check' },
-  { label: 'Thanh toán VNPay', icon: 'account_balance_wallet' },
+  { label: 'Chọn thanh toán', icon: 'account_balance_wallet' },
   { label: 'Nhận vé QR', icon: 'qr_code_2' },
 ]
 
 const checkoutTrustItems = [
   {
     title: 'Thanh toán bảo mật',
-    description: 'Giao dịch được chuyển qua cổng VNPay, VietTicket không lưu thông tin thẻ.',
+    description: 'Chọn VNPay hoặc VietQR; VietTicket không lưu thông tin thẻ hay tài khoản ngân hàng.',
     icon: 'lock',
   },
   {
@@ -84,6 +84,8 @@ function CheckoutPage() {
   const [searchParams] = useSearchParams()
   const aiQueueId = searchParams.get('aiQueueId') || ''
   const aiQueueItemId = searchParams.get('aiQueueItemId') || ''
+  const itineraryId = searchParams.get('itineraryId') || ''
+  const itineraryVersion = Number(searchParams.get('itineraryVersion'))
   const isAiItineraryCheckout = Boolean(aiQueueId && aiQueueItemId)
   const [booking, setBooking] = useState(null)
   const [contact, setContact] = useState({
@@ -302,6 +304,15 @@ function CheckoutPage() {
           note: note.trim(),
           voucherCode: appliedVoucherCode || undefined,
           paymentMethod: selectedPayment,
+          ...(isAiItineraryCheckout && itineraryId && Number.isSafeInteger(itineraryVersion)
+            ? {
+                itineraryContext: {
+                  itineraryId,
+                  version: itineraryVersion,
+                  itemId: aiQueueItemId,
+                },
+              }
+            : {}),
         })
         bookingId = createdBooking.id
       }

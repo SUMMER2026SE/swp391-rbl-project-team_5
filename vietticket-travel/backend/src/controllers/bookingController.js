@@ -8,7 +8,7 @@ const {
   MIN_VNPAY_AMOUNT,
   parseVndInteger,
 } = require('../utils/money');
-
+const { buildTicketRestrictions } = require('../utils/ticketRestrictions');
 
 const { Decimal } = Prisma;
 const {
@@ -16,6 +16,7 @@ const {
   getBankTransferHoldMs,
 } = require('../utils/bankTransferPolicy');
 const { getBankTransferConfig } = require('../config/runtimeConfig');
+const { isCapturedPayment } = require('../utils/paymentGateway');
 
 // Chỉ mở phương thức chuyển khoản khi nền tảng đã cấu hình tài khoản nhận tiền,
 // tránh việc khách chọn được rồi lại không có mã QR để chuyển.
@@ -47,6 +48,7 @@ const bookingInclude = {
   voucher: true,
   payments: { orderBy: { createdAt: 'desc' } },
   refundRequests: { orderBy: { createdAt: 'desc' } },
+  refundRequestsTargeting: { orderBy: { createdAt: 'desc' } },
   // Thứ tự cố định để "Vé #1, #2..." trên vé của khách không đổi sau mỗi lần
   // check-in và khớp đúng với danh sách vé bên cổng soát vé của nhân viên.
   ticketInstances: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
@@ -72,12 +74,201 @@ function normalizeVoucherCode(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+function normalizeItineraryContext(value) {
+  if (value == null) return null;
+  const itineraryId = String(value.itineraryId || '').trim();
+  const itemId = String(value.itemId || '').trim();
+  const version = Number(value.version);
+  if (
+    !itineraryId
+    || itineraryId.length > 100
+    || !itemId
+    || itemId.length > 300
+    || !Number.isSafeInteger(version)
+    || version < 1
+  ) {
+    const error = new Error('Ngữ cảnh lịch trình đặt vé không hợp lệ.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return { itineraryId, itemId, version };
+}
+
+function normalizeItineraryQuantity(value) {
+  const quantity = Number(value);
+  return Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+}
+
+function buildItineraryItemId({ attractionId, ticketId, visitDate, slotId, index }) {
+  return [attractionId, ticketId, visitDate || 'date', slotId || 'slot', index]
+    .map((part) => String(part).replace(/[^A-Za-z0-9_-]+/g, '-'))
+    .join('__');
+}
+
+function extractItineraryTicketItems(itinerary) {
+  const plan = itinerary?.data || itinerary || {};
+  const days = Array.isArray(plan.days) ? plan.days : [];
+  const items = [];
+
+  days.forEach((day, dayIndex) => {
+    const activities = Array.isArray(day?.activities)
+      ? day.activities
+      : Array.isArray(day?.items) ? day.items : [];
+    const dayVisitDate = day?.visitDate || plan.startDate || '';
+
+    activities.forEach((activity, activityIndex) => {
+      const attractionId = activity?.attractionId || activity?.id;
+      if (!attractionId) return;
+      const visitDate = activity?.visitDate || dayVisitDate;
+      const ticketItems = Array.isArray(activity?.ticketItems) ? activity.ticketItems : [];
+      ticketItems.forEach((ticketItem, ticketIndex) => {
+        if (!ticketItem?.ticketId) return;
+        const slotId = ticketItem?.suggestedTimeSlot?.timeSlotId
+          || ticketItem?.timeSlotId
+          || '';
+        const index = items.length;
+        items.push({
+          id: buildItineraryItemId({
+            attractionId,
+            ticketId: ticketItem.ticketId,
+            visitDate,
+            slotId,
+            index,
+          }),
+          attractionId: String(attractionId),
+          ticketId: String(ticketItem.ticketId),
+          visitDate,
+          timeSlotId: String(slotId),
+          quantity: normalizeItineraryQuantity(ticketItem.quantity),
+          dayIndex,
+          activityIndex,
+          ticketIndex,
+        });
+      });
+    });
+  });
+
+  return items;
+}
+
+function itineraryItemMatchesReservation(item, reservation) {
+  if (!item || !reservation) return false;
+  const expectedTicketId = String(reservation.ticketProductId || '');
+  const expectedAttractionId = String(reservation.ticketProduct?.attractionId || '');
+  const expectedDate = dateOnly(reservation.date);
+  const expectedSlotId = String(reservation.timeSlotId || '');
+
+  return (
+    item.ticketId === expectedTicketId
+    && (!expectedAttractionId || item.attractionId === expectedAttractionId)
+    && (!item.visitDate || dateOnly(item.visitDate) === expectedDate)
+    && (!item.timeSlotId || item.timeSlotId === expectedSlotId)
+    && item.quantity === Number(reservation.quantity)
+  );
+}
+
+function itineraryContainsReservation(itinerary, reservation) {
+  return extractItineraryTicketItems(itinerary).some(
+    (item) => itineraryItemMatchesReservation(item, reservation),
+  );
+}
+
+async function validateItineraryBookingContext(tx, {
+  context,
+  reservation,
+  userId,
+  now,
+}) {
+  if (!context) return null;
+
+  const itinerary = await tx.savedItinerary.findFirst({
+    where: { id: context.itineraryId, userId },
+    include: {
+      partyRoom: {
+        select: {
+          id: true,
+          status: true,
+          version: true,
+          bookingStartedAt: true,
+          bookingVersion: true,
+        },
+      },
+    },
+  });
+  if (!itinerary) {
+    const error = new Error('Không tìm thấy lịch trình thuộc tài khoản của bạn.');
+    error.statusCode = 404;
+    throw error;
+  }
+  const itineraryItem = extractItineraryTicketItems(itinerary).find(
+    (item) => item.id === context.itemId,
+  );
+  if (!itineraryItem || !itineraryItemMatchesReservation(itineraryItem, reservation)) {
+    const error = new Error(
+      'Dòng vé đang giữ chỗ không khớp điểm tham quan, ngày đi, khung giờ hoặc số lượng trong lịch trình đã chốt.',
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const existingItemBooking = await tx.booking.findFirst({
+    where: {
+      itineraryId: itinerary.id,
+      itineraryVersion: context.version,
+      itineraryItemId: context.itemId,
+      status: { notIn: ['CANCELLED', 'REFUNDED'] },
+    },
+    select: { id: true },
+  });
+  if (existingItemBooking) {
+    const error = new Error('Dòng vé này đã có một đơn đang được xử lý.');
+    error.statusCode = 409;
+    throw error;
+  }
+
+  if (itinerary.partyRoom) {
+    const room = itinerary.partyRoom;
+    if (room.status !== 'FINALIZED' || room.version !== context.version) {
+      const error = new Error('Lịch nhóm đã thay đổi. Vui lòng quay lại phòng và tạo lại danh sách đặt vé.');
+      error.statusCode = 409;
+      throw error;
+    }
+    if (room.bookingStartedAt && room.bookingVersion !== context.version) {
+      const error = new Error('Phòng đã bắt đầu đặt vé từ một phiên bản lịch trình khác.');
+      error.statusCode = 409;
+      throw error;
+    }
+    if (!room.bookingStartedAt) {
+      const locked = await tx.partyRoom.updateMany({
+        where: {
+          id: room.id,
+          status: 'FINALIZED',
+          version: context.version,
+          bookingStartedAt: null,
+        },
+        data: {
+          bookingStartedAt: now,
+          bookingVersion: context.version,
+        },
+      });
+      if (locked.count !== 1) {
+        const error = new Error('Lịch nhóm vừa thay đổi. Vui lòng tải lại trước khi đặt vé.');
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+  }
+  return itinerary;
+}
+
 function decimalToNumber(value) {
   return value == null ? 0 : Number(value.toString());
 }
 
 function dateOnly(value) {
-  return value ? new Date(value).toISOString().slice(0, 10) : '';
+  if (!value) return '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
 }
 
 function selectBookingPayment(payments = []) {
@@ -121,9 +312,16 @@ function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
     snapshotAttractionCity: attraction.city || '',
     snapshotAttractionDistrict: attraction.district || null,
     snapshotAttractionImage: primaryImage,
+    snapshotAttractionLatitude: attraction.latitude ?? null,
+    snapshotAttractionLongitude: attraction.longitude ?? null,
+    snapshotAttractionEnvironment: attraction.environment || null,
+    snapshotPartnerId: attraction.partnerId || attraction.partner?.id || null,
+    snapshotPartnerName: attraction.partner?.businessName || null,
     snapshotTicketName: product.name,
     snapshotTicketType: product.type || 'ADULT',
     snapshotTicketDescription: product.description || null,
+    snapshotTicketRestrictions:
+      reservation.snapshotTicketRestrictions ?? buildTicketRestrictions(product),
     snapshotUnitPrice: reservation.snapshotUnitPrice ?? product.sellingPrice,
     snapshotRefundPolicy:
       reservation.snapshotRefundPolicy ?? product.refundPolicy ?? 'NON_REFUNDABLE',
@@ -135,6 +333,8 @@ function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
     snapshotTimeSlotLabel: reservation.timeSlot
       ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
       : null,
+    snapshotActivityStartTime: attraction.openTime || null,
+    snapshotActivityEndTime: attraction.closeTime || null,
   };
 }
 
@@ -226,6 +426,12 @@ function toBookingResponse(booking) {
   const product = reservation.ticketProduct;
   const snapshot = getBookingSnapshotView(booking);
   const paymentStatus = resolveBookingPaymentStatus(booking.payments);
+  const latestRefundRequest = [
+    ...(booking.refundRequests || []),
+    ...(booking.refundRequestsTargeting || []),
+  ].sort((left, right) => (
+    new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  ))[0] || null;
 
   return {
     id: booking.id,
@@ -246,6 +452,13 @@ function toBookingResponse(booking) {
     subtotal: decimalToNumber(booking.subtotalAmount),
     discountAmount: decimalToNumber(booking.discountAmount),
     totalAmount: decimalToNumber(booking.totalAmount),
+    itineraryContext: booking.itineraryId
+      ? {
+          itineraryId: booking.itineraryId,
+          version: booking.itineraryVersion,
+          itemId: booking.itineraryItemId,
+        }
+      : null,
     voucherCode: booking.voucher?.code || '',
     voucherLabel: booking.voucher
       ? booking.voucher.discountType === 'FIXED'
@@ -271,17 +484,17 @@ function toBookingResponse(booking) {
     rating: booking.review?.rating || 0,
     // Yêu cầu hoàn tiền gần nhất; một booking có thể có thêm yêu cầu riêng
     // cho từng giao dịch thanh toán trùng.
-    refundRequest: booking.refundRequests?.[0]
+    refundRequest: latestRefundRequest
       ? {
-          id: booking.refundRequests[0].id,
-          type: booking.refundRequests[0].type,
-          mandatory: booking.refundRequests[0].mandatory,
-          status: booking.refundRequests[0].status,
-          amount: decimalToNumber(booking.refundRequests[0].amount),
-          reason: booking.refundRequests[0].reason,
-          staffNotes: booking.refundRequests[0].staffNotes || '',
-          createdAt: booking.refundRequests[0].createdAt,
-          processedAt: booking.refundRequests[0].processedAt,
+          id: latestRefundRequest.id,
+          type: latestRefundRequest.type,
+          mandatory: latestRefundRequest.mandatory,
+          status: latestRefundRequest.status,
+          amount: decimalToNumber(latestRefundRequest.amount),
+          reason: latestRefundRequest.reason,
+          staffNotes: latestRefundRequest.staffNotes || '',
+          createdAt: latestRefundRequest.createdAt,
+          processedAt: latestRefundRequest.processedAt,
         }
       : null,
     ticketInstances: booking.ticketInstances.map((ticket) => ({
@@ -611,6 +824,7 @@ async function createBooking(req, res, next) {
     const note = String(req.body?.note || '').trim();
     const voucherCode = normalizeVoucherCode(req.body?.voucherCode);
     const paymentMethod = String(req.body?.paymentMethod || 'vnpay').toLowerCase();
+    const itineraryContext = normalizeItineraryContext(req.body?.itineraryContext);
 
     if (!reservationId) {
       return res.status(400).json({ message: 'reservationId là bắt buộc.' });
@@ -636,7 +850,14 @@ async function createBooking(req, res, next) {
               include: {
                 attraction: {
                   include: {
-                    partner: { select: { commissionRate: true, status: true } },
+                    partner: {
+                      select: {
+                        id: true,
+                        businessName: true,
+                        commissionRate: true,
+                        status: true,
+                      },
+                    },
                     images: {
                       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
                       take: 1,
@@ -688,6 +909,13 @@ async function createBooking(req, res, next) {
           error.statusCode = 409;
           throw error;
         }
+
+        await validateItineraryBookingContext(tx, {
+          context: itineraryContext,
+          reservation,
+          userId,
+          now,
+        });
 
         const unitPrice = parseVndInteger(
           reservation.snapshotUnitPrice ?? reservation.ticketProduct.sellingPrice,
@@ -764,6 +992,9 @@ async function createBooking(req, res, next) {
             userId,
             reservationId,
             voucherId: voucher?.id || null,
+            itineraryId: itineraryContext?.itineraryId || null,
+            itineraryVersion: itineraryContext?.version || null,
+            itineraryItemId: itineraryContext?.itemId || null,
             subtotalAmount,
             discountAmount,
             totalAmount,
@@ -816,12 +1047,79 @@ async function createBooking(req, res, next) {
     if (error.code === 'P2002') {
       return res.status(409).json({ message: 'Đơn giữ chỗ này đã được tạo booking.' });
     }
+    if (error.code === 'P2034') {
+      return res.status(409).json({
+        message: 'Dữ liệu lịch trình hoặc tồn vé vừa thay đổi. Vui lòng tải lại và thử đặt vé lần nữa.',
+      });
+    }
+    return next(error);
+  }
+}
+
+async function getItineraryBookingProgress(req, res, next) {
+  try {
+    const itineraryId = String(req.params.itineraryId || '').trim();
+    const itinerary = await prisma.savedItinerary.findFirst({
+      where: { id: itineraryId, userId: req.user.id },
+      select: { id: true, planId: true, title: true },
+    });
+    if (!itinerary) {
+      return res.status(404).json({ message: 'Không tìm thấy lịch trình thuộc tài khoản của bạn.' });
+    }
+    const bookings = await prisma.booking.findMany({
+      where: { itineraryId, userId: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        itineraryVersion: true,
+        itineraryItemId: true,
+        status: true,
+        createdAt: true,
+        payments: {
+          where: { status: 'SUCCESS', isDuplicate: false },
+          select: {
+            status: true,
+            isDuplicate: true,
+            paymentGateway: true,
+            paidAt: true,
+          },
+        },
+      },
+    });
+    const latestByItem = new Map();
+    for (const booking of bookings) {
+      if (!booking.itineraryItemId || latestByItem.has(booking.itineraryItemId)) continue;
+      const capturedPayment = booking.payments.find((payment) => (
+        isCapturedPayment(payment, { allowInternalCredit: true })
+      ));
+      const fulfilled = Boolean(capturedPayment)
+        && ['PENDING_PARTNER', 'CONFIRMED', 'COMPLETED'].includes(booking.status);
+      latestByItem.set(booking.itineraryItemId, {
+        itemId: booking.itineraryItemId,
+        bookingId: booking.id,
+        version: booking.itineraryVersion,
+        bookingStatus: booking.status,
+        paid: Boolean(capturedPayment),
+        fulfilled,
+        paidAt: capturedPayment?.paidAt || null,
+        createdAt: booking.createdAt,
+      });
+    }
+    return res.json({
+      success: true,
+      data: {
+        itinerary,
+        items: [...latestByItem.values()],
+      },
+    });
+  } catch (error) {
     return next(error);
   }
 }
 
 module.exports = {
   createBooking,
+  getItineraryBookingProgress,
   getBooking,
   getReservation,
   listBookings,
@@ -833,4 +1131,10 @@ module.exports = {
   getBookingSnapshotView,
   resolveBookingPaymentStatus,
   selectBookingPayment,
+  buildItineraryItemId,
+  extractItineraryTicketItems,
+  itineraryContainsReservation,
+  itineraryItemMatchesReservation,
+  normalizeItineraryContext,
+  validateItineraryBookingContext,
 };

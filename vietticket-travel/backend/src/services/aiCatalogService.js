@@ -181,6 +181,11 @@ async function findCatalog({ city, category, limit, includeCategory = true }) {
       averageRating: true,
       totalReviews: true,
       minTicketPrice: true,
+      images: {
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+        take: 1,
+        select: { imageUrl: true },
+      },
       categories: {
         select: { category: { select: { name: true } } },
       },
@@ -265,6 +270,7 @@ function toCatalogItem(a) {
     rating: a.averageRating,
     totalReviews: a.totalReviews,
     minPrice: a.minTicketPrice ? Number(a.minTicketPrice) : null,
+    imageUrl: a.images?.[0]?.imageUrl || null,
     categories: a.categories.map((c) => c.category.name),
     tickets: a.ticketProducts.map((t) => ({
       id: t.id,

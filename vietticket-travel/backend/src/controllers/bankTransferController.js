@@ -19,6 +19,10 @@ const {
 const { queueNewBookingNotification, emitBookingStatusUpdated } = require('../realtime/events');
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
 const { formatBookingReference } = require('../utils/bookingReference');
+const {
+  isBankTransferPayment,
+  isCapturedPayment,
+} = require('../utils/paymentGateway');
 
 // GET /api/payments/methods — cho trang thanh toán biết nên hiện những gì.
 async function listPaymentMethods(req, res, next) {
@@ -53,7 +57,19 @@ async function getBankTransferInstruction(req, res, next) {
     const bookingId = String(req.params.bookingId || '').trim();
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      include: { reservation: { select: { expiresAt: true, status: true } } },
+      include: {
+        reservation: { select: { expiresAt: true, status: true } },
+        payments: {
+          where: { status: 'SUCCESS', isDuplicate: false },
+          select: {
+            id: true,
+            status: true,
+            isDuplicate: true,
+            paymentGateway: true,
+            paidAt: true,
+          },
+        },
+      },
     });
 
     if (!booking || booking.isForecastTrainingSample || booking.userId !== req.user.id) {
@@ -66,15 +82,39 @@ async function getBankTransferInstruction(req, res, next) {
       });
     }
 
-    const instruction = buildTransferInstruction(booking);
+    const capturedPayment = booking.payments.find((payment) => (
+      isCapturedPayment(payment) && isBankTransferPayment(payment)
+    ));
+    const terminal = ['CANCELLED', 'REFUNDED'].includes(booking.status);
+    let instruction;
+    try {
+      instruction = buildTransferInstruction(booking);
+    } catch (error) {
+      // A paid or terminal booking must remain visible to the customer even if
+      // Finance later disables the receiving account configuration.
+      if (!capturedPayment && !terminal) throw error;
+      instruction = {
+        bankName: null,
+        bankBin: null,
+        accountNumber: null,
+        accountName: null,
+        amount: Number(booking.totalAmount),
+        content: null,
+        bookingReference: formatBookingReference(booking.id),
+        qrPayload: null,
+        expiresAt: booking.reservation?.expiresAt || null,
+        holdMinutes: null,
+      };
+    }
     return res.json({
       success: true,
       data: {
         ...instruction,
         bookingId: booking.id,
         bookingStatus: booking.status,
-        // Đơn đã được duyệt thì không cần chuyển tiền nữa.
-        paid: booking.status !== 'PENDING_PAYMENT',
+        paid: Boolean(capturedPayment),
+        paidAt: capturedPayment?.paidAt || null,
+        terminal,
       },
     });
   } catch (error) {
@@ -113,6 +153,26 @@ async function confirmBankTransferPayment(req, res, next) {
         success: true,
         message: 'Đơn này đã được xác nhận thanh toán trước đó.',
         data: { bookingId, bookingStatus: result.bookingStatus, alreadyConfirmed: true },
+      });
+    }
+
+    if (result.latePayment) {
+      emitBookingStatusUpdated({
+        customerId: result.booking.userId,
+        bookingId,
+        status: 'CANCELLED',
+        message: `VietTicket đã nhận chuyển khoản cho đơn ${formatBookingReference(bookingId)} sau khi hết giữ chỗ. Yêu cầu hoàn 100% đã được tạo để nhân viên đối soát chuyển khoản.`,
+      });
+      return res.status(202).json({
+        success: true,
+        message: 'Đã ghi nhận khoản tiền đến muộn và tạo yêu cầu hoàn 100%; không phát vé cho đơn đã hết giữ chỗ.',
+        data: {
+          bookingId,
+          bookingStatus: 'CANCELLED',
+          alreadyConfirmed: false,
+          latePayment: true,
+          refundRequestId: result.refundRequestId,
+        },
       });
     }
 

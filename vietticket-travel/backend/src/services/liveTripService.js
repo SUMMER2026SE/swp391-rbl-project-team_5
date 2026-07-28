@@ -16,7 +16,11 @@ const {
 } = require('./arrivalPressureService');
 const { serializeProposal } = require('./liveTripAutopilotService');
 const { serializeLiveTripEvent } = require('./liveTripEventService');
-const { getQueueSnapshot, serializeQueueEntry } = require('./smartQueueService');
+const {
+  getQueueAvailabilityForItem,
+  getQueueSnapshot,
+  serializeQueueEntry,
+} = require('./smartQueueService');
 
 const MAX_LIVE_TRIP_DAYS = 14;
 const MAX_LIVE_TRIP_ITEMS = MAX_LIVE_TRIP_DAYS * 4;
@@ -40,9 +44,22 @@ const LIVE_TRIP_INCLUDE = {
       booking: {
         select: {
           id: true,
+          userId: true,
           status: true,
           snapshotVisitDate: true,
           snapshotTimeSlotLabel: true,
+          reservation: {
+            select: {
+              date: true,
+              quantity: true,
+              timeSlotId: true,
+            },
+          },
+          ticketInstances: {
+            where: { status: 'USED' },
+            select: { id: true, status: true },
+            take: 1,
+          },
         },
       },
       smartQueueEntry: {
@@ -53,6 +70,12 @@ const LIVE_TRIP_INCLUDE = {
               title: true,
               city: true,
               operationalStatus: true,
+            },
+          },
+          booking: {
+            select: {
+              status: true,
+              reservation: { select: { timeSlotId: true } },
             },
           },
         },
@@ -308,7 +331,16 @@ async function getOwnedBookings(client, userId, descriptors, startDate, endDate)
       snapshotVisitDate: true,
       snapshotTimeSlotLabel: true,
       reservation: {
-        select: { ticketProductId: true, timeSlotId: true },
+        select: {
+          ticketProductId: true,
+          timeSlotId: true,
+          timeSlot: {
+            select: {
+              startTime: true,
+              endTime: true,
+            },
+          },
+        },
       },
     },
     orderBy: { createdAt: 'asc' },
@@ -345,16 +377,19 @@ function findMatchingBooking(descriptor, bookings, usedBookingIds) {
     return candidates.find((booking) => booking.id === explicitBookingId) || null;
   }
 
-  return candidates.sort((left, right) => {
-    const leftTicketMatch = ticketIds.includes(left.reservation?.ticketProductId) ? 1 : 0;
-    const rightTicketMatch = ticketIds.includes(right.reservation?.ticketProductId) ? 1 : 0;
-    const leftSlotMatch = timeSlotId && left.reservation?.timeSlotId === timeSlotId ? 1 : 0;
-    const rightSlotMatch = timeSlotId && right.reservation?.timeSlotId === timeSlotId ? 1 : 0;
-    return (rightTicketMatch - leftTicketMatch) || (rightSlotMatch - leftSlotMatch);
-  })[0] || null;
+  const exactCandidates = candidates.filter((booking) => (
+    (ticketIds.length === 0 || ticketIds.includes(booking.reservation?.ticketProductId))
+    && (!timeSlotId || booking.reservation?.timeSlotId === timeSlotId)
+  ));
+  if (ticketIds.length > 0 || timeSlotId) return exactCandidates[0] || null;
+
+  // Attraction + date alone is safe only when it identifies one booking.
+  // Guessing among multiple bookings can attach the wrong paid time slot and
+  // later cause SmartQueue to call the customer at an invalid hour.
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
-function buildSnapshot(descriptor, attraction, dateKey, startTime, endTime, bookingId) {
+function buildSnapshot(descriptor, attraction, dateKey, startTime, endTime, booking) {
   return cloneJson({
     title: descriptor.activity.title
       || descriptor.activity.name
@@ -366,8 +401,9 @@ function buildSnapshot(descriptor, attraction, dateKey, startTime, endTime, book
     suggestedTime: descriptor.activity.suggestedTime || descriptor.activity.timeSlot || null,
     startTime,
     endTime,
-    timeSlotId: getActivityTimeSlotId(descriptor.activity),
-    bookingId: bookingId || null,
+    timeSlotId: booking?.reservation?.timeSlotId
+      || getActivityTimeSlotId(descriptor.activity),
+    bookingId: booking?.id || null,
     activity: descriptor.activity,
   });
 }
@@ -384,24 +420,33 @@ function serializeTrip(trip) {
     status: trip.status,
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,
-    items: (trip.items || []).map((item) => ({
-      id: item.id,
-      dayIndex: item.dayIndex,
-      orderIndex: item.orderIndex,
-      attractionId: item.attractionId,
-      bookingId: item.bookingId,
-      scheduledStart: item.scheduledStart,
-      scheduledEnd: item.scheduledEnd,
-      status: item.status,
-      snapshot: item.snapshot,
-      attraction: item.attraction || null,
-      booking: item.booking || null,
-      smartQueue: item.smartQueueEntry
-        ? serializeQueueEntry(item.smartQueueEntry)
-        : null,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    })),
+    items: (trip.items || [])
+      .filter((item) => item.snapshot?.hiddenFromPlan !== true)
+      .map((item) => ({
+        id: item.id,
+        dayIndex: item.dayIndex,
+        orderIndex: item.orderIndex,
+        attractionId: item.attractionId,
+        bookingId: item.bookingId,
+        scheduledStart: item.scheduledStart,
+        scheduledEnd: item.scheduledEnd,
+        status: item.status,
+        snapshot: item.snapshot,
+        attraction: item.attraction || null,
+        booking: item.booking
+          ? {
+            id: item.booking.id,
+            status: item.booking.status,
+            snapshotVisitDate: item.booking.snapshotVisitDate,
+            snapshotTimeSlotLabel: item.booking.snapshotTimeSlotLabel,
+            }
+          : null,
+        smartQueue: item.smartQueueEntry
+          ? serializeQueueEntry(item.smartQueueEntry)
+          : null,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      })),
     proposals: (trip.proposals || []).map(serializeProposal),
     events: (trip.events || []).map(serializeLiveTripEvent),
   };
@@ -441,7 +486,10 @@ async function materializeItems({ client, descriptors, startDate, endDate, userI
     const attraction = attractionMap.get(descriptor.attractionId);
     const matchedBooking = findMatchingBooking(descriptor, bookings, usedBookingIds);
     if (matchedBooking) usedBookingIds.add(matchedBooking.id);
-    const { startTime, endTime } = resolveActivityTimes(descriptor.activity, attraction);
+    const activityTimes = resolveActivityTimes(descriptor.activity, attraction);
+    const bookingSlot = matchedBooking?.reservation?.timeSlot;
+    const startTime = bookingSlot?.startTime || activityTimes.startTime;
+    const endTime = bookingSlot?.endTime || activityTimes.endTime;
     const window = getActivityWindow({
       date: descriptor.dateInfo.date,
       timeSlot: { startTime, endTime },
@@ -461,7 +509,7 @@ async function materializeItems({ client, descriptors, startDate, endDate, userI
         descriptor.dateInfo.key,
         startTime,
         endTime,
-        matchedBooking?.id,
+        matchedBooking,
       ),
     };
   });
@@ -513,30 +561,44 @@ async function activateLiveTrip({
   });
 
   let didCreate = true;
-  const createdId = await prismaClient.$transaction(async (tx) => {
-    const raceWinner = await tx.liveTrip.findUnique({
+  let createdId;
+  try {
+    createdId = await prismaClient.$transaction(async (tx) => {
+      const raceWinner = await tx.liveTrip.findUnique({
+        where: { savedItineraryId: saved.id },
+        select: { id: true },
+      });
+      if (raceWinner) {
+        didCreate = false;
+        return raceWinner.id;
+      }
+
+      const created = await tx.liveTrip.create({
+        data: {
+          userId,
+          savedItineraryId: saved.id,
+          title: saved.title || plan.title || 'Chuyến đi VietTicket',
+          startDate: start.date,
+          endDate,
+          status: 'ACTIVE',
+          items: { create: items },
+        },
+        select: { id: true },
+      });
+      return created.id;
+    });
+  } catch (error) {
+    if (error?.code !== 'P2002') throw error;
+    // The preflight and in-transaction checks can still race at the unique
+    // constraint. Reload the winner and preserve idempotent activation.
+    const raceWinner = await prismaClient.liveTrip.findUnique({
       where: { savedItineraryId: saved.id },
       select: { id: true },
     });
-    if (raceWinner) {
-      didCreate = false;
-      return raceWinner.id;
-    }
-
-    const created = await tx.liveTrip.create({
-      data: {
-        userId,
-        savedItineraryId: saved.id,
-        title: saved.title || plan.title || 'Chuyến đi VietTicket',
-        startDate: start.date,
-        endDate,
-        status: 'ACTIVE',
-        items: { create: items },
-      },
-      select: { id: true },
-    });
-    return created.id;
-  });
+    if (!raceWinner) throw error;
+    didCreate = false;
+    createdId = raceWinner.id;
+  }
   const created = await prismaClient.liveTrip.findUnique({
     where: { id: createdId },
     include: LIVE_TRIP_INCLUDE,
@@ -631,6 +693,24 @@ async function getLiveTripOverview(tripId, userId, { prismaClient = prisma, now 
     },
   );
   const queueByItemId = new Map(queueEntries);
+  const availabilityEntries = await mapWithConcurrency(
+    (rawTrip.items || []).filter((item) => item.bookingId && !item.smartQueueEntry),
+    PRESSURE_QUERY_CONCURRENCY,
+    async (item) => {
+      const pressure = item.attractionId
+        ? pressureByKey.get(`${item.attractionId}:${itemVisitDate(item)}`) || null
+        : null;
+      return [
+        item.id,
+        await getQueueAvailabilityForItem(item, {
+          prismaClient,
+          now,
+          pressure,
+        }),
+      ];
+    },
+  );
+  const availabilityByItemId = new Map(availabilityEntries);
 
   return {
     ...trip,
@@ -640,9 +720,10 @@ async function getLiveTripOverview(tripId, userId, { prismaClient = prisma, now 
         ? pressureByKey.get(`${item.attractionId}:${itemVisitDate(item)}`) || null
         : null,
       smartQueue: queueByItemId.get(item.id) || item.smartQueue,
+      smartQueueAvailability: availabilityByItemId.get(item.id) || null,
     })),
     dataBasis: 'LIVE_TRIP_MATERIALIZED_PLAN',
-    measurementNote: 'Pressure là chỉ số áp lực lượt đến từ booking, tồn chỗ và QR check-in; không phải số người đếm bằng cảm biến.',
+    measurementNote: 'Chỉ số nhu cầu chỉ phản ánh dữ liệu VietTicket quan sát được từ booking, tồn chỗ, SmartQueue và QR; không đại diện tổng khách tại địa điểm.',
     calculatedAt: now.toISOString(),
   };
 }
@@ -652,6 +733,7 @@ module.exports = {
   MAX_LIVE_TRIP_ITEMS,
   activateLiveTrip,
   extractActivityDescriptors,
+  findMatchingBooking,
   findLiveTripForUser,
   getLiveTripForUser,
   getLiveTripOverview,

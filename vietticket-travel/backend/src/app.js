@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const { rateLimit } = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
 const prisma = require('./config/prisma');
 const { corsOptions } = require('./config/cors');
 const adminRoutes = require('./routes/adminRoutes');
@@ -25,6 +26,8 @@ const weatherRoutes = require('./routes/weatherRoutes');
 const forecastRoutes = require('./routes/forecastRoutes');
 const liveTripRoutes = require('./routes/liveTripRoutes');
 const loyaltyRoutes = require('./routes/loyaltyRoutes');
+const recoveryCaseRoutes = require('./routes/recoveryCaseRoutes');
+const partyRoomRoutes = require('./routes/partyRoomRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
@@ -79,11 +82,46 @@ app.use('/uploads', express.static(
 app.get('/api/health', async (req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    return res.json({
+    const payload = {
       status: 'ok',
       database: 'connected',
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    // Staging-only diagnostics help verify a remote restore without exposing
+    // catalog counts or database metadata from a production health endpoint.
+    if (process.env.NODE_ENV !== 'production' && req.query.details === 'true') {
+      const [
+        totalAttractions,
+        approvedAttractions,
+        publicAttractions,
+        totalPartners,
+        approvedPartners,
+      ] = await Promise.all([
+        prisma.attraction.count(),
+        prisma.attraction.count({ where: { status: 'APPROVED' } }),
+        prisma.attraction.count({
+          where: {
+            publishedAt: { not: null },
+            publicationStatus: 'ACTIVE',
+            operationalStatus: 'ACTIVE',
+            archivedAt: null,
+            partner: { status: 'APPROVED' },
+          },
+        }),
+        prisma.partnerProfile.count(),
+        prisma.partnerProfile.count({ where: { status: 'APPROVED' } }),
+      ]);
+      payload.catalog = {
+        totalAttractions,
+        approvedAttractions,
+        publicAttractions,
+        totalPartners,
+        approvedPartners,
+      };
+    }
+
+    return res.json(payload);
   } catch {
     return res.status(503).json({
       status: 'unavailable',
@@ -113,6 +151,36 @@ app.use('/api/weather', weatherRoutes);
 app.use('/api/forecast', forecastRoutes);
 app.use('/api/live', liveTripRoutes);
 app.use('/api/loyalty', loyaltyRoutes);
+app.use('/api/recovery-cases', recoveryCaseRoutes);
+app.use('/api/party', partyRoomRoutes);
+
+// Render demo deployment can serve the Vite build from the same origin as the
+// API. Keeping the SPA and API together preserves cookie-based authentication
+// and Socket.IO without cross-site configuration.
+const frontendDistDir = path.resolve(
+  process.env.FRONTEND_DIST_DIR || path.join(__dirname, '../../dist'),
+);
+const shouldServeFrontend =
+  process.env.SERVE_FRONTEND === 'true' && fs.existsSync(frontendDistDir);
+
+if (shouldServeFrontend) {
+  app.use(
+    express.static(frontendDistDir, {
+      maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
+      immutable: process.env.NODE_ENV === 'production',
+    }),
+  );
+
+  // React Router handles client-side routes. Never turn unknown API or
+  // websocket paths into index.html; those must reach the API 404 handler.
+  app.get(
+    /^(?!\/api(?:\/|$)|\/socket\.io(?:\/|$)|\/uploads(?:\/|$)).*/,
+    (req, res, next) => {
+      if (!['GET', 'HEAD'].includes(req.method)) return next();
+      return res.sendFile(path.join(frontendDistDir, 'index.html'));
+    },
+  );
+}
 
 app.use(notFound);
 app.use(errorHandler);

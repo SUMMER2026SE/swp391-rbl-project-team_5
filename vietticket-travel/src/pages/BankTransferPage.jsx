@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'react-toastify'
 import { getBankTransferInstruction } from '../services/paymentApi.js'
+import { completeItineraryQueueItemByBookingId } from '../utils/aiItineraryBookingQueue.js'
 
 // Trang hướng dẫn chuyển khoản: khách quét mã VietQR bằng app ngân hàng,
 // KHÔNG phải nhập số tài khoản. Số tiền và nội dung đã nhúng sẵn trong mã.
@@ -60,13 +61,20 @@ export default function BankTransferPage() {
   const load = useCallback(async () => {
     try {
       const response = await getBankTransferInstruction(bookingId)
-      setInfo(response.data)
       setError('')
       // Đơn đã được xác nhận -> đưa khách sang xem vé.
-      if (response.data?.paid) {
+      if (response.data?.paid && !response.data?.terminal) {
+        const updatedQueue = completeItineraryQueueItemByBookingId(bookingId)
         toast.success('Đơn của bạn đã được xác nhận thanh toán!')
-        navigate(`/tickets/${bookingId}`, { replace: true })
+        navigate(
+          updatedQueue?.id
+            ? `/itinerary-checkout/${updatedQueue.id}`
+            : `/tickets/${bookingId}`,
+          { replace: true },
+        )
+        return
       }
+      setInfo(response.data)
     } catch (err) {
       setError(err.message || 'Không tải được hướng dẫn chuyển khoản.')
     } finally {
@@ -120,15 +128,31 @@ export default function BankTransferPage() {
     )
   }
 
+  if (!info) {
+    return <div className="p-10 text-center text-on-surface-variant">Đang chuyển tới đơn vé đã xác nhận…</div>
+  }
+
   return (
     <div className="mx-auto max-w-2xl p-4 sm:p-8">
-      <h1 className="text-2xl font-bold text-on-surface">Chuyển khoản để hoàn tất đặt vé</h1>
+      <h1 className="text-2xl font-bold text-on-surface">
+        {info.bookingStatus === 'REFUNDED'
+          ? 'Hoàn tiền chuyển khoản'
+          : info.terminal
+            ? 'Theo dõi chuyển khoản đến muộn'
+            : 'Chuyển khoản để hoàn tất đặt vé'}
+      </h1>
       <p className="mt-1 text-sm text-on-surface-variant">
-        Mở app ngân hàng, chọn <strong>Quét mã QR</strong> và quét mã bên dưới. Số tiền và nội dung
-        đã được điền sẵn — bạn không cần nhập số tài khoản.
+        {info.terminal
+          ? 'Trang này cập nhật trạng thái đối soát của khoản chuyển khoản; mã QR thanh toán đã được khóa để tránh phát sinh giao dịch lặp.'
+          : (
+            <>
+              Mở app ngân hàng, chọn <strong>Quét mã QR</strong> và quét mã bên dưới. Số tiền và
+              nội dung đã được điền sẵn — bạn không cần nhập số tài khoản.
+            </>
+          )}
       </p>
 
-      {remaining !== null && (
+      {!info.terminal && remaining !== null && (
         <div
           className={`mt-4 rounded-xl border-2 p-3 text-center font-bold ${
             remaining > 0
@@ -142,7 +166,32 @@ export default function BankTransferPage() {
         </div>
       )}
 
-      <div className="mt-5 rounded-2xl border border-outline-variant bg-white p-6 shadow-sm">
+      {info.terminal && (
+          <div
+            className={`mt-4 rounded-xl border-2 p-4 text-sm leading-6 ${
+              info.bookingStatus === 'REFUNDED'
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
+                : 'border-amber-300 bg-amber-50 text-amber-950'
+            }`}
+          >
+            <p className="font-bold">
+              {info.bookingStatus === 'REFUNDED'
+                ? 'Khoản chuyển khoản đã được hoàn lại'
+                : info.paid
+                ? 'Đã ghi nhận tiền sau khi đơn hết khả năng phát vé'
+                : 'Đơn đã kết thúc và không còn nhận chuyển khoản'}
+            </p>
+            <p className="mt-1">
+              {info.bookingStatus === 'REFUNDED'
+                ? 'VietTicket đã hoàn 100% theo mã giao dịch đối soát. Nếu tiền chưa về tài khoản, vui lòng liên hệ hỗ trợ và cung cấp mã đặt chỗ.'
+                : info.paid
+                ? 'VietTicket không phát vé sai tồn kho. Yêu cầu hoàn 100% đã được chuyển tới nhân viên để đối soát và hoàn qua ngân hàng.'
+                : 'Không chuyển tiền theo mã QR này. Nếu tài khoản đã bị trừ tiền, vui lòng liên hệ hỗ trợ và cung cấp mã đặt chỗ.'}
+          </p>
+        </div>
+      )}
+
+      {!info.terminal && <div className="mt-5 rounded-2xl border border-outline-variant bg-white p-6 shadow-sm">
         <div className="flex flex-col items-center">
           <QRCodeSVG
             bgColor="#ffffff"
@@ -180,7 +229,7 @@ export default function BankTransferPage() {
             </li>
           </ul>
         </div>
-      </div>
+      </div>}
 
       <div className="mt-5 flex flex-wrap gap-3">
         <button
@@ -189,7 +238,7 @@ export default function BankTransferPage() {
           className="flex items-center gap-2 rounded-xl border border-primary px-4 py-2.5 text-sm font-bold text-primary hover:bg-primary/5"
         >
           <span className="material-symbols-outlined text-[18px]" aria-hidden="true">refresh</span>
-          Tôi đã chuyển khoản — kiểm tra lại
+          {info.terminal ? 'Kiểm tra trạng thái' : 'Tôi đã chuyển khoản — kiểm tra lại'}
         </button>
         <Link
           to="/my-tickets"

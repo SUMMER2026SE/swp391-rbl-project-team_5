@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { footerLinks } from '../data/landingData.js'
 
 function Footer({ links = footerLinks }) {

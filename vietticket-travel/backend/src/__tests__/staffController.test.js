@@ -18,6 +18,7 @@ const {
   refundViaVnpay,
 } = require('../controllers/paymentController');
 const {
+  adjudicateRefundRequest,
   listRefundRequests,
   processRefundRequest,
   reconcileRefundRequest,
@@ -290,6 +291,36 @@ describe('processRefundRequest', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  test('waits for the Rescue difference refund before approving replacement cancellation', async () => {
+    const request = refundFixture({
+      requestKey: 'recovery-customer:booking-replacement',
+      targetBookingId: 'booking-replacement',
+      booking: {
+        ...refundFixture().booking,
+        id: 'booking-vnpay-root',
+        status: 'CANCELLED',
+      },
+      targetBooking: {
+        id: 'booking-replacement',
+        status: 'REFUND_REQUESTED',
+        user: { fullName: 'Nguyen Van A', email: 'a@example.com' },
+      },
+    });
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    prisma.refundRequest.count.mockResolvedValue(1);
+    const { req, res, next } = makeReqRes({
+      params: { refundId: request.id },
+      body: { action: 'APPROVED' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(prisma.refundRequest.updateMany).not.toHaveBeenCalled();
+    expect(refundViaVnpay).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   test('calls VNPay refund for an online payment before updating the DB', async () => {
     const request = refundFixture({
       booking: {
@@ -344,6 +375,94 @@ describe('processRefundRequest', () => {
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({ success: true }),
     );
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('requires a bank reference before approving a manual transfer refund', async () => {
+    const bankPayment = paymentFixture({
+      paymentGateway: 'BANK_TRANSFER',
+      transactionId: 'BT-booking-1',
+      rawResponse: { method: 'bank_transfer' },
+    });
+    prisma.refundRequest.findUnique.mockResolvedValue(refundFixture({
+      booking: {
+        ...refundFixture().booking,
+        payments: [bankPayment],
+      },
+    }));
+    const { req, res, next } = makeReqRes({
+      params: { refundId: 'refund-1' },
+      body: { action: 'APPROVED', manualReference: '' },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(prisma.refundRequest.updateMany).not.toHaveBeenCalled();
+    expect(prisma.refundTransaction.create).not.toHaveBeenCalled();
+    expect(refundViaVnpay).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('records and finalizes a bank-transfer refund without calling VNPay', async () => {
+    const bankPayment = paymentFixture({
+      paymentGateway: 'BANK_TRANSFER',
+      transactionId: 'BT-booking-1',
+      rawResponse: { method: 'bank_transfer' },
+    });
+    const request = refundFixture({
+      booking: {
+        ...refundFixture().booking,
+        payments: [bankPayment],
+      },
+    });
+    const tx = {
+      refundRequest: {
+        findUnique: jest.fn().mockResolvedValue({ ...request, status: 'PROCESSING' }),
+        update: jest.fn().mockResolvedValue({ ...request, status: 'APPROVED' }),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      refundTransaction: { update: jest.fn().mockResolvedValue({}) },
+      dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      timeSlotStock: { updateMany: jest.fn() },
+      reservation: { update: jest.fn().mockResolvedValue({}) },
+      ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      booking: { update: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: { findUnique: jest.fn().mockResolvedValue(null) },
+      user: { update: jest.fn() },
+    };
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const { req, res, next } = makeReqRes({
+      user: { id: 'staff-1', email: 'staff@example.com' },
+      params: { refundId: 'refund-1' },
+      body: {
+        action: 'APPROVED',
+        manualReference: 'FT260727123456',
+        staffNotes: 'Đã kiểm tra sao kê hoàn tiền.',
+      },
+    });
+
+    await processRefundRequest(req, res, next);
+
+    expect(refundViaVnpay).not.toHaveBeenCalled();
+    expect(prisma.refundTransaction.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        gateway: 'BANK_TRANSFER_MANUAL',
+        transactionType: 'MANUAL',
+        gatewayTransactionId: 'FT260727123456',
+        status: 'PROCESSING',
+      }),
+    });
+    expect(tx.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'SUCCESS' }),
+    }));
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -501,6 +620,7 @@ describe('reconcileRefundRequest', () => {
         amount: 90000,
         transactionType: '03',
         status: 'NEEDS_RECONCILIATION',
+        gatewayRequestId: 'refund-request-1',
         rawResponse: { vnp_ResponseCode: '94' },
         payment: paymentFixture(),
       }],
@@ -517,6 +637,7 @@ describe('reconcileRefundRequest', () => {
         vnp_TransactionType: '03',
         vnp_Amount: '9000000',
         vnp_TransactionNo: 'refund-vnp-1',
+        vnp_RequestId: 'refund-request-1',
       },
     });
     const tx = {
@@ -599,10 +720,190 @@ describe('reconcileRefundRequest', () => {
 
     await processRefundRequest(req, res, next);
 
-    expect(prisma.refundTransaction.update).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prisma.refundTransaction.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: expect.any(String),
+        status: 'PROCESSING',
+      }),
       data: expect.objectContaining({ status: 'NEEDS_RECONCILIATION' }),
     }));
     expect(res.status).toHaveBeenCalledWith(202);
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('adjudicateRefundRequest', () => {
+  function makeAdjudicationRequest(overrides = {}) {
+    const payment = paymentFixture();
+    const transaction = {
+      id: 'refund-txn-manual-1',
+      bookingId: 'booking-1',
+      paymentId: payment.id,
+      refundRequestId: 'refund-1',
+      gateway: 'VNPAY',
+      gatewayRequestId: 'refund-request-manual-1',
+      gatewayTransactionId: null,
+      transactionType: '03',
+      amount: 90000,
+      status: 'NEEDS_RECONCILIATION',
+      rawResponse: { workerError: 'timeout' },
+      payment,
+    };
+    return refundFixture({
+      status: 'PROCESSING',
+      refundTransactions: [transaction],
+      ...overrides,
+    });
+  }
+
+  function makeAdjudicationBody(overrides = {}) {
+    return {
+      outcome: 'SUCCESS',
+      confirmAmount: 90000,
+      transactionType: '03',
+      paymentTransactionRef: 'txn-ref-1',
+      gatewayTransactionId: 'vnp-refund-90001',
+      evidenceNote: 'Đã đối chiếu trên cổng quản trị VNPay lúc 10:30.',
+      ...overrides,
+    };
+  }
+
+  test('requires ADMIN for evidence-based financial adjudication', async () => {
+    const { req, res, next } = makeReqRes({
+      params: { refundId: 'refund-1' },
+      body: makeAdjudicationBody(),
+    });
+
+    await adjudicateRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(prisma.refundRequest.findUnique).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('rejects evidence when amount does not exactly match the pending refund', async () => {
+    prisma.refundRequest.findUnique.mockResolvedValue(makeAdjudicationRequest());
+    const { req, res, next } = makeReqRes({
+      user: { role: 'ADMIN' },
+      params: { refundId: 'refund-1' },
+      body: makeAdjudicationBody({ confirmAmount: 80000 }),
+    });
+
+    await adjudicateRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('finalizes a stuck refund only after matching all external evidence fields', async () => {
+    const request = makeAdjudicationRequest();
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    const tx = {
+      refundRequest: {
+        findUnique: jest.fn().mockResolvedValue(request),
+        update: jest.fn().mockResolvedValue({ ...request, status: 'APPROVED' }),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      refundTransaction: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+      loyaltyTransaction: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      reservation: { update: jest.fn().mockResolvedValue({}) },
+      ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      booking: { update: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const { req, res, next } = makeReqRes({
+      user: { role: 'ADMIN', id: 'admin-1' },
+      params: { refundId: 'refund-1' },
+      body: makeAdjudicationBody(),
+    });
+
+    await adjudicateRefundRequest(req, res, next);
+
+    expect(tx.refundTransaction.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        gateway: 'VNPAY',
+        gatewayTransactionId: 'vnp-refund-90001',
+      }),
+      select: { id: true, refundRequestId: true },
+    });
+    expect(tx.refundTransaction.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        gatewayTransactionId: 'vnp-refund-90001',
+        rawResponse: expect.objectContaining({
+          manualAdjudication: expect.objectContaining({
+            paymentTransactionRef: 'txn-ref-1',
+            confirmAmount: 90000,
+          }),
+        }),
+      }),
+    }));
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: 'booking-1' },
+      data: { status: 'REFUNDED', refundRequired: false },
+    });
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'REFUND_MANUAL_ADJUDICATION_SUCCESS',
+      }),
+    }));
+    expect(sendRefundStatusEmail).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('records a verified failed attempt and safely reopens the request', async () => {
+    const request = makeAdjudicationRequest();
+    prisma.refundRequest.findUnique.mockResolvedValue(request);
+    const tx = {
+      refundRequest: {
+        findUnique: jest.fn().mockResolvedValue(request),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      refundTransaction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const { req, res, next } = makeReqRes({
+      user: { role: 'ADMIN', id: 'admin-1' },
+      params: { refundId: 'refund-1' },
+      body: makeAdjudicationBody({
+        outcome: 'FAILED',
+        gatewayTransactionId: '',
+        evidenceNote: 'VNPay merchant xác nhận lần gửi trước chưa ghi nhận hoàn tiền.',
+      }),
+    });
+
+    await adjudicateRefundRequest(req, res, next);
+
+    expect(tx.refundTransaction.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'FAILED' }),
+    }));
+    expect(tx.refundRequest.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'PENDING' }),
+    }));
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'REFUND_MANUAL_ADJUDICATION_FAILED',
+      }),
+    }));
+    expect(sendRefundStatusEmail).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ status: 'PENDING' }),
+    }));
     expect(next).not.toHaveBeenCalled();
   });
 });

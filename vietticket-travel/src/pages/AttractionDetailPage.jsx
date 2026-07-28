@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'react-toastify'
 import BookingModal from '../components/BookingModal.jsx'
 import Footer from '../components/Footer.jsx'
@@ -827,7 +827,7 @@ export default function AttractionDetailPage() {
                 <ul className="space-y-3">
                   {[
                     'Vé QR lưu trên điện thoại',
-                    'Thanh toán an toàn qua VNPay',
+                    'Thanh toán an toàn qua VNPay hoặc VietQR',
                     'Chính sách hoàn hiển thị theo từng loại vé',
                     'Hỗ trợ khi lịch trình thay đổi',
                   ].map((item) => (

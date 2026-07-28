@@ -157,7 +157,31 @@ describe('getRefundEligibility', () => {
     });
     expect(getRefundEligibility(booking, now)).toEqual(expect.objectContaining({
       refundable: false,
-      notRefundableReason: expect.stringMatching(/VNPay/i),
+      notRefundableReason: expect.stringMatching(/phương thức gốc/i),
+    }));
+  });
+
+  test('allows a Rescue replacement to use the traced VNPay payment', () => {
+    const booking = eligibleBooking({
+      payments: [{
+        status: 'SUCCESS',
+        isDuplicate: false,
+        paymentGateway: 'RECOVERY_CREDIT',
+      }],
+      recoveryCaseAsReplacement: {
+        fundingBooking: {
+          payments: [{
+            status: 'SUCCESS',
+            isDuplicate: false,
+            paymentGateway: 'VNPAY',
+          }],
+        },
+      },
+    });
+
+    expect(getRefundEligibility(booking, now)).toEqual(expect.objectContaining({
+      refundable: true,
+      refundAmount: 100000,
     }));
   });
 
@@ -171,6 +195,14 @@ describe('getRefundEligibility', () => {
       refundRequests: [{ type: 'CUSTOMER_CANCELLATION', status: 'REJECTED' }],
     });
     expect(getRefundEligibility(withCustomerRequest, now).refundable).toBe(false);
+
+    const withTargetedRecoveryRequest = eligibleBooking({
+      refundRequestsTargeting: [{
+        type: 'CUSTOMER_CANCELLATION',
+        status: 'PENDING',
+      }],
+    });
+    expect(getRefundEligibility(withTargetedRecoveryRequest, now).refundable).toBe(false);
   });
 });
 

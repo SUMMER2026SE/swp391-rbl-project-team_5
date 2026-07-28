@@ -26,7 +26,7 @@ describe('arrivalPressureService', () => {
 
     expect(result.score).toBe(6);
     expect(result.level).toBe('QUIET');
-    expect(result.label).toBe('Thoáng');
+    expect(result.label).toBe('Nhu cầu VietTicket thấp');
   });
 
   test('caps a fully loaded attraction at 100 and exposes the busy level', () => {
@@ -41,7 +41,7 @@ describe('arrivalPressureService', () => {
 
     expect(result.score).toBe(100);
     expect(result.level).toBe('VERY_BUSY');
-    expect(getPressureLabel(result.level)).toBe('Rất đông');
+    expect(getPressureLabel(result.level)).toBe('Nhu cầu VietTicket rất cao');
   });
 
   test('marks zero-capacity or closed attractions as closed, not quiet', () => {
@@ -95,7 +95,11 @@ describe('arrivalPressureService', () => {
     mockPrisma.specialDate.findUnique.mockResolvedValue({ closed: false, capacity: null, note: null });
     mockPrisma.timeSlot.findMany.mockResolvedValue([]);
     mockPrisma.booking.count.mockResolvedValueOnce(20).mockResolvedValueOnce(5);
-    mockPrisma.ticketInstance.count.mockResolvedValue(3);
+    mockPrisma.ticketInstance.findMany.mockResolvedValue([
+      { id: 'used-1', booking: { reservation: { timeSlotId: null } } },
+      { id: 'used-2', booking: { reservation: { timeSlotId: null } } },
+      { id: 'used-3', booking: { reservation: { timeSlotId: null } } },
+    ]);
     mockPrisma.smartQueueEntry.findMany.mockResolvedValue([{
       partySize: 7,
       liveTripItem: { scheduledStart: new Date('2099-03-10T02:00:00.000Z') },
@@ -113,14 +117,53 @@ describe('arrivalPressureService', () => {
     expect(result.summary.waitingGuests).toBe(7);
     expect(result.showRate).toBe(0.8);
     expect(result.dataBasis).toBe('BOOKING_STOCK_QR_AND_SMART_QUEUE');
-    expect(mockPrisma.ticketInstance.count).toHaveBeenCalledWith({
+    expect(result).toMatchObject({
+      coverageScope: 'VIETTICKET_CHANNEL_ONLY',
+      venueCoverageKnown: false,
+      venueCoverageRatio: null,
+    });
+    expect(mockPrisma.booking.count).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.booking.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        isForecastTrainingSample: false,
+        OR: expect.arrayContaining([
+          expect.objectContaining({
+            snapshotAttractionId: 'a1',
+            snapshotVisitDate: { lt: new Date('2099-03-10T00:00:00.000Z') },
+          }),
+          expect.objectContaining({
+            snapshotAttractionId: null,
+            reservation: expect.objectContaining({
+              ticketProduct: { attractionId: 'a1' },
+            }),
+          }),
+        ]),
+      }),
+    });
+    expect(mockPrisma.ticketInstance.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         checkedInAt: {
           gte: new Date('2099-03-10T01:45:00.000Z'),
           lte: new Date('2099-03-10T02:00:00.000Z'),
         },
+        booking: expect.objectContaining({
+          isForecastTrainingSample: false,
+          status: { in: ['CONFIRMED', 'COMPLETED'] },
+          OR: expect.arrayContaining([
+            expect.objectContaining({
+              snapshotAttractionId: 'a1',
+              snapshotVisitDate: new Date('2099-03-10T00:00:00.000Z'),
+            }),
+            expect.objectContaining({
+              snapshotAttractionId: null,
+              reservation: expect.objectContaining({
+                ticketProduct: { attractionId: 'a1' },
+              }),
+            }),
+          ]),
+        }),
       }),
-    });
+    }));
   });
 
   test('attributes waiting guests only to their scheduled slot', async () => {
@@ -158,7 +201,11 @@ describe('arrivalPressureService', () => {
       },
     ]);
     mockPrisma.booking.count.mockResolvedValue(0);
-    mockPrisma.ticketInstance.count.mockResolvedValue(0);
+    mockPrisma.ticketInstance.findMany.mockResolvedValue([
+      { id: 'morning-1', booking: { reservation: { timeSlotId: 'slot-morning' } } },
+      { id: 'morning-2', booking: { reservation: { timeSlotId: 'slot-morning' } } },
+      { id: 'afternoon-1', booking: { reservation: { timeSlotId: 'slot-afternoon' } } },
+    ]);
     mockPrisma.smartQueueEntry.findMany.mockResolvedValue([{
       partySize: 10,
       liveTripItem: { scheduledStart: new Date('2099-03-10T02:00:00.000Z') },
@@ -173,6 +220,10 @@ describe('arrivalPressureService', () => {
     expect(result.slots).toEqual(expect.arrayContaining([
       expect.objectContaining({ timeSlotId: 'slot-morning', waitingGuests: 10 }),
       expect.objectContaining({ timeSlotId: 'slot-afternoon', waitingGuests: 0 }),
+    ]));
+    expect(result.slots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ timeSlotId: 'slot-morning', checkinsLast15Minutes: 2 }),
+      expect.objectContaining({ timeSlotId: 'slot-afternoon', checkinsLast15Minutes: 1 }),
     ]));
   });
 

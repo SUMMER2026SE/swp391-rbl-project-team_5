@@ -2,6 +2,7 @@
 
 const {
   getActivityWindow,
+  getBookingActivityWindow,
   getCheckinTimeBlockReason,
   getManualApprovalDeadline,
   isBookingCutoffPassed,
@@ -53,6 +54,36 @@ test('limits manual approval by the earlier of 24 hours and activity start', () 
   expect(getManualApprovalDeadline(makeBooking())).toEqual(
     new Date('2026-07-11T01:00:00.000Z'),
   );
+});
+
+test('keeps the sold booking slot immutable when a partner later changes the live slot', () => {
+  const booking = makeBooking();
+  booking.snapshotTimeSlotLabel = '08:00 - 10:00';
+  booking.reservation.timeSlot = { startTime: '09:30', endTime: '11:30' };
+
+  expect(getBookingActivityWindow(booking)).toEqual({
+    startsAt: new Date('2026-07-11T01:00:00.000Z'),
+    endsAt: new Date('2026-07-11T03:00:00.000Z'),
+    startTime: '08:00',
+    endTime: '10:00',
+  });
+});
+
+test('keeps all-day activity hours immutable when attraction hours change later', () => {
+  const booking = makeBooking();
+  booking.reservation.timeSlot = null;
+  booking.snapshotTimeSlotLabel = null;
+  booking.snapshotActivityStartTime = '07:30';
+  booking.snapshotActivityEndTime = '17:00';
+  booking.reservation.ticketProduct.attraction.openTime = '09:00';
+  booking.reservation.ticketProduct.attraction.closeTime = '16:00';
+
+  expect(getBookingActivityWindow(booking)).toEqual({
+    startsAt: new Date('2026-07-11T00:30:00.000Z'),
+    endsAt: new Date('2026-07-11T10:00:00.000Z'),
+    startTime: '07:30',
+    endTime: '17:00',
+  });
 });
 
 test('blocks check-in outside the slot and allows it during the slot', () => {

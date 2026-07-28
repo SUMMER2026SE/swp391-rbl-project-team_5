@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router'
 import { toast } from 'react-toastify'
 import AccountLayout from '../components/auth/AccountLayout.jsx'
 import AuthFormInput from '../components/auth/AuthFormInput.jsx'

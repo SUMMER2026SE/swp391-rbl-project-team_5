@@ -22,6 +22,7 @@ backend/public/uploads/*
 
 # Local QA/demo artefacts
 tmp/
+.tmp/
 backend/jest-unit-results.json
 
 # Editor directories and files

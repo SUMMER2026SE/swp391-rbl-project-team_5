@@ -925,11 +925,13 @@ describe('cancelConfirmedBooking', () => {
     return {
       booking: {
         findUnique: jest.fn().mockResolvedValue(booking),
+        update: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      ticketProduct: { findMany: jest.fn().mockResolvedValue([]) },
       reservation: { update: jest.fn().mockResolvedValue({}) },
       ticketInstance: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
       voucher: { updateMany: jest.fn() },
@@ -940,6 +942,10 @@ describe('cancelConfirmedBooking', () => {
       refundTransaction: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'refund-tx-cancel', status: 'PENDING' }),
+      },
+      recoveryCase: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
       },
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
@@ -998,5 +1004,50 @@ describe('cancelConfirmedBooking', () => {
 
     expect(res.status).toHaveBeenCalledWith(409);
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  test('refunds a repeatedly cancelled replacement from the traced VNPay booking', async () => {
+    const replacement = makeBooking('CONFIRMED');
+    replacement.id = 'booking-replacement';
+    replacement.totalAmount = 30000;
+    replacement.payments = [{
+      id: 'payment-recovery-credit',
+      status: 'SUCCESS',
+      isDuplicate: false,
+      paymentGateway: 'RECOVERY_CREDIT',
+      amount: 30000,
+    }];
+    const fundingBooking = makeBooking('CANCELLED');
+    fundingBooking.id = 'booking-vnpay-root';
+    fundingBooking.totalAmount = 520000;
+    fundingBooking.payments[0].amount = 520000;
+    mockPrisma.booking.findUnique.mockResolvedValue(replacement);
+
+    let tx;
+    mockPrisma.$transaction.mockImplementation(async (callback) => {
+      tx = makeCancelTx(replacement);
+      tx.recoveryCase.findFirst.mockResolvedValue({ fundingBooking });
+      return callback(tx);
+    });
+
+    const { req, res, next } = makeReqRes({
+      params: { id: replacement.id },
+      body: { reason: REASON },
+    });
+    await cancelConfirmedBooking(req, res, next);
+
+    expect(tx.refundRequest.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { requestKey: `recovery-full-booking:${replacement.id}` },
+      create: expect.objectContaining({
+        bookingId: fundingBooking.id,
+        amount: 30000,
+      }),
+    }));
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: fundingBooking.id },
+      data: { refundRequired: true },
+    });
+    expect(next).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
   });
 });

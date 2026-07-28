@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router'
 import ProtectedRoute from '../components/ProtectedRoute.jsx'
 import AdminRoute from '../components/AdminRoute.jsx'
 
@@ -9,6 +9,7 @@ const BookingSuccessPage = lazy(() => import('../pages/BookingSuccessPage.jsx'))
 const ChangePasswordPage = lazy(() => import('../pages/ChangePasswordPage.jsx'))
 const CheckoutPage = lazy(() => import('../pages/CheckoutPage.jsx'))
 const ItineraryCheckoutPage = lazy(() => import('../pages/ItineraryCheckoutPage.jsx'))
+const JourneyCenterPage = lazy(() => import('../pages/JourneyCenterPage.jsx'))
 const ETicketPage = lazy(() => import('../pages/ETicketPage.jsx'))
 const EditProfilePage = lazy(() => import('../pages/EditProfilePage.jsx'))
 const ForgotPasswordPage = lazy(() => import('../pages/ForgotPasswordPage.jsx'))
@@ -33,9 +34,13 @@ const PartnerSmartQueuePage = lazy(() => import('../pages/PartnerSmartQueuePage.
 const PartnerDynamicPricingPage = lazy(() => import('../pages/PartnerDynamicPricingPage.jsx'))
 const PartnerTicketFormPage = lazy(() => import('../pages/PartnerTicketFormPage.jsx'))
 const PartnerTicketsPage = lazy(() => import('../pages/PartnerTicketsPage.jsx'))
+const PartyJoinPage = lazy(() => import('../pages/PartyJoinPage.jsx'))
+const PartyRoomPage = lazy(() => import('../pages/PartyRoomPage.jsx'))
+const PartyRoomsPage = lazy(() => import('../pages/PartyRoomsPage.jsx'))
 const ProfilePage = lazy(() => import('../pages/ProfilePage.jsx'))
 const RegisterPage = lazy(() => import('../pages/RegisterPage.jsx'))
 const ResetPasswordPage = lazy(() => import('../pages/ResetPasswordPage.jsx'))
+const RecoveryCenterPage = lazy(() => import('../pages/RecoveryCenterPage.jsx'))
 const SearchAttractionsPage = lazy(() => import('../pages/SearchAttractionsPage.jsx'))
 const SupportCenterPage = lazy(() => import('../pages/SupportCenterPage.jsx'))
 const MySupportTicketsPage = lazy(() => import('../pages/MySupportTicketsPage.jsx'))
@@ -87,6 +92,16 @@ function AppRoutes() {
       <Route path="/attractions/:id" element={<AttractionDetailPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/party/join/:roomId" element={<PartyJoinPage />} />
+      <Route path="/party/:roomId" element={<PartyRoomPage />} />
+      <Route
+        path="/party"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <PartyRoomsPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/partner" element={<Navigate to="/partner/dashboard" replace />} />
       <Route path="/partner/register" element={<PartnerRegisterPage />} />
       <Route
@@ -382,10 +397,34 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/journey"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <JourneyCenterPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/my-tickets"
         element={
           <ProtectedRoute>
             <MyTicketsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/rescue"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <RecoveryCenterPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/rescue/:id"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <RecoveryCenterPage />
           </ProtectedRoute>
         }
       />

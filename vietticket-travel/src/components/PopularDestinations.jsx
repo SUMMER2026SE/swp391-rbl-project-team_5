@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { searchAttractions } from '../services/attractionApi.js'
 import fallbackDestinationImage from '../assets/ninh_binh.webp'
 

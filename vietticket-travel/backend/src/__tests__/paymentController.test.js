@@ -24,6 +24,9 @@ jest.mock('../realtime/events', () => ({
 jest.mock('../services/ticketEmailService', () => ({
   queueConfirmedTicketEmail: jest.fn(),
 }));
+jest.mock('../utils/mailer', () => ({
+  sendRefundRequestReceivedEmail: jest.fn().mockResolvedValue(undefined),
+}));
 
 const prisma = require('../config/prisma');
 const { verifyVnpaySignature, buildVnpayUrl } = require('../utils/vnpay');
@@ -40,6 +43,7 @@ const {
   vnpayIpn,
   vnpayReturn,
   createVNPayUrl,
+  createRefundRequest,
   refundViaVnpay,
   queryVnpayTransaction,
 } = require('../controllers/paymentController');
@@ -199,6 +203,92 @@ function setupTx({
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+describe('Rescue replacement refund request', () => {
+  test('attaches the request to the VNPay funding booking and targets the replacement', async () => {
+    const replacement = {
+      id: 'booking-replacement',
+      userId: 'user-1',
+      status: 'CONFIRMED',
+      totalAmount: 30000,
+      snapshotRefundPolicy: 'FREE_CANCELLATION',
+      snapshotRefundFeeRate: 0,
+      snapshotRefundCutoffHours: 0,
+      fullName: 'Khách Rescue',
+      email: 'rescue@example.com',
+      payments: [{
+        id: 'credit-1',
+        amount: 30000,
+        status: 'SUCCESS',
+        isDuplicate: false,
+        paymentGateway: 'RECOVERY_CREDIT',
+      }],
+      ticketInstances: [{ status: 'VALID' }],
+      refundRequests: [],
+      refundRequestsTargeting: [],
+      reservation: {
+        date: new Date(Date.now() + 48 * 60 * 60 * 1000),
+        timeSlot: null,
+        ticketProduct: {
+          refundPolicy: 'FREE_CANCELLATION',
+          attraction: { openTime: '08:00', closeTime: '17:00' },
+        },
+      },
+      recoveryCaseAsReplacement: {
+        fundingBooking: {
+          id: 'booking-vnpay-root',
+          payments: [{
+            id: 'payment-vnpay-root',
+            amount: 520000,
+            status: 'SUCCESS',
+            isDuplicate: false,
+            paymentGateway: 'VNPAY',
+          }],
+        },
+      },
+    };
+    const tx = {
+      booking: {
+        findUnique: jest.fn().mockResolvedValue(replacement),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      refundRequest: {
+        create: jest.fn().mockImplementation(({ data }) => ({
+          id: 'refund-recovery-customer',
+          ...data,
+        })),
+      },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const req = {
+      user: { id: 'user-1' },
+      body: {
+        bookingId: replacement.id,
+        reason: 'Thay đổi lịch trình cá nhân',
+      },
+    };
+    const res = makeRes();
+    const next = jest.fn();
+
+    await createRefundRequest(req, res, next);
+
+    expect(tx.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: replacement.id, status: 'CONFIRMED' },
+      data: { status: 'REFUND_REQUESTED' },
+    });
+    expect(tx.refundRequest.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        bookingId: 'booking-vnpay-root',
+        targetBookingId: replacement.id,
+        requestKey: `recovery-customer:${replacement.id}`,
+        originalAmount: replacement.totalAmount,
+        amount: replacement.totalAmount,
+      }),
+    });
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 describe('vnpayIpn', () => {

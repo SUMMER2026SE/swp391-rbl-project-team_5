@@ -92,13 +92,15 @@ async function seedLiveAutopilotSignals({
       create: {
         attractionId: attraction.id,
         enabled: true,
+        operationalReadinessConfirmedAt: now,
         mode: 'AUTO',
         openBeforeMinutes: 120,
         readyGraceMinutes: 10,
         maxReadyParties: 3,
+        maxReadyGuests: 20,
         maxActiveParties: 100,
       },
-      update: { enabled: true, mode: 'AUTO' },
+      update: { enabled: true, operationalReadinessConfirmedAt: now, mode: 'AUTO' },
     });
     for (let step = 1; step <= 96; step += 1) {
       const bucketStart = new Date(now.getTime() - step * 15 * 60 * 1000);

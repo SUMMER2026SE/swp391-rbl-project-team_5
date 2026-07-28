@@ -79,7 +79,7 @@ function qrTokenForHistory(key, index) {
   return stableUuid('ticket-qr-history', `${key}:${index}`);
 }
 
-function assertLocalDemoDatabase() {
+function assertDemoDatabaseTarget({ allowExplicitRemote = false } = {}) {
   let databaseUrl;
   try {
     databaseUrl = new URL(String(process.env.DATABASE_URL || ''));
@@ -87,6 +87,15 @@ function assertLocalDemoDatabase() {
     throw new Error('DATABASE_URL không hợp lệ; từ chối reset dữ liệu demo.');
   }
   const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
+  if (localHosts.has(databaseUrl.hostname)) return;
+
+  const remoteConfirmed =
+    allowExplicitRemote
+    && process.env.DEPLOYMENT_MODE === 'defense-demo'
+    && process.env.ALLOW_REMOTE_DEMO_SEED === 'true'
+    && process.argv.includes('--confirm-remote-demo');
+  if (remoteConfirmed) return;
+
   if (!localHosts.has(databaseUrl.hostname)) {
     throw new Error('demo:prepare chỉ được phép reset database chạy trên localhost.');
   }
@@ -385,6 +394,15 @@ function liveShowcaseWindow(now = new Date()) {
     endTime: timeKeyFromMinutes(endMinute),
     callWindowOpen: currentMinute >= startMinute - 15,
   };
+}
+
+function isLiveShowcaseWindowAvailable(now = new Date()) {
+  try {
+    liveShowcaseWindow(now);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function money(value) {
@@ -2356,10 +2374,12 @@ async function seedLiveAutopilotShowcase(scenarioBookings, { now = new Date() } 
     where: { attractionId: IDS.attractions.museum },
     data: {
       enabled: true,
+      operationalReadinessConfirmedAt: now,
       mode: 'STAFF_CONTROLLED',
       openBeforeMinutes: 1440,
       readyGraceMinutes: 10,
       maxReadyParties: 3,
+      maxReadyGuests: 20,
       maxActiveParties: 100,
       fallbackThroughput15m: 12,
       pausedAt: null,
@@ -2702,7 +2722,7 @@ async function collectDemoReadiness() {
   };
 }
 
-function assertDemoReady(readiness) {
+function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
   const failures = [];
   const requireAtLeast = (field, minimum, label) => {
     if (Number(readiness[field] || 0) < minimum) {
@@ -2750,15 +2770,17 @@ function assertDemoReady(readiness) {
       else failures.push(message);
     }
   };
-  requireLiveAtLeast('showcaseTrips', 1, 'LiveTrip showcase đang hoạt động');
-  requireLiveAtLeast('showcaseItems', 2, 'Hoạt động trong LiveTrip showcase');
-  requireLiveAtLeast('linkedBookings', 1, 'Hoạt động liên kết booking thật');
-  requireLiveAtLeast('pendingProposals', 1, 'Đề xuất Autopilot chờ Customer xác nhận');
-  requireLiveAtLeast('waitingQueueEntries', 1, 'Lượt SmartQueue đang chờ');
-  requireLiveAtLeast('staffControlledPolicies', 1, 'Chính sách SmartQueue do nhân viên điều phối');
+  if (requireLiveShowcase) {
+    requireLiveAtLeast('showcaseTrips', 1, 'LiveTrip showcase đang hoạt động');
+    requireLiveAtLeast('showcaseItems', 2, 'Hoạt động trong LiveTrip showcase');
+    requireLiveAtLeast('linkedBookings', 1, 'Hoạt động liên kết booking thật');
+    requireLiveAtLeast('pendingProposals', 1, 'Đề xuất Autopilot chờ Customer xác nhận');
+    requireLiveAtLeast('waitingQueueEntries', 1, 'Lượt SmartQueue đang chờ');
+    requireLiveAtLeast('staffControlledPolicies', 1, 'Chính sách SmartQueue do nhân viên điều phối');
+    requireLiveAtLeast('freshNonFallbackPredictions', 1, 'Dự báo ML thật, còn mới và không fallback');
+    requireLiveAtLeast('explainabilityEvents', 3, 'Event giải thích quyết định Live-AutoPilot');
+  }
   requireLiveAtLeast('trainingObservations', 288, 'Quan sát huấn luyện Live AI có nhãn');
-  requireLiveAtLeast('freshNonFallbackPredictions', 1, 'Dự báo ML thật, còn mới và không fallback');
-  requireLiveAtLeast('explainabilityEvents', 3, 'Event giải thích quyết định Live-AutoPilot');
   requireLiveAtLeast('pressureSourceBookings', 2, 'Booking đoàn tạo áp lực tồn chỗ có kiểm chứng');
   if (Number(live.museumInventoryRatio || 0) < 0.85) {
     failures.push(`Tỷ lệ tồn chỗ bảo tàng cho SmartQueue: cần >= 0.85, hiện có ${live.museumInventoryRatio || 0}`);
@@ -2783,7 +2805,12 @@ function assertDemoReady(readiness) {
   return readiness;
 }
 
-function printHandoff(readiness, forecastResults = [], liveShowcase = null) {
+function printHandoff(
+  readiness,
+  forecastResults = [],
+  liveShowcase = null,
+  { liveWindowAvailable = true } = {},
+) {
   console.log('\n============================================================');
   console.log('VIETTICKET OPERATIONAL SHOWCASE — READY');
   console.log('============================================================');
@@ -2818,6 +2845,10 @@ function printHandoff(readiness, forecastResults = [], liveShowcase = null) {
   if (liveShowcase) {
     console.log('\nLive-AutoPilot showcase:');
     console.log(JSON.stringify(liveShowcase, null, 2));
+  } else if (!liveWindowAvailable) {
+    console.log('\nLive-AutoPilot showcase: TẠM KHÔNG DỰNG');
+    console.log('Lý do: đã ngoài cửa sổ vận hành thật của điểm đến; hệ thống không tạo hàng chờ giả sau giờ đóng.');
+    console.log('Chạy lại npm run demo:prepare trước 16:45 giờ Việt Nam để có WAITING/proposal live.');
   }
   console.log('\nTrước mỗi lần tập/trình diễn: npm run demo:prepare');
   console.log('Kiểm tra không ghi DB:    npm run demo:check');
@@ -2828,6 +2859,7 @@ function printHandoff(readiness, forecastResults = [], liveShowcase = null) {
 async function main() {
   const checkOnly = process.argv.includes('--check');
   const confirmedLocalDemo = process.argv.includes('--confirm-local-demo');
+  const confirmedRemoteDemo = process.argv.includes('--confirm-remote-demo');
 
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Tuyệt đối không được seed dữ liệu bảo vệ trong production.');
@@ -2837,15 +2869,29 @@ async function main() {
   }
 
   await prisma.$connect();
+  const liveWindowAvailable = isLiveShowcaseWindowAvailable();
   if (checkOnly) {
-    const readiness = assertDemoReady(await collectDemoReadiness());
-    printHandoff(readiness);
+    const readiness = assertDemoReady(
+      await collectDemoReadiness(),
+      { requireLiveShowcase: liveWindowAvailable },
+    );
+    printHandoff(readiness, [], null, { liveWindowAvailable });
     return;
   }
   if (!confirmedLocalDemo) {
-    throw new Error('Thiếu cờ --confirm-local-demo. Hãy chạy npm run demo:prepare.');
+    if (!confirmedRemoteDemo) {
+      throw new Error('Thiếu cờ --confirm-local-demo. Hãy chạy npm run demo:prepare.');
+    }
+    if (
+      process.env.DEPLOYMENT_MODE !== 'defense-demo'
+      || process.env.ALLOW_REMOTE_DEMO_SEED !== 'true'
+    ) {
+      throw new Error(
+        'Remote demo seed yêu cầu DEPLOYMENT_MODE=defense-demo và ALLOW_REMOTE_DEMO_SEED=true.',
+      );
+    }
   }
-  assertLocalDemoDatabase();
+  assertDemoDatabaseTarget({ allowExplicitRemote: confirmedRemoteDemo });
 
   // Chặn sớm trường hợp seed quá sát nửa đêm (dữ liệu "hôm nay" sẽ hết hạn ngay).
   const gateWindow = assertDemoGateWindowUsable();
@@ -2874,13 +2920,26 @@ async function main() {
   console.log('Đang tạo settlement, support, favorites, itinerary và audit log...');
   await seedSettlements(scenarioBookings);
   await seedSupportAndCustomerFeatures(scenarioBookings);
-  console.log('Đang dựng LiveTrip showcase, dự báo ML, SmartQueue và đề xuất Autopilot...');
-  const liveShowcase = await seedLiveAutopilotShowcase(scenarioBookings);
+  let liveShowcase = null;
+  if (liveWindowAvailable) {
+    console.log('Đang dựng LiveTrip showcase, dự báo ML, SmartQueue và đề xuất Autopilot...');
+    liveShowcase = await seedLiveAutopilotShowcase(scenarioBookings);
+  } else {
+    console.log('Bỏ qua LiveTrip showcase vì điểm đến đã ngoài giờ vận hành; không tạo hàng chờ giả.');
+  }
   await seedAuditLogs();
   console.log('Đang làm nóng forecast cache cho ba điểm của Partner...');
   const forecastResults = await prepareForecastCache();
-  const readiness = assertDemoReady(await collectDemoReadiness());
-  printHandoff(readiness, forecastResults, { ...liveShowcase, signals: liveSignals });
+  const readiness = assertDemoReady(
+    await collectDemoReadiness(),
+    { requireLiveShowcase: liveWindowAvailable },
+  );
+  printHandoff(
+    readiness,
+    forecastResults,
+    liveShowcase ? { ...liveShowcase, signals: liveSignals } : null,
+    { liveWindowAvailable },
+  );
 }
 
 if (require.main === module) {

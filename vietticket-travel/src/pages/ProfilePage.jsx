@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router'
 import AccountLayout from '../components/auth/AccountLayout.jsx'
 import { defaultUser } from '../context/authConstants.js'
 import { useAuth } from '../context/useAuth.js'
@@ -297,7 +297,7 @@ function ProfilePage() {
             credit_card
           </span>
           <h3>Phương thức thanh toán</h3>
-          <p>Thanh toán an toàn qua VNPay và nhận cập nhật trạng thái ngay sau giao dịch.</p>
+          <p>Thanh toán an toàn qua VNPay hoặc VietQR và theo dõi trạng thái ngay trên website.</p>
         </article>
         <article className="summary-card">
           <span className="material-symbols-outlined" aria-hidden="true">

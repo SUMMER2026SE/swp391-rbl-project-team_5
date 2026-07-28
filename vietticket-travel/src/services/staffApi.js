@@ -18,15 +18,22 @@ export function listRefundRequests({ status, search, page, limit } = {}) {
 }
 
 // action: 'APPROVED' | 'REJECTED' — staffNotes bắt buộc khi từ chối.
-export function processRefundRequest(refundId, action, staffNotes) {
+export function processRefundRequest(refundId, action, staffNotes, manualReference = '') {
   return apiRequest(`/staff/refunds/${refundId}`, {
     method: 'PATCH',
-    body: { action, staffNotes },
+    body: { action, staffNotes, manualReference },
   })
 }
 
 export function reconcileRefundRequest(refundId) {
   return apiRequest(`/staff/refunds/${refundId}/reconcile`, { method: 'POST' })
+}
+
+export function adjudicateRefundRequest(refundId, evidence) {
+  return apiRequest(`/staff/refunds/${refundId}/adjudicate`, {
+    method: 'POST',
+    body: evidence,
+  })
 }
 
 // ----- Cấp lại vé -----
@@ -114,6 +121,7 @@ export function noShowSmartQueueEntry(entryId) {
 }
 
 const staffApi = {
+  adjudicateRefundRequest,
   listRefundRequests,
   processRefundRequest,
   reconcileRefundRequest,
