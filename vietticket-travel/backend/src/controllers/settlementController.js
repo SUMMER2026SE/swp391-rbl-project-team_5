@@ -7,6 +7,8 @@ const { writeAuditLog } = require('../utils/auditLog');
 
 const STATUSES = ['DRAFT', 'APPROVED', 'PAID', 'CANCELLED'];
 const BOOKING_INCLUDE = {
+  snapshotPartnerId: true,
+  snapshotPartnerName: true,
   payments: {
     where: { status: 'SUCCESS', isDuplicate: false },
     select: { amount: true },
@@ -14,9 +16,30 @@ const BOOKING_INCLUDE = {
   refundTransactions: {
     where: { status: 'SUCCESS' },
     select: {
+      id: true,
       amount: true,
+      status: true,
       refundRequest: { select: { type: true } },
     },
+  },
+  refundRequestsTargeting: {
+    where: {
+      refundTransactions: { some: { status: 'SUCCESS' } },
+    },
+    select: {
+      type: true,
+      refundTransactions: {
+        where: { status: 'SUCCESS' },
+        select: {
+          id: true,
+          amount: true,
+          status: true,
+        },
+      },
+    },
+  },
+  recoveryCaseAsOriginal: {
+    select: { id: true, status: true },
   },
 };
 
@@ -243,12 +266,21 @@ async function createSettlement(req, res, next) {
             lte: period.periodEnd,
           },
           status: { in: ['COMPLETED', 'NO_SHOW', 'REFUNDED'] },
+          // The cancelled source of a Rescue chain keeps the real gateway
+          // cash entry, but only the replacement booking may be settled.
+          recoveryCaseAsOriginal: { is: null },
           payments: { some: { status: 'SUCCESS', isDuplicate: false } },
-          reservation: {
-            ticketProduct: {
-              attraction: { partnerId },
+          OR: [
+            { snapshotPartnerId: partnerId },
+            {
+              snapshotPartnerId: null,
+              reservation: {
+                ticketProduct: {
+                  attraction: { partnerId },
+                },
+              },
             },
-          },
+          ],
           settlementItems: { none: { releasedAt: null } },
         },
         select: {
