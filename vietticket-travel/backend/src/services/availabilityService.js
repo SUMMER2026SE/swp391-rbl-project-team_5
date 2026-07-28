@@ -53,7 +53,14 @@ async function getBookableSchedule(client, ticketProductId, date) {
       },
       attraction: {
         include: {
-          partner: { select: { status: true, commissionRate: true } },
+          partner: {
+            select: {
+              id: true,
+              businessName: true,
+              status: true,
+              commissionRate: true,
+            },
+          },
           specialDates: { where: { date }, take: 1 },
           timeSlots: {
             where: { ticketProductId: null, isActive: true },
@@ -233,7 +240,14 @@ async function getTicketAvailabilityBatch(
       },
       attraction: {
         include: {
-          partner: { select: { status: true, commissionRate: true } },
+          partner: {
+            select: {
+              id: true,
+              businessName: true,
+              status: true,
+              commissionRate: true,
+            },
+          },
           specialDates: { where: { date }, take: 1 },
           timeSlots: {
             where: { ticketProductId: null, isActive: true },

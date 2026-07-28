@@ -5,7 +5,7 @@ const {
   CASE_INCLUDE,
   acceptRecoveryOption,
   declineRecoveryCase,
-  findEligibleRecoveryOptions,
+  getRecoveryCaseDetail,
   serializeRecoveryCase,
   sweepExpiredRecoveryCases,
 } = require('../services/recoveryService');
@@ -60,25 +60,39 @@ async function listRecoveryCases(req, res, next) {
 async function getRecoveryCase(req, res, next) {
   try {
     await sweepExpiredRecoveryCases({ userId: req.user.id });
-    const recoveryCase = await prisma.recoveryCase.findUnique({
-      where: { id: req.params.id },
-      include: CASE_INCLUDE,
+    const {
+      recoveryCase,
+      options,
+      transitionedToRefundPending,
+      optionsUnavailable,
+    } = await getRecoveryCaseDetail({
+      recoveryCaseId: req.params.id,
+      userId: req.user.id,
+      req,
     });
-    if (!recoveryCase || recoveryCase.userId !== req.user.id) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'RECOVERY_NOT_FOUND', message: 'Không tìm thấy yêu cầu cứu chuyến.' },
-        message: 'Không tìm thấy yêu cầu cứu chuyến.',
+    if (transitionedToRefundPending) {
+      emitRecoveryCaseEvent({
+        customerId: req.user.id,
+        recoveryCaseId: recoveryCase.id,
+        eventName: 'RECOVERY_CASE_UPDATED',
+        status: 'REFUND_PENDING',
+        message: 'Không còn phương án thay thế phù hợp. Hoàn tiền 100% đang được xử lý.',
+        originalBookingId: recoveryCase.originalBookingId,
       });
     }
-    const options = recoveryCase.status === 'OPEN'
-      ? await findEligibleRecoveryOptions(prisma, recoveryCase)
-      : [];
     return res.json({
       success: true,
-      data: serializeRecoveryCase(recoveryCase, { options }),
+      data: serializeRecoveryCase(recoveryCase, { options, optionsUnavailable }),
     });
   } catch (error) {
+    if (error.statusCode) return sendRecoveryError(res, error);
+    if (error.code === 'P2034') {
+      return sendRecoveryError(res, {
+        statusCode: 409,
+        code: 'RECOVERY_STATE_CHANGED',
+        message: 'Yêu cầu vừa được xử lý ở thiết bị khác. Vui lòng tải lại.',
+      });
+    }
     return next(error);
   }
 }
@@ -89,6 +103,7 @@ async function acceptOption(req, res, next) {
     const timeSlotId = req.body?.timeSlotId
       ? String(req.body.timeSlotId).trim()
       : null;
+    const quoteFingerprint = String(req.body?.quoteFingerprint || '').trim().toLowerCase();
     if (!ticketProductId) {
       return res.status(400).json({
         success: false,
@@ -102,6 +117,7 @@ async function acceptOption(req, res, next) {
       userId: req.user.id,
       ticketProductId,
       timeSlotId,
+      quoteFingerprint,
       req,
     });
     if (result.expired) {
@@ -121,28 +137,30 @@ async function acceptOption(req, res, next) {
       });
     }
 
-    queueConfirmedTicketEmail(result.replacementBookingId);
-    emitBookingStatusUpdated({
-      customerId: req.user.id,
-      bookingId: result.replacementBookingId,
-      status: 'CONFIRMED',
-      message: 'Vé thay thế đã được xác nhận và QR mới đã sẵn sàng.',
-    });
-    emitRecoveryCaseEvent({
-      customerId: req.user.id,
-      recoveryCaseId: result.recoveryCaseId,
-      status: 'REPLACED',
-      message: 'Kế hoạch đã được cứu thành công. Vé mới đã sẵn sàng.',
-      originalBookingId: result.originalBookingId,
-      replacementBookingId: result.replacementBookingId,
-    });
-    result.liveTripIds.forEach((tripId) => {
-      emitLiveTripUpdated({
+    if (!result.replayed) {
+      queueConfirmedTicketEmail(result.replacementBookingId);
+      emitBookingStatusUpdated({
         customerId: req.user.id,
-        tripId,
-        reason: 'BOOKING_RECOVERED',
+        bookingId: result.replacementBookingId,
+        status: 'CONFIRMED',
+        message: 'Vé thay thế đã được xác nhận và QR mới đã sẵn sàng.',
       });
-    });
+      emitRecoveryCaseEvent({
+        customerId: req.user.id,
+        recoveryCaseId: result.recoveryCaseId,
+        status: 'REPLACED',
+        message: 'Kế hoạch đã được cứu thành công. Vé mới đã sẵn sàng.',
+        originalBookingId: result.originalBookingId,
+        replacementBookingId: result.replacementBookingId,
+      });
+      result.liveTripIds.forEach((tripId) => {
+        emitLiveTripUpdated({
+          customerId: req.user.id,
+          tripId,
+          reason: 'BOOKING_RECOVERED',
+        });
+      });
+    }
 
     const recoveryCase = await prisma.recoveryCase.findUnique({
       where: { id: result.recoveryCaseId },
@@ -150,7 +168,9 @@ async function acceptOption(req, res, next) {
     });
     return res.json({
       success: true,
-      message: 'Đổi vé thành công. QR mới đã được cấp.',
+      message: result.replayed
+        ? 'Phương án này đã được xác nhận trước đó.'
+        : 'Đổi vé thành công. QR mới đã được cấp.',
       data: serializeRecoveryCase(recoveryCase),
     });
   } catch (error) {
@@ -173,20 +193,24 @@ async function declineCase(req, res, next) {
       userId: req.user.id,
       req,
     });
-    emitRecoveryCaseEvent({
-      customerId: req.user.id,
-      recoveryCaseId: updated.id,
-      status: 'REFUND_PENDING',
-      message: 'Yêu cầu hoàn tiền 100% đã được ghi nhận và đang xử lý.',
-      originalBookingId: updated.originalBookingId,
-    });
+    if (!updated.replayed) {
+      emitRecoveryCaseEvent({
+        customerId: req.user.id,
+        recoveryCaseId: updated.id,
+        status: 'REFUND_PENDING',
+        message: 'Yêu cầu hoàn tiền 100% đã được ghi nhận và đang xử lý.',
+        originalBookingId: updated.originalBookingId,
+      });
+    }
     const recoveryCase = await prisma.recoveryCase.findUnique({
       where: { id: updated.id },
       include: CASE_INCLUDE,
     });
     return res.json({
       success: true,
-      message: 'Đã chọn hoàn tiền 100%.',
+      message: updated.replayed
+        ? 'Yêu cầu hoàn tiền 100% đã được ghi nhận trước đó.'
+        : 'Đã chọn hoàn tiền 100%.',
       data: serializeRecoveryCase(recoveryCase),
     });
   } catch (error) {

@@ -9,6 +9,7 @@ const {
 const { isValidTime, validateTicket } = require('../utils/partnerValidators');
 const { findOwnedAttraction } = require('./attractionController');
 const { normalizeRefundFeeRate, todayInVietnam } = require('../utils/refundService');
+const { buildTicketRestrictions } = require('../utils/ticketRestrictions');
 const {
   getBookableSchedule,
   getProductCapacity,
@@ -1146,6 +1147,7 @@ async function reserveTickets(req, res, next) {
           snapshotRefundPolicy,
           snapshotRefundFeeRate,
           snapshotRefundCutoffHours,
+          snapshotTicketRestrictions: buildTicketRestrictions(schedule.product),
           snapshotCommissionRate,
         },
       });

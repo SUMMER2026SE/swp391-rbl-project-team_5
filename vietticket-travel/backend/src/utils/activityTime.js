@@ -46,14 +46,18 @@ function getActivityWindow({
   timeSlot = null,
   attraction = null,
   snapshotTimeSlotLabel = null,
+  snapshotActivityStartTime = null,
+  snapshotActivityEndTime = null,
 } = {}) {
   const snapshotSlot = parseSnapshotSlotLabel(snapshotTimeSlotLabel);
-  const startTime = timeSlot?.startTime
-    || snapshotSlot.startTime
+  const startTime = snapshotSlot.startTime
+    || (parseTime(snapshotActivityStartTime) ? snapshotActivityStartTime : null)
+    || timeSlot?.startTime
     || attraction?.openTime
     || '00:00';
-  const endTime = timeSlot?.endTime
-    || snapshotSlot.endTime
+  const endTime = snapshotSlot.endTime
+    || (parseTime(snapshotActivityEndTime) ? snapshotActivityEndTime : null)
+    || timeSlot?.endTime
     || attraction?.closeTime
     || '23:59';
 
@@ -72,6 +76,8 @@ function getBookingActivityWindow(booking) {
     timeSlot: reservation.timeSlot,
     attraction: reservation.ticketProduct?.attraction,
     snapshotTimeSlotLabel: booking?.snapshotTimeSlotLabel,
+    snapshotActivityStartTime: booking?.snapshotActivityStartTime,
+    snapshotActivityEndTime: booking?.snapshotActivityEndTime,
   });
 }
 

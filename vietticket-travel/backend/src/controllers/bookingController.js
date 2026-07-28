@@ -8,7 +8,7 @@ const {
   MIN_VNPAY_AMOUNT,
   parseVndInteger,
 } = require('../utils/money');
-
+const { buildTicketRestrictions } = require('../utils/ticketRestrictions');
 
 const { Decimal } = Prisma;
 const {
@@ -312,9 +312,16 @@ function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
     snapshotAttractionCity: attraction.city || '',
     snapshotAttractionDistrict: attraction.district || null,
     snapshotAttractionImage: primaryImage,
+    snapshotAttractionLatitude: attraction.latitude ?? null,
+    snapshotAttractionLongitude: attraction.longitude ?? null,
+    snapshotAttractionEnvironment: attraction.environment || null,
+    snapshotPartnerId: attraction.partnerId || attraction.partner?.id || null,
+    snapshotPartnerName: attraction.partner?.businessName || null,
     snapshotTicketName: product.name,
     snapshotTicketType: product.type || 'ADULT',
     snapshotTicketDescription: product.description || null,
+    snapshotTicketRestrictions:
+      reservation.snapshotTicketRestrictions ?? buildTicketRestrictions(product),
     snapshotUnitPrice: reservation.snapshotUnitPrice ?? product.sellingPrice,
     snapshotRefundPolicy:
       reservation.snapshotRefundPolicy ?? product.refundPolicy ?? 'NON_REFUNDABLE',
@@ -326,6 +333,8 @@ function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
     snapshotTimeSlotLabel: reservation.timeSlot
       ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
       : null,
+    snapshotActivityStartTime: attraction.openTime || null,
+    snapshotActivityEndTime: attraction.closeTime || null,
   };
 }
 
@@ -841,7 +850,14 @@ async function createBooking(req, res, next) {
               include: {
                 attraction: {
                   include: {
-                    partner: { select: { commissionRate: true, status: true } },
+                    partner: {
+                      select: {
+                        id: true,
+                        businessName: true,
+                        commissionRate: true,
+                        status: true,
+                      },
+                    },
                     images: {
                       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
                       take: 1,

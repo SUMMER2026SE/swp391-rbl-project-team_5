@@ -599,7 +599,10 @@ async function sendRecoveryCaseCreatedEmail({
   const safeName = escapeHtml(fullName || 'bạn');
   const safeReason = escapeHtml(reason || 'Sự cố vận hành từ đối tác.');
   const shortId = formatBookingReference(bookingId);
-  const deadline = new Date(expiresAt).toLocaleTimeString('vi-VN', {
+  const deadline = new Date(expiresAt).toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     timeZone: 'Asia/Ho_Chi_Minh',

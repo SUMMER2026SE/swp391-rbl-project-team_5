@@ -122,6 +122,13 @@ describe('reserveTickets - chống overbooking', () => {
         snapshotRefundPolicy: 'REFUND_WITH_FEE',
         snapshotRefundFeeRate: 0.15,
         snapshotRefundCutoffHours: 48,
+        snapshotTicketRestrictions: {
+          minAgeYears: null,
+          maxAgeYears: null,
+          minHeightCm: null,
+          maxHeightCm: null,
+          requiresAdult: false,
+        },
         snapshotCommissionRate: 0.2,
       }),
     });

@@ -302,6 +302,13 @@ describe('createBooking', () => {
       snapshotRefundPolicy: 'REFUND_WITH_FEE',
       snapshotRefundFeeRate: new Decimal('0.15'),
       snapshotRefundCutoffHours: 72,
+      snapshotTicketRestrictions: {
+        minAgeYears: 12,
+        maxAgeYears: 65,
+        minHeightCm: 120,
+        maxHeightCm: 210,
+        requiresAdult: true,
+      },
       snapshotCommissionRate: new Decimal('0.25'),
       ticketProduct: {
         id: 'ticket-1',
@@ -426,6 +433,13 @@ describe('createBooking', () => {
     expect(createData.snapshotRefundPolicy).toBe('REFUND_WITH_FEE');
     expect(createData.snapshotRefundFeeRate.toString()).toBe('0.15');
     expect(createData.snapshotRefundCutoffHours).toBe(72);
+    expect(createData.snapshotTicketRestrictions).toEqual({
+      minAgeYears: 12,
+      maxAgeYears: 65,
+      minHeightCm: 120,
+      maxHeightCm: 210,
+      requiresAdult: true,
+    });
     expect(createData.commissionRateSnapshot).toBe(0.25);
     expect(createData.commissionAmountSnapshot.toString()).toBe('45002');
     expect(createData.partnerNetAmountSnapshot.toString()).toBe('135004');

@@ -1,6 +1,6 @@
 'use strict';
 
-const { randomUUID } = require('crypto');
+const { createHash, randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const {
@@ -14,7 +14,11 @@ const {
   queueRecoveryDifferenceRefund,
   queueRecoveryFullRefund,
 } = require('./mandatoryRefundService');
-const { getActivityWindow, isBookingCutoffPassed } = require('../utils/activityTime');
+const {
+  getActivityWindow,
+  isBookingCutoffPassed,
+  parseSnapshotSlotLabel,
+} = require('../utils/activityTime');
 const { parseVndInteger } = require('../utils/money');
 const { writeAuditLog } = require('../utils/auditLog');
 const { recordLiveTripEvent } = require('./liveTripEventService');
@@ -22,19 +26,35 @@ const {
   awardPointsForBooking,
   reversePointsForBooking,
 } = require('./loyaltyService');
+const {
+  buildTicketRestrictions,
+  hasTicketRestrictions,
+} = require('../utils/ticketRestrictions');
 
 const { Decimal } = Prisma;
-const DEFAULT_RECOVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
-const MIN_RECOVERY_WINDOW_MS = 15 * 60 * 1000;
-const MAX_RECOVERY_WINDOW_MS = 72 * 60 * 60 * 1000;
-const configuredRecoveryWindow = Number(process.env.RECOVERY_WINDOW_MS);
-const RECOVERY_WINDOW_MS = Number.isFinite(configuredRecoveryWindow)
-  ? Math.min(
-      Math.max(Math.round(configuredRecoveryWindow), MIN_RECOVERY_WINDOW_MS),
-      MAX_RECOVERY_WINDOW_MS,
-    )
-  : DEFAULT_RECOVERY_WINDOW_MS;
+const DEFAULT_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+const MIN_RECOVERY_WINDOW_MS = 5 * 60 * 1000;
+const MAX_RECOVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+function normalizeRecoveryWindowMs(value) {
+  if (value == null || String(value).trim() === '') return DEFAULT_RECOVERY_WINDOW_MS;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_RECOVERY_WINDOW_MS;
+  return Math.min(
+    MAX_RECOVERY_WINDOW_MS,
+    Math.max(MIN_RECOVERY_WINDOW_MS, Math.trunc(parsed)),
+  );
+}
+
+const RECOVERY_WINDOW_MS = normalizeRecoveryWindowMs(process.env.RECOVERY_WINDOW_MS);
 const MAX_RECOVERY_OPTIONS = 8;
+const RECOVERY_DETAIL_MAX_ATTEMPTS = 3;
+const REFUND_POLICY_RANK = Object.freeze({
+  NON_REFUNDABLE: 1,
+  REFUND_WITH_FEE: 2,
+  FREE_CANCELLATION: 3,
+});
+const DEFAULT_REFUND_CUTOFF_HOURS = 24;
 
 const ORIGINAL_BOOKING_INCLUDE = {
   payments: {
@@ -68,6 +88,31 @@ const CASE_INCLUDE = {
       payments: {
         where: { status: 'SUCCESS', isDuplicate: false },
         orderBy: { createdAt: 'asc' },
+      },
+      refundRequests: {
+        where: { requestKey: { startsWith: 'recovery-' } },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          requestKey: true,
+          status: true,
+          amount: true,
+          createdAt: true,
+          processingStartedAt: true,
+          processedAt: true,
+          refundTransactions: {
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              status: true,
+              gatewayResponseCode: true,
+              submittedAt: true,
+              reconciledAt: true,
+              processedAt: true,
+              createdAt: true,
+            },
+          },
+        },
       },
     },
   },
@@ -111,6 +156,13 @@ async function resolveRecoveryFundingBooking(tx, booking) {
     },
   });
   const fundingBooking = sourceCase?.fundingBooking || null;
+  if (
+    !booking?.userId
+    || !fundingBooking?.userId
+    || fundingBooking.userId !== booking.userId
+  ) {
+    return null;
+  }
   return getCapturedPayment(fundingBooking) ? fundingBooking : null;
 }
 
@@ -134,10 +186,191 @@ function timeToMinutes(value) {
   return match ? Number(match[1]) * 60 + Number(match[2]) : null;
 }
 
+function normalizeRefundPolicy(value) {
+  return Object.prototype.hasOwnProperty.call(REFUND_POLICY_RANK, value)
+    ? value
+    : 'NON_REFUNDABLE';
+}
+
+function normalizeRefundFeeRate(policy, value) {
+  if (policy !== 'REFUND_WITH_FEE') return 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0.5;
+  return Math.min(1, Math.max(0, parsed));
+}
+
+function normalizeRefundCutoffHours(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_REFUND_CUTOFF_HOURS;
+  return Math.min(720, Math.max(0, Math.trunc(parsed)));
+}
+
+function getRefundTerms(source = {}) {
+  const policy = normalizeRefundPolicy(
+    source.refundPolicy
+      ?? source.snapshotRefundPolicy
+      ?? source.ticketProduct?.refundPolicy,
+  );
+  return {
+    refundPolicy: policy,
+    refundFeeRate: normalizeRefundFeeRate(
+      policy,
+      source.refundFeeRate
+        ?? source.snapshotRefundFeeRate
+        ?? source.ticketProduct?.refundFeeRate,
+    ),
+    refundCutoffHours: normalizeRefundCutoffHours(
+      source.refundCutoffHours
+        ?? source.snapshotRefundCutoffHours
+        ?? source.ticketProduct?.refundCutoffHours,
+    ),
+  };
+}
+
+function cutoffMinutesFromVisitStart(source, cutoffHours) {
+  const start = timeToMinutes(source.startTime);
+  if (start == null) return null;
+  const date = String(source.visitDate || '');
+  // Comparing an absolute UTC timestamp is unnecessary here because Rescue
+  // options are constrained to the same visit date and Vietnam has no DST.
+  // The date component still prevents a future/previous-day quote from
+  // accidentally passing a time-only comparison.
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? Date.parse(`${date}T00:00:00Z`) / 86400000
+    : 0;
+  return day * 1440 + start - cutoffHours * 60;
+}
+
+function isNoWorseRefundTerms(candidate, original, { compareCutoff = true } = {}) {
+  const candidateTerms = getRefundTerms(candidate);
+  const originalTerms = getRefundTerms(original);
+  if (
+    REFUND_POLICY_RANK[candidateTerms.refundPolicy]
+    < REFUND_POLICY_RANK[originalTerms.refundPolicy]
+  ) {
+    return false;
+  }
+  // A NON_REFUNDABLE original has no cancellation right to preserve. For
+  // refundable originals, compare the actual deadline (activity start minus
+  // cutoff) rather than cutoff hours alone; a replacement may start earlier.
+  if (compareCutoff && originalTerms.refundPolicy !== 'NON_REFUNDABLE') {
+    const originalDeadline = cutoffMinutesFromVisitStart(
+      original,
+      originalTerms.refundCutoffHours,
+    );
+    const candidateDeadline = cutoffMinutesFromVisitStart(
+      candidate,
+      candidateTerms.refundCutoffHours,
+    );
+    if (
+      originalDeadline != null
+      && candidateDeadline != null
+      && candidateDeadline < originalDeadline
+    ) {
+      return false;
+    }
+    if (originalDeadline != null && candidateDeadline == null) {
+      // Never promise a replacement cancellation right that cannot be
+      // proven from its selected slot/activity start.
+      return false;
+    }
+    if (
+      originalDeadline == null
+      && candidateDeadline == null
+      && candidateTerms.refundCutoffHours > originalTerms.refundCutoffHours
+    ) {
+      return false;
+    }
+  }
+  if (
+    candidateTerms.refundPolicy === originalTerms.refundPolicy
+    && candidateTerms.refundPolicy === 'REFUND_WITH_FEE'
+    && candidateTerms.refundFeeRate > originalTerms.refundFeeRate + 1e-9
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function buildRecoveryOptionFingerprint(option = {}) {
+  const terms = getRefundTerms(option);
+  const payload = {
+    ticketProductId: option.ticketProductId || null,
+    timeSlotId: option.timeSlotId || null,
+    attractionId: option.attractionId || null,
+    attractionTitle: normalizeText(option.attractionTitle),
+    address: normalizeText(option.address),
+    latitude: option.latitude == null ? null : Number(option.latitude),
+    longitude: option.longitude == null ? null : Number(option.longitude),
+    ticketName: normalizeText(option.ticketName),
+    visitDate: option.visitDate || null,
+    quantity: Number(option.quantity || 0),
+    unitPrice: Math.round(Number(option.unitPrice || 0)),
+    totalAmount: Math.round(Number(option.totalAmount || 0)),
+    refundAmount: Math.round(Number(option.refundAmount || 0)),
+    creditAmount: Math.round(Number(option.creditAmount || 0)),
+    startTime: option.startTime || null,
+    endTime: option.endTime || null,
+    ...terms,
+    restrictions: buildTicketRestrictions(option.restrictions || {}),
+  };
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function isNoStricterThanOriginal(candidateTicket, originalSnapshot) {
+  const candidate = buildTicketRestrictions(candidateTicket);
+  const hasOriginalRestrictionSnapshot = Object.prototype.hasOwnProperty.call(
+    originalSnapshot || {},
+    'restrictions',
+  );
+
+  // Legacy cases did not retain the original eligibility rules. In that case,
+  // only an unrestricted replacement is safe to recommend automatically.
+  if (!hasOriginalRestrictionSnapshot) return !hasTicketRestrictions(candidate);
+
+  const original = buildTicketRestrictions(originalSnapshot.restrictions || {});
+  if (
+    candidate.minAgeYears != null
+    && (original.minAgeYears == null || candidate.minAgeYears > original.minAgeYears)
+  ) {
+    return false;
+  }
+  if (
+    candidate.maxAgeYears != null
+    && (original.maxAgeYears == null || candidate.maxAgeYears < original.maxAgeYears)
+  ) {
+    return false;
+  }
+  if (
+    candidate.minHeightCm != null
+    && (original.minHeightCm == null || candidate.minHeightCm > original.minHeightCm)
+  ) {
+    return false;
+  }
+  if (
+    candidate.maxHeightCm != null
+    && (original.maxHeightCm == null || candidate.maxHeightCm < original.maxHeightCm)
+  ) {
+    return false;
+  }
+  return !candidate.requiresAdult || original.requiresAdult;
+}
+
 function haversineKm(lat1, lon1, lat2, lon2) {
-  const values = [lat1, lon1, lat2, lon2].map(Number);
+  const values = [lat1, lon1, lat2, lon2].map((value) => {
+    if (value == null || String(value).trim() === '') return null;
+    return Number(value);
+  });
   if (!values.every(Number.isFinite)) return null;
   const [aLat, aLon, bLat, bLon] = values;
+  if (
+    aLat < -90 || aLat > 90
+    || bLat < -90 || bLat > 90
+    || aLon < -180 || aLon > 180
+    || bLon < -180 || bLon > 180
+  ) {
+    return null;
+  }
   const rad = (degrees) => degrees * Math.PI / 180;
   const dLat = rad(bLat - aLat);
   const dLon = rad(bLon - aLon);
@@ -148,7 +381,18 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 
 function buildOriginalSnapshot(booking) {
   const reservation = booking.reservation;
-  const attraction = reservation.ticketProduct.attraction;
+  const ticketProduct = reservation.ticketProduct;
+  const attraction = ticketProduct.attraction;
+  const timeSlotLabel = booking.snapshotTimeSlotLabel || (
+    reservation.timeSlot
+      ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
+      : null
+  );
+  const snapshotSlot = parseSnapshotSlotLabel(timeSlotLabel);
+  const persistedRestrictions = booking.snapshotTicketRestrictions;
+  const hasPersistedRestrictions = persistedRestrictions
+    && typeof persistedRestrictions === 'object'
+    && !Array.isArray(persistedRestrictions);
   return {
     bookingId: booking.id,
     attractionId: booking.snapshotAttractionId || attraction.id,
@@ -157,21 +401,46 @@ function buildOriginalSnapshot(booking) {
     city: booking.snapshotAttractionCity || attraction.city,
     district: booking.snapshotAttractionDistrict || attraction.district || null,
     imageUrl: booking.snapshotAttractionImage || attraction.images?.[0]?.imageUrl || null,
-    latitude: attraction.latitude ?? null,
-    longitude: attraction.longitude ?? null,
-    environment: attraction.environment || 'MIXED',
-    ticketName: booking.snapshotTicketName || reservation.ticketProduct.name,
-    ticketType: booking.snapshotTicketType || reservation.ticketProduct.type,
+    latitude: booking.snapshotAttractionLatitude ?? attraction.latitude ?? null,
+    longitude: booking.snapshotAttractionLongitude ?? attraction.longitude ?? null,
+    environment: booking.snapshotAttractionEnvironment
+      || attraction.environment
+      || 'MIXED',
+    ticketName: booking.snapshotTicketName || ticketProduct.name,
+    ticketType: booking.snapshotTicketType || ticketProduct.type,
     visitDate: dateKey(booking.snapshotVisitDate || reservation.date),
-    timeSlotLabel: booking.snapshotTimeSlotLabel || (
-      reservation.timeSlot
-        ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
-        : null
-    ),
-    startTime: reservation.timeSlot?.startTime || attraction.openTime || null,
-    endTime: reservation.timeSlot?.endTime || attraction.closeTime || null,
+    timeSlotLabel,
+    startTime: snapshotSlot.startTime
+      || booking.snapshotActivityStartTime
+      || reservation.timeSlot?.startTime
+      || attraction.openTime
+      || null,
+    endTime: snapshotSlot.endTime
+      || booking.snapshotActivityEndTime
+      || reservation.timeSlot?.endTime
+      || attraction.closeTime
+      || null,
+    activityStartTime: booking.snapshotActivityStartTime
+      || attraction.openTime
+      || null,
+    activityEndTime: booking.snapshotActivityEndTime
+      || attraction.closeTime
+      || null,
     quantity: reservation.quantity,
     totalAmount: Number(booking.totalAmount),
+    refundPolicy: normalizeRefundPolicy(
+      booking.snapshotRefundPolicy ?? ticketProduct.refundPolicy,
+    ),
+    refundFeeRate: normalizeRefundFeeRate(
+      booking.snapshotRefundPolicy ?? ticketProduct.refundPolicy,
+      booking.snapshotRefundFeeRate ?? ticketProduct.refundFeeRate,
+    ),
+    refundCutoffHours: normalizeRefundCutoffHours(
+      booking.snapshotRefundCutoffHours ?? ticketProduct.refundCutoffHours,
+    ),
+    ...(hasPersistedRestrictions
+      ? { restrictions: buildTicketRestrictions(persistedRestrictions) }
+      : {}),
   };
 }
 
@@ -293,7 +562,13 @@ async function findEligibleRecoveryOptions(
 
   const affordableProducts = products.filter((product) => {
     const unitPrice = parseVndInteger(product.sellingPrice);
-    return unitPrice != null && unitPrice * original.quantity <= creditAmount;
+    return isNoStricterThanOriginal(product, original)
+      // Cutoff comparison needs the selected slot's actual start time; the
+      // product row alone has no visit date/slot and must only be screened for
+      // policy rank and fee here.
+      && isNoWorseRefundTerms(product, original, { compareCutoff: false })
+      && unitPrice != null
+      && unitPrice * original.quantity <= creditAmount;
   });
   const availabilityByProduct = await getTicketAvailabilityBatch(
     client,
@@ -316,6 +591,12 @@ async function findEligibleRecoveryOptions(
         && Number(slot.availableTickets || 0) >= original.quantity
       ))
       .forEach((slot) => {
+        const candidateRefundTerms = {
+          ...product,
+          visitDate: original.visitDate,
+          startTime: slot.startTime || product.attraction.openTime || null,
+        };
+        if (!isNoWorseRefundTerms(candidateRefundTerms, original)) return;
         const rank = scoreOption({
           original,
           attraction: product.attraction,
@@ -323,7 +604,7 @@ async function findEligibleRecoveryOptions(
           creditAmount,
           slot,
         });
-        options.push({
+        const option = {
           ticketProductId: product.id,
           timeSlotId: slot.timeSlotId || null,
           attractionId: product.attraction.id,
@@ -340,10 +621,18 @@ async function findEligibleRecoveryOptions(
           ticketName: product.name,
           ticketType: product.type,
           ticketDescription: product.description,
+          restrictions: buildTicketRestrictions(product),
+          refundPolicy: normalizeRefundPolicy(product.refundPolicy),
+          refundFeeRate: normalizeRefundFeeRate(
+            product.refundPolicy,
+            product.refundFeeRate,
+          ),
+          refundCutoffHours: normalizeRefundCutoffHours(product.refundCutoffHours),
           unitPrice,
           quantity: original.quantity,
           totalAmount,
           refundAmount,
+          creditAmount,
           availableTickets: Number(slot.availableTickets || 0),
           visitDate: original.visitDate,
           startTime: slot.startTime || null,
@@ -360,7 +649,9 @@ async function findEligibleRecoveryOptions(
             refundAmount,
             slot,
           }),
-        });
+        };
+        option.quoteFingerprint = buildRecoveryOptionFingerprint(option);
+        options.push(option);
       });
   });
 
@@ -447,7 +738,8 @@ async function queueFullRecoveryRefund(tx, recoveryCase, {
     data: {
       status: 'REFUND_PENDING',
       refundAmount: recoveryCase.creditAmount,
-      completedAt: now,
+      // completedAt is reserved for an actually confirmed gateway outcome.
+      // The request/transaction timestamps expose queue progress meanwhile.
       version: { increment: 1 },
     },
   });
@@ -519,6 +811,148 @@ async function sweepExpiredRecoveryCases({
     }
   }
   return count;
+}
+
+async function getRecoveryCaseDetail({
+  recoveryCaseId,
+  userId,
+  now = new Date(),
+  req = null,
+}) {
+  let lastError;
+
+  // Terminal cases are read-only. Avoid opening a SERIALIZABLE transaction
+  // (and pinning a PostgreSQL connection) just to render the success/refund
+  // page; only OPEN cases need the transactional fallback below.
+  const terminalProbe = prisma.recoveryCase?.findUnique
+    ? await prisma.recoveryCase.findUnique({
+      where: { id: recoveryCaseId, userId },
+      select: { id: true, userId: true, status: true },
+    })
+    : null;
+  if (terminalProbe && terminalProbe.status !== 'OPEN') {
+    const recoveryCase = await prisma.recoveryCase.findUnique({
+      where: { id: recoveryCaseId, userId },
+      include: CASE_INCLUDE,
+    });
+    if (!recoveryCase || recoveryCase.userId !== userId) {
+      throw createRecoveryError(
+        404,
+        'RECOVERY_NOT_FOUND',
+        'Không tìm thấy yêu cầu cứu chuyến.',
+      );
+    }
+    return {
+      recoveryCase,
+      options: [],
+      transitionedToRefundPending: false,
+    };
+  }
+
+  for (let attempt = 0; attempt < RECOVERY_DETAIL_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const recoveryCase = await tx.recoveryCase.findUnique({
+          where: { id: recoveryCaseId, userId },
+          include: CASE_INCLUDE,
+        });
+        if (!recoveryCase || recoveryCase.userId !== userId) {
+          throw createRecoveryError(
+            404,
+            'RECOVERY_NOT_FOUND',
+            'Không tìm thấy yêu cầu cứu chuyến.',
+          );
+        }
+        if (recoveryCase.status !== 'OPEN') {
+          return {
+            recoveryCase,
+            options: [],
+            transitionedToRefundPending: false,
+          };
+        }
+
+        const options = await findEligibleRecoveryOptions(
+          tx,
+          recoveryCase,
+          { now },
+        );
+        if (options.length > 0) {
+          return {
+            recoveryCase,
+            options,
+            transitionedToRefundPending: false,
+            optionsUnavailable: false,
+          };
+        }
+
+        // Inventory and operating hours are live data. A temporary stock
+        // reservation, catalog sync, or partner outage must not irreversibly
+        // forfeit the customer's Rescue window. Keep the case OPEN so the
+        // customer can retry (or explicitly choose the guaranteed refund);
+        // the expiry sweep remains the only automatic fallback.
+        if (recoveryCase.expiresAt > now) {
+          return {
+            recoveryCase,
+            options: [],
+            transitionedToRefundPending: false,
+            optionsUnavailable: true,
+          };
+        }
+
+        const claimed = await tx.recoveryCase.updateMany({
+          where: {
+            id: recoveryCase.id,
+            userId,
+            status: 'OPEN',
+            version: recoveryCase.version,
+          },
+          data: { version: { increment: 1 } },
+        });
+        if (claimed.count !== 1) {
+          throw createRecoveryError(
+            409,
+            'RECOVERY_STATE_CHANGED',
+            'Yêu cầu vừa được xử lý ở thiết bị khác. Vui lòng tải lại.',
+          );
+        }
+
+        const updated = await queueFullRecoveryRefund(
+          tx,
+          recoveryCase,
+          {
+            now,
+            reason: 'Không còn phương án thay thế hợp lệ. Hoàn tiền 100% tự động.',
+          },
+        );
+        await writeAuditLog({
+          client: tx,
+          req,
+          actorId: userId,
+          action: 'RECOVERY_NO_OPTIONS_REFUND_QUEUED',
+          entityType: 'RecoveryCase',
+          entityId: recoveryCase.id,
+          metadata: {
+            originalBookingId: recoveryCase.originalBookingId,
+            fundingBookingId: recoveryCase.fundingBookingId,
+            creditAmount: Number(recoveryCase.creditAmount),
+          },
+        });
+
+        return {
+          recoveryCase: { ...recoveryCase, ...updated },
+          options: [],
+          transitionedToRefundPending: true,
+        };
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    } catch (error) {
+      lastError = error;
+      const retryable = error?.code === 'P2034'
+        || error?.code === 'RECOVERY_STATE_CHANGED';
+      if (!retryable || attempt === RECOVERY_DETAIL_MAX_ATTEMPTS - 1) throw error;
+    }
+  }
+
+  throw lastError;
 }
 
 async function claimConfirmedInventory(tx, {
@@ -761,6 +1195,7 @@ async function acceptRecoveryOption({
   userId,
   ticketProductId,
   timeSlotId = null,
+  quoteFingerprint = null,
   now = new Date(),
   req = null,
 }) {
@@ -771,6 +1206,23 @@ async function acceptRecoveryOption({
     });
     if (!recoveryCase || recoveryCase.userId !== userId) {
       throw createRecoveryError(404, 'RECOVERY_NOT_FOUND', 'Không tìm thấy yêu cầu cứu chuyến.');
+    }
+    if (recoveryCase.status === 'REPLACED') {
+      const selectedOption = recoveryCase.selectedOptionSnapshot || {};
+      const isSameDecision = Boolean(recoveryCase.replacementBookingId)
+        && selectedOption.ticketProductId === ticketProductId
+        && (selectedOption.timeSlotId || null) === (timeSlotId || null);
+      if (isSameDecision) {
+        return {
+          expired: false,
+          replayed: true,
+          recoveryCaseId: recoveryCase.id,
+          originalBookingId: recoveryCase.originalBookingId,
+          replacementBookingId: recoveryCase.replacementBookingId,
+          refundDifference: Number(recoveryCase.refundAmount || 0),
+          liveTripIds: [],
+        };
+      }
     }
     if (recoveryCase.status !== 'OPEN') {
       throw createRecoveryError(409, 'RECOVERY_ALREADY_DECIDED', 'Yêu cầu này đã được xử lý.');
@@ -798,6 +1250,20 @@ async function acceptRecoveryOption({
         409,
         'OPTION_UNAVAILABLE',
         'Phương án này không còn đáp ứng giá, lịch hoặc tồn kho. Vui lòng chọn lại.',
+      );
+    }
+    if (!/^[a-f0-9]{64}$/i.test(String(quoteFingerprint || ''))) {
+      throw createRecoveryError(
+        400,
+        'OPTION_QUOTE_REQUIRED',
+        'Báº£ng giÃ¡ Ä‘Ã£ chá» hoáº·c khÃ´ng há»£p lá»‡. Vui lÃ²ng táº£i láº¡i phÆ°Æ¡ng Ã¡n trÆ°á»›c khi xÃ¡c nháº­n.',
+      );
+    }
+    if (String(quoteFingerprint).toLowerCase() !== option.quoteFingerprint) {
+      throw createRecoveryError(
+        409,
+        'OPTION_CHANGED',
+        'GiÃ¡, lá»‹ch hoáº·c Ä‘iá»u kiá»‡n vÃ© Ä‘Ã£ thay Ä‘á»•i. Vui lÃ²ng táº£i láº¡i vÃ  xÃ¡c nháº­n láº¡i.',
       );
     }
 
@@ -855,6 +1321,7 @@ async function acceptRecoveryOption({
         snapshotRefundPolicy: schedule.product.refundPolicy,
         snapshotRefundFeeRate: schedule.product.refundFeeRate,
         snapshotRefundCutoffHours: schedule.product.refundCutoffHours,
+        snapshotTicketRestrictions: buildTicketRestrictions(schedule.product),
         snapshotCommissionRate: commissionRate,
       },
     });
@@ -881,9 +1348,17 @@ async function acceptRecoveryOption({
         snapshotAttractionCity: option.city,
         snapshotAttractionDistrict: option.district,
         snapshotAttractionImage: option.imageUrl,
+        snapshotAttractionLatitude: option.latitude ?? null,
+        snapshotAttractionLongitude: option.longitude ?? null,
+        snapshotAttractionEnvironment: option.environment || null,
+        snapshotPartnerId: schedule.attraction.partnerId
+          || schedule.attraction.partner?.id
+          || null,
+        snapshotPartnerName: schedule.attraction.partner?.businessName || null,
         snapshotTicketName: option.ticketName,
         snapshotTicketType: option.ticketType,
         snapshotTicketDescription: option.ticketDescription,
+        snapshotTicketRestrictions: buildTicketRestrictions(schedule.product),
         snapshotUnitPrice: unitPrice,
         snapshotRefundPolicy: schedule.product.refundPolicy,
         snapshotRefundFeeRate: schedule.product.refundFeeRate,
@@ -892,6 +1367,8 @@ async function acceptRecoveryOption({
         snapshotTimeSlotLabel: option.startTime
           ? `${option.startTime} - ${option.endTime}`
           : null,
+        snapshotActivityStartTime: schedule.attraction.openTime || null,
+        snapshotActivityEndTime: schedule.attraction.closeTime || null,
         commissionRateSnapshot: commissionRate,
         commissionAmountSnapshot: commissionAmount,
         partnerNetAmountSnapshot: partnerNetAmount,
@@ -1003,6 +1480,7 @@ async function acceptRecoveryOption({
 
     return {
       expired: false,
+      replayed: false,
       recoveryCaseId: recoveryCase.id,
       originalBookingId: original.id,
       replacementBookingId: replacementBooking.id,
@@ -1025,6 +1503,12 @@ async function declineRecoveryCase({
     });
     if (!recoveryCase || recoveryCase.userId !== userId) {
       throw createRecoveryError(404, 'RECOVERY_NOT_FOUND', 'Không tìm thấy yêu cầu cứu chuyến.');
+    }
+    if (
+      recoveryCase.declinedAt
+      && ['REFUND_PENDING', 'REFUNDED'].includes(recoveryCase.status)
+    ) {
+      return { ...recoveryCase, replayed: true };
     }
     if (recoveryCase.status !== 'OPEN') {
       throw createRecoveryError(409, 'RECOVERY_ALREADY_DECIDED', 'Yêu cầu này đã được xử lý.');
@@ -1051,7 +1535,7 @@ async function declineRecoveryCase({
       entityId: recoveryCase.id,
       metadata: { originalBookingId: recoveryCase.originalBookingId },
     });
-    return updated;
+    return { ...updated, replayed: false };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -1068,7 +1552,42 @@ function serializeReplacementBooking(booking) {
   };
 }
 
-function serializeRecoveryCase(recoveryCase, { options } = {}) {
+function serializeRecoveryRefund(recoveryCase) {
+  const requests = recoveryCase?.fundingBooking?.refundRequests || [];
+  const expectedKeys = new Set([
+    `recovery-full:${recoveryCase.id}`,
+    `recovery-difference:${recoveryCase.id}`,
+  ]);
+  const request = requests.find((item) => expectedKeys.has(item.requestKey));
+  if (!request) return null;
+  const transaction = request.refundTransactions?.[0] || null;
+  return {
+    requestId: request.id,
+    type: request.requestKey.startsWith('recovery-difference:')
+      ? 'DIFFERENCE'
+      : 'FULL',
+    status: request.status,
+    amount: Number(request.amount),
+    requestedAt: request.createdAt,
+    processingStartedAt: request.processingStartedAt,
+    processedAt: request.processedAt,
+    transaction: transaction
+      ? {
+        id: transaction.id,
+        status: transaction.status,
+        gatewayResponseCode: transaction.gatewayResponseCode,
+        submittedAt: transaction.submittedAt,
+        reconciledAt: transaction.reconciledAt,
+        processedAt: transaction.processedAt,
+      }
+      : null,
+  };
+}
+
+function serializeRecoveryCase(
+  recoveryCase,
+  { options, optionsUnavailable = undefined } = {},
+) {
   return {
     id: recoveryCase.id,
     status: recoveryCase.status,
@@ -1085,11 +1604,13 @@ function serializeRecoveryCase(recoveryCase, { options } = {}) {
     original: recoveryCase.originalSnapshot,
     selectedOption: recoveryCase.selectedOptionSnapshot || null,
     replacementBooking: serializeReplacementBooking(recoveryCase.replacementBooking),
+    refundProgress: serializeRecoveryRefund(recoveryCase),
     acceptedAt: recoveryCase.acceptedAt,
     declinedAt: recoveryCase.declinedAt,
     completedAt: recoveryCase.completedAt,
     createdAt: recoveryCase.createdAt,
     ...(options ? { options } : {}),
+    ...(typeof optionsUnavailable === 'boolean' ? { optionsUnavailable } : {}),
   };
 }
 
@@ -1097,18 +1618,27 @@ module.exports = {
   CASE_INCLUDE,
   DEFAULT_RECOVERY_WINDOW_MS,
   MAX_RECOVERY_OPTIONS,
+  MAX_RECOVERY_WINDOW_MS,
+  MIN_RECOVERY_WINDOW_MS,
   ORIGINAL_BOOKING_INCLUDE,
   RECOVERY_WINDOW_MS,
   acceptRecoveryOption,
   buildOriginalSnapshot,
+  buildRecoveryOptionFingerprint,
+  buildTicketRestrictions,
   createRecoveryCaseForCancellation,
   createRecoveryError,
   declineRecoveryCase,
   expireRecoveryCase,
   findEligibleRecoveryOptions,
   getRecoveryExpiry,
+  getRecoveryCaseDetail,
+  isNoWorseRefundTerms,
+  isNoStricterThanOriginal,
+  normalizeRecoveryWindowMs,
   resolveRecoveryFundingBooking,
   serializeRecoveryCase,
+  serializeRecoveryRefund,
   sweepExpiredRecoveryCases,
   synchronizeLiveTrip,
 };

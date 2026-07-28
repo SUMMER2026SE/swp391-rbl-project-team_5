@@ -24,6 +24,7 @@ const { expirePendingPartnerBooking } = require('../utils/pendingPartnerWorker')
 const {
   queueMandatoryRefund,
   queueRecoveryFullRefund,
+  getCapturedPayment,
 } = require('../services/mandatoryRefundService');
 const {
   createRecoveryCaseForCancellation,
@@ -464,6 +465,7 @@ async function getDashboard(req, res, next) {
           status: true,
           createdAt: true,
           snapshotVisitDate: true,
+          recoveryCaseAsOriginal: { select: { id: true, status: true } },
           commissionRateSnapshot: true,
           commissionAmountSnapshot: true,
           partnerNetAmountSnapshot: true,
@@ -471,11 +473,32 @@ async function getDashboard(req, res, next) {
           refundTransactions: {
             where: { status: 'SUCCESS' },
             select: {
+              id: true,
               amount: true,
+              status: true,
               processedAt: true,
               reconciledAt: true,
               createdAt: true,
               refundRequest: { select: { type: true } },
+            },
+          },
+          refundRequestsTargeting: {
+            where: {
+              refundTransactions: { some: { status: 'SUCCESS' } },
+            },
+            select: {
+              type: true,
+              refundTransactions: {
+                where: { status: 'SUCCESS' },
+                select: {
+                  id: true,
+                  amount: true,
+                  status: true,
+                  processedAt: true,
+                  reconciledAt: true,
+                  createdAt: true,
+                },
+              },
             },
           },
           reservation: { select: { quantity: true, date: true } },
@@ -685,6 +708,7 @@ async function getReports(req, res, next) {
         status: true,
         createdAt: true,
         snapshotVisitDate: true,
+        recoveryCaseAsOriginal: { select: { id: true, status: true } },
         commissionRateSnapshot: true,
         commissionAmountSnapshot: true,
         partnerNetAmountSnapshot: true,
@@ -695,11 +719,32 @@ async function getReports(req, res, next) {
         refundTransactions: {
           where: { status: 'SUCCESS' },
           select: {
+            id: true,
             amount: true,
+            status: true,
             processedAt: true,
             reconciledAt: true,
             createdAt: true,
             refundRequest: { select: { type: true } },
+          },
+        },
+        refundRequestsTargeting: {
+          where: {
+            refundTransactions: { some: { status: 'SUCCESS' } },
+          },
+          select: {
+            type: true,
+            refundTransactions: {
+              where: { status: 'SUCCESS' },
+              select: {
+                id: true,
+                amount: true,
+                status: true,
+                processedAt: true,
+                reconciledAt: true,
+                createdAt: true,
+              },
+            },
           },
         },
         reservation: {
@@ -943,6 +988,7 @@ async function getPartnerBookings(req, res, next) {
         },
         select: {
           status: true,
+          recoveryCaseAsOriginal: { select: { id: true, status: true } },
           commissionRateSnapshot: true,
           commissionAmountSnapshot: true,
           partnerNetAmountSnapshot: true,
@@ -953,8 +999,26 @@ async function getPartnerBookings(req, res, next) {
           refundTransactions: {
             where: { status: 'SUCCESS' },
             select: {
+              id: true,
               amount: true,
+              status: true,
               refundRequest: { select: { type: true } },
+            },
+          },
+          refundRequestsTargeting: {
+            where: {
+              refundTransactions: { some: { status: 'SUCCESS' } },
+            },
+            select: {
+              type: true,
+              refundTransactions: {
+                where: { status: 'SUCCESS' },
+                select: {
+                  id: true,
+                  amount: true,
+                  status: true,
+                },
+              },
             },
           },
         },
@@ -1246,7 +1310,13 @@ async function rejectBooking(req, res, next) {
       });
     }
 
-    const hasPaid = booking.payments.length > 0;
+    const hasPaid = Boolean(getCapturedPayment(booking));
+    if (booking.payments.length > 0 && !hasPaid) {
+      return res.status(409).json({
+        success: false,
+        message: 'Đơn đã có giao dịch nhưng chưa có giao dịch VNPay hợp lệ để tự động hoàn. Vui lòng chuyển Staff đối soát.',
+      });
+    }
     const cancelledAt = new Date();
 
     await prisma.$transaction(async (tx) => {
@@ -1281,7 +1351,10 @@ async function rejectBooking(req, res, next) {
       }
 
       const reservation = booking.reservation;
-      const hasPaid = booking.payments.length > 0;
+      const hasPaid = Boolean(getCapturedPayment(booking));
+      if (booking.payments.length > 0 && !hasPaid) {
+        throw bookingConflict('Đơn đã có giao dịch nhưng chưa có giao dịch VNPay hợp lệ để tự động hoàn. Vui lòng chuyển Staff đối soát.');
+      }
       const claimed = await tx.booking.updateMany({
         where: { id: bookingId, status: 'PENDING_PARTNER', isForecastTrainingSample: false },
         data: {
@@ -1362,11 +1435,14 @@ async function rejectBooking(req, res, next) {
       // 5. Đơn đã thu tiền -> tạo RefundRequest hoàn 100% (partner từ chối thì
       //    khách không chịu phí hủy) để Staff duyệt hoàn qua luồng sẵn có.
       if (hasPaid) {
-        await queueMandatoryRefund(tx, booking, {
+        const queuedRefund = await queueMandatoryRefund(tx, booking, {
           now: cancelledAt,
           type: 'PARTNER_CANCELLATION',
           reason: `Đối tác từ chối đơn đặt vé. Lý do: ${reason}`,
         });
+        if (!queuedRefund?.refundRequest) {
+          throw bookingConflict('Không thể tạo yêu cầu hoàn tiền tự động. Vui lòng chuyển Staff đối soát.');
+        }
       }
     });
 
@@ -1497,7 +1573,15 @@ async function cancelConfirmedBooking(req, res, next) {
         throw bookingConflict('Hoạt động đã bắt đầu, không thể hủy theo luồng Partner.');
       }
 
-      const hasPaid = current.payments.length > 0;
+      // Rescue replacements are funded by an internal RECOVERY_CREDIT payment,
+      // so trace their original booking before deciding whether a refund path
+      // exists. Without this, cancelling a replacement would be blocked as
+      // "unpaid" even though the source booking has a captured VNPay payment.
+      const fundingBooking = await resolveRecoveryFundingBooking(tx, current);
+      const hasPaid = Boolean(getCapturedPayment(current) || fundingBooking);
+      if (current.payments.length > 0 && !hasPaid) {
+        throw bookingConflict('Đơn đã có giao dịch nhưng chưa có giao dịch VNPay hợp lệ để tự động hoàn. Vui lòng chuyển Staff đối soát.');
+      }
       const claimed = await tx.booking.updateMany({
         where: { id: bookingId, status: 'CONFIRMED', isForecastTrainingSample: false },
         data: {
@@ -1529,7 +1613,6 @@ async function cancelConfirmedBooking(req, res, next) {
           now,
         });
         if (!recoveryCase) {
-          const fundingBooking = await resolveRecoveryFundingBooking(tx, current);
           if (fundingBooking) {
             const queuedRefund = await queueRecoveryFullRefund(tx, fundingBooking, {
               cancelledBookingId: current.id,
@@ -1548,11 +1631,14 @@ async function cancelConfirmedBooking(req, res, next) {
               });
             }
           } else {
-            await queueMandatoryRefund(tx, current, {
+            const queuedRefund = await queueMandatoryRefund(tx, current, {
               type: 'PARTNER_CANCELLATION',
               reason: `Đối tác hủy đơn đã xác nhận. Lý do: ${reason}`,
               now,
             });
+            if (!queuedRefund?.refundRequest) {
+              throw bookingConflict('Không thể tạo yêu cầu hoàn tiền tự động. Vui lòng chuyển Staff đối soát.');
+            }
           }
         }
       }
@@ -1621,7 +1707,7 @@ async function cancelConfirmedBooking(req, res, next) {
       data: {
         id: bookingId,
         status: 'cancelled',
-        refundRequired: booking.payments.length > 0,
+        refundRequired: cancellationResult.hasPaid,
         recoveryCaseId: recoveryCase?.id || null,
         recoveryStatus: recoveryCase?.status || null,
       },
