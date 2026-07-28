@@ -6,6 +6,9 @@ jest.mock('../controllers/bookingController', () => ({
   createTicketInstances: jest.fn(),
 }));
 jest.mock('../services/loyaltyService', () => ({ awardPointsForBooking: jest.fn() }));
+jest.mock('../services/mandatoryRefundService', () => ({
+  queueMandatoryRefund: jest.fn(),
+}));
 jest.mock('../utils/auditLog', () => ({ writeAuditLog: jest.fn() }));
 
 const mockPrisma = require('./helpers/mockPrisma');
@@ -14,6 +17,7 @@ const {
   createTicketInstances,
 } = require('../controllers/bookingController');
 const { awardPointsForBooking } = require('../services/loyaltyService');
+const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const {
   buildVietQrPayload,
   crc16,
@@ -27,6 +31,12 @@ const BOOKING_ID = 'aaaaaaaa-bbbb-cccc-dddd-1234567890ab';
 const ORIGINAL_ENV = { ...process.env };
 beforeEach(() => {
   jest.clearAllMocks();
+  queueMandatoryRefund.mockResolvedValue({
+    queued: true,
+    refundRequest: { id: 'refund-late-payment' },
+    refundTransaction: null,
+    processingMode: 'MANUAL_BANK_TRANSFER',
+  });
   process.env.BANK_BIN = '970436';
   process.env.BANK_ACCOUNT_NUMBER = '1234567890';
   process.env.BANK_ACCOUNT_NAME = 'NGUYEN VAN A';
@@ -39,7 +49,16 @@ afterAll(() => {
 function makeTx() {
   return {
     booking: { findUnique: jest.fn(), update: jest.fn().mockResolvedValue({}) },
-    payment: { upsert: jest.fn().mockResolvedValue({}) },
+    payment: {
+      upsert: jest.fn().mockResolvedValue({
+        id: 'payment-bank-transfer',
+        amount: 250000,
+        paymentGateway: 'BANK_TRANSFER',
+        transactionId: `BT-${BOOKING_ID}`,
+        status: 'SUCCESS',
+        isDuplicate: false,
+      }),
+    },
   };
 }
 
@@ -49,6 +68,7 @@ function bookingFixture(overrides = {}) {
     userId: 'user-1',
     status: 'PENDING_PAYMENT',
     paymentMethod: 'bank_transfer',
+    payments: [],
     totalAmount: 250000,
     isForecastTrainingSample: false,
     reservation: {
@@ -187,7 +207,7 @@ describe('confirmBankTransfer', () => {
     expect(tx.payment.upsert).not.toHaveBeenCalled();
   });
 
-  test('giữ chỗ đã hết hạn -> 409 và nhắc hoàn tiền thủ công', async () => {
+  test('tiền đến sau khi giữ chỗ hết hạn -> ghi nhận tiền và tự mở hồ sơ hoàn 100%', async () => {
     const tx = makeTx();
     tx.booking.findUnique.mockResolvedValue(
       bookingFixture({
@@ -196,18 +216,63 @@ describe('confirmBankTransfer', () => {
     );
     wire(tx);
 
-    await expect(confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' }))
-      .rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('hoàn tiền thủ công') });
+    const result = await confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' });
+
+    expect(result).toEqual(expect.objectContaining({
+      latePayment: true,
+      bookingStatus: 'CANCELLED',
+      refundRequestId: 'refund-late-payment',
+    }));
+    expect(tx.payment.upsert).toHaveBeenCalled();
+    expect(queueMandatoryRefund).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        id: BOOKING_ID,
+        status: 'CANCELLED',
+        refundRequired: true,
+      }),
+      expect.objectContaining({ type: 'SYSTEM_CANCELLATION' }),
+    );
     expect(confirmReservationAndStock).not.toHaveBeenCalled();
   });
 
-  test('đơn đã bị hủy -> 409, không âm thầm phát vé', async () => {
+  test('tiền đến sau khi đơn đã hủy -> không phát vé và tự mở hồ sơ hoàn', async () => {
     const tx = makeTx();
     tx.booking.findUnique.mockResolvedValue(bookingFixture({ status: 'CANCELLED' }));
     wire(tx);
 
-    await expect(confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' }))
-      .rejects.toMatchObject({ statusCode: 409 });
+    const result = await confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' });
+
+    expect(result.latePayment).toBe(true);
+    expect(result.bookingStatus).toBe('CANCELLED');
+    expect(createTicketInstances).not.toHaveBeenCalled();
+    expect(queueMandatoryRefund).toHaveBeenCalled();
+  });
+
+  test('xác nhận lặp tiền đến muộn -> idempotent, không mở thêm hồ sơ hoàn', async () => {
+    const tx = makeTx();
+    tx.booking.findUnique.mockResolvedValue(bookingFixture({
+      status: 'CANCELLED',
+      payments: [{
+        id: 'payment-bank-transfer',
+        amount: 250000,
+        paymentGateway: 'BANK_TRANSFER',
+        transactionId: `BT-${BOOKING_ID}`,
+        status: 'SUCCESS',
+        isDuplicate: false,
+      }],
+    }));
+    wire(tx);
+
+    const result = await confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' });
+
+    expect(result).toEqual(expect.objectContaining({
+      alreadyConfirmed: true,
+      latePayment: true,
+      bookingStatus: 'CANCELLED',
+    }));
+    expect(tx.payment.upsert).not.toHaveBeenCalled();
+    expect(queueMandatoryRefund).not.toHaveBeenCalled();
   });
 
   test('đơn thanh toán VNPay -> từ chối xác nhận thủ công', async () => {
@@ -219,15 +284,17 @@ describe('confirmBankTransfer', () => {
       .rejects.toMatchObject({ statusCode: 400 });
   });
 
-  test('gói vé đã ngừng bán -> 409, không chốt kho', async () => {
+  test('tiền đến khi gói vé đã ngừng bán -> không chốt kho và tự mở hồ sơ hoàn', async () => {
     const booking = bookingFixture();
     booking.reservation.ticketProduct.attraction.partner.status = 'SUSPENDED';
     const tx = makeTx();
     tx.booking.findUnique.mockResolvedValue(booking);
     wire(tx);
 
-    await expect(confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' }))
-      .rejects.toMatchObject({ statusCode: 409 });
+    const result = await confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' });
+
+    expect(result.latePayment).toBe(true);
+    expect(queueMandatoryRefund).toHaveBeenCalled();
     expect(confirmReservationAndStock).not.toHaveBeenCalled();
   });
 

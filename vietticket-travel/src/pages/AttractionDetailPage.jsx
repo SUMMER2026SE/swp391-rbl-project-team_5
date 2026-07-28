@@ -827,7 +827,7 @@ export default function AttractionDetailPage() {
                 <ul className="space-y-3">
                   {[
                     'Vé QR lưu trên điện thoại',
-                    'Thanh toán an toàn qua VNPay',
+                    'Thanh toán an toàn qua VNPay hoặc VietQR',
                     'Chính sách hoàn hiển thị theo từng loại vé',
                     'Hỗ trợ khi lịch trình thay đổi',
                   ].map((item) => (

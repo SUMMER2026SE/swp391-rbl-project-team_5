@@ -374,6 +374,8 @@ function serializeRoom(room, actor = null) {
     version: room.version,
     inviteExpiresAt: room.inviteExpiresAt,
     finalizedAt: room.finalizedAt,
+    bookingStartedAt: room.bookingStartedAt,
+    bookingVersion: room.bookingVersion,
     closedAt: room.closedAt,
     createdAt: room.createdAt,
     updatedAt: room.updatedAt,
@@ -1098,21 +1100,21 @@ async function finalizeRoom(roomId, userId, { prismaClient = prisma } = {}) {
   };
   const planId = `party-${room.id}`;
 
-  const existingSavedCount = await prismaClient.savedItinerary.count({
-    where: {
-      userId,
-      NOT: { planId },
-    },
-  });
-  if (existingSavedCount >= MAX_SAVED_ITINERARIES_PER_USER) {
-    throw createHttpError(
-      409,
-      'SAVED_ITINERARY_LIMIT_REACHED',
-      `Bạn đã lưu tối đa ${MAX_SAVED_ITINERARIES_PER_USER} lịch trình. Hãy xóa bớt trước khi chốt.`,
-    );
-  }
-
   await prismaClient.$transaction(async (tx) => {
+    const existingSavedCount = await tx.savedItinerary.count({
+      where: {
+        userId,
+        NOT: { planId },
+      },
+    });
+    if (existingSavedCount >= MAX_SAVED_ITINERARIES_PER_USER) {
+      throw createHttpError(
+        409,
+        'SAVED_ITINERARY_LIMIT_REACHED',
+        `Bạn đã lưu tối đa ${MAX_SAVED_ITINERARIES_PER_USER} lịch trình. Hãy xóa bớt trước khi chốt.`,
+      );
+    }
+
     const locked = await tx.partyRoom.updateMany({
       where: { id: room.id, status: 'OPEN', version: inputVersion },
       data: {
@@ -1177,7 +1179,7 @@ async function finalizeRoom(roomId, userId, { prismaClient = prisma } = {}) {
       where: { id: room.id },
       data: { savedItineraryId: saved.id },
     });
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
   const finalizedRoom = await loadRoom(room.id, { prismaClient });
   emitPartyRoomUpdated({
@@ -1212,26 +1214,45 @@ async function reopenRoom(roomId, userId, { prismaClient = prisma } = {}) {
       'Lịch trình đã kích hoạt Live Trip nên không thể mở lại bình chọn.',
     );
   }
-  await prismaClient.partyRoom.update({
-    where: { id: room.id },
+  if (room.bookingStartedAt) {
+    throw createHttpError(
+      409,
+      'PARTY_BOOKING_ALREADY_STARTED',
+      'Lịch trình đã bắt đầu phát sinh đơn đặt vé nên không thể mở lại bình chọn. Hãy tạo một phòng mới nếu nhóm muốn đổi kế hoạch.',
+    );
+  }
+  const reopened = await prismaClient.partyRoom.updateMany({
+    where: {
+      id: room.id,
+      status: 'FINALIZED',
+      version: room.version,
+      bookingStartedAt: null,
+    },
     data: {
       status: 'OPEN',
       finalizedAt: null,
       version: { increment: 1 },
     },
   });
-  const reopened = await loadRoom(room.id, { prismaClient });
+  if (reopened.count !== 1) {
+    throw createHttpError(
+      409,
+      'PARTY_ROOM_VERSION_CHANGED',
+      'Lịch trình vừa thay đổi hoặc đã bắt đầu phát sinh đơn đặt vé. Vui lòng tải lại phòng.',
+    );
+  }
+  const reopenedRoom = await loadRoom(room.id, { prismaClient });
   emitPartyRoomUpdated({
     roomId: room.id,
     eventName: 'PARTY_ROOM_UPDATED',
     reason: 'room_reopened',
-    version: reopened.version,
+    version: reopenedRoom.version,
   });
   return serializeRoom(
-    reopened,
+    reopenedRoom,
     {
-      memberId: reopened.members.find((member) => member.userId === userId)?.id,
-      roomId: reopened.id,
+      memberId: reopenedRoom.members.find((member) => member.userId === userId)?.id,
+      roomId: reopenedRoom.id,
       isHost: true,
       role: 'HOST',
     },
@@ -1320,10 +1341,17 @@ async function closeRoom(roomId, userId, { prismaClient = prisma } = {}) {
     where: { id: String(roomId || '').trim() },
   });
   assertHost(room, userId);
-  if (room.status === 'CLOSED' || room.status === 'EXPIRED') {
-    throw createHttpError(409, 'PARTY_ROOM_ALREADY_CLOSED', 'Phòng đã đóng.');
-  }
-  const updated = await prismaClient.partyRoom.update({
+    if (room.status === 'CLOSED' || room.status === 'EXPIRED') {
+      throw createHttpError(409, 'PARTY_ROOM_ALREADY_CLOSED', 'Phòng đã đóng.');
+    }
+    if (room.bookingStartedAt) {
+      throw createHttpError(
+        409,
+        'PARTY_BOOKING_ALREADY_STARTED',
+        'Không thể đóng phòng khi lịch trình đang có đơn đặt vé. Hãy hoàn tất hoặc xử lý các dòng vé còn lại trong lịch trình.',
+      );
+    }
+    const updated = await prismaClient.partyRoom.update({
     where: { id: room.id },
     data: {
       status: 'CLOSED',

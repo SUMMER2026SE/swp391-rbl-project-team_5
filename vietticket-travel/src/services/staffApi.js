@@ -18,10 +18,10 @@ export function listRefundRequests({ status, search, page, limit } = {}) {
 }
 
 // action: 'APPROVED' | 'REJECTED' — staffNotes bắt buộc khi từ chối.
-export function processRefundRequest(refundId, action, staffNotes) {
+export function processRefundRequest(refundId, action, staffNotes, manualReference = '') {
   return apiRequest(`/staff/refunds/${refundId}`, {
     method: 'PATCH',
-    body: { action, staffNotes },
+    body: { action, staffNotes, manualReference },
   })
 }
 

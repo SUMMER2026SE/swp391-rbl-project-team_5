@@ -71,6 +71,7 @@ const statusMeta = {
   CLOSED: { label: 'Đã đóng', className: 'bg-slate-200 text-slate-700', icon: 'lock' },
   EXPIRED: { label: 'Hết hạn', className: 'bg-slate-200 text-slate-700', icon: 'timer_off' },
 }
+const EMPTY_LIST = Object.freeze([])
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('vi-VN', {
@@ -155,13 +156,17 @@ function PartyRoomPage() {
 
   useEffect(() => () => window.clearTimeout(refreshTimer.current), [])
 
+  const roomMeId = room?.me?.id
+  const roomVotes = room?.votes || EMPTY_LIST
+  const roomCandidates = room?.candidates || EMPTY_LIST
+
   const handleRevoked = useCallback((payload) => {
     if (!partyToken) return
-    if (payload?.memberId && payload.memberId !== room?.me?.id) return
+    if (payload?.memberId && payload.memberId !== roomMeId) return
     clearPartySession(roomId)
     setAccessError('Host đã thu hồi quyền tham gia phòng này.')
     setRoom(null)
-  }, [partyToken, room?.me?.id, roomId])
+  }, [partyToken, roomMeId, roomId])
 
   const connectionState = usePartyRoomSocket({
     roomId,
@@ -172,29 +177,29 @@ function PartyRoomPage() {
 
   const myVotes = useMemo(
     () => new Map(
-      (room?.votes || [])
-        .filter((vote) => vote.memberId === room?.me?.id)
+      roomVotes
+        .filter((vote) => vote.memberId === roomMeId)
         .map((vote) => [vote.candidateId, vote.value]),
     ),
-    [room?.me?.id, room?.votes],
+    [roomMeId, roomVotes],
   )
   const votingMemberCount = useMemo(
-    () => new Set((room?.votes || []).map((vote) => vote.memberId)).size,
-    [room?.votes],
+    () => new Set(roomVotes.map((vote) => vote.memberId)).size,
+    [roomVotes],
   )
   const requiredVoters = Number(
     room?.votingPolicy?.requiredVoters
       || Math.max(2, Math.ceil((room?.members?.length || 0) * 0.6)),
   )
   const endorsedCandidateCount = useMemo(
-    () => (room?.candidates || []).filter((candidate) => {
-      const votes = (room?.votes || []).filter((vote) => vote.candidateId === candidate.id)
+    () => roomCandidates.filter((candidate) => {
+      const votes = roomVotes.filter((vote) => vote.candidateId === candidate.id)
       return (
         votes.some((vote) => ['LOVE', 'LIKE'].includes(vote.value))
         && !votes.some((vote) => vote.value === 'VETO')
       )
     }).length,
-    [room?.candidates, room?.votes],
+    [roomCandidates, roomVotes],
   )
   const isHost = Boolean(room?.me?.isHost)
   const isOpen = room?.status === 'OPEN'
@@ -309,7 +314,10 @@ function PartyRoomPage() {
   }
 
   const handleClose = async () => {
-    if (!window.confirm('Đóng phòng sẽ ngừng nhận vote và vô hiệu hóa link mời. Tiếp tục?')) return
+    const closeMessage = room.status === 'FINALIZED'
+      ? 'Đóng phòng sẽ hủy quy trình đặt các vé còn lại từ lịch nhóm và vô hiệu hóa link mời. Các vé đã mua (nếu có) không bị hủy. Tiếp tục?'
+      : 'Đóng phòng sẽ ngừng nhận vote và vô hiệu hóa link mời. Tiếp tục?'
+    if (!window.confirm(closeMessage)) return
     setAction('close')
     try {
       const response = await closePartyRoom(roomId)
@@ -333,6 +341,12 @@ function PartyRoomPage() {
     const queue = createItineraryBookingQueue(latestPlan, {
       fallbackStartDate: room.startDate,
       ownerId: user?.id || user?.userId || '',
+      queueId: room.savedItinerary?.id
+        ? `itinerary-${room.savedItinerary.id}-v${room.version}`
+        : undefined,
+      itineraryId: room.savedItinerary?.id,
+      itineraryVersion: room.version,
+      partyRoomId: room.id,
     })
     if (!queue) {
       toast.warning('Lịch trình chưa có dòng vé phù hợp để bắt đầu đặt.')
@@ -455,11 +469,17 @@ function PartyRoomPage() {
                     </button>
                   )}
                   {!['CLOSED', 'EXPIRED'].includes(room.status) && (
-                    <button
-                      className="rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/15"
-                      onClick={() => void handleClose()}
-                      type="button"
-                    >
+                      <button
+                        className="rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-bold text-white hover:bg-white/15 disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-white/45"
+                        disabled={action === 'close' || Boolean(room.bookingStartedAt)}
+                        onClick={() => void handleClose()}
+                        title={
+                          room.bookingStartedAt
+                            ? 'Không thể đóng phòng khi lịch trình đang có đơn đặt vé.'
+                            : 'Đóng và lưu phòng vào lịch sử.'
+                        }
+                        type="button"
+                      >
                       Đóng phòng
                     </button>
                   )}
@@ -1132,10 +1152,21 @@ function DecisionPanel({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button
-                className="rounded-xl border border-[#68bdb6] bg-white px-4 py-3 text-sm font-extrabold text-[#006b68]"
-                disabled={Boolean(room.savedItinerary?.liveTrip) || runningAction === 'reopen'}
+                <button
+                  className="rounded-xl border border-[#68bdb6] bg-white px-4 py-3 text-sm font-extrabold text-[#006b68] disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                disabled={
+                  Boolean(room.savedItinerary?.liveTrip)
+                  || Boolean(room.bookingStartedAt)
+                  || runningAction === 'reopen'
+                }
                 onClick={() => void onReopen()}
+                title={
+                  room.bookingStartedAt
+                    ? 'Không thể mở lại vì lịch trình đã phát sinh đơn đặt vé.'
+                    : room.savedItinerary?.liveTrip
+                      ? 'Không thể mở lại khi Live Trip đang hoạt động.'
+                      : 'Mở lại để nhóm tiếp tục bình chọn.'
+                }
                 type="button"
               >
                 Mở lại bình chọn
@@ -1156,6 +1187,11 @@ function DecisionPanel({
                 Bắt đầu đặt vé
               </button>
             </div>
+            {room.bookingStartedAt && (
+              <p className="w-full rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                Lịch trình đã phát sinh đơn đặt vé nên phiên bản này được khóa để tránh lệch ngày đi, tồn vé và khoản đã thanh toán. Nhóm có thể tạo phòng mới nếu muốn đổi kế hoạch.
+              </p>
+            )}
           </div>
         </section>
       )}

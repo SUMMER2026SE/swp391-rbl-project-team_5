@@ -1,6 +1,7 @@
 'use strict';
 
 const { getBookingActivityWindow } = require('./activityTime');
+const { isRefundableCapturedPayment } = require('./paymentGateway');
 
 // Múi giờ nghiệp vụ của hệ thống (Việt Nam, UTC+7).
 const VN_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -125,18 +126,14 @@ function getRefundEligibility(booking, now = new Date()) {
     ...(booking?.payments || []),
     ...(booking?.recoveryCaseAsReplacement?.fundingBooking?.payments || []),
   ];
-  const hasCapturedPayment = paymentCandidates.some((payment) => (
-    payment.status === 'SUCCESS'
-    && !payment.isDuplicate
-    && /vnpay/i.test(payment.paymentGateway || '')
-  ));
+  const hasCapturedPayment = paymentCandidates.some(isRefundableCapturedPayment);
   const { refundAmount, feeAmount, policyLabel } = calculateRefundAmount(booking);
 
   let notRefundableReason = null;
   if (booking?.status !== 'CONFIRMED') {
     notRefundableReason = 'Chỉ đơn đã xác nhận mới có thể yêu cầu hoàn tiền.';
   } else if (!hasCapturedPayment) {
-    notRefundableReason = 'Đơn chưa có giao dịch VNPay thành công để hoàn tiền về phương thức gốc.';
+    notRefundableReason = 'Đơn chưa có giao dịch thanh toán thành công để hoàn tiền theo phương thức gốc.';
   } else if (hasUsedTicket) {
     notRefundableReason = 'Đơn đã có vé được sử dụng nên không thể yêu cầu hoàn tiền.';
   } else if (refundPolicy === 'NON_REFUNDABLE' || refundAmount <= 0) {

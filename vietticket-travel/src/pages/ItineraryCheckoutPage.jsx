@@ -1,13 +1,16 @@
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import { useAuth } from '../context/useAuth.js'
+import { getItineraryBookingProgress } from '../services/bookingService.js'
 import { footerLinks } from '../data/landingData.js'
 import {
   buildItineraryQueueBookingUrl,
   getItineraryQueueProgress,
   getNextItineraryQueueStep,
   loadItineraryBookingQueue,
+  syncItineraryBookingQueueProgress,
 } from '../utils/aiItineraryBookingQueue.js'
 
 const formatCurrency = (value) =>
@@ -22,15 +25,37 @@ const formatDate = (value) => {
 const STATUS_LABELS = {
   reserved: 'Đã giữ chỗ',
   booking_created: 'Chờ hoàn tất thanh toán',
+  action_required: 'Cần đặt lại dòng vé này',
   completed: 'Đã thanh toán',
 }
 
 export default function ItineraryCheckoutPage() {
   const { queueId } = useParams()
   const { user } = useAuth()
-  const queue = loadItineraryBookingQueue()
+  const [queue, setQueue] = useState(() => loadItineraryBookingQueue())
+  const [syncWarning, setSyncWarning] = useState('')
   const currentUserId = user?.id || user?.userId || ''
   const canView = queue?.id === queueId && (!queue.ownerId || queue.ownerId === currentUserId)
+
+  useEffect(() => {
+    if (!canView || !queue?.itineraryId) return undefined
+    let active = true
+    getItineraryBookingProgress(queue.itineraryId)
+      .then((progress) => {
+        if (!active) return
+        const updated = syncItineraryBookingQueueProgress(progress?.items)
+        if (updated) setQueue(updated)
+        setSyncWarning('')
+      })
+      .catch(() => {
+        if (active) {
+          setSyncWarning('Chưa đồng bộ được trạng thái thanh toán mới nhất. Bạn có thể tải lại trang sau ít phút.')
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [canView, queue?.itineraryId])
 
   if (!canView) {
     return (
@@ -68,6 +93,11 @@ export default function ItineraryCheckoutPage() {
             <p className="mt-3 max-w-3xl text-sm leading-6 text-[#596365]">
               Đây là một quy trình gồm {queue.items.length} dòng vé. Mỗi dòng được giữ chỗ và thanh toán riêng để đúng tồn kho, ngày đi và chính sách của từng đối tác; hệ thống luôn đưa bạn trở lại danh sách này sau mỗi giao dịch.
             </p>
+            {syncWarning && (
+              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                {syncWarning}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
@@ -97,7 +127,11 @@ export default function ItineraryCheckoutPage() {
                             {item.dayLabel} · {formatDate(item.visitDate)}{item.timeSlotLabel ? ` · ${item.timeSlotLabel}` : ''}
                           </p>
                           {item.status && (
-                            <span className="mt-3 inline-flex rounded-full bg-[#eef3f4] px-3 py-1 text-xs font-semibold text-[#3f484a]">
+                            <span className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                              item.status === 'action_required'
+                                ? 'bg-amber-100 text-amber-900'
+                                : 'bg-[#eef3f4] text-[#3f484a]'
+                            }`}>
                               {STATUS_LABELS[item.status] || 'Đang xử lý'}
                             </span>
                           )}
@@ -116,7 +150,7 @@ export default function ItineraryCheckoutPage() {
                 <div className="flex justify-between gap-4"><span className="text-[#596365]">Tạm tính toàn lịch trình</span><strong>{formatCurrency(estimatedTotal)}</strong></div>
               </div>
               <p className="mt-4 rounded-xl bg-[#fff7e6] p-3 text-xs leading-5 text-[#5d4300]">
-                Giá, voucher và tồn vé được xác nhận lại ở từng bước giữ chỗ. Bạn chỉ bị tính tiền cho giao dịch đã xác nhận trên VNPay.
+                Giá, voucher và tồn vé được xác nhận lại ở từng bước giữ chỗ. Một dòng chỉ hoàn tất khi hệ thống đã xác nhận thanh toán qua VNPay hoặc chuyển khoản ngân hàng và đơn vẫn có khả năng cung cấp vé.
               </p>
               {progress.isComplete ? (
                 <Link className="mt-5 flex w-full items-center justify-center rounded-xl bg-[#006068] px-4 py-3 text-sm font-bold text-white" to="/my-tickets">Xem toàn bộ vé đã đặt</Link>

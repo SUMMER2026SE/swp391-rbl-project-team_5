@@ -28,7 +28,12 @@ const {
 } = require('../utils/bankTransferPolicy');
 const { isTicketProductSaleEnabled } = require('../services/catalogVisibilityService');
 const { awardPointsForBooking } = require('../services/loyaltyService');
+const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const { writeAuditLog } = require('../utils/auditLog');
+const {
+  isBankTransferPayment,
+  isCapturedPayment,
+} = require('../utils/paymentGateway');
 const {
   confirmReservationAndStock,
   createTicketInstances,
@@ -78,6 +83,18 @@ function buildTransferInstruction(booking) {
 }
 
 const CONFIRM_INCLUDE = {
+  payments: {
+    where: { status: 'SUCCESS', isDuplicate: false },
+    select: {
+      id: true,
+      amount: true,
+      status: true,
+      isDuplicate: true,
+      paymentGateway: true,
+      transactionId: true,
+      paidAt: true,
+    },
+  },
   reservation: {
     include: {
       ticketProduct: {
@@ -115,6 +132,90 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
       if (['CONFIRMED', 'PENDING_PARTNER', 'COMPLETED'].includes(booking.status)) {
         return { alreadyConfirmed: true, bookingStatus: booking.status, booking };
       }
+      if (
+        ['CANCELLED', 'REFUNDED'].includes(booking.status)
+        && (booking.payments || []).some((payment) => (
+          isCapturedPayment(payment) && isBankTransferPayment(payment)
+        ))
+      ) {
+        return {
+          alreadyConfirmed: true,
+          latePayment: true,
+          bookingStatus: booking.status,
+          booking,
+        };
+      }
+      const now = new Date();
+      const cannotFulfill = (
+        booking.status === 'CANCELLED'
+        || !booking.reservation
+        || booking.reservation.status !== 'HELD'
+        || booking.reservation.expiresAt <= now
+        || !isTicketProductSaleEnabled(booking.reservation.ticketProduct)
+      );
+      if (cannotFulfill) {
+        const payment = await tx.payment.upsert({
+          where: { transactionId: `BT-${booking.id}` },
+          update: {},
+          create: {
+            bookingId: booking.id,
+            amount: booking.totalAmount,
+            paymentGateway: 'BANK_TRANSFER',
+            transactionId: `BT-${booking.id}`,
+            status: 'SUCCESS',
+            paidAt: now,
+            rawResponse: {
+              method: BANK_TRANSFER_METHOD,
+              confirmedBy: actorId || null,
+              note: note || null,
+              transferContent: buildTransferContent(booking.id),
+              receivedAfterFulfillmentWindow: true,
+            },
+          },
+        });
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: {
+            status: 'CANCELLED',
+            refundRequired: true,
+            cancelledAt: booking.cancelledAt || now,
+            cancellationReason: booking.cancellationReason
+              || 'Tiền chuyển khoản được ghi nhận sau khi đơn không còn khả năng phát vé.',
+            cancellationSource: booking.cancellationSource || 'BANK_TRANSFER_AFTER_EXPIRY',
+          },
+        });
+        const queuedRefund = await queueMandatoryRefund(tx, {
+          ...booking,
+          status: 'CANCELLED',
+          refundRequired: true,
+          payments: [payment],
+        }, {
+          type: 'SYSTEM_CANCELLATION',
+          reason: 'Hệ thống đã nhận chuyển khoản sau khi hết thời hạn giữ chỗ hoặc vé ngừng bán. Hoàn lại 100% qua chuyển khoản ngân hàng.',
+          now,
+        });
+        await writeAuditLog({
+          client: tx,
+          req,
+          actorId,
+          action: 'BANK_TRANSFER_RECEIVED_AFTER_EXPIRY',
+          entityType: 'Booking',
+          entityId: booking.id,
+          metadata: {
+            bookingId: booking.id,
+            paymentId: payment.id,
+            refundRequestId: queuedRefund.refundRequest?.id || null,
+            amount: Number(booking.totalAmount),
+          },
+        });
+        return {
+          alreadyConfirmed: false,
+          latePayment: true,
+          bookingStatus: 'CANCELLED',
+          booking,
+          refundRequestId: queuedRefund.refundRequest?.id || null,
+        };
+      }
       if (booking.status !== 'PENDING_PAYMENT') {
         throw httpError(
           409,
@@ -124,26 +225,12 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
       }
 
       const reservation = booking.reservation;
-      if (!reservation || reservation.status !== 'HELD') {
-        throw httpError(
-          409,
-          'Đơn giữ chỗ đã hết hạn nên không còn vé để phát. '
-          + 'Nếu khách đã chuyển tiền, hãy hoàn tiền thủ công cho khách.',
-        );
-      }
-      if (!isTicketProductSaleEnabled(reservation.ticketProduct)) {
-        throw httpError(
-          409,
-          'Gói vé hoặc đối tác đã tạm dừng bán. Vui lòng hoàn tiền thủ công cho khách.',
-        );
-      }
 
       // Chốt kho giữ chỗ -> kho đã bán (dùng chung helper với luồng VNPay).
       await confirmReservationAndStock(tx, reservation);
 
       const needsApproval =
         reservation.ticketProduct?.attraction?.requiresManualApproval === true;
-      const now = new Date();
       let bookingStatus;
 
       if (needsApproval) {
