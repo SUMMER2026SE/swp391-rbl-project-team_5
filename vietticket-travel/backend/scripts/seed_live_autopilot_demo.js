@@ -27,10 +27,35 @@ function requireLocalConfirmation() {
   }
 }
 
+const BUCKET_MS = 15 * 60 * 1000;
+const VN_OFFSET_HOURS = 7;
+
+// Lượng khách đến trong một khung 15 phút, theo giờ Việt Nam.
+//
+// Trước đây hàm này trả về wave + (index % 5) - 2. Vì các bucket cách nhau đúng
+// 900.000 ms mà 900000 % 5 === 0 nên (index % 5) là HẰNG SỐ -> cả chuỗi chỉ có
+// 2 giá trị (bậc thang). Mô hình không học được gì từ dữ liệu 2 mức, khiến sai
+// số chuẩn hoá luôn ~0.72 và độ tin cậy luôn LOW.
+//
+// Thay bằng đường cong lưu lượng thật của điểm tham quan: đêm vắng, sáng tăng
+// dần, hai đỉnh (giữa buổi sáng và giữa buổi chiều), tối giảm; kèm dao động nhỏ
+// tất định theo chỉ số bucket (đổi theo từng khung, không còn là hằng số).
 function deterministicArrivals(index) {
-  const hour = new Date(index).getUTCHours();
-  const wave = hour >= 2 && hour <= 10 ? 7 : 3;
-  return Math.max(0, wave + (index % 5) - 2);
+  const date = new Date(index);
+  const hourOfDay =
+    ((date.getUTCHours() + VN_OFFSET_HOURS) % 24)
+    + date.getUTCMinutes() / 60;
+
+  // Hai đỉnh khách: ~10h00 và ~15h30.
+  const morningPeak = 9 * Math.exp(-((hourOfDay - 10) ** 2) / 6);
+  const afternoonPeak = 11 * Math.exp(-((hourOfDay - 15.5) ** 2) / 7);
+  const baseline = 1.5;
+
+  // Dao động nhỏ theo chỉ số bucket (tăng 1 mỗi 15 phút) nên thực sự biến thiên.
+  const bucketIndex = Math.floor(index / BUCKET_MS);
+  const jitter = ((bucketIndex % 7) - 3) * 0.25;
+
+  return Math.max(0, Math.round(baseline + morningPeak + afternoonPeak + jitter));
 }
 
 async function seedLiveAutopilotSignals({
@@ -93,7 +118,9 @@ async function seedLiveAutopilotSignals({
           bookedGuests: Math.round(capacity * 0.55),
           heldGuests: Math.round(capacity * 0.05),
           queueGuests: Math.round(capacity * 0.1),
-          checkinsLast15Minutes: deterministicArrivals(bucketStart.getTime()),
+          // Khách đã vào trong 15 phút TRƯỚC khung này (không phải cùng khung),
+          // để mô hình có tín hiệu dự báo thật thay vì chép lại nhãn.
+          checkinsLast15Minutes: deterministicArrivals(bucketStart.getTime() - BUCKET_MS),
           showRate: 0.9,
           pressureScore: 68 + (step % 18),
           actualArrivalsNext15m: deterministicArrivals(bucketStart.getTime()),
