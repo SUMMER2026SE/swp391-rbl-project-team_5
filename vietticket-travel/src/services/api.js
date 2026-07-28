@@ -21,6 +21,7 @@ export async function apiRequest(path, options = {}) {
       data.message || data.error?.message || 'Không thể kết nối đến máy chủ.',
     )
     error.status = response.status
+    error.code = data.error?.code || data.code || 'API_ERROR'
     error.data = data
     throw error
   }

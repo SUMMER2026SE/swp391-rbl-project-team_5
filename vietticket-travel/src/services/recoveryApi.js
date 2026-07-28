@@ -17,6 +17,7 @@ export async function acceptRecoveryOption(id, option) {
     body: {
       ticketProductId: option.ticketProductId,
       timeSlotId: option.timeSlotId || null,
+      quoteFingerprint: option.quoteFingerprint,
     },
   })
   return response.data
