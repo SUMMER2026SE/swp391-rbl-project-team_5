@@ -487,15 +487,41 @@ export default function BookingManagementPage() {
                     <span style={{ fontWeight: 500, color: '#1a1c1e' }}>{formatVND(selectedBooking.subtotalAmount || selectedBooking.totalAmount)}</span>
                   </div>
                   {selectedBooking.discountAmount > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                      <span style={{ color: '#6f797a' }}>Giảm giá (Voucher)</span>
-                      <span style={{ fontWeight: 600, color: 'var(--adm-error)' }}>-{formatVND(selectedBooking.discountAmount)}</span>
-                    </div>
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                        <span style={{ color: '#6f797a' }}>Giảm giá (Voucher)</span>
+                        <span style={{ fontWeight: 600, color: 'var(--adm-error)' }}>-{formatVND(selectedBooking.discountAmount)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 12, fontSize: 12 }}>
+                        <span style={{ color: '#6f797a' }}>Nền tảng tài trợ</span>
+                        <span>{formatVND(selectedBooking.platformDiscountAmount || 0)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: 12, fontSize: 12 }}>
+                        <span style={{ color: '#6f797a' }}>Đối tác tài trợ</span>
+                        <span>{formatVND(selectedBooking.partnerDiscountAmount || 0)}</span>
+                      </div>
+                    </>
                   )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, borderTop: '1px solid #e1e3e4', paddingTop: 8, marginTop: 4 }}>
                     <span style={{ fontWeight: 700, color: '#1a1c1e' }}>Tổng tiền thu</span>
                     <span style={{ fontWeight: 700, color: 'var(--adm-primary-dark)' }}>{formatVND(selectedBooking.totalAmount)}</span>
                   </div>
+                  {Number(selectedBooking.commissionBaseAmount || 0) > 0 && (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #d8ddde', paddingTop: 8, marginTop: 4, fontSize: 12 }}>
+                        <span style={{ color: '#6f797a' }}>Cơ sở tính hoa hồng</span>
+                        <span>{formatVND(selectedBooking.commissionBaseAmount)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                        <span style={{ color: '#6f797a' }}>Hoa hồng nền tảng</span>
+                        <span>{formatVND(selectedBooking.commissionAmount || 0)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700 }}>
+                        <span style={{ color: '#1a1c1e' }}>Phải trả đối tác (gốc)</span>
+                        <span>{formatVND(selectedBooking.partnerNetAmount || 0)}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 

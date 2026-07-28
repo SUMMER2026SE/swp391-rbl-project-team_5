@@ -87,6 +87,9 @@ describe('partner settlement ledger', () => {
         payableAmount: 90000,
       })],
     });
+    expect(tx.booking.findMany.mock.calls[0][0].select).toEqual(
+      expect.objectContaining({ platformDiscountAmountSnapshot: true }),
+    );
     expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         action: 'PARTNER_SETTLEMENT_CREATED',

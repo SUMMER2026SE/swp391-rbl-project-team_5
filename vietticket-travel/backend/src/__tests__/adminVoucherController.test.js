@@ -27,6 +27,8 @@ function voucher(overrides = {}) {
     isActive: true,
     usageLimit: 100,
     usedCount: 0,
+    fundingSource: 'PLATFORM',
+    platformFundingPercent: 100,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -119,6 +121,8 @@ describe('admin voucher management', () => {
         code: 'WELCOME10',
         discountType: 'PERCENTAGE',
         discountValue: 10,
+        fundingSource: 'PLATFORM',
+        platformFundingPercent: 100,
       }),
     });
     expect(tx.auditLog.create).toHaveBeenCalledWith({
@@ -146,6 +150,45 @@ describe('admin voucher management', () => {
     );
 
     expect(res.status).toHaveBeenCalledWith(409);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  test('does not allow the funding source to change after a voucher was used', async () => {
+    prisma.voucher.findUnique.mockResolvedValue(voucher({ usedCount: 1 }));
+    const res = response();
+
+    await updateVoucher(
+      {
+        params: { id: 'voucher-001' },
+        body: { fundingSource: 'PARTNER' },
+      },
+      res,
+      jest.fn(),
+    );
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  test('requires an explicit valid split for shared funding', async () => {
+    const res = response();
+
+    await createVoucher(
+      {
+        body: {
+          code: 'SHARED50',
+          discountType: 'FIXED',
+          discountValue: 50_000,
+          fundingSource: 'SHARED',
+          platformFundingPercent: 100,
+          expiryDate: new Date(Date.now() + 86_400_000).toISOString(),
+        },
+      },
+      res,
+      jest.fn(),
+    );
+
+    expect(res.status).toHaveBeenCalledWith(400);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 

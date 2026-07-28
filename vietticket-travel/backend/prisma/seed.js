@@ -27,6 +27,8 @@ const VOUCHERS = [
     discountValue: 20000,
     maxDiscount: null,
     minSpend: 100000,
+    fundingSource: 'PLATFORM',
+    platformFundingPercent: 100,
   },
   {
     code: 'VIETTICKET10',
@@ -34,6 +36,8 @@ const VOUCHERS = [
     discountValue: 10,
     maxDiscount: 50000,
     minSpend: 150000,
+    fundingSource: 'PLATFORM',
+    platformFundingPercent: 100,
   },
 ];
 

@@ -1411,8 +1411,12 @@ async function acceptRecoveryOption({
         snapshotActivityStartTime: schedule.attraction.openTime || null,
         snapshotActivityEndTime: schedule.attraction.closeTime || null,
         commissionRateSnapshot: commissionRate,
+        platformDiscountAmountSnapshot: 0,
+        partnerDiscountAmountSnapshot: 0,
+        commissionBaseAmountSnapshot: totalAmount,
         commissionAmountSnapshot: commissionAmount,
         partnerNetAmountSnapshot: partnerNetAmount,
+        platformNetRevenueSnapshot: commissionAmount,
       },
     });
     await tx.payment.create({

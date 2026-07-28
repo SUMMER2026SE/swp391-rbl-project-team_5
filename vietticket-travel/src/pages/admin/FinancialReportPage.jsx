@@ -150,6 +150,8 @@ export default function FinancialReportPage() {
     { icon: 'currency_exchange', label: 'Tiền hoàn thành công', value: formatCurrency(summary.refundedAmount) },
     { icon: 'account_balance_wallet', label: 'Dòng tiền thuần', value: formatCurrency(summary.netCashAmount) },
     { icon: 'percent', label: 'Hoa hồng đã ghi nhận', value: formatCurrency(summary.commissionRevenueAmount) },
+    { icon: 'redeem', label: 'Khuyến mãi nền tảng', value: formatCurrency(summary.platformPromotionCostAmount) },
+    { icon: 'savings', label: 'Doanh thu ròng nền tảng', value: formatCurrency(summary.platformNetRevenueAmount) },
     { icon: 'receipt_long', label: 'Doanh số thuần đã ghi nhận', value: formatCurrency(summary.recognizedNetAmount) },
     { icon: 'account_balance', label: 'Phát sinh phải trả trong kỳ', value: formatCurrency(summary.partnerPayableAmount) },
     { icon: 'pending_actions', label: `Khoản hoàn đang mở (${summary.openRefundCount || 0})`, value: formatCurrency(summary.openRefundAmount) },
@@ -279,13 +281,15 @@ export default function FinancialReportPage() {
                     <th>Trạng thái</th>
                     <th className="admin-table-cell--right">Doanh số thuần ghi nhận</th>
                     <th className="admin-table-cell--right">Hoa hồng kỳ này</th>
+                    <th className="admin-table-cell--right">Nền tảng tài trợ</th>
+                    <th className="admin-table-cell--right">Doanh thu ròng nền tảng</th>
                     <th className="admin-table-cell--right">Phát sinh phải trả</th>
                     <th className="admin-table-cell--right">Tỷ lệ booking mới</th>
                   </tr>
                 </thead>
                 <tbody>
                   {report.partners.length === 0 ? (
-                    <EmptyRow columns={6}>Chưa có hồ sơ đối tác.</EmptyRow>
+                    <EmptyRow columns={8}>Chưa có hồ sơ đối tác.</EmptyRow>
                   ) : report.partners.map((partner) => (
                     <tr key={partner.id}>
                       <td className="financial-partner-name">{partner.businessName}</td>
@@ -296,6 +300,8 @@ export default function FinancialReportPage() {
                       </td>
                       <td className="admin-table-cell--right">{formatCurrency(partner.recognizedNetAmount)}</td>
                       <td className="admin-table-cell--right">{formatCurrency(partner.commissionRevenueAmount)}</td>
+                      <td className="admin-table-cell--right">{formatCurrency(partner.platformPromotionCostAmount)}</td>
+                      <td className="admin-table-cell--right">{formatCurrency(partner.platformNetRevenueAmount)}</td>
                       <td className="admin-table-cell--right">{formatCurrency(partner.partnerPayableAmount)}</td>
                       <td className="admin-table-cell--right">
                         <div className="financial-rate-control">

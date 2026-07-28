@@ -211,6 +211,8 @@ function createPartnerMetrics(partner) {
     recognizedRefundAmount: 0,
     recognizedNetAmount: 0,
     commissionRevenueAmount: 0,
+    platformPromotionCostAmount: 0,
+    platformNetRevenueAmount: 0,
     partnerPayableAmount: 0,
   };
 }
@@ -261,6 +263,8 @@ function recognizedAmountsOf(booking) {
       refundAmount: 0,
       netAmount: 0,
       commissionAmount: 0,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 0,
       partnerPayableAmount: 0,
     };
   }
@@ -274,28 +278,55 @@ function recognizedAmountsOf(booking) {
     0,
   );
   const netAmount = Math.max(0, grossAmount - refundAmount);
-
-  if (refundAmount === 0) {
-    return {
-      grossAmount,
-      refundAmount: 0,
-      netAmount: grossAmount,
-      commissionAmount: amountOf(booking.commissionAmountSnapshot),
-      partnerPayableAmount: amountOf(booking.partnerNetAmountSnapshot),
-    };
-  }
-
   const commissionRate = Math.min(
     Math.max(amountOf(booking.commissionRateSnapshot), 0),
     1,
   );
-  const commissionAmount = roundMoney(netAmount * commissionRate);
+  const hasAllocationSnapshot = (
+    booking.commissionAmountSnapshot !== null
+    && booking.commissionAmountSnapshot !== undefined
+    && booking.partnerNetAmountSnapshot !== null
+    && booking.partnerNetAmountSnapshot !== undefined
+  );
+  const bookedCommissionAmount = hasAllocationSnapshot
+    ? amountOf(booking.commissionAmountSnapshot)
+    : roundMoney(grossAmount * commissionRate);
+  const bookedPartnerPayableAmount = hasAllocationSnapshot
+    ? amountOf(booking.partnerNetAmountSnapshot)
+    : roundMoney(grossAmount - bookedCommissionAmount);
+  const hasPlatformPromotionSnapshot = (
+    booking.platformDiscountAmountSnapshot !== null
+    && booking.platformDiscountAmountSnapshot !== undefined
+  );
+  const bookedPlatformPromotionCost = amountOf(
+    booking.platformDiscountAmountSnapshot,
+  );
+
+  // Refunds reduce each immutable booking allocation by the same retained-cash
+  // ratio. Partner payable is then derived as the balancing figure so the
+  // accounting identity remains exact to the đồng after rounding:
+  // customer cash + platform promotion = commission + partner payable.
+  const retainedRatio = grossAmount > 0 ? netAmount / grossAmount : 0;
+  const commissionAmount = roundMoney(bookedCommissionAmount * retainedRatio);
+  const platformPromotionCostAmount = roundMoney(
+    bookedPlatformPromotionCost * retainedRatio,
+  );
+  const partnerPayableAmount = hasPlatformPromotionSnapshot
+    ? Math.max(
+        0,
+        netAmount + platformPromotionCostAmount - commissionAmount,
+      )
+    : roundMoney(bookedPartnerPayableAmount * retainedRatio);
+
   return {
     grossAmount,
     refundAmount: Math.min(refundAmount, grossAmount),
     netAmount,
     commissionAmount,
-    partnerPayableAmount: roundMoney(netAmount - commissionAmount),
+    platformPromotionCostAmount,
+    platformNetRevenueAmount:
+      commissionAmount - platformPromotionCostAmount,
+    partnerPayableAmount,
   };
 }
 
@@ -332,6 +363,8 @@ function summarizeFinancialRows({ payments, refunds, recognizedBookings }) {
   let recognizedRefundAmount = 0;
   let recognizedNetAmount = 0;
   let commissionRevenueAmount = 0;
+  let platformPromotionCostAmount = 0;
+  let platformNetRevenueAmount = 0;
   let partnerPayableAmount = 0;
   for (const booking of recognizedBookings) {
     const recognized = recognizedAmountsOf(booking);
@@ -339,6 +372,8 @@ function summarizeFinancialRows({ payments, refunds, recognizedBookings }) {
     recognizedRefundAmount += recognized.refundAmount;
     recognizedNetAmount += recognized.netAmount;
     commissionRevenueAmount += recognized.commissionAmount;
+    platformPromotionCostAmount += recognized.platformPromotionCostAmount;
+    platformNetRevenueAmount += recognized.platformNetRevenueAmount;
     partnerPayableAmount += recognized.partnerPayableAmount;
   }
 
@@ -352,6 +387,8 @@ function summarizeFinancialRows({ payments, refunds, recognizedBookings }) {
     recognizedRefundAmount,
     recognizedNetAmount,
     commissionRevenueAmount,
+    platformPromotionCostAmount,
+    platformNetRevenueAmount,
     partnerPayableAmount,
     successfulPaymentCount: cashPayments.length,
     successfulRefundCount: refunds.length,
@@ -387,6 +424,8 @@ function buildPartnerBreakdown(partners, payments, refunds, recognizedBookings) 
     metrics.recognizedRefundAmount += recognized.refundAmount;
     metrics.recognizedNetAmount += recognized.netAmount;
     metrics.commissionRevenueAmount += recognized.commissionAmount;
+    metrics.platformPromotionCostAmount += recognized.platformPromotionCostAmount;
+    metrics.platformNetRevenueAmount += recognized.platformNetRevenueAmount;
     metrics.partnerPayableAmount += recognized.partnerPayableAmount;
   }
 
@@ -449,6 +488,7 @@ async function getPlatformFinancialReport(period) {
         commissionRateSnapshot: true,
         commissionAmountSnapshot: true,
         partnerNetAmountSnapshot: true,
+        platformDiscountAmountSnapshot: true,
         payments: {
           where: { status: 'SUCCESS', isDuplicate: false },
           select: { amount: true },

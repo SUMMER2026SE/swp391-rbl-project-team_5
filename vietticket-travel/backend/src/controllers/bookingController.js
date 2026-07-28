@@ -25,6 +25,10 @@ const {
 const { getBankTransferConfig } = require('../config/runtimeConfig');
 const { isCapturedPayment } = require('../utils/paymentGateway');
 const { getManualApprovalDeadline } = require('../utils/activityTime');
+const {
+  calculateBookingFinancials,
+  normalizeVoucherFunding,
+} = require('../services/bookingFinancialService');
 
 // Chỉ mở phương thức chuyển khoản khi nền tảng đã cấu hình tài khoản nhận tiền,
 // tránh việc khách chọn được rồi lại không có mã QR để chuyển.
@@ -602,6 +606,8 @@ function validateVoucher(voucher, subtotalAmount, now = new Date(), userId = nul
     throw error;
   }
 
+  normalizeVoucherFunding(voucher);
+
   if (voucher.usageLimit != null && voucher.usedCount >= voucher.usageLimit) {
     const error = new Error('Mã ưu đãi đã hết lượt sử dụng.');
     error.statusCode = 400;
@@ -1022,8 +1028,8 @@ async function createBooking(req, res, next) {
           now,
           userId,
         );
-        const totalAmount = subtotalAmount.minus(discountAmount);
-        const parsedTotal = parseVndInteger(totalAmount);
+        const customerTotalAmount = subtotalAmount.minus(discountAmount);
+        const parsedTotal = parseVndInteger(customerTotalAmount);
         if (parsedTotal === null) {
           const error = new Error('Tổng tiền sau ưu đãi phải lớn hơn 0.');
           error.statusCode = 400;
@@ -1044,10 +1050,12 @@ async function createBooking(req, res, next) {
         const commissionRate = Number.isFinite(rawCommissionRate)
           ? Math.min(Math.max(rawCommissionRate, 0), 1)
           : 0.10;
-        const commissionAmount = totalAmount
-          .mul(commissionRate)
-          .toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
-        const partnerNetAmount = totalAmount.minus(commissionAmount);
+        const financials = calculateBookingFinancials({
+          subtotalAmount,
+          discountAmount,
+          commissionRate,
+          voucher,
+        });
 
         if (voucher) {
           const usageWhere =
@@ -1081,7 +1089,7 @@ async function createBooking(req, res, next) {
             itineraryItemId: itineraryContext?.itemId || null,
             subtotalAmount,
             discountAmount,
-            totalAmount,
+            totalAmount: financials.totalAmount,
             status: 'PENDING_PAYMENT',
             paymentMethod,
             fullName,
@@ -1089,8 +1097,22 @@ async function createBooking(req, res, next) {
             phone: phone || null,
             note: note || null,
             commissionRateSnapshot: commissionRate,
-            commissionAmountSnapshot: commissionAmount,
-            partnerNetAmountSnapshot: partnerNetAmount,
+            voucherFundingSourceSnapshot:
+              financials.voucherFundingSourceSnapshot,
+            voucherPlatformFundingPercentSnapshot:
+              financials.voucherPlatformFundingPercentSnapshot,
+            platformDiscountAmountSnapshot:
+              financials.platformDiscountAmountSnapshot,
+            partnerDiscountAmountSnapshot:
+              financials.partnerDiscountAmountSnapshot,
+            commissionBaseAmountSnapshot:
+              financials.commissionBaseAmountSnapshot,
+            commissionAmountSnapshot:
+              financials.commissionAmountSnapshot,
+            partnerNetAmountSnapshot:
+              financials.partnerNetAmountSnapshot,
+            platformNetRevenueSnapshot:
+              financials.platformNetRevenueSnapshot,
             ...buildBookingSnapshot(reservation, now),
           },
         });

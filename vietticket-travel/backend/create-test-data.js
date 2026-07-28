@@ -62,6 +62,8 @@ async function createTestData() {
 
     // 4. Create a Booking with COMPLETED status
     const price = ticketProduct.sellingPrice;
+    const commissionAmount = Math.round(Number(price) * 0.1);
+    const partnerNetAmount = Number(price) - commissionAmount;
     
     // Check if a completed booking already exists for this reservation to avoid duplicates
     const booking = await prisma.booking.create({
@@ -71,6 +73,13 @@ async function createTestData() {
         subtotalAmount: price,
         discountAmount: 0,
         totalAmount: price,
+        platformDiscountAmountSnapshot: 0,
+        partnerDiscountAmountSnapshot: 0,
+        commissionBaseAmountSnapshot: price,
+        commissionRateSnapshot: 0.1,
+        commissionAmountSnapshot: commissionAmount,
+        partnerNetAmountSnapshot: partnerNetAmount,
+        platformNetRevenueSnapshot: commissionAmount,
         status: 'COMPLETED',
         fullName: user.fullName,
         email: user.email,

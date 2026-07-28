@@ -224,6 +224,8 @@ describe('redeemPoints', () => {
     expect(tx.voucher.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         source: 'LOYALTY',
+        fundingSource: 'PLATFORM',
+        platformFundingPercent: 100,
         userId: 'user-1',
         usageLimit: 1,
         discountType: 'FIXED',

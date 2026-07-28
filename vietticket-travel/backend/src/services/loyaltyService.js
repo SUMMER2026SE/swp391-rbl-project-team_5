@@ -314,6 +314,8 @@ async function redeemPoints({ userId, tierId }) {
           usedCount: 0,
           userId,
           source: 'LOYALTY',
+          fundingSource: 'PLATFORM',
+          platformFundingPercent: 100,
         },
       });
 

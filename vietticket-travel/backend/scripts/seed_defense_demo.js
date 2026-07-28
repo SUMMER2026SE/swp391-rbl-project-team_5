@@ -983,6 +983,8 @@ async function seedCatalog() {
       isActive: true,
       usageLimit: 100,
       usedCount: 12,
+      fundingSource: 'PLATFORM',
+      platformFundingPercent: 100,
     },
   });
 
@@ -1485,7 +1487,7 @@ async function createScenarioBooking(definition, ticket) {
     : 0;
   const total = Math.max(0, subtotal - discount);
   const commissionRate = Number(ticket.attraction.partner.commissionRate || 0.1);
-  const { commission, partnerNet } = commissionAmounts(total, commissionRate);
+  const { commission, partnerNet } = commissionAmounts(subtotal, commissionRate);
   const visitDate = dateOnly(definition.visitDateKey);
   const now = new Date();
   const createdAt = definition.offset < 0
@@ -1545,6 +1547,11 @@ async function createScenarioBooking(definition, ticket) {
       subtotalAmount: subtotal,
       discountAmount: discount,
       totalAmount: total,
+      voucherFundingSourceSnapshot: discount > 0 ? 'PLATFORM' : null,
+      voucherPlatformFundingPercentSnapshot: discount > 0 ? 100 : null,
+      platformDiscountAmountSnapshot: discount,
+      partnerDiscountAmountSnapshot: 0,
+      commissionBaseAmountSnapshot: subtotal,
       status: definition.status,
       refundRequired: definition.status === 'REFUND_REQUESTED',
       paymentMethod,
@@ -1572,6 +1579,7 @@ async function createScenarioBooking(definition, ticket) {
       commissionRateSnapshot: commissionRate,
       commissionAmountSnapshot: commission,
       partnerNetAmountSnapshot: partnerNet,
+      platformNetRevenueSnapshot: commission - discount,
       cancelledAt: definition.status === 'CANCELLED' ? now : null,
       cancellationReason: definition.status === 'CANCELLED'
         ? 'Thanh toán không hoàn tất trong thời hạn giữ chỗ.'
@@ -1952,6 +1960,9 @@ async function seedForecastHistory(attractionDefinitions) {
         subtotalAmount: subtotal,
         discountAmount: 0,
         totalAmount: subtotal,
+        platformDiscountAmountSnapshot: 0,
+        partnerDiscountAmountSnapshot: 0,
+        commissionBaseAmountSnapshot: subtotal,
         status: noShow ? 'NO_SHOW' : 'COMPLETED',
         paymentMethod: 'vnpay',
         fullName: historyCustomer.fullName,
@@ -1977,6 +1988,7 @@ async function seedForecastHistory(attractionDefinitions) {
         commissionRateSnapshot: 0.1,
         commissionAmountSnapshot: commission,
         partnerNetAmountSnapshot: partnerNet,
+        platformNetRevenueSnapshot: commission,
         isForecastTrainingSample: true,
         createdAt,
       });

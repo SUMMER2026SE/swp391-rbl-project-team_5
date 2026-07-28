@@ -55,6 +55,7 @@ const FINANCIAL_TRANSACTION_STATUSES = new Set([
   ...REFUND_STATUSES,
 ]);
 const VOUCHER_DISCOUNT_TYPES = ['FIXED', 'PERCENTAGE'];
+const VOUCHER_FUNDING_SOURCES = ['PLATFORM', 'PARTNER', 'SHARED'];
 const VOUCHER_CODE_PATTERN = /^[A-Z0-9][A-Z0-9_-]{2,31}$/;
 const MAX_VOUCHER_USAGE_LIMIT = 1_000_000;
 const PLATFORM_STAFF_INVITE_EXPIRY_MINUTES = 60 * 48;
@@ -1575,6 +1576,15 @@ async function getAdminBookings(req, res, next) {
         totalAmount: Number(b.totalAmount),
         subtotalAmount: Number(b.subtotalAmount),
         discountAmount: Number(b.discountAmount),
+        voucherFundingSource: b.voucherFundingSourceSnapshot || null,
+        voucherPlatformFundingPercent:
+          b.voucherPlatformFundingPercentSnapshot ?? null,
+        platformDiscountAmount: Number(b.platformDiscountAmountSnapshot || 0),
+        partnerDiscountAmount: Number(b.partnerDiscountAmountSnapshot || 0),
+        commissionBaseAmount: Number(b.commissionBaseAmountSnapshot || 0),
+        commissionAmount: Number(b.commissionAmountSnapshot || 0),
+        partnerNetAmount: Number(b.partnerNetAmountSnapshot || 0),
+        platformNetRevenue: Number(b.platformNetRevenueSnapshot || 0),
         snapshotTicketType: b.snapshotTicketType,
         snapshotUnitPrice: Number(b.snapshotUnitPrice),
         status: b.status,
@@ -2103,6 +2113,42 @@ function voucherPayload(body, { partial = false, currentVoucher = null } = {}) {
     data.minSpend = parsed.value;
   }
 
+  if (
+    !partial
+    || body.fundingSource !== undefined
+    || body.platformFundingPercent !== undefined
+  ) {
+    const fundingSource = String(
+      body.fundingSource
+      ?? currentVoucher?.fundingSource
+      ?? 'PLATFORM',
+    ).trim().toUpperCase();
+    if (!VOUCHER_FUNDING_SOURCES.includes(fundingSource)) {
+      return { error: 'Nguồn tài trợ voucher không hợp lệ.' };
+    }
+
+    let platformFundingPercent;
+    if (fundingSource === 'PLATFORM') {
+      platformFundingPercent = 100;
+    } else if (fundingSource === 'PARTNER') {
+      platformFundingPercent = 0;
+    } else {
+      platformFundingPercent = Number(body.platformFundingPercent);
+      if (
+        !Number.isSafeInteger(platformFundingPercent)
+        || platformFundingPercent < 1
+        || platformFundingPercent > 99
+      ) {
+        return {
+          error: 'Voucher đồng tài trợ cần tỷ lệ nền tảng từ 1 đến 99%.',
+        };
+      }
+    }
+
+    data.fundingSource = fundingSource;
+    data.platformFundingPercent = platformFundingPercent;
+  }
+
   if (!partial || body.expiryDate !== undefined) {
     const expiryDate = new Date(body.expiryDate);
     if (Number.isNaN(expiryDate.getTime()) || (!partial && expiryDate <= new Date())) {
@@ -2222,6 +2268,8 @@ async function updateVoucher(req, res, next) {
       'discountValue',
       'maxDiscount',
       'minSpend',
+      'fundingSource',
+      'platformFundingPercent',
     ];
     const changesFinancialTerms = protectedFields.some(
       (field) => Object.prototype.hasOwnProperty.call(payload.data, field),

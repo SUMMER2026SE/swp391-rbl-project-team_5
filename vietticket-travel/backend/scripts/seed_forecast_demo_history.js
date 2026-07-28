@@ -243,6 +243,9 @@ function bookingShape({
       subtotalAmount: totalAmount,
       discountAmount: 0,
       totalAmount,
+      platformDiscountAmountSnapshot: 0,
+      partnerDiscountAmountSnapshot: 0,
+      commissionBaseAmountSnapshot: totalAmount,
       status: noShow ? 'NO_SHOW' : 'COMPLETED',
       paymentMethod: 'vnpay',
       fullName: customer.fullName,
@@ -267,6 +270,7 @@ function bookingShape({
       commissionRateSnapshot: commissionRate,
       commissionAmountSnapshot: commissionAmount,
       partnerNetAmountSnapshot: totalAmount - commissionAmount,
+      platformNetRevenueSnapshot: commissionAmount,
       createdAt,
       payments: {
         create: {

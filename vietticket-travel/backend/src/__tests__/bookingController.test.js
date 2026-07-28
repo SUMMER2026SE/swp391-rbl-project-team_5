@@ -560,6 +560,8 @@ describe('createBooking', () => {
       isActive: true,
       usageLimit: 10,
       usedCount: 1,
+      fundingSource: 'PLATFORM',
+      platformFundingPercent: 100,
     };
     const tx = {
       reservation: {
@@ -673,8 +675,14 @@ describe('createBooking', () => {
       snapshotExclusions: ['Đồ ăn'],
     });
     expect(createData.commissionRateSnapshot).toBe(0.25);
-    expect(createData.commissionAmountSnapshot.toString()).toBe('45002');
-    expect(createData.partnerNetAmountSnapshot.toString()).toBe('135004');
+    expect(createData.voucherFundingSourceSnapshot).toBe('PLATFORM');
+    expect(createData.voucherPlatformFundingPercentSnapshot).toBe(100);
+    expect(createData.platformDiscountAmountSnapshot.toString()).toBe('20000');
+    expect(createData.partnerDiscountAmountSnapshot.toString()).toBe('0');
+    expect(createData.commissionBaseAmountSnapshot.toString()).toBe('200006');
+    expect(createData.commissionAmountSnapshot.toString()).toBe('50002');
+    expect(createData.partnerNetAmountSnapshot.toString()).toBe('150004');
+    expect(createData.platformNetRevenueSnapshot.toString()).toBe('30002');
     expect(res.status).toHaveBeenCalledWith(201);
     expect(next).not.toHaveBeenCalled();
   });

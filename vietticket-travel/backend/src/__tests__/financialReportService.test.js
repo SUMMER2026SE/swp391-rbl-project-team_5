@@ -55,6 +55,8 @@ describe('financial report calculations', () => {
       recognizedRefundAmount: 0,
       recognizedNetAmount: 100000,
       commissionRevenueAmount: 10000,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 10000,
       partnerPayableAmount: 90000,
       successfulPaymentCount: 2,
       successfulRefundCount: 1,
@@ -129,6 +131,8 @@ describe('financial report calculations', () => {
       refundAmount: 80000,
       netAmount: 20000,
       commissionAmount: 2000,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 2000,
       partnerPayableAmount: 18000,
     });
   });
@@ -158,6 +162,8 @@ describe('financial report calculations', () => {
       refundAmount: 40000,
       netAmount: 40000,
       commissionAmount: 4000,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 4000,
       partnerPayableAmount: 36000,
     });
   });
@@ -184,6 +190,8 @@ describe('financial report calculations', () => {
       refundAmount: 20000,
       netAmount: 80000,
       commissionAmount: 8000,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 8000,
       partnerPayableAmount: 72000,
     });
   });
@@ -219,6 +227,8 @@ describe('financial report calculations', () => {
       refundAmount: 80000,
       netAmount: 0,
       commissionAmount: 0,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 0,
       partnerPayableAmount: 0,
     });
     expect(providerCancelledSource).toEqual({
@@ -226,6 +236,8 @@ describe('financial report calculations', () => {
       refundAmount: 0,
       netAmount: 0,
       commissionAmount: 0,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 0,
       partnerPayableAmount: 0,
     });
   });
@@ -244,8 +256,38 @@ describe('financial report calculations', () => {
       refundAmount: 1,
       netAmount: 99998,
       commissionAmount: 10000,
+      platformPromotionCostAmount: 0,
+      platformNetRevenueAmount: 10000,
       partnerPayableAmount: 89998,
     });
+  });
+
+  test('prorates platform-funded promotion and keeps the ledger balanced after refund', () => {
+    const recognized = recognizedAmountsOf({
+      commissionRateSnapshot: 0.1,
+      commissionAmountSnapshot: 100000,
+      partnerNetAmountSnapshot: 900000,
+      platformDiscountAmountSnapshot: 100000,
+      payments: [{ amount: 900000 }],
+      refundTransactions: [
+        { amount: 450000, refundRequest: { type: 'CUSTOMER_CANCELLATION' } },
+      ],
+    });
+
+    expect(recognized).toEqual({
+      grossAmount: 900000,
+      refundAmount: 450000,
+      netAmount: 450000,
+      commissionAmount: 50000,
+      platformPromotionCostAmount: 50000,
+      platformNetRevenueAmount: 0,
+      partnerPayableAmount: 450000,
+    });
+    expect(
+      recognized.netAmount + recognized.platformPromotionCostAmount,
+    ).toBe(
+      recognized.commissionAmount + recognized.partnerPayableAmount,
+    );
   });
 
   test('uses paidAt and processedAt for financial timeline buckets', () => {

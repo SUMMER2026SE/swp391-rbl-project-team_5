@@ -16,6 +16,8 @@ const EMPTY_FORM = {
   discountValue: '',
   maxDiscount: '',
   minSpend: '',
+  fundingSource: 'PLATFORM',
+  platformFundingPercent: '100',
   expiryDate: '',
   usageLimit: '',
   isActive: true,
@@ -47,6 +49,8 @@ function voucherToForm(voucher) {
     discountValue: String(voucher.discountValue),
     maxDiscount: voucher.maxDiscount == null ? '' : String(voucher.maxDiscount),
     minSpend: voucher.minSpend == null ? '' : String(voucher.minSpend),
+    fundingSource: voucher.fundingSource || 'PARTNER',
+    platformFundingPercent: String(voucher.platformFundingPercent ?? 0),
     expiryDate: toDateTimeLocal(voucher.expiryDate),
     usageLimit: voucher.usageLimit == null ? '' : String(voucher.usageLimit),
     isActive: voucher.isActive,
@@ -65,6 +69,13 @@ function buildPayload(form) {
     discountValue: form.discountValue,
     maxDiscount: form.discountType === 'PERCENTAGE' ? form.maxDiscount || null : null,
     minSpend: form.minSpend || null,
+    fundingSource: form.fundingSource,
+    platformFundingPercent:
+      form.fundingSource === 'PLATFORM'
+        ? 100
+        : form.fundingSource === 'PARTNER'
+          ? 0
+          : Number(form.platformFundingPercent),
     expiryDate: expiryDate.toISOString(),
     usageLimit: form.usageLimit || null,
     isActive: form.isActive,
@@ -354,6 +365,49 @@ export default function VoucherManagementPage() {
               placeholder="Không giới hạn"
             />
           </label>
+          <label>
+            <span>Nguồn tài trợ ưu đãi</span>
+            <select
+              className="admin-form-input"
+              disabled={financialTermsLocked}
+              value={form.fundingSource}
+              onChange={(event) => {
+                const fundingSource = event.target.value
+                setForm({
+                  ...form,
+                  fundingSource,
+                  platformFundingPercent:
+                    fundingSource === 'PLATFORM'
+                      ? '100'
+                      : fundingSource === 'PARTNER'
+                        ? '0'
+                        : '50',
+                })
+              }}
+            >
+              <option value="PLATFORM">VietTicket tài trợ</option>
+              <option value="PARTNER">Đối tác tài trợ</option>
+              <option value="SHARED">Đồng tài trợ</option>
+            </select>
+          </label>
+          {form.fundingSource === 'SHARED' && (
+            <label>
+              <span>Tỷ lệ VietTicket tài trợ (%)</span>
+              <input
+                className="admin-form-input"
+                type="number"
+                min={1}
+                max={99}
+                step={1}
+                required
+                disabled={financialTermsLocked}
+                value={form.platformFundingPercent}
+                onChange={(event) =>
+                  setForm({ ...form, platformFundingPercent: event.target.value })
+                }
+              />
+            </label>
+          )}
         </div>
 
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 18 }}>
@@ -419,14 +473,15 @@ export default function VoucherManagementPage() {
                 <th>Lượt dùng</th>
                 <th>Hết hạn</th>
                 <th>Trạng thái</th>
+                <th>Nguồn tài trợ</th>
                 <th style={{ textAlign: 'right' }}>Thao tác</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="admin-empty-state">Đang tải...</td></tr>
+                <tr><td colSpan={8} className="admin-empty-state">Đang tải...</td></tr>
               ) : vouchers.length === 0 ? (
-                <tr><td colSpan={7} className="admin-empty-state">Chưa có voucher phù hợp.</td></tr>
+                <tr><td colSpan={8} className="admin-empty-state">Chưa có voucher phù hợp.</td></tr>
               ) : vouchers.map((voucher) => {
                 const [statusLabel, statusClass] =
                   STATUS_LABELS[voucher.operationalStatus] || STATUS_LABELS.INACTIVE
@@ -448,6 +503,13 @@ export default function VoucherManagementPage() {
                     <td>{new Date(voucher.expiryDate).toLocaleString('vi-VN')}</td>
                     <td>
                       <span className={`admin-status-badge ${statusClass}`}>{statusLabel}</span>
+                    </td>
+                    <td>
+                      {voucher.fundingSource === 'PLATFORM'
+                        ? 'VietTicket'
+                        : voucher.fundingSource === 'SHARED'
+                          ? `VietTicket ${voucher.platformFundingPercent}%`
+                          : 'Đối tác'}
                     </td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <button
