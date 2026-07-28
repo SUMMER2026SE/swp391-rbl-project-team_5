@@ -20,6 +20,7 @@ const scheduleController = require('../controllers/scheduleController');
 const reviewController = require('../controllers/reviewController');
 const settlementController = require('../controllers/settlementController');
 const smartQueueOperationsController = require('../controllers/smartQueueOperationsController');
+const dynamicPricingController = require('../controllers/dynamicPricingController');
 
 const router = express.Router();
 const staffInviteLimiter = rateLimit({
@@ -106,6 +107,12 @@ router.get('/attractions/:id/schedule', scheduleController.getSchedule);
 router.put('/attractions/:id/schedule', scheduleController.saveSchedule);
 router.get('/attractions/:id/smart-queue-policy', smartQueueOperationsController.getPartnerPolicy);
 router.put('/attractions/:id/smart-queue-policy', smartQueueOperationsController.updatePartnerPolicy);
+
+// Giá động theo dự báo AI
+router.get('/attractions/:id/pricing-policy', restrictTo('PARTNER'), dynamicPricingController.getPricingPolicy);
+router.put('/attractions/:id/pricing-policy', restrictTo('PARTNER'), dynamicPricingController.updatePricingPolicy);
+router.get('/attractions/:id/pricing-preview', restrictTo('PARTNER'), dynamicPricingController.getPricingPreview);
+router.get('/attractions/:id/pricing-impact', restrictTo('PARTNER'), dynamicPricingController.getImpactReport);
 
 // Đặt vé (quản lý phía đối tác)
 router.get('/bookings', restrictTo('PARTNER'), partnerController.getPartnerBookings);

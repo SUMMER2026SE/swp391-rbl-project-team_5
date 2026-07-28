@@ -203,6 +203,15 @@ async function confirmBankTransferPayment(req, res, next) {
     if (error.statusCode) {
       return res.status(error.statusCode).json({ success: false, message: error.message });
     }
+    // Hai nhân viên cùng bấm duyệt một đơn -> transaction Serializable báo lỗi
+    // tuần tự hóa. Đây là tranh chấp bình thường, không phải lỗi hệ thống:
+    // trả 409 để giao diện nhắc tải lại thay vì hiện "lỗi máy chủ".
+    if (error.code === 'P2034') {
+      return res.status(409).json({
+        success: false,
+        message: 'Đơn này vừa được một nhân viên khác xử lý. Vui lòng tải lại danh sách.',
+      });
+    }
     return next(error);
   }
 }

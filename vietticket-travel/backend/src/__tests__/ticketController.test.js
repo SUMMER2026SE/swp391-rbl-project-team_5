@@ -88,6 +88,16 @@ describe('reserveTickets - chống overbooking', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'res-001' }),
       },
+      // Giá động tắt theo mặc định: không có chính sách nào được lưu.
+      dynamicPricingPolicy: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      revenueForecast: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      dynamicPriceAdjustment: {
+        create: jest.fn(),
+      },
     };
   }
 
@@ -136,6 +146,240 @@ describe('reserveTickets - chống overbooking', () => {
       expect.any(Function),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+  });
+
+  // --- Giá động theo dự báo ---
+  // Kho tồn kho được đặt sao cho tín hiệu nhu cầu rơi hẳn về một phía, để bài
+  // test kiểm tra đúng đường dẫn quyết định giá chứ không phụ thuộc ngày chạy.
+  const PRICING_POLICY = {
+    id: 'policy-1',
+    attractionId: 'attr-001',
+    enabled: true,
+    mode: 'AUTO_APPLY',
+    highDemandThreshold: 0.75,
+    lowDemandThreshold: 0.35,
+    maxSurchargePercent: 20,
+    maxDiscountPercent: 20,
+    priceFloorPercent: 80,
+    priceCeilingPercent: 120,
+    roundingStep: 1000,
+    lookaheadDays: 14,
+    minConfidence: 'MEDIUM',
+  };
+
+  function withPricing(tx, { policy = PRICING_POLICY, predictedTickets = null } = {}) {
+    tx.dynamicPricingPolicy.findUnique.mockResolvedValue(policy);
+    tx.revenueForecast.findUnique.mockResolvedValue(
+      predictedTickets === null
+        ? null
+        : {
+            predictedTickets,
+            usedFallback: false,
+            observedDays: 30,
+            sampleBookings: 100,
+            modelVersion: 'test-model-1',
+            generatedAt: new Date('2026-07-27T00:00:00.000Z'),
+          },
+    );
+    return tx;
+  }
+
+  test('giảm giá và ghi sổ khi dự báo vắng khách', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-quiet', capacity: 100, bookedQuantity: 10, heldQuantity: 5 },
+        attractionStock: { id: 'attr-quiet', capacity: 100, bookedQty: 10, heldQty: 5 },
+      }),
+      { predictedTickets: 10 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const snapshotPrice = tx.reservation.create.mock.calls[0][0].data.snapshotUnitPrice;
+    expect(snapshotPrice).toBeLessThan(125001);
+    expect(snapshotPrice % 1000).toBe(0);
+    // Giá sàn 80% của 125.001 là 100.001 -> mọi mức giảm phải nằm trên ngưỡng này.
+    expect(snapshotPrice).toBeGreaterThanOrEqual(100001);
+    expect(tx.dynamicPriceAdjustment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        policyId: 'policy-1',
+        reservationId: 'res-001',
+        demandLevel: 'QUIET',
+        basePrice: 125001,
+        finalPrice: snapshotPrice,
+        quantity: 2,
+        modelVersion: 'test-model-1',
+      }),
+    });
+  });
+
+  test('phụ thu khi kho gần đầy và dự báo tiếp tục đông', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-peak', capacity: 100, bookedQuantity: 80, heldQuantity: 10 },
+        attractionStock: { id: 'attr-peak', capacity: 100, bookedQty: 80, heldQty: 10 },
+      }),
+      { predictedTickets: 95 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const snapshotPrice = tx.reservation.create.mock.calls[0][0].data.snapshotUnitPrice;
+    expect(snapshotPrice).toBeGreaterThan(125001);
+    // Giá trần 120% của 125.001 là 150.001.
+    expect(snapshotPrice).toBeLessThanOrEqual(150001);
+    expect(tx.dynamicPriceAdjustment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ demandLevel: 'PEAK', finalPrice: snapshotPrice }),
+    });
+  });
+
+  test('chế độ chỉ đề xuất không được đổi giá khách phải trả', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-suggest', capacity: 100, bookedQuantity: 80, heldQuantity: 10 },
+        attractionStock: { id: 'attr-suggest', capacity: 100, bookedQty: 80, heldQty: 10 },
+      }),
+      { policy: { ...PRICING_POLICY, mode: 'SUGGEST_ONLY' }, predictedTickets: 95 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(tx.reservation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ snapshotUnitPrice: 125001 }),
+    });
+    expect(tx.dynamicPriceAdjustment.create).not.toHaveBeenCalled();
+  });
+
+  test('giá động tắt thì không ghi sổ điều chỉnh nào', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-off', capacity: 100, bookedQuantity: 80, heldQuantity: 10 },
+        attractionStock: { id: 'attr-off', capacity: 100, bookedQty: 80, heldQty: 10 },
+      }),
+      { policy: { ...PRICING_POLICY, enabled: false }, predictedTickets: 95 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(tx.reservation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ snapshotUnitPrice: 125001 }),
+    });
+    expect(tx.dynamicPriceAdjustment.create).not.toHaveBeenCalled();
+  });
+
+  test('từ chối giữ chỗ khi giá đã tăng cao hơn mức khách nhìn thấy', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-race', capacity: 100, bookedQuantity: 80, heldQuantity: 10 },
+        attractionStock: { id: 'attr-race', capacity: 100, bookedQty: 80, heldQty: 10 },
+      }),
+      { predictedTickets: 95 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    // Khách nhìn thấy giá niêm yết, nhưng nhu cầu đã tăng thành cao điểm.
+    await reserveTickets(makeReq({ expectedUnitPrice: 125001 }), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ code: 'PRICE_CHANGED' }),
+      }),
+    );
+    expect(tx.reservation.create).not.toHaveBeenCalled();
+  });
+
+  test('vẫn giữ chỗ khi giá giảm xuống thấp hơn mức khách nhìn thấy', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-cheaper', capacity: 100, bookedQuantity: 10, heldQuantity: 5 },
+        attractionStock: { id: 'attr-cheaper', capacity: 100, bookedQty: 10, heldQty: 5 },
+      }),
+      { predictedTickets: 10 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq({ expectedUnitPrice: 125001 }), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const snapshotPrice = tx.reservation.create.mock.calls[0][0].data.snapshotUnitPrice;
+    expect(snapshotPrice).toBeLessThan(125001);
+  });
+
+  // expectedUnitPrice chỉ là hàng rào "không thu quá mức đã hiển thị". Client
+  // gửi giá bịa thấp thì bị từ chối, tuyệt đối không được bán theo giá đó.
+  test('giá bịa do client gửi lên không bao giờ trở thành giá bán', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-forged', capacity: 100, bookedQuantity: 0, heldQuantity: 0 },
+        attractionStock: { id: 'attr-forged', capacity: 100, bookedQty: 0, heldQty: 0 },
+      }),
+      { policy: { ...PRICING_POLICY, enabled: false } },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq({ expectedUnitPrice: 1000 }), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(tx.reservation.create).not.toHaveBeenCalled();
+  });
+
+  test('không gửi expectedUnitPrice thì luồng giữ chỗ vẫn chạy bình thường', async () => {
+    const tx = withPricing(
+      makeTx({
+        daily: { id: 'daily-noexpect', capacity: 100, bookedQuantity: 80, heldQuantity: 10 },
+        attractionStock: { id: 'attr-noexpect', capacity: 100, bookedQty: 80, heldQty: 10 },
+      }),
+      { predictedTickets: 95 },
+    );
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(tx.reservation.create).toHaveBeenCalled();
+  });
+
+  test('giá động không dùng dự báo có độ tin cậy thấp', async () => {
+    const tx = makeTx({
+      daily: { id: 'daily-lowconf', capacity: 100, bookedQuantity: 10, heldQuantity: 5 },
+      attractionStock: { id: 'attr-lowconf', capacity: 100, bookedQty: 10, heldQty: 5 },
+    });
+    tx.dynamicPricingPolicy.findUnique.mockResolvedValue(PRICING_POLICY);
+    tx.revenueForecast.findUnique.mockResolvedValue({
+      predictedTickets: 5,
+      usedFallback: true, // baseline thống kê, không phải model AI
+      observedDays: 60,
+      sampleBookings: 500,
+      modelVersion: 'historical_baseline',
+      generatedAt: new Date('2026-07-27T00:00:00.000Z'),
+    });
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq(), res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(tx.reservation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ snapshotUnitPrice: 125001 }),
+    });
+    expect(tx.dynamicPriceAdjustment.create).not.toHaveBeenCalled();
   });
 
   test('trả 409 khi kho sản phẩm không còn đủ vé', async () => {

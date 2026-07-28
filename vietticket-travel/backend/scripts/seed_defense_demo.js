@@ -24,6 +24,16 @@ const { activateLiveTrip } = require('../src/services/liveTripService');
 const { refreshTripAutopilot } = require('../src/services/liveTripAutopilotService');
 const { predictLiveArrivals } = require('../src/services/livePredictionService');
 const { joinQueue } = require('../src/services/smartQueueService');
+// Dùng đúng hàm chặn check-in của production để "readiness" không hứa suông:
+// seed chỉ báo READY khi cổng soát vé thật sự quét được vé ngay lúc đó.
+const { getCheckinTimeBlockReason } = require('../src/utils/activityTime');
+// Giữ chỗ của đơn chuyển khoản phải khớp chính sách production, không hằng số riêng.
+const {
+  BANK_TRANSFER_METHOD,
+  buildTransferContent,
+  getBankTransferHoldMinutes,
+  getBankTransferHoldMs,
+} = require('../src/utils/bankTransferPolicy');
 const {
   LIVE_AUTOPILOT_DEMO_MARKER,
   seedLiveAutopilotSignals,
@@ -47,6 +57,26 @@ function stableUuid(scope, key) {
 
 function fixtureId(scope, key) {
   return stableUuid(scope, key);
+}
+
+// ------------------------------------------------------------
+// Mã QR của vé demo.
+//
+// Bản cũ sinh token theo công thức `VTQ-<mã đặt chỗ>-NN`. Mã đặt chỗ lại được
+// IN CÔNG KHAI trên vé, nên chỉ cần nhìn vé là suy ra được token của mọi vé
+// trong đơn (…-01, …-02). Production dùng randomUUID() nên không có vấn đề
+// này — chỉ dữ liệu demo bị hở, và đó đúng chỗ hội đồng nhìn thấy.
+//
+// Nay token là UUID v4 dẫn xuất từ KHÓA KỊCH BẢN nội bộ (không bao giờ hiển
+// thị trên giao diện), nên: không đoán được từ vé, mà vẫn ổn định giữa các lần
+// seed để runbook và smoke test dùng lại được.
+// ------------------------------------------------------------
+function qrTokenForBooking(key, index) {
+  return stableUuid('ticket-qr', `${key}:${index}`);
+}
+
+function qrTokenForHistory(key, index) {
+  return stableUuid('ticket-qr-history', `${key}:${index}`);
 }
 
 function assertDemoDatabaseTarget({ allowExplicitRemote = false } = {}) {
@@ -198,8 +228,10 @@ const BACKGROUND_CUSTOMERS = Object.freeze([
 
 const OPERATIONAL_VALUES = Object.freeze({
   voucherCode: 'KHAMPHA15',
-  checkinQrPrimary: 'VTQ-A74C-91D2-E8B5-01',
-  checkinQrBackup: 'VTQ-A74C-91D2-E8B5-02',
+  // Sinh từ khóa kịch bản nội bộ (xem qrTokenForBooking) — không suy ra được
+  // từ mã đặt chỗ in trên vé. In ra ở cuối demo:prepare để nhập tay tại cổng.
+  checkinQrPrimary: qrTokenForBooking('checkin-today', 0),
+  checkinQrBackup: qrTokenForBooking('checkin-today', 1),
   settlementBankReference: 'FT262010845731',
 });
 
@@ -223,6 +255,7 @@ const SCENARIO_BOOKING_REFERENCES = Object.freeze({
   'refund-approve': 'D2A7F9406E1C',
   'refund-reject': '5C19B8E24A70',
   'pending-payment': '8E43A1C7D2F5',
+  'bank-transfer-pending': 'B40F72C1D9A6',
   reissue: 'F6B20D9A4C81',
   refunded: '3A7E51C8B920',
   'no-show': 'C1D84A7F2E56',
@@ -249,21 +282,6 @@ function scenarioRefundRequestId(key) {
   return `${base.slice(0, -12)}${reference.toLowerCase()}`;
 }
 
-function qrTokenForBooking(key, index) {
-  const reference = SCENARIO_BOOKING_REFERENCES[key];
-  if (!reference) throw new Error(`Không có mã QR cho booking ${key}.`);
-  return `VTQ-${reference.slice(0, 4)}-${reference.slice(4, 8)}-${reference.slice(8, 12)}-${String(index + 1).padStart(2, '0')}`;
-}
-
-function qrTokenForHistory(key, index) {
-  const token = createHash('sha256')
-    .update(`vietticket-history-qr:${key}:${index}`)
-    .digest('hex')
-    .slice(0, 16)
-    .toUpperCase();
-  return `VTQ-${token.slice(0, 4)}-${token.slice(4, 8)}-${token.slice(8, 12)}-${token.slice(12, 16)}`;
-}
-
 function vietnamDateKey(date = new Date()) {
   return new Date(date.getTime() + VN_OFFSET_MS).toISOString().slice(0, 10);
 }
@@ -288,15 +306,82 @@ function timeKeyFromMinutes(totalMinutes) {
   return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
 }
 
-function liveShowcaseWindow(now = new Date()) {
+// ------------------------------------------------------------
+// Khung giờ nhận khách trong ngày của điểm demo check-in (Bảo tàng Mỹ thuật).
+//
+// getActivityWindow() (utils/activityTime.js) lấy khung giờ của TimeSlot gắn
+// trên đơn làm cửa sổ hiệu lực của vé. Trước đây slot này bằng đúng giờ mở
+// cửa 08:00–17:00, nên mọi buổi tập/bảo vệ sau 17:00 đều bị chặn với thông
+// báo "Khung giờ sử dụng vé đã kết thúc" — không còn vé nào check-in được.
+//
+// Nay slot kéo tới cuối ngày: seed lúc nào trong ngày thì buổi demo cũng quét
+// được vé. Giờ mở cửa công bố của địa điểm (openTime/closeTime) giữ nguyên
+// 08:00–17:00 nên trang chi tiết vẫn đúng thực tế; chỉ khung giờ nhận khách
+// của vé hôm nay được nới cho phù hợp lịch trình trình diễn.
+//
+// Vẫn dùng TimeSlot thật (không gỡ khỏi đơn) để tồn kho theo khung giờ được
+// ghi nhận — SmartQueue/Live-AutoPilot tính áp lực dựa trên số liệu này.
+// ------------------------------------------------------------
+const DEMO_GATE_OPEN_MINUTE = 8 * 60;
+const DEMO_GATE_LEAD_MINUTES = 120;
+const DEMO_GATE_MIN_RUNWAY_MINUTES = 30;
+const END_OF_DAY_MINUTE = 23 * 60 + 59;
+
+function demoGateWindow(now = new Date()) {
   const vietnamNow = new Date(now.getTime() + VN_OFFSET_MS);
   const currentMinute = vietnamNow.getUTCHours() * 60 + vietnamNow.getUTCMinutes();
-  const opensAt = 8 * 60;
-  const closesAt = 17 * 60;
+  // Seed trong/sau giờ mở cửa -> bắt đầu đúng giờ mở cửa công bố.
+  // Seed trước giờ mở cửa (tập buổi sớm) -> lùi lại để vé đã có hiệu lực.
+  const startMinute = currentMinute >= DEMO_GATE_OPEN_MINUTE
+    ? DEMO_GATE_OPEN_MINUTE
+    : Math.max(0, currentMinute - DEMO_GATE_LEAD_MINUTES);
+  const endMinute = END_OF_DAY_MINUTE;
+  const startTime = timeKeyFromMinutes(startMinute);
+  const endTime = timeKeyFromMinutes(endMinute);
+  return {
+    startTime,
+    endTime,
+    // Dấu gạch ngang dài khớp đúng định dạng nhãn khung giờ của các đơn khác.
+    label: `${startTime} – ${endTime}`,
+    startMinute,
+    endMinute,
+    currentMinute,
+    runwayMinutes: endMinute - currentMinute,
+  };
+}
+
+// Seed quá sát nửa đêm thì dữ liệu "hôm nay" sẽ hết hạn ngay khi sang ngày mới.
+function assertDemoGateWindowUsable(now = new Date()) {
+  const gate = demoGateWindow(now);
+  if (gate.runwayMinutes < DEMO_GATE_MIN_RUNWAY_MINUTES) {
+    throw new Error(
+      `Chỉ còn ${gate.runwayMinutes} phút trước nửa đêm giờ Việt Nam nên không dựng được dữ liệu "hôm nay" `
+      + `(cần tối thiểu ${DEMO_GATE_MIN_RUNWAY_MINUTES} phút). Hãy seed lại sau 00:00 để có ngày dữ liệu mới.`,
+    );
+  }
+  return gate;
+}
+
+// Kịch bản Autopilot xoay quanh chuyến du thuyền 16:30; seed sau mốc này thì
+// không còn hoạt động nào "có rủi ro" để sinh đề xuất.
+const LIVE_SHOWCASE_LATEST_MINUTE = 16 * 60 + 45;
+
+function isLiveShowcaseWindowOpen(now = new Date()) {
+  return demoGateWindow(now).currentMinute < LIVE_SHOWCASE_LATEST_MINUTE;
+}
+
+function liveShowcaseWindow(now = new Date()) {
+  // Bám theo cùng cửa sổ soát vé để LiveTrip/SmartQueue chạy được ở mọi khung
+  // giờ, thay vì bị khóa cứng trong 08:00–17:00 như trước.
+  const gate = demoGateWindow(now);
+  const currentMinute = gate.currentMinute;
+  const opensAt = gate.startMinute;
+  const closesAt = gate.endMinute;
   const latestStart = closesAt - 15;
   if (currentMinute >= latestStart) {
     throw new Error(
-      'Live-AutoPilot showcase chỉ chuẩn bị được trước 16:45 giờ Việt Nam vì SmartQueue cần tối thiểu 15 phút vận hành hợp lệ.',
+      'Không đủ thời gian trong ngày để dựng Live-AutoPilot showcase '
+      + '(SmartQueue cần tối thiểu 15 phút vận hành hợp lệ). Hãy seed lại sau 00:00 giờ Việt Nam.',
     );
   }
   const proposedStart = currentMinute < opensAt - 15
@@ -989,7 +1074,17 @@ async function seedCatalog() {
                 { id: `${attraction.id}-slot-1`, startTime: '16:30', endTime: '18:00', maxCapacity: 45, isActive: true },
                 { id: `${attraction.id}-slot-2`, startTime: '18:30', endTime: '20:00', maxCapacity: 45, isActive: true },
               ]
-            : [{ id: `${attraction.id}-slot-all-day`, startTime: attraction.openTime, endTime: attraction.closeTime, maxCapacity: attraction.defaultCapacity, isActive: true }],
+            : [{
+                id: `${attraction.id}-slot-all-day`,
+                startTime: attraction.openTime,
+                // Điểm dùng cho kịch bản check-in nhận khách tới cuối ngày để
+                // buổi demo giờ nào cũng quét được vé (xem demoGateWindow).
+                endTime: attraction.id === IDS.attractions.museum
+                  ? demoGateWindow().endTime
+                  : attraction.closeTime,
+                maxCapacity: attraction.defaultCapacity,
+                isActive: true,
+              }],
         },
       },
     });
@@ -1170,6 +1265,7 @@ function scenarioBookingDefinitions(todayKey) {
     'cruise-review-2': BACKGROUND_CUSTOMERS[5],
     'cruise-review-3': BACKGROUND_CUSTOMERS[8],
     'cruise-review-4': BACKGROUND_CUSTOMERS[10],
+    'bank-transfer-pending': BACKGROUND_CUSTOMERS[4],
     'refund-approve': BACKGROUND_CUSTOMERS[5],
     'refund-reject': BACKGROUND_CUSTOMERS[6],
     reissue: BACKGROUND_CUSTOMERS[7],
@@ -1178,6 +1274,8 @@ function scenarioBookingDefinitions(todayKey) {
     cancelled: BACKGROUND_CUSTOMERS[10],
   };
   return [
+    // Các kịch bản cổng soát vé dùng khung giờ nhận khách trong ngày của bảo
+    // tàng (timeSlotIndex 0), khung này kéo tới cuối ngày — xem demoGateWindow.
     {
       key: 'checkin-today', ticketId: IDS.tickets.museumAdult, offset: 0,
       timeSlotIndex: 0,
@@ -1292,6 +1390,18 @@ function scenarioBookingDefinitions(todayKey) {
       note: 'Khách chưa hoàn tất bước thanh toán.',
     },
     {
+      // Đơn chờ Admin đối chiếu sao kê ở màn /admin/bank-transfers.
+      // Chuyển khoản KHÔNG có callback nên chưa có bản ghi Payment nào — bản
+      // ghi thu tiền chỉ được tạo khi Admin bấm xác nhận (confirmBankTransfer).
+      // Ngày tham quan là hôm nay + cửa sổ soát vé theo đồng hồ, nên sau khi
+      // duyệt là vé phát ra check-in được ngay: nối trọn Phần 1 -> 2 -> 3.
+      key: 'bank-transfer-pending', ticketId: IDS.tickets.museumAdult, offset: 0,
+      timeSlotIndex: 0,
+      quantity: 2, status: 'PENDING_PAYMENT', reservationStatus: 'HELD',
+      paymentMethod: 'bank_transfer', skipPayment: true, ticketStatuses: [],
+      note: 'Khách đã quét mã VietQR và chờ nhân viên đối chiếu sao kê ngân hàng.',
+    },
+    {
       key: 'reissue', ticketId: IDS.tickets.ecoAdult, offset: 8,
       quantity: 1, status: 'CONFIRMED', reservationStatus: 'CONFIRMED',
       ticketStatuses: ['VALID'],
@@ -1348,6 +1458,16 @@ async function createScenarioBooking(definition, ticket) {
   const selectedTimeSlot = Number.isInteger(definition.timeSlotIndex)
     ? ticket.attraction.timeSlots?.[definition.timeSlotIndex] || null
     : null;
+  const timeSlotLabel = selectedTimeSlot
+    ? `${selectedTimeSlot.startTime} – ${selectedTimeSlot.endTime}`
+    : null;
+
+  // Đơn chuyển khoản được giữ chỗ dài hơn (BANK_TRANSFER_HOLD_MINUTES) để khách
+  // kịp chuyển tiền và Admin kịp đối chiếu sao kê — dùng đúng chính sách của
+  // production thay vì hằng số riêng, tránh seed lệch với hành vi thật.
+  const paymentMethod = definition.paymentMethod || 'vnpay';
+  const isBankTransfer = paymentMethod === BANK_TRANSFER_METHOD;
+  const holdMs = isBankTransfer ? getBankTransferHoldMs() : 30 * 60 * 1000;
 
   await prisma.reservation.create({
     data: {
@@ -1359,12 +1479,12 @@ async function createScenarioBooking(definition, ticket) {
       quantity: definition.quantity,
       status: definition.reservationStatus,
       expiresAt: definition.reservationStatus === 'HELD'
-        ? new Date(now.getTime() + 30 * 60 * 1000)
+        ? new Date(now.getTime() + holdMs)
         : new Date(createdAt.getTime() + 15 * 60 * 1000),
       paymentDeadline: definition.status === 'PENDING_PAYMENT'
-        ? new Date(now.getTime() + 30 * 60 * 1000)
+        ? new Date(now.getTime() + holdMs)
         : null,
-      paymentAttemptCount: definition.status === 'PENDING_PAYMENT' ? 1 : 0,
+      paymentAttemptCount: definition.status === 'PENDING_PAYMENT' && !isBankTransfer ? 1 : 0,
       snapshotUnitPrice: unitPrice,
       snapshotRefundPolicy: ticket.refundPolicy,
       snapshotRefundFeeRate: ticket.refundFeeRate,
@@ -1385,7 +1505,7 @@ async function createScenarioBooking(definition, ticket) {
       totalAmount: total,
       status: definition.status,
       refundRequired: definition.status === 'REFUND_REQUESTED',
-      paymentMethod: 'vnpay',
+      paymentMethod,
       fullName: definition.customer.fullName,
       email: definition.customer.email,
       phone: definition.customer.phone,
@@ -1405,9 +1525,7 @@ async function createScenarioBooking(definition, ticket) {
       snapshotRefundFeeRate: ticket.refundFeeRate,
       snapshotRefundCutoffHours: ticket.refundCutoffHours,
       snapshotVisitDate: visitDate,
-      snapshotTimeSlotLabel: selectedTimeSlot
-        ? `${selectedTimeSlot.startTime} – ${selectedTimeSlot.endTime}`
-        : null,
+      snapshotTimeSlotLabel: timeSlotLabel,
       commissionRateSnapshot: commissionRate,
       commissionAmountSnapshot: commission,
       partnerNetAmountSnapshot: partnerNet,
@@ -1421,26 +1539,31 @@ async function createScenarioBooking(definition, ticket) {
     },
   });
 
-  await prisma.payment.create({
-    data: {
-      id: paymentId,
-      bookingId: id,
-      amount: total,
-      paymentGateway: 'VNPAY',
-      transactionId: paymentStatus === 'SUCCESS'
-        ? gatewayReference(`scenario-payment-${definition.key}`)
-        : null,
-      status: paymentStatus,
-      expiresAt: paymentStatus === 'PENDING' ? new Date(now.getTime() + 30 * 60 * 1000) : null,
-      paidAt: paymentStatus === 'SUCCESS' ? paidAt : null,
-      failureReason: paymentStatus === 'FAILED' ? 'Khách hàng không hoàn tất giao dịch trong thời hạn thanh toán.' : null,
-      rawResponse: {
-        source: 'operational_fixture_v2',
-        environment: 'VNPAY_SANDBOX',
+  // Chuyển khoản ngân hàng chưa có bản ghi thu tiền nào cho tới khi Admin đối
+  // chiếu sao kê — confirmBankTransfer mới tạo Payment `BT-<bookingId>`.
+  // Seed sẵn một Payment ở đây sẽ làm sai lệch báo cáo tài chính và đối soát.
+  if (!definition.skipPayment) {
+    await prisma.payment.create({
+      data: {
+        id: paymentId,
+        bookingId: id,
+        amount: total,
+        paymentGateway: 'VNPAY',
+        transactionId: paymentStatus === 'SUCCESS'
+          ? gatewayReference(`scenario-payment-${definition.key}`)
+          : null,
+        status: paymentStatus,
+        expiresAt: paymentStatus === 'PENDING' ? new Date(now.getTime() + holdMs) : null,
+        paidAt: paymentStatus === 'SUCCESS' ? paidAt : null,
+        failureReason: paymentStatus === 'FAILED' ? 'Khách hàng không hoàn tất giao dịch trong thời hạn thanh toán.' : null,
+        rawResponse: {
+          source: 'operational_fixture_v2',
+          environment: 'VNPAY_SANDBOX',
+        },
+        createdAt,
       },
-      createdAt,
-    },
-  });
+    });
+  }
 
   if (definition.ticketStatuses.length > 0) {
     await prisma.ticketInstance.createMany({
@@ -2514,12 +2637,62 @@ async function collectDemoReadiness() {
     }),
   ]);
 
+  // Kiểm chứng bằng CHÍNH luật chặn của cổng soát vé (getCheckinTimeBlockReason):
+  // đếm số vé thật sự quét được NGAY LÚC NÀY. Đếm "QR hợp lệ hôm nay" là chưa
+  // đủ — vé vẫn VALID nhưng ngoài khung giờ thì nhân viên không check-in được.
+  const checkinCandidates = await prisma.ticketInstance.findMany({
+    where: {
+      status: 'VALID',
+      booking: { status: 'CONFIRMED', reservation: { date: today } },
+    },
+    select: {
+      booking: {
+        select: {
+          snapshotVisitDate: true,
+          snapshotTimeSlotLabel: true,
+          reservation: {
+            select: {
+              date: true,
+              timeSlot: { select: { startTime: true, endTime: true } },
+              ticketProduct: {
+                select: { attraction: { select: { openTime: true, closeTime: true } } },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  // Hàng đợi đối chiếu chuyển khoản của Admin phải có đơn để demo được Phần 1.
+  const pendingBankTransfers = await prisma.booking.count({
+    where: {
+      paymentMethod: BANK_TRANSFER_METHOD,
+      status: 'PENDING_PAYMENT',
+      isForecastTrainingSample: false,
+      reservation: { status: 'HELD', expiresAt: { gt: new Date() } },
+    },
+  });
+
+  const readyWindows = new Set();
+  let checkinReadyNow = 0;
+  for (const instance of checkinCandidates) {
+    if (getCheckinTimeBlockReason(instance.booking) === null) {
+      checkinReadyNow += 1;
+      if (instance.booking.snapshotTimeSlotLabel) {
+        readyWindows.add(instance.booking.snapshotTimeSlotLabel);
+      }
+    }
+  }
+
   return {
     accounts,
     pendingKyc,
     pendingAttractions,
     scenarioBookings,
     todayValidTickets,
+    checkinReadyNow,
+    checkinWindows: [...readyWindows],
+    pendingBankTransfers,
     pendingRefunds,
     actionableSupport,
     visibleReviews,
@@ -2565,6 +2738,13 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
     'Booking theo trạng thái',
   );
   requireAtLeast('todayValidTickets', 2, 'QR hợp lệ hôm nay');
+  // Chốt chặn quan trọng nhất của phần demo check-in: phải có vé quét được ngay.
+  requireAtLeast(
+    'checkinReadyNow',
+    2,
+    'Vé check-in được NGAY LÚC NÀY tại cổng (chạy lại npm run demo:prepare nếu thiếu)',
+  );
+  requireAtLeast('pendingBankTransfers', 1, 'Đơn chuyển khoản VietQR chờ Admin đối chiếu sao kê');
   requireAtLeast('pendingRefunds', 2, 'Yêu cầu hoàn tiền chờ xử lý');
   requireAtLeast('actionableSupport', 2, 'Support ticket đang xử lý');
   requireAtLeast('visibleReviews', 2, 'Review để Partner/Admin xử lý');
@@ -2575,9 +2755,19 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
   const forecastPoints = Object.values(readiness.forecasts).reduce((sum, value) => sum + value, 0);
   if (forecastPoints < 21) failures.push(`Forecast tương lai: cần 21 điểm, hiện có ${forecastPoints}`);
   const live = readiness.liveAutopilot || {};
+  // Đề xuất Autopilot được sinh khi một hoạt động trong ngày đang "có rủi ro".
+  // Hoạt động du thuyền của kịch bản khởi hành 16:30, nên seed sau giờ đó thì
+  // không còn gì để đề xuất. Đây là ràng buộc nghiệp vụ của riêng phần
+  // Live-AutoPilot: hạ thành CẢNH BÁO để buổi tập buổi tối vẫn dựng được dữ
+  // liệu cho thanh toán / vé / check-in, thay vì hỏng toàn bộ bộ seed.
+  const liveShowcaseOpen = isLiveShowcaseWindowOpen();
+  const timeBoundLiveFields = new Set(['pendingProposals', 'explainabilityEvents']);
+  const liveWarnings = [];
   const requireLiveAtLeast = (field, minimum, label) => {
     if (Number(live[field] || 0) < minimum) {
-      failures.push(`${label}: cần >= ${minimum}, hiện có ${live[field] || 0}`);
+      const message = `${label}: cần >= ${minimum}, hiện có ${live[field] || 0}`;
+      if (!liveShowcaseOpen && timeBoundLiveFields.has(field)) liveWarnings.push(message);
+      else failures.push(message);
     }
   };
   if (requireLiveShowcase) {
@@ -2603,6 +2793,15 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
     error.readiness = readiness;
     throw error;
   }
+  if (liveWarnings.length > 0) {
+    console.warn(
+      `\n⚠  Đã seed sau ${timeKeyFromMinutes(LIVE_SHOWCASE_LATEST_MINUTE)} giờ Việt Nam nên phần`
+      + ' Live-AutoPilot bị thiếu dữ liệu:\n- '
+      + `${liveWarnings.join('\n- ')}\n`
+      + '   Thanh toán, vé và check-in vẫn đầy đủ. Muốn demo cả Live-AutoPilot thì'
+      + ` chạy lại npm run demo:prepare trước ${timeKeyFromMinutes(LIVE_SHOWCASE_LATEST_MINUTE)}.\n`,
+    );
+  }
   return readiness;
 }
 
@@ -2623,8 +2822,20 @@ function printHandoff(
   console.log(`- Staff check-in: ${ACCOUNTS.gateStaff.email}`);
   console.log(`- Staff hỗ trợ:   ${ACCOUNTS.platformStaff.email}`);
   console.log(`- Admin:          ${ACCOUNTS.admin.email}`);
-  console.log(`\nMã QR nhập tay: ${OPERATIONAL_VALUES.checkinQrPrimary}`);
-  console.log(`Voucher: ${OPERATIONAL_VALUES.voucherCode} (giảm 15%, tối đa 100.000 VND, đơn từ 200.000 VND)`);
+  console.log('\nCổng soát vé:');
+  console.log(`- Khung giờ vé check-in hôm nay: ${(readiness.checkinWindows || []).join(', ') || '—'}`);
+  console.log(`- Số vé quét được ngay lúc này:  ${readiness.checkinReadyNow ?? 0}`);
+  console.log(`- Mã QR nhập tay:                ${OPERATIONAL_VALUES.checkinQrPrimary}`);
+  console.log(`- Mã QR dự phòng:                ${OPERATIONAL_VALUES.checkinQrBackup}`);
+  const bankTransferBookingId = scenarioBookingId('bank-transfer-pending');
+  console.log('\nThanh toán chuyển khoản VietQR (Admin > Đối chiếu chuyển khoản):');
+  console.log(`- Đơn chờ đối chiếu:  ${readiness.pendingBankTransfers ?? 0}`);
+  console.log(`- Mã đặt chỗ:         VT-${bankTransferBookingId.slice(-12).toUpperCase()}`);
+  console.log(`- Nội dung chuyển khoản: ${buildTransferContent(bankTransferBookingId)}`);
+  console.log(`- Hạn giữ chỗ:        ${getBankTransferHoldMinutes()} phút kể từ lúc seed`);
+  console.log(
+    `\nVoucher: ${OPERATIONAL_VALUES.voucherCode} (giảm 15%, tối đa 100.000 VND, đơn từ 200.000 VND)`,
+  );
   console.log('\nReadiness:');
   console.log(JSON.stringify(readiness, null, 2));
   if (forecastResults.length > 0) {
@@ -2681,6 +2892,13 @@ async function main() {
     }
   }
   assertDemoDatabaseTarget({ allowExplicitRemote: confirmedRemoteDemo });
+
+  // Chặn sớm trường hợp seed quá sát nửa đêm (dữ liệu "hôm nay" sẽ hết hạn ngay).
+  const gateWindow = assertDemoGateWindowUsable();
+  console.log(
+    `Cửa sổ soát vé cho kịch bản check-in hôm nay: ${gateWindow.label} `
+    + `(còn hiệu lực ${Math.floor(gateWindow.runwayMinutes / 60)}h${String(gateWindow.runwayMinutes % 60).padStart(2, '0')} kể từ bây giờ).`,
+  );
 
   console.log('Đang phục hồi bộ dữ liệu vận hành do script sở hữu...');
   await resetOwnedDemoData();

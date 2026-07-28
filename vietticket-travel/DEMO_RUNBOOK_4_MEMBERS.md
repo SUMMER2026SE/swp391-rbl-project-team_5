@@ -107,8 +107,8 @@ Dùng Chrome Profile/Edge/Firefox riêng để năm tài khoản không ghi đè
 |---|---|
 | Thành phố tìm kiếm | `ho chi minh` |
 | Voucher | `KHAMPHA15` — giảm 15%, tối đa 100.000đ, đơn từ 200.000đ |
-| QR check-in chính | `VTQ-A74C-91D2-E8B5-01` |
-| QR dự phòng | `VTQ-A74C-91D2-E8B5-02` |
+| QR check-in chính | Xem dòng `Mã QR nhập tay` ở cuối output `npm run demo:prepare` |
+| QR dự phòng | Xem dòng `Mã QR dự phòng` ở cuối output `npm run demo:prepare` |
 | Điểm giá thấp | Bảo tàng Mỹ thuật Thành phố Hồ Chí Minh |
 | Điểm cần Partner duyệt | Tour Hoàng hôn trên sông Sài Gòn |
 | Điểm trọn ngày | Khu du lịch sinh thái Vàm Sát – Cần Giờ |
@@ -317,10 +317,13 @@ Chứng minh phân tách nhiệm vụ: nhân viên cổng chỉ thao tác các �
 Ở cửa sổ Gate staff `/staff/checkin`:
 
 1. Chỉ danh sách booking hôm nay: một đoàn có hai QR hợp lệ và một booking đã check-in.
-2. Nhập `VTQ-A74C-91D2-E8B5-01`, bấm tra cứu.
+2. Dán **mã QR chính** (lấy từ output `npm run demo:prepare`), bấm tra cứu.
 3. Đối chiếu tên khách, điểm, ngày, gói vé, trạng thái và bấm check-in.
 4. Nhập lại cùng QR để cho thấy hệ thống chặn dùng lần hai.
-5. QR `VTQ-A74C-91D2-E8B5-02` là dự phòng; không quét nếu đã đủ thời gian.
+5. **Mã QR dự phòng** là vé thứ hai của cùng đơn; không quét nếu đã đủ thời gian.
+
+> Mã QR là UUID sinh từ khóa kịch bản nội bộ, **không suy ra được từ mã đặt chỗ
+> in trên vé**. Luôn lấy giá trị mới nhất từ output của `npm run demo:prepare`.
 
 Lời thoại:
 
@@ -536,6 +539,6 @@ npm run demo:check
 - [ ] `demo-preflight.ps1` PASS.
 - [ ] Năm cửa sổ đã đăng nhập đúng role và đúng route.
 - [ ] Zoom trình duyệt 90–100%, tắt notification cá nhân.
-- [ ] Clipboard có `VTQ-A74C-91D2-E8B5-01`, `KHAMPHA15` và các câu lý do mẫu.
+- [ ] Clipboard có mã QR check-in (từ output `demo:prepare`), `KHAMPHA15` và các câu lý do mẫu.
 - [ ] Không mở `.env`, terminal chứa key hoặc trang quản lý API key khi đang chiếu.
 - [ ] Thành viên 1 bắt đầu; các thành viên khác không thao tác dữ liệu trước lượt.

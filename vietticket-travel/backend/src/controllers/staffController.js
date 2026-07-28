@@ -1678,9 +1678,32 @@ async function reissueTicket(req, res, next) {
 // ─── Check-in tại cổng ──────────────────────────────────────────────────────
 
 // Khách có thể quét nguyên chuỗi trong QR ("VIETTICKET:<token>") hoặc nhập tay token.
+// Một số máy quét cầm tay trả về chữ HOA hoặc kèm khoảng trắng thừa.
+const QR_TOKEN_PREFIX_PATTERN = /^VIETTICKET:\s*/iu;
+
 function normalizeQrToken(raw) {
-  const value = String(raw || '').trim();
-  return value.startsWith('VIETTICKET:') ? value.slice('VIETTICKET:'.length) : value;
+  return String(raw || '').trim().replace(QR_TOKEN_PREFIX_PATTERN, '').trim();
+}
+
+// Token thật là UUID chữ thường, nhưng nhân viên nhập tay ở cổng rất dễ gõ
+// hoa/thường lệch với giá trị trong DB. findUnique khớp tuyệt đối nên trước
+// đây gõ lệch kiểu chữ là báo "không tìm thấy vé" dù mã hoàn toàn đúng.
+// Vẫn thử findUnique trước để dùng index, chỉ dò không phân biệt hoa/thường
+// khi không khớp — nhánh hiếm, không ảnh hưởng đường quét QR thông thường.
+async function findTicketInstanceByToken(client, token, include = null) {
+  if (!token) return null;
+  const query = include ? { include } : {};
+
+  const exact = await client.ticketInstance.findUnique({
+    where: { qrCodeToken: token },
+    ...query,
+  });
+  if (exact) return exact;
+
+  return client.ticketInstance.findFirst({
+    where: { qrCodeToken: { equals: token, mode: 'insensitive' } },
+    ...query,
+  });
 }
 
 function toCheckinTicket(instance) {
@@ -1748,19 +1771,16 @@ async function lookupTicketByQr(req, res, next) {
       return res.status(400).json({ success: false, error: { message: 'Thiếu mã vé.' } });
     }
 
-    const instance = await prisma.ticketInstance.findUnique({
-      where: { qrCodeToken: token },
-      include: {
-        booking: {
-          include: {
-            reservation: {
-              include: {
-                timeSlot: true,
-                ticketProduct: {
-                  include: {
-                    attraction: {
-                      select: { id: true, title: true, openTime: true, closeTime: true },
-                    },
+    const instance = await findTicketInstanceByToken(prisma, token, {
+      booking: {
+        include: {
+          reservation: {
+            include: {
+              timeSlot: true,
+              ticketProduct: {
+                include: {
+                  attraction: {
+                    select: { id: true, title: true, openTime: true, closeTime: true },
                   },
                 },
               },
@@ -1924,12 +1944,7 @@ async function lookupCheckinTarget(req, res, next) {
 
     // 1) Ưu tiên khớp chính xác mã QR của một vé.
     const token = normalizeQrToken(raw);
-    const instance = token
-      ? await prisma.ticketInstance.findUnique({
-          where: { qrCodeToken: token },
-          include: CHECKIN_TICKET_INCLUDE,
-        })
-      : null;
+    const instance = await findTicketInstanceByToken(prisma, token, CHECKIN_TICKET_INCLUDE);
 
     if (instance) {
       if (instance.booking?.isForecastTrainingSample) {
@@ -2004,19 +2019,16 @@ async function checkInTicket(req, res, next) {
 
     const result = await prisma.$transaction(
       async (tx) => {
-        const instance = await tx.ticketInstance.findUnique({
-          where: { qrCodeToken: token },
-          include: {
-            booking: {
-              include: {
-                reservation: {
-                  include: {
-                    timeSlot: true,
-                    ticketProduct: {
-                      include: {
-                        attraction: {
-                          select: { id: true, title: true, openTime: true, closeTime: true },
-                        },
+        const instance = await findTicketInstanceByToken(tx, token, {
+          booking: {
+            include: {
+              reservation: {
+                include: {
+                  timeSlot: true,
+                  ticketProduct: {
+                    include: {
+                      attraction: {
+                        select: { id: true, title: true, openTime: true, closeTime: true },
                       },
                     },
                   },

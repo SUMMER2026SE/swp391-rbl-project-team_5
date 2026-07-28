@@ -72,6 +72,7 @@ model User {
   smartQueuePolicies      SmartQueuePolicy[]          @relation("SmartQueuePolicyUpdatedBy")
   calledQueueEntries      SmartQueueEntry[]           @relation("SmartQueueCalledBy")
   pausedQueuePolicies     SmartQueuePolicy[]          @relation("SmartQueuePolicyPausedBy")
+  pricingPolicies         DynamicPricingPolicy[]      @relation("DynamicPricingPolicyUpdatedBy")
   recoveryCases           RecoveryCase[]
   partyRoomsHosted        PartyRoom[]                 @relation("PartyRoomHost")
   partyMemberships        PartyMember[]               @relation("PartyMemberUser")
@@ -274,10 +275,11 @@ model Reservation {
   snapshotCommissionRate    Decimal?          @db.Decimal(5, 2)
   createdAt                 DateTime          @default(now())
 
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ticketProduct TicketProduct @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
-  timeSlot      TimeSlot?     @relation(fields: [timeSlotId], references: [id])
-  booking       Booking?
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticketProduct   TicketProduct           @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
+  timeSlot        TimeSlot?               @relation(fields: [timeSlotId], references: [id])
+  booking         Booking?
+  priceAdjustment DynamicPriceAdjustment?
 
   @@index([status, expiresAt])
   @@index([userId, createdAt])
@@ -397,6 +399,8 @@ model Attraction {
   smartQueuePolicy    SmartQueuePolicy?
   arrivalObservations ArrivalObservation[]
   livePredictions     LivePrediction[]
+  pricingPolicy       DynamicPricingPolicy?
+  priceAdjustments    DynamicPriceAdjustment[]
   partyCandidates     PartyCandidate[]
 
   @@index([city])
@@ -474,11 +478,12 @@ model TicketProduct {
   updatedAt         DateTime         @updatedAt
   archivedAt        DateTime?
 
-  attraction      Attraction       @relation(fields: [attractionId], references: [id], onDelete: Cascade)
-  timeSlots       TimeSlot[]
-  dailyStocks     DailyStock[]
-  reservations    Reservation[]
-  ticketInstances TicketInstance[]
+  attraction       Attraction               @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  timeSlots        TimeSlot[]
+  dailyStocks      DailyStock[]
+  reservations     Reservation[]
+  ticketInstances  TicketInstance[]
+  priceAdjustments DynamicPriceAdjustment[]
 
   @@index([archivedAt])
 }
@@ -1597,4 +1602,117 @@ model RevenueForecast {
   @@index([attractionId])
   @@index([forecastDate])
   @@index([generatedAt])
+}
+
+// ============================================================
+// GIÁ ĐỘNG THEO DỰ BÁO (Dynamic Pricing)
+// ------------------------------------------------------------
+// Biến dự báo AI (RevenueForecast) + mức lấp đầy thực tế thành
+// một mức điều chỉnh giá bán cho từng khung giờ / ngày tham quan.
+// Nguyên tắc: AI chỉ được ĐỀ XUẤT; đối tác phải bật AUTO_APPLY
+// thì giá mới thực sự thay đổi, và luôn nằm trong hàng rào an
+// toàn (sàn/trần) do chính đối tác cấu hình.
+// ============================================================
+
+enum DynamicPricingMode {
+  SUGGEST_ONLY // AI tính toán và hiển thị đề xuất, giá bán giữ nguyên
+  AUTO_APPLY // Đề xuất được áp thẳng vào giá giữ chỗ của khách
+}
+
+enum DemandLevel {
+  QUIET // Dự báo vắng -> giảm giá kích cầu
+  NORMAL // Trong vùng trung tính -> giữ nguyên giá niêm yết
+  PEAK // Dự báo đông -> phụ thu cao điểm
+}
+
+enum DemandSignalSource {
+  NONE // Không có tín hiệu hợp lệ -> không điều chỉnh
+  REALTIME_OCCUPANCY // Chỉ dùng mức lấp đầy thực tế (sát ngày, hoặc chưa có dự báo)
+  AI_FORECAST // Chủ yếu dùng dự báo AI (còn xa ngày tham quan)
+  BLENDED // Trộn dự báo AI với mức lấp đầy thực tế theo lead time
+}
+
+enum DemandConfidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model DynamicPricingPolicy {
+  id           String             @id @default(uuid())
+  attractionId String             @unique
+  enabled      Boolean            @default(false)
+  mode         DynamicPricingMode @default(SUGGEST_ONLY)
+
+  // Ngưỡng phân vùng nhu cầu, tính theo tỷ lệ lấp đầy dự kiến (0..1).
+  highDemandThreshold Float @default(0.75)
+  lowDemandThreshold  Float @default(0.35)
+
+  // Biên điều chỉnh tối đa tại hai đầu mút (%).
+  maxSurchargePercent Int @default(15)
+  maxDiscountPercent  Int @default(15)
+
+  // Hàng rào tuyệt đối so với giá niêm yết (%) — chặn mọi lỗi mô hình.
+  priceFloorPercent   Int @default(80)
+  priceCeilingPercent Int @default(120)
+
+  // Làm tròn giá cuối về bội số này (VND) cho dễ nhìn.
+  roundingStep Int @default(1000)
+
+  // Chỉ điều chỉnh cho ngày tham quan trong vòng N ngày tới; xa hơn thì
+  // dự báo không còn đáng tin để đụng vào giá.
+  lookaheadDays Int @default(14)
+
+  // Mức tin cậy tối thiểu của tín hiệu nhu cầu. Dưới ngưỡng này giá giữ nguyên.
+  minConfidence DemandConfidence @default(MEDIUM)
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attraction  Attraction               @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  updatedBy   User?                    @relation("DynamicPricingPolicyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  adjustments DynamicPriceAdjustment[]
+
+  @@index([enabled, mode])
+}
+
+// Sổ cái mọi lần AI thực sự tác động vào giá. Mỗi lượt giữ chỗ có giá khác giá
+// niêm yết đều để lại đúng một dòng, phục vụ đối soát và giải trình với đối tác.
+model DynamicPriceAdjustment {
+  id              String  @id @default(uuid())
+  policyId        String
+  attractionId    String
+  ticketProductId String
+  reservationId   String  @unique
+  timeSlotId      String?
+
+  visitDate DateTime @db.Date
+
+  basePrice         Decimal @db.Decimal(12, 2) // Giá niêm yết tại thời điểm giữ chỗ
+  finalPrice        Decimal @db.Decimal(12, 2) // Giá đã áp dụng cho khách
+  adjustmentPercent Decimal @db.Decimal(6, 2) // Âm = giảm, dương = phụ thu
+  quantity          Int     @default(1)
+
+  demandLevel         DemandLevel
+  demandIndex         Float // Tỷ lệ lấp đầy dự kiến (0..1) đã dùng để ra quyết định
+  forecastRatio       Float? // Thành phần từ dự báo AI
+  realizedRatio       Float // Thành phần từ mức lấp đầy thực tế
+  signalSource        DemandSignalSource
+  confidence          DemandConfidence
+  leadTimeDays        Int
+  modelVersion        String?
+  forecastGeneratedAt DateTime?
+  reason              String             @db.Text
+
+  createdAt DateTime @default(now())
+
+  policy        DynamicPricingPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  attraction    Attraction           @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  ticketProduct TicketProduct        @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
+  reservation   Reservation          @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([attractionId, visitDate])
+  @@index([attractionId, createdAt])
+  @@index([demandLevel])
 }

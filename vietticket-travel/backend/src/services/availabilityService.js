@@ -318,6 +318,7 @@ async function getTicketAvailabilityBatch(
 }
 
 module.exports = {
+  buildScheduleFromProduct,
   getBookableSchedule,
   getProductCapacity,
   getTicketAvailability,

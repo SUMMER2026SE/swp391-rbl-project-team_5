@@ -31,6 +31,7 @@ const PartnerSettlementsPage = lazy(() => import('../pages/PartnerSettlementsPag
 const PartnerSchedulePage = lazy(() => import('../pages/PartnerSchedulePage.jsx'))
 const PartnerSettingsPage = lazy(() => import('../pages/PartnerSettingsPage.jsx'))
 const PartnerSmartQueuePage = lazy(() => import('../pages/PartnerSmartQueuePage.jsx'))
+const PartnerDynamicPricingPage = lazy(() => import('../pages/PartnerDynamicPricingPage.jsx'))
 const PartnerTicketFormPage = lazy(() => import('../pages/PartnerTicketFormPage.jsx'))
 const PartnerTicketsPage = lazy(() => import('../pages/PartnerTicketsPage.jsx'))
 const PartyJoinPage = lazy(() => import('../pages/PartyJoinPage.jsx'))
@@ -432,6 +433,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerSmartQueuePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/dynamic-pricing"
+        element={
+          <ProtectedRoute allowedRoles={['PARTNER']}>
+            <PartnerDynamicPricingPage />
           </ProtectedRoute>
         }
       />

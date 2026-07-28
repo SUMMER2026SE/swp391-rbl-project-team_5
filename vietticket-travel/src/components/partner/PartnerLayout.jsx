@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/partner/bookings', icon: 'confirmation_number', label: 'Đặt vé' },
   { to: '/partner/staff', icon: 'groups', label: 'Nhân viên' },
   { to: '/partner/smart-queue', icon: 'queue', label: 'SmartQueue & Autopilot' },
+  { to: '/partner/dynamic-pricing', icon: 'trending_up', label: 'Giá động theo dự báo' },
   { to: '/partner/reviews', icon: 'rate_review', label: 'Đánh giá' },
   { to: '/partner/reports', icon: 'assessment', label: 'Báo cáo' },
   { to: '/partner/settlements', icon: 'account_balance_wallet', label: 'Đối soát & chi trả' },

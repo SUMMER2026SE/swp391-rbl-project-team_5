@@ -95,6 +95,35 @@ describe('lookupTicketByQr', () => {
     );
   });
 
+  test('✅ Tiền tố viết thường và khoảng trắng thừa vẫn nhận ra mã QR', async () => {
+    mockPrisma.ticketInstance.findUnique.mockResolvedValue(makeInstance());
+
+    const { req, res } = makeReqRes({ params: { token: `  vietticket: ${TOKEN}  ` } });
+    await lookupTicketByQr(req, res, jest.fn());
+
+    expect(mockPrisma.ticketInstance.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { qrCodeToken: TOKEN } }),
+    );
+  });
+
+  test('✅ Nhập tay lệch HOA/thường: dò lại không phân biệt hoa thường thay vì báo không tìm thấy', async () => {
+    // Token thật là UUID chữ thường; nhân viên gõ chữ HOA ở cổng.
+    mockPrisma.ticketInstance.findUnique.mockResolvedValue(null);
+    mockPrisma.ticketInstance.findFirst.mockResolvedValue(makeInstance());
+
+    const { req, res } = makeReqRes({ params: { token: TOKEN.toUpperCase() } });
+    await lookupTicketByQr(req, res, jest.fn());
+
+    expect(mockPrisma.ticketInstance.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { qrCodeToken: { equals: TOKEN.toUpperCase(), mode: 'insensitive' } },
+      }),
+    );
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, data: expect.objectContaining({ canCheckIn: true }) }),
+    );
+  });
+
   test('❌ Vé đã USED: canCheckIn = false với lý do đã check-in', async () => {
     mockPrisma.ticketInstance.findUnique.mockResolvedValue(
       makeInstance({ ticketStatus: 'USED' }),
@@ -134,6 +163,7 @@ describe('lookupTicketByQr', () => {
 
   test('❌ Không tìm thấy vé: trả 404', async () => {
     mockPrisma.ticketInstance.findUnique.mockResolvedValue(null);
+    mockPrisma.ticketInstance.findFirst.mockResolvedValue(null);
 
     const { req, res } = makeReqRes({ params: { token: 'khong-ton-tai' } });
     await lookupTicketByQr(req, res, jest.fn());
@@ -155,6 +185,8 @@ describe('checkInTicket', () => {
     return {
       ticketInstance: {
         findUnique: jest.fn().mockResolvedValue(instance),
+        // Nhánh dò lại không phân biệt HOA/thường khi khớp tuyệt đối trượt.
+        findFirst: jest.fn().mockResolvedValue(instance),
         updateMany: jest.fn().mockResolvedValue({ count: updatedCount }),
         count: jest.fn().mockResolvedValue(nonUsedTicketCount),
       },
@@ -326,7 +358,11 @@ describe('checkInTicket', () => {
   test('❌ Không tìm thấy vé: trả 404', async () => {
     mockPrisma.$transaction.mockImplementation(async (fn) =>
       fn({
-        ticketInstance: { findUnique: jest.fn().mockResolvedValue(null), updateMany: jest.fn() },
+        ticketInstance: {
+          findUnique: jest.fn().mockResolvedValue(null),
+          findFirst: jest.fn().mockResolvedValue(null),
+          updateMany: jest.fn(),
+        },
         staffAttractionAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
         auditLog: { create: jest.fn().mockResolvedValue({}) },
       }),
