@@ -146,7 +146,12 @@ describe('checkInTicket', () => {
   // makeTx cho checkInTicket — phải có staffAttractionAssignment và auditLog
   // (vì assertStaffAttractionAccess và writeAuditLog chạy trong transaction).
   // Với role ADMIN, assertStaffAttractionAccess return sớm → không cần findFirst.
-  function makeTx(instance, updatedCount = 1, nonUsedTicketCount = 1) {
+  function makeTx(
+    instance,
+    updatedCount = 1,
+    nonUsedTicketCount = 1,
+    queueEntries = [],
+  ) {
     return {
       ticketInstance: {
         findUnique: jest.fn().mockResolvedValue(instance),
@@ -161,6 +166,13 @@ describe('checkInTicket', () => {
       },
       auditLog: {
         create: jest.fn().mockResolvedValue({}),
+      },
+      liveTripEvent: {
+        create: jest.fn().mockResolvedValue({ id: 'event-queue-admitted' }),
+      },
+      smartQueueEntry: {
+        findMany: jest.fn().mockResolvedValue(queueEntries),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
   }
@@ -212,6 +224,44 @@ describe('checkInTicket', () => {
     });
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ bookingStatus: 'COMPLETED' }),
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('✅ QR atomically overrides a stale NO_SHOW queue in the check-in transaction', async () => {
+    const instance = makeInstance();
+    const staleQueue = {
+      id: 'queue-no-show',
+      bookingId: BOOKING_ID,
+      liveTripId: 'trip-1',
+      liveTripItemId: 'item-1',
+      userId: 'customer-1',
+      status: 'NO_SHOW',
+    };
+    let capturedTx;
+    mockPrisma.$transaction.mockImplementation(async (fn) => {
+      capturedTx = makeTx(instance, 1, 1, [staleQueue]);
+      return fn(capturedTx);
+    });
+
+    const { req, res, next } = makeReqRes({ params: { token: TOKEN } });
+    await checkInTicket(req, res, next);
+
+    expect(capturedTx.smartQueueEntry.updateMany).toHaveBeenCalledWith({
+      where: { id: staleQueue.id, status: { not: 'ADMITTED' } },
+      data: {
+        status: 'ADMITTED',
+        admittedAt: expect.any(Date),
+      },
+    });
+    expect(capturedTx.liveTripEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: 'QUEUE_ADMITTED',
+        data: expect.objectContaining({ previousStatus: 'NO_SHOW' }),
+      }),
+    });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ smartQueueUpdated: true }),
     }));
     expect(next).not.toHaveBeenCalled();
   });

@@ -175,7 +175,7 @@ function ETicketPage() {
   if (isLoading) {
     return (
       <>
-        <div className="print:hidden"><Header activeLink="My Tickets" /></div>
+        <div className="print:hidden"><Header activeLink="Hành trình" /></div>
         <main className="flex min-h-[65vh] items-center justify-center bg-surface px-5 py-16">
           <p className="font-semibold text-primary">Đang tải vé điện tử...</p>
         </main>
@@ -187,7 +187,7 @@ function ETicketPage() {
   if (!booking) {
     return (
       <>
-        <div className="print:hidden"><Header activeLink="My Tickets" /></div>
+        <div className="print:hidden"><Header activeLink="Hành trình" /></div>
         <main className="flex min-h-[65vh] items-center justify-center bg-surface px-5 py-16">
           <div className="max-w-lg text-center">
             <span className="material-symbols-outlined text-6xl text-primary" aria-hidden="true">
@@ -321,7 +321,7 @@ function ETicketPage() {
 
   return (
     <>
-      <div className="print:hidden"><Header activeLink="My Tickets" /></div>
+      <div className="print:hidden"><Header activeLink="Hành trình" /></div>
       <main className="min-h-screen bg-surface px-5 py-10 md:px-12">
         <div className="mx-auto max-w-5xl">
           <div className="print:hidden mb-8 flex flex-wrap items-center justify-between gap-4">

@@ -14,20 +14,50 @@ const ACTIVE_QUEUE_STATUSES = ['WAITING', 'READY'];
 const QUEUE_OPEN_BEFORE_MS = 2 * 60 * 60 * 1000;
 const QUEUE_READY_MAX_PRESSURE = 84;
 const QUEUE_FALLBACK_THROUGHPUT_RATIO = 0.08;
-const ARRIVAL_PREDICTION_MAX_AGE_MS = 30 * 60 * 1000;
-const ARRIVAL_PREDICTION_HORIZON_MINUTES = 15;
 const MAX_ESTIMATED_WAIT_MINUTES = 240;
 const QUEUE_SWEEP_LIMIT = 100;
 const QUEUE_CALL_BEFORE_MS = 15 * 60 * 1000;
 const DEFAULT_QUEUE_POLICY = Object.freeze({
-  enabled: true,
+  // A virtual queue only has real-world value when the partner has committed
+  // staff/a dedicated VietTicket check-in flow. Missing configuration must
+  // therefore fail closed instead of silently promising a queue at every venue.
+  enabled: false,
   mode: 'AUTO',
   openBeforeMinutes: 120,
   readyGraceMinutes: 10,
   maxReadyParties: 3,
+  maxReadyGuests: 20,
   maxActiveParties: 100,
   fallbackThroughput15m: 8,
 });
+const SERIALIZABLE_RETRY_LIMIT = 2;
+
+/**
+ * Run a queue state transition at SERIALIZABLE isolation and retry transient
+ * serialization conflicts.  Queue workers and staff actions can legitimately
+ * collide (for example, a customer joining while staff pauses a venue); a
+ * bounded retry lets the winning committed state be re-read without exposing
+ * a spurious "state changed" error to the customer.
+ */
+async function runSerializableTransaction(
+  prismaClient,
+  callback,
+  { retries = SERIALIZABLE_RETRY_LIMIT } = {},
+) {
+  // A few read-only maintenance paths and legacy test doubles expose the
+  // model delegates but not `$transaction`; retain their deterministic
+  // behaviour while real Prisma clients always take the serializable path.
+  if (!prismaClient?.$transaction) return callback(prismaClient);
+  let attempt = 0;
+  while (true) {
+    try {
+      return await prismaClient.$transaction(callback, { isolationLevel: 'Serializable' });
+    } catch (error) {
+      if (error?.code !== 'P2034' || attempt >= retries) throw error;
+      attempt += 1;
+    }
+  }
+}
 
 const QUEUE_ENTRY_INCLUDE = {
   attraction: {
@@ -79,11 +109,25 @@ function normalizeNow(now) {
 async function getQueuePolicy(attractionId, { prismaClient = prisma } = {}) {
   // Older unit-test doubles and pre-migration read replicas do not expose the
   // new table. Falling back here keeps the Sprint 1–2 customer flow safe.
-  if (!prismaClient?.smartQueuePolicy?.findUnique) return { ...DEFAULT_QUEUE_POLICY };
+  if (!prismaClient?.smartQueuePolicy?.findUnique) {
+    return { ...DEFAULT_QUEUE_POLICY, configured: false };
+  }
   const policy = await prismaClient.smartQueuePolicy.findUnique({
     where: { attractionId: String(attractionId || '') },
   });
-  return { ...DEFAULT_QUEUE_POLICY, ...(policy || {}) };
+  const merged = { ...DEFAULT_QUEUE_POLICY, ...(policy || {}), configured: Boolean(policy) };
+  // The field is present on real Prisma rows after the readiness migration.
+  // Older test doubles/read replicas may omit it; preserve their legacy shape
+  // while production fails closed for pre-opt-in enabled rows.
+  if (
+    policy
+    && Object.prototype.hasOwnProperty.call(policy, 'operationalReadinessConfirmedAt')
+    && merged.enabled === true
+    && !policy.operationalReadinessConfirmedAt
+  ) {
+    merged.enabled = false;
+  }
+  return merged;
 }
 
 function getQueueVisitDate(item) {
@@ -97,6 +141,13 @@ function getQueueCloseTime(item) {
   return end && start && end > start
     ? end
     : new Date(start.getTime() + 4 * 60 * 60 * 1000);
+}
+
+function getSnapshotVisitDateKey(value) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+  return value ? getVietnamDateKey(value) : null;
 }
 
 function assertQueueEligibility(item, now, policy = DEFAULT_QUEUE_POLICY) {
@@ -121,7 +172,8 @@ function assertQueueEligibility(item, now, policy = DEFAULT_QUEUE_POLICY) {
 
   const visitDate = getQueueVisitDate(item);
   const visitDateKey = getDateKey(visitDate);
-  const itemDateKey = item.snapshot?.visitDate || getVietnamDateKey(item.scheduledStart);
+  const itemDateKey = getSnapshotVisitDateKey(item.snapshot?.visitDate)
+    || getVietnamDateKey(item.scheduledStart);
   if (!visitDateKey || visitDateKey !== itemDateKey) {
     throw createHttpError(409, 'QUEUE_DATE_MISMATCH', 'Ngày booking không khớp với hoạt động trong chuyến đi.');
   }
@@ -266,7 +318,6 @@ function buildWaitEstimate({
   entry,
   guestsAhead,
   pressure,
-  arrivalPrediction = null,
   policy = DEFAULT_QUEUE_POLICY,
 }) {
   if (['READY', 'ADMITTED'].includes(entry.status)) {
@@ -275,66 +326,32 @@ function buildWaitEstimate({
 
   const recentCheckins = Math.max(0, Number(pressure?.summary?.checkinsLast15Minutes) || 0);
   const capacity = Math.max(1, Number(pressure?.summary?.capacity) || 1);
-  const hasUsableModelPrediction = Boolean(
-    arrivalPrediction
-    && arrivalPrediction.usedFallback === false
-    && ['MEDIUM', 'HIGH'].includes(arrivalPrediction.confidence),
-  );
-  const modelThroughput = hasUsableModelPrediction
-    ? Number(arrivalPrediction.predictedP50)
-    : Number.NaN;
-  const throughputPer15Minutes = Number.isFinite(modelThroughput) && modelThroughput > 0
-    ? modelThroughput
-    : recentCheckins > 0
+  // Arrival demand and service throughput are different quantities. Treating
+  // predicted arrivals as gate throughput makes a busier forecast shorten the
+  // ETA, which is directionally wrong. ETA therefore uses observed QR service
+  // throughput, then the partner-configured conservative fallback.
+  const throughputPer15Minutes = recentCheckins > 0
     ? recentCheckins
     : Math.max(
       1,
       Number(policy.fallbackThroughput15m)
         || Math.round(capacity * QUEUE_FALLBACK_THROUGHPUT_RATIO),
     );
-  const guestsToServe = guestsAhead + Math.max(1, Number(entry.partySize) || 1);
-  const rawWait = Math.ceil(guestsToServe / (throughputPer15Minutes / 15));
+  // ETA means time until this party is called, so only guests ahead belong in
+  // the numerator. The party's own size affects people behind them, not their
+  // wait to reach the gate.
+  const guestsToServeBeforeTurn = Math.max(0, Number(guestsAhead) || 0);
+  const rawWait = guestsToServeBeforeTurn === 0
+    ? 1
+    : Math.ceil(guestsToServeBeforeTurn / (throughputPer15Minutes / 15));
 
   return {
     estimatedWaitMinutes: Math.min(MAX_ESTIMATED_WAIT_MINUTES, Math.max(1, rawWait)),
-    estimateBasis: Number.isFinite(modelThroughput) && modelThroughput > 0
-      ? 'ML_ARRIVAL_PREDICTION'
-      : recentCheckins > 0 ? 'RECENT_QR_THROUGHPUT' : 'CAPACITY_FALLBACK',
-    confidence: hasUsableModelPrediction
-      ? arrivalPrediction.confidence
-      : recentCheckins >= 5 ? 'HIGH' : recentCheckins > 0 ? 'MEDIUM' : 'LOW',
+    estimateBasis: recentCheckins > 0
+      ? 'RECENT_QR_THROUGHPUT'
+      : 'PARTNER_CONFIGURED_FALLBACK',
+    confidence: recentCheckins >= 5 ? 'HIGH' : recentCheckins > 0 ? 'MEDIUM' : 'LOW',
   };
-}
-
-async function getLatestArrivalPrediction(
-  attractionId,
-  { prismaClient = prisma, now = new Date() } = {},
-) {
-  if (!prismaClient?.livePrediction?.findFirst) return null;
-  const referenceNow = normalizeNow(now);
-  return prismaClient.livePrediction.findFirst({
-    where: {
-      attractionId,
-      predictionType: 'ARRIVALS',
-      horizonMinutes: ARRIVAL_PREDICTION_HORIZON_MINUTES,
-      usedFallback: false,
-      confidence: { in: ['MEDIUM', 'HIGH'] },
-      trainingSource: 'live_operational_history',
-      predictedAt: {
-        gte: new Date(referenceNow.getTime() - ARRIVAL_PREDICTION_MAX_AGE_MS),
-        lte: referenceNow,
-      },
-    },
-    orderBy: { predictedAt: 'desc' },
-    select: {
-      predictedP50: true,
-      predictedP90: true,
-      confidence: true,
-      usedFallback: true,
-      modelVersion: true,
-      predictedAt: true,
-    },
-  });
 }
 
 function serializeQueueEntry(entry, metrics = null, pressure = null) {
@@ -381,11 +398,16 @@ function serializeQueueEntry(entry, metrics = null, pressure = null) {
         ?? DEFAULT_QUEUE_POLICY.openBeforeMinutes,
       readyGraceMinutes: metrics?.policy?.readyGraceMinutes
         ?? DEFAULT_QUEUE_POLICY.readyGraceMinutes,
+      maxReadyGuests: metrics?.policy?.maxReadyGuests
+        ?? DEFAULT_QUEUE_POLICY.maxReadyGuests,
       maxActiveParties: metrics?.policy?.maxActiveParties
         ?? DEFAULT_QUEUE_POLICY.maxActiveParties,
       admissionMethod: 'STAFF_QR_CHECKIN',
+      partyAdmissionRule: 'FIRST_VALID_QR_CLOSES_QUEUE_ENTRY',
+      serviceScope: 'VIETTICKET_MANAGED_ARRIVAL_FLOW',
       mode: metrics?.policy?.mode || null,
-      enabled: metrics?.policy?.enabled ?? true,
+      enabled: metrics?.policy?.enabled ?? false,
+      configured: metrics?.policy?.configured ?? false,
       paused: metrics?.policy?.paused ?? false,
       pauseReason: metrics?.policy?.pauseReason || null,
     },
@@ -493,7 +515,11 @@ async function getQueueAvailabilityForItem(item, {
       ? await getQueuePolicy(item.attractionId, { prismaClient })
       : { ...DEFAULT_QUEUE_POLICY };
     if (!policy.enabled) {
-      throw createHttpError(409, 'QUEUE_DISABLED', 'Điểm tham quan chưa bật SmartQueue.');
+      throw createHttpError(
+        409,
+        'QUEUE_DISABLED',
+        'Đối tác chưa kích hoạt luồng vào cổng SmartQueue cho điểm tham quan này.',
+      );
     }
     if (policy.pausedAt) {
       throw createHttpError(
@@ -567,7 +593,7 @@ async function refreshQueueRecord(entry, {
   const policy = await getQueuePolicy(entry.attractionId, { prismaClient });
 
   if (referenceNow >= entry.expiresAt) {
-    const expired = await prismaClient.$transaction(async (tx) => {
+    const expired = await runSerializableTransaction(prismaClient, async (tx) => {
       const result = await tx.smartQueueEntry.updateMany({
         where: { id: entry.id, status: { in: ACTIVE_QUEUE_STATUSES } },
         data: { status: 'EXPIRED' },
@@ -598,8 +624,17 @@ async function refreshQueueRecord(entry, {
     }
   }
 
-  if (entry.status === 'READY' && entry.readyExpiresAt && referenceNow >= entry.readyExpiresAt) {
-    const noShow = await prismaClient.$transaction(async (tx) => {
+  if (
+    !policy.pausedAt
+    && entry.status === 'READY'
+    && entry.readyExpiresAt
+    && referenceNow >= entry.readyExpiresAt
+  ) {
+    const noShow = await runSerializableTransaction(prismaClient, async (tx) => {
+      const txPolicy = tx !== prismaClient && tx.smartQueuePolicy?.findUnique
+        ? await getQueuePolicy(entry.attractionId, { prismaClient: tx })
+        : policy;
+      if (!txPolicy.enabled || txPolicy.pausedAt) return null;
       const result = await tx.smartQueueEntry.updateMany({
         where: { id: entry.id, status: 'READY', readyExpiresAt: { lte: referenceNow } },
         data: { status: 'NO_SHOW', noShowAt: referenceNow },
@@ -636,10 +671,6 @@ async function refreshQueueRecord(entry, {
     { prismaClient, now: referenceNow },
   );
   const pressure = selectQueuePressure(rawPressure, entry);
-  const arrivalPrediction = await getLatestArrivalPrediction(entry.attractionId, {
-    prismaClient,
-    now: referenceNow,
-  });
   const ahead = await getAheadMetrics(entry, prismaClient, referenceNow);
   const hasRecentAdmission = Number(pressure.summary?.checkinsLast15Minutes || 0) > 0;
   const shouldAttemptReady = policy.enabled
@@ -659,26 +690,57 @@ async function refreshQueueRecord(entry, {
   let current = entry;
   if (shouldAttemptReady) {
     const readyAt = referenceNow;
-    const graceExpiresAt = new Date(
-      readyAt.getTime() + Math.max(1, Number(policy.readyGraceMinutes) || 10) * 60 * 1000,
-    );
-    const readyExpiresAt = new Date(Math.min(
-      normalizedDate(entry.expiresAt).getTime(),
-      graceExpiresAt.getTime(),
-    ));
     let updated = null;
     try {
-      updated = await prismaClient.$transaction(async (tx) => {
+      updated = await runSerializableTransaction(prismaClient, async (tx) => {
+        const canReReadState = Boolean(
+          tx !== prismaClient
+          && tx.smartQueueEntry?.findUnique,
+        );
+        const txEntry = canReReadState
+          ? await tx.smartQueueEntry.findUnique({
+            where: { id: entry.id },
+            include: QUEUE_ENTRY_INCLUDE,
+          })
+          : entry;
+        const txScheduledStart = normalizedDate(txEntry?.liveTripItem?.scheduledStart);
+        const txExpiresAt = normalizedDate(txEntry?.expiresAt);
+        if (
+          !txEntry
+          || txEntry.status !== 'WAITING'
+          || !txExpiresAt
+          || txExpiresAt <= referenceNow
+          || txEntry.attraction?.operationalStatus === 'SUSPENDED'
+          || (txEntry.booking?.status && txEntry.booking.status !== 'CONFIRMED')
+          || (txEntry.booking?.ticketInstances?.length || 0) > 0
+          || !txScheduledStart
+          || referenceNow < new Date(txScheduledStart.getTime() - QUEUE_CALL_BEFORE_MS)
+        ) return null;
+
+        // Re-read operational policy after acquiring the serializable
+        // transaction. A pause or mode switch may have committed after the
+        // worker's preflight read.
+        const txPolicy = tx.smartQueuePolicy?.findUnique
+          ? await getQueuePolicy(txEntry.attractionId, { prismaClient: tx })
+          : policy;
+        if (!txPolicy.enabled || txPolicy.pausedAt || txPolicy.mode !== 'AUTO') return null;
+        const graceExpiresAt = new Date(
+          readyAt.getTime() + Math.max(1, Number(txPolicy.readyGraceMinutes) || 10) * 60 * 1000,
+        );
+        const readyExpiresAt = new Date(Math.min(
+          txExpiresAt.getTime(),
+          graceExpiresAt.getTime(),
+        ));
         // The FIFO and gate-capacity reads must live in the same serializable
         // transaction as the transition. This prevents two app instances from
         // calling different parties concurrently and overfilling the return window.
-        const [waitingAhead, readyCount] = await Promise.all([
-          getWaitingAheadCount(entry, tx, referenceNow),
+        const [waitingAhead, readyCount, readyGuestsResult] = await Promise.all([
+          getWaitingAheadCount(txEntry, tx, referenceNow),
           tx.smartQueueEntry.count({
             where: {
-              attractionId: entry.attractionId,
-              visitDate: entry.visitDate,
-              ...queueScopeWhere(entry),
+              attractionId: txEntry.attractionId,
+              visitDate: txEntry.visitDate,
+              ...queueScopeWhere(txEntry),
               status: 'READY',
               expiresAt: { gt: referenceNow },
               OR: [
@@ -687,14 +749,36 @@ async function refreshQueueRecord(entry, {
               ],
             },
           }),
+          tx.smartQueueEntry.aggregate
+            ? tx.smartQueueEntry.aggregate({
+              where: {
+                attractionId: txEntry.attractionId,
+                visitDate: txEntry.visitDate,
+                ...queueScopeWhere(txEntry),
+                status: 'READY',
+                expiresAt: { gt: referenceNow },
+                OR: [
+                  { readyExpiresAt: null },
+                  { readyExpiresAt: { gt: referenceNow } },
+                ],
+              },
+              _sum: { partySize: true },
+            })
+            : Promise.resolve({ _sum: { partySize: 0 } }),
         ]);
+        const readyGuests = Number(readyGuestsResult?._sum?.partySize || 0);
+        const incomingGuests = Math.max(1, Number(txEntry.partySize) || 1);
         if (
           Number(waitingAhead || 0) > 0
-          || Number(readyCount || 0) >= Math.max(1, Number(policy.maxReadyParties) || 3)
+          || Number(readyCount || 0) >= Math.max(1, Number(txPolicy.maxReadyParties) || 3)
+          || readyGuests + incomingGuests > Math.max(
+            1,
+            Number(txPolicy.maxReadyGuests) || DEFAULT_QUEUE_POLICY.maxReadyGuests,
+          )
         ) return null;
 
         const result = await tx.smartQueueEntry.updateMany({
-          where: { id: entry.id, status: 'WAITING', expiresAt: { gt: referenceNow } },
+          where: { id: txEntry.id, status: 'WAITING', expiresAt: { gt: referenceNow } },
           data: {
             status: 'READY',
             readyAt,
@@ -705,23 +789,23 @@ async function refreshQueueRecord(entry, {
         if (result.count !== 1) return null;
         await recordLiveTripEvent({
           client: tx,
-          liveTripId: entry.liveTripId,
-          liveTripItemId: entry.liveTripItemId,
-          userId: entry.userId,
+          liveTripId: txEntry.liveTripId,
+          liveTripItemId: txEntry.liveTripItemId,
+          userId: txEntry.userId,
           type: 'QUEUE_READY',
           severity: 'SUCCESS',
           title: 'Đã đến lượt vào cổng',
           message: 'Vui lòng di chuyển đến cổng và mở mã QR để nhân viên check-in.',
-          data: { queueEntryId: entry.id, pressureScore: pressure.summary?.score ?? null },
+          data: { queueEntryId: txEntry.id, pressureScore: pressure.summary?.score ?? null },
         });
         return {
-          ...entry,
+          ...txEntry,
           status: 'READY',
           readyAt,
           calledAt: readyAt,
           readyExpiresAt,
         };
-      }, { isolationLevel: 'Serializable' });
+      });
     } catch (error) {
       // A serialization conflict simply means another worker won the race.
       // The next sweep will re-evaluate FIFO from committed state.
@@ -743,7 +827,6 @@ async function refreshQueueRecord(entry, {
     entry: current,
     guestsAhead: ahead.guestsAhead,
     pressure,
-    arrivalPrediction,
     policy,
   });
   return serializeQueueEntry(current, {
@@ -752,10 +835,12 @@ async function refreshQueueRecord(entry, {
     policy: {
       mode: policy.mode,
       enabled: policy.enabled,
+      configured: policy.configured,
       paused: Boolean(policy.pausedAt),
       pauseReason: policy.pauseReason,
       openBeforeMinutes: policy.openBeforeMinutes,
       readyGraceMinutes: policy.readyGraceMinutes,
+      maxReadyGuests: policy.maxReadyGuests,
       maxActiveParties: policy.maxActiveParties,
     },
   }, pressure);
@@ -768,29 +853,30 @@ async function getQueueSnapshot(entry, {
 } = {}) {
   const referenceNow = normalizeNow(now);
   if (!ACTIVE_QUEUE_STATUSES.includes(entry.status)) return serializeQueueEntry(entry);
+  const policy = await getQueuePolicy(entry.attractionId, { prismaClient });
   if (referenceNow >= entry.expiresAt) {
     return serializeQueueEntry({ ...entry, status: 'EXPIRED' });
   }
-  if (entry.status === 'READY' && entry.readyExpiresAt && referenceNow >= entry.readyExpiresAt) {
+  if (
+    !policy.pausedAt
+    && entry.status === 'READY'
+    && entry.readyExpiresAt
+    && referenceNow >= entry.readyExpiresAt
+  ) {
     return serializeQueueEntry({ ...entry, status: 'NO_SHOW', noShowAt: referenceNow });
   }
 
-  const [rawPressure, arrivalPrediction, policy] = await Promise.all([
-    providedPressure || getAttractionPressure(
-      entry.attractionId,
-      getDateKey(entry.visitDate),
-      { prismaClient, now: referenceNow },
-    ),
-    getLatestArrivalPrediction(entry.attractionId, { prismaClient, now: referenceNow }),
-    getQueuePolicy(entry.attractionId, { prismaClient }),
-  ]);
+  const rawPressure = providedPressure || await getAttractionPressure(
+    entry.attractionId,
+    getDateKey(entry.visitDate),
+    { prismaClient, now: referenceNow },
+  );
   const pressure = selectQueuePressure(rawPressure, entry);
   const ahead = await getAheadMetrics(entry, prismaClient, referenceNow);
   const estimate = buildWaitEstimate({
     entry,
     guestsAhead: ahead.guestsAhead,
     pressure,
-    arrivalPrediction,
     policy,
   });
   return serializeQueueEntry(entry, {
@@ -799,10 +885,12 @@ async function getQueueSnapshot(entry, {
     policy: {
       mode: policy.mode,
       enabled: policy.enabled,
+      configured: policy.configured,
       paused: Boolean(policy.pausedAt),
       pauseReason: policy.pauseReason,
       openBeforeMinutes: policy.openBeforeMinutes,
       readyGraceMinutes: policy.readyGraceMinutes,
+      maxReadyGuests: policy.maxReadyGuests,
       maxActiveParties: policy.maxActiveParties,
     },
   }, pressure);
@@ -821,7 +909,14 @@ async function joinQueue({
   const policy = item?.attractionId
     ? await getQueuePolicy(item.attractionId, { prismaClient })
     : { ...DEFAULT_QUEUE_POLICY };
-  if (!policy.enabled || policy.pausedAt) {
+  if (!policy.enabled) {
+    throw createHttpError(
+      409,
+      'QUEUE_DISABLED',
+      'Đối tác chưa kích hoạt luồng vào cổng SmartQueue cho điểm tham quan này.',
+    );
+  }
+  if (policy.pausedAt) {
     throw createHttpError(409, 'QUEUE_PAUSED', 'SmartQueue đang tạm dừng tại điểm tham quan.');
   }
   const eligibility = assertQueueEligibility(item, referenceNow, policy);
@@ -858,15 +953,48 @@ async function joinQueue({
     throw createHttpError(409, 'QUEUE_NOT_NEEDED', 'Điểm tham quan hiện chưa đông; bạn có thể đến cổng check-in trực tiếp.');
   }
 
-  const data = queueJoinData(item, eligibility, userId, referenceNow);
   let entry;
   let joinedExistingBooking = null;
 
   try {
-    const outcome = await prismaClient.$transaction(async (tx) => {
+    const outcome = await runSerializableTransaction(prismaClient, async (tx) => {
+      // Preflight reads are only an early UX guard. Re-read the booking item
+      // and policy inside the serializable transaction so a concurrent pause,
+      // readiness change, cancellation, or QR admission cannot be followed by
+      // a stale queue insert.
+      let txItem = item;
+      if (tx.liveTripItem?.findFirst) {
+        const reloadedItem = await loadOwnedItem(tx, tripId, itemId, userId);
+        if (!reloadedItem) {
+          throw createHttpError(
+            409,
+            'QUEUE_STATE_CHANGED',
+            'Booking hoặc chuyến đi vừa thay đổi. Vui lòng tải lại trạng thái.',
+          );
+        }
+        txItem = reloadedItem;
+      }
+      const txPolicy = tx.smartQueuePolicy?.findUnique
+        ? await getQueuePolicy(txItem.attractionId, { prismaClient: tx })
+        : policy;
+      if (!txPolicy.enabled) {
+        throw createHttpError(
+          409,
+          'QUEUE_DISABLED',
+          'SmartQueue vừa được tắt hoặc chưa xác nhận sẵn sàng vận hành.',
+        );
+      }
+      if (txPolicy.pausedAt) {
+        throw createHttpError(409, 'QUEUE_PAUSED', 'SmartQueue vừa được tạm dừng tại điểm tham quan.');
+      }
+      const txEligibility = assertQueueEligibility(txItem, referenceNow, txPolicy);
+      if (txItem.booking?.userId !== userId) {
+        throw createHttpError(403, 'QUEUE_BOOKING_FORBIDDEN', 'Booking không thuộc tài khoản hiện tại.');
+      }
+
       const existingForBooking = tx.smartQueueEntry?.findUnique
         ? await tx.smartQueueEntry.findUnique({
-          where: { bookingId: item.bookingId },
+          where: { bookingId: txItem.bookingId },
           select: { id: true, liveTripItemId: true, status: true },
         })
         : null;
@@ -874,18 +1002,26 @@ async function joinQueue({
         return { entry: null, existingForBooking };
       }
       await assertQueueHasCapacity({
-        attractionId: item.attractionId,
-        visitDate: eligibility.visitDate,
-        policy,
+        attractionId: txItem.attractionId,
+        visitDate: txEligibility.visitDate,
+        policy: txPolicy,
         prismaClient: tx,
         now: referenceNow,
       });
+      const data = queueJoinData(txItem, txEligibility, userId, referenceNow);
       const saved = await tx.smartQueueEntry.create({
         data,
       });
-      await recordQueueJoined({ tx, item, userId, entry: saved, eligibility, pressure });
+      await recordQueueJoined({
+        tx,
+        item: txItem,
+        userId,
+        entry: saved,
+        eligibility: txEligibility,
+        pressure,
+      });
       return { entry: saved, existingForBooking: null };
-    }, { isolationLevel: 'Serializable' });
+    });
     entry = outcome.entry;
     joinedExistingBooking = outcome.existingForBooking;
   } catch (error) {
@@ -1024,7 +1160,7 @@ async function cancelQueue({
   }
 
   const cancelledAt = referenceNow;
-  const cancelled = await prismaClient.$transaction(async (tx) => {
+  const cancelled = await runSerializableTransaction(prismaClient, async (tx) => {
     const result = await tx.smartQueueEntry.updateMany({
       where: { id: entry.id, status: { in: ACTIVE_QUEUE_STATUSES } },
       data: { status: 'CANCELLED', cancelledAt },
@@ -1058,19 +1194,30 @@ async function cancelQueue({
 
 async function markQueueAdmittedForBooking(
   bookingId,
-  { prismaClient = prisma, admittedAt = new Date() } = {},
+  {
+    prismaClient = prisma,
+    admittedAt = new Date(),
+    emitRealtime = true,
+  } = {},
 ) {
   const referenceNow = normalizeNow(admittedAt);
+  if (!prismaClient?.smartQueueEntry?.findMany) {
+    return { count: 0, entryIds: [], updates: [] };
+  }
   const entries = await prismaClient.smartQueueEntry.findMany({
-    where: { bookingId, status: { in: ACTIVE_QUEUE_STATUSES } },
+    // A successful QR scan is the source of truth for physical admission.
+    // It must repair a stale CANCELLED/NO_SHOW/EXPIRED queue state as well as
+    // close an active one when the two operations race.
+    where: { bookingId, status: { not: 'ADMITTED' } },
     include: QUEUE_ENTRY_INCLUDE,
   });
   const admitted = [];
+  const updates = [];
 
   for (const entry of entries || []) {
-    const updated = await prismaClient.$transaction(async (tx) => {
+    const updated = await runSerializableTransaction(prismaClient, async (tx) => {
       const result = await tx.smartQueueEntry.updateMany({
-        where: { id: entry.id, status: { in: ACTIVE_QUEUE_STATUSES } },
+        where: { id: entry.id, status: { not: 'ADMITTED' } },
         data: { status: 'ADMITTED', admittedAt: referenceNow },
       });
       if (result.count !== 1) return false;
@@ -1083,13 +1230,17 @@ async function markQueueAdmittedForBooking(
         severity: 'SUCCESS',
         title: 'Đã check-in qua SmartQueue',
         message: 'Nhân viên đã xác nhận mã QR và hoàn tất lượt vào cổng.',
-        data: { queueEntryId: entry.id, bookingId },
+        data: {
+          queueEntryId: entry.id,
+          bookingId,
+          previousStatus: entry.status,
+        },
       });
       return true;
     });
     if (!updated) continue;
     admitted.push(entry.id);
-    emitLiveTripUpdated({
+    updates.push({
       customerId: entry.userId,
       tripId: entry.liveTripId,
       itemId: entry.liveTripItemId,
@@ -1098,7 +1249,12 @@ async function markQueueAdmittedForBooking(
     });
   }
 
-  return { count: admitted.length, entryIds: admitted };
+  if (emitRealtime) emitQueueAdmissionUpdates(updates);
+  return { count: admitted.length, entryIds: admitted, updates };
+}
+
+function emitQueueAdmissionUpdates(updates = []) {
+  for (const update of updates) emitLiveTripUpdated(update);
 }
 
 async function sweepSmartQueues({ prismaClient = prisma, now = new Date() } = {}) {
@@ -1139,25 +1295,38 @@ async function sweepSmartQueues({ prismaClient = prisma, now = new Date() } = {}
         }
         if (entry.booking?.status && entry.booking.status !== 'CONFIRMED') {
           const cancelledAt = referenceNow;
-          const didCancel = await prismaClient.$transaction(async (tx) => {
+          const didCancel = await runSerializableTransaction(prismaClient, async (tx) => {
+            const txEntry = tx !== prismaClient && tx.smartQueueEntry?.findUnique
+              ? await tx.smartQueueEntry.findUnique({
+                where: { id: entry.id },
+                include: QUEUE_ENTRY_INCLUDE,
+              })
+              : entry;
+            if (
+              !txEntry
+              || !ACTIVE_QUEUE_STATUSES.includes(txEntry.status)
+              || !txEntry.booking?.status
+              || txEntry.booking.status === 'CONFIRMED'
+              || (txEntry.booking.ticketInstances?.length || 0) > 0
+            ) return false;
             const result = await tx.smartQueueEntry.updateMany({
-              where: { id: entry.id, status: { in: ACTIVE_QUEUE_STATUSES } },
+              where: { id: txEntry.id, status: { in: ACTIVE_QUEUE_STATUSES } },
               data: { status: 'CANCELLED', cancelledAt },
             });
             if (result.count !== 1) return false;
             await recordLiveTripEvent({
               client: tx,
-              liveTripId: entry.liveTripId,
-              liveTripItemId: entry.liveTripItemId,
-              userId: entry.userId,
+              liveTripId: txEntry.liveTripId,
+              liveTripItemId: txEntry.liveTripItemId,
+              userId: txEntry.userId,
               type: 'QUEUE_CANCELLED',
               severity: 'WARNING',
               title: 'SmartQueue đã kết thúc theo trạng thái booking',
               message: 'Booking không còn ở trạng thái xác nhận nên lượt SmartQueue được đóng tự động; quyền lợi vé áp dụng theo trạng thái booking hiện tại.',
               data: {
-                queueEntryId: entry.id,
-                bookingId: entry.bookingId,
-                bookingStatus: entry.booking.status,
+                queueEntryId: txEntry.id,
+                bookingId: txEntry.bookingId,
+                bookingStatus: txEntry.booking.status,
               },
             });
             return true;
@@ -1190,7 +1359,6 @@ async function sweepSmartQueues({ prismaClient = prisma, now = new Date() } = {}
 
 module.exports = {
   ACTIVE_QUEUE_STATUSES,
-  ARRIVAL_PREDICTION_HORIZON_MINUTES,
   MAX_ESTIMATED_WAIT_MINUTES,
   DEFAULT_QUEUE_POLICY,
   QUEUE_OPEN_BEFORE_MS,
@@ -1201,11 +1369,12 @@ module.exports = {
   getQueueForItem,
   getQueueAvailabilityForItem,
   getQueuePolicy,
-  getLatestArrivalPrediction,
   getQueueSnapshot,
   joinQueue,
+  emitQueueAdmissionUpdates,
   markQueueAdmittedForBooking,
   refreshQueueRecord,
+  runSerializableTransaction,
   selectQueuePressure,
   serializeQueueEntry,
   sweepSmartQueues,

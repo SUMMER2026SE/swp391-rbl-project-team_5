@@ -96,6 +96,25 @@ test('collects a new 15-minute bucket even when the worker tick is not on an exa
   expect(evaluateLivePredictions).toHaveBeenCalledWith({ now, prismaClient: livePrisma });
 });
 
+test('retries the same bucket when one attraction snapshot temporarily fails', async () => {
+  const firstNow = new Date('2099-03-10T03:01:00.000Z');
+  const retryNow = new Date('2099-03-10T03:02:00.000Z');
+  const livePrisma = {
+    attraction: {
+      findMany: jest.fn().mockResolvedValue([{ id: 'attraction-retry' }]),
+    },
+  };
+  recordArrivalObservation
+    .mockRejectedValueOnce(new Error('temporary database outage'))
+    .mockResolvedValue({});
+
+  await sweepLiveTripOperations({ now: firstNow, prismaClient: livePrisma });
+  await sweepLiveTripOperations({ now: retryNow, prismaClient: livePrisma });
+
+  expect(livePrisma.attraction.findMany).toHaveBeenCalledTimes(2);
+  expect(recordArrivalObservation).toHaveBeenCalledTimes(2);
+});
+
 test('skips safely when another instance owns the distributed lock', async () => {
   acquireJobLock.mockResolvedValue(false);
   const handle = startLiveTripWorker({ intervalMs: 1000 });

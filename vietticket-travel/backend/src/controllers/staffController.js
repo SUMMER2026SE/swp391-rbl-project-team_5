@@ -29,7 +29,10 @@ const {
   sendRefundStatusEmail,
   sendReissueTicketEmail,
 } = require('../utils/mailer');
-const { markQueueAdmittedForBooking } = require('../services/smartQueueService');
+const {
+  emitQueueAdmissionUpdates,
+  markQueueAdmittedForBooking,
+} = require('../services/smartQueueService');
 
 function getClientIp(req) {
   return getRequestIp(req) || '127.0.0.1';
@@ -1366,26 +1369,32 @@ async function checkInTicket(req, res, next) {
           },
         });
 
+        // QR is the admission source of truth. Persist the queue transition in
+        // the same transaction as TicketInstance.USED so a concurrent
+        // CANCEL/CALL/NO_SHOW can never leave a terminal queue state behind.
+        const smartQueue = await markQueueAdmittedForBooking(instance.bookingId, {
+          prismaClient: tx,
+          admittedAt: checkedInAt,
+          emitRealtime: false,
+        });
+
         return {
           instance,
           checkedInCount: updated.count,
           checkedInAt,
           bookingStatus,
+          smartQueue,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
-    // SmartQueue là lớp vận hành bổ sung. Check-in vé đã thành công không được
-    // rollback chỉ vì cập nhật hàng chờ/realtime tạm thời thất bại.
-    let smartQueueUpdated = false;
+    // Realtime is deliberately post-commit: clients can only reload a state
+    // that is already durable. A socket transport failure never rolls back QR.
     try {
-      const queueResult = await markQueueAdmittedForBooking(result.instance.bookingId, {
-        admittedAt: result.checkedInAt,
-      });
-      smartQueueUpdated = queueResult.count > 0;
-    } catch (queueError) {
-      console.error('[staff-checkin] Không thể cập nhật SmartQueue:', queueError.message);
+      emitQueueAdmissionUpdates(result.smartQueue?.updates);
+    } catch (realtimeError) {
+      console.error('[staff-checkin] Không thể phát realtime SmartQueue:', realtimeError.message);
     }
 
     return res.json({
@@ -1398,7 +1407,7 @@ async function checkInTicket(req, res, next) {
         checkedInAt: result.checkedInAt,
         checkedInBy: req.user.email,
         bookingStatus: result.bookingStatus,
-        smartQueueUpdated,
+        smartQueueUpdated: Number(result.smartQueue?.count || 0) > 0,
       },
     });
   } catch (error) {

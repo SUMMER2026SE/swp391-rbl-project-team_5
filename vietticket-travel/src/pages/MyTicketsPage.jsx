@@ -17,6 +17,7 @@ import {
   isPaymentExpired,
   normalizeBookingStatus,
 } from '../utils/myTicketsFilters.js'
+import { isLiveTripOperable } from '../utils/journeyCenter.js'
 
 const tabs = [
   { id: 'all', label: 'Tất cả' },
@@ -202,10 +203,14 @@ function MyTicketsPage() {
     () => getTicketOverviewItems(bookings, now),
     [bookings, now],
   )
+  const activeLiveTrips = useMemo(
+    () => liveTrips.filter((trip) => isLiveTripOperable(trip, new Date(now))),
+    [liveTrips, now],
+  )
 
   return (
     <>
-      <Header activeLink="My Tickets" />
+      <Header activeLink="Hành trình" />
       <div className="mx-auto flex min-h-[calc(100vh-80px)] max-w-[1440px] bg-surface">
         <aside className="hidden w-64 shrink-0 border-r border-outline-variant/30 bg-surface-container-lowest p-6 md:block">
           <div className="mb-8">
@@ -216,6 +221,7 @@ function MyTicketsPage() {
           </div>
           <nav className="flex flex-col gap-2">
             <SidebarLink href="/profile" icon="person" label="Hồ sơ" />
+            <SidebarLink href="/journey" icon="travel_explore" label="Trung tâm hành trình" />
             <SidebarLink
               active
               href="/my-tickets"
@@ -260,8 +266,8 @@ function MyTicketsPage() {
             <TicketOverview items={overviewItems} />
           )}
 
-          {liveTrips.some((trip) => trip.status === 'ACTIVE') && (
-            <LiveTripStrip trips={liveTrips.filter((trip) => trip.status === 'ACTIVE')} />
+          {activeLiveTrips.length > 0 && (
+            <LiveTripStrip trips={activeLiveTrips} />
           )}
 
           <div className="flex max-w-4xl flex-col gap-6">

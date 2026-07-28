@@ -7,6 +7,7 @@ const {
   extractActivityDescriptors,
   findMatchingBooking,
   resolveActivityTimes,
+  serializeTrip,
 } = require('../services/liveTripService');
 const mockPrisma = require('./helpers/mockPrisma');
 
@@ -76,6 +77,35 @@ describe('liveTripService', () => {
       days: [{ activities: [{ attractionId: 'a1', title: 'Điểm tham quan' }] }],
     }, {})).toThrow('chưa có ngày bắt đầu');
   });
+
+  test('hides replaced historical items while exposing the new recovery item', () => {
+    const trip = serializeTrip({
+      id: 'trip-1',
+      userId: 'user-1',
+      savedItineraryId: 'saved-1',
+      title: 'Đà Nẵng',
+      startDate: new Date('2026-08-15T00:00:00.000Z'),
+      endDate: new Date('2026-08-15T00:00:00.000Z'),
+      status: 'ACTIVE',
+      items: [
+        {
+          id: 'item-old',
+          status: 'SKIPPED',
+          snapshot: { title: 'Điểm cũ', hiddenFromPlan: true },
+        },
+        {
+          id: 'item-new',
+          status: 'PLANNED',
+          snapshot: { title: 'Điểm thay thế', recoveredFromLiveTripItemId: 'item-old' },
+        },
+      ],
+      proposals: [],
+      events: [],
+    });
+
+    expect(trip.items.map((item) => item.id)).toEqual(['item-new']);
+  });
+
   test('rejects explicit days outside the trip window or out of order', () => {
     expect(() => extractActivityDescriptors({
       startDate: '2099-03-10',

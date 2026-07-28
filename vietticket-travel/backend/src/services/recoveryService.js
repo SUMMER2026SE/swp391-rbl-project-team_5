@@ -638,17 +638,36 @@ async function synchronizeLiveTrip(tx, {
         where: { id: item.smartQueueEntry.id },
         data: { status: 'CANCELLED', cancelledAt: now },
       });
+      await recordLiveTripEvent({
+        client: tx,
+        liveTripId: item.liveTripId,
+        liveTripItemId: item.id,
+        userId,
+        type: 'QUEUE_CANCELLED',
+        severity: 'INFO',
+        title: 'SmartQueue cũ đã được đóng an toàn',
+        message: 'Booking cũ được thay thế nên lượt SmartQueue liên quan đã kết thúc; booking mới vẫn có thể đăng ký một lượt riêng.',
+        data: {
+          queueEntryId: item.smartQueueEntry.id,
+          originalBookingId,
+          replacementBookingId,
+          reason: 'BOOKING_RECOVERED',
+        },
+      });
     }
     const snapshot = item.snapshot && typeof item.snapshot === 'object'
       ? item.snapshot
       : {};
-    await tx.liveTripItem.update({
-      where: { id: item.id },
+    const replacementItem = await tx.liveTripItem.create({
       data: {
+        liveTripId: item.liveTripId,
         bookingId: replacementBookingId,
         attractionId: option.attractionId,
+        dayIndex: item.dayIndex,
+        orderIndex: item.orderIndex,
         scheduledStart: window.startsAt || item.scheduledStart,
         scheduledEnd: window.endsAt || item.scheduledEnd,
+        status: 'PLANNED',
         snapshot: {
           ...snapshot,
           title: option.attractionTitle,
@@ -661,19 +680,47 @@ async function synchronizeLiveTrip(tx, {
           timeSlotId: option.timeSlotId,
           bookingId: replacementBookingId,
           recoveredFromBookingId: originalBookingId,
+          recoveredFromLiveTripItemId: item.id,
+        },
+      },
+    });
+    if (tx.liveTripProposal?.updateMany) {
+      await tx.liveTripProposal.updateMany({
+        where: { liveTripItemId: item.id, status: 'PENDING' },
+        data: {
+          status: 'SUPERSEDED',
+          activeKey: null,
+          decidedAt: now,
+        },
+      });
+    }
+    await tx.liveTripItem.update({
+      where: { id: item.id },
+      data: {
+        status: 'SKIPPED',
+        snapshot: {
+          ...snapshot,
+          hiddenFromPlan: true,
+          recoveredByBookingId: replacementBookingId,
+          recoveredByLiveTripItemId: replacementItem.id,
         },
       },
     });
     await recordLiveTripEvent({
       client: tx,
       liveTripId: item.liveTripId,
-      liveTripItemId: item.id,
+      liveTripItemId: replacementItem.id,
       userId,
       type: 'ITEM_RECOVERED',
       severity: 'SUCCESS',
       title: 'Đã cứu kế hoạch bằng vé thay thế',
       message: `${option.attractionTitle} đã thay cho hoạt động bị hủy và vé mới đã được cấp.`,
-      data: { originalBookingId, replacementBookingId },
+      data: {
+        originalBookingId,
+        replacementBookingId,
+        originalLiveTripItemId: item.id,
+        replacementLiveTripItemId: replacementItem.id,
+      },
     });
     updatedTrips.add(item.liveTripId);
   }
@@ -1022,4 +1069,5 @@ module.exports = {
   resolveRecoveryFundingBooking,
   serializeRecoveryCase,
   sweepExpiredRecoveryCases,
+  synchronizeLiveTrip,
 };

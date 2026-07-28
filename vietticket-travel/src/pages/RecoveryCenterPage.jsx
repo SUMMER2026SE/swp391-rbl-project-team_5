@@ -510,13 +510,69 @@ function RecoveryCaseList({ cases, loading }) {
   }
   if (cases.length === 0) {
     return (
-      <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
-        <span className="material-symbols-outlined text-6xl text-teal-700" aria-hidden="true">shield</span>
-        <h2 className="mt-4 text-2xl font-black text-slate-900">Mọi kế hoạch đang an toàn</h2>
-        <p className="mt-2 text-slate-600">Chưa có booking nào cần VietTicket Rescue xử lý.</p>
-        <Link className="mt-5 inline-flex rounded-xl bg-[#07545b] px-5 py-3 text-sm font-bold text-white" to="/my-tickets">
-          Xem vé của tôi
-        </Link>
+      <div className="overflow-hidden rounded-3xl border border-teal-100 bg-white shadow-sm">
+        <div className="bg-gradient-to-br from-[#ecfffb] via-white to-[#f0f7ff] p-7 text-center sm:p-10">
+          <div className="relative mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-teal-100 text-teal-800">
+            <span className="absolute inset-0 animate-ping rounded-3xl bg-teal-200 opacity-20" aria-hidden="true" />
+            <span className="material-symbols-outlined relative text-5xl" aria-hidden="true">shield</span>
+          </div>
+          <p className="mt-5 text-xs font-extrabold uppercase tracking-[0.18em] text-emerald-700">
+            Trạng thái bảo vệ · Bình thường
+          </p>
+          <h2 className="mt-2 text-3xl font-black text-slate-900">Mọi kế hoạch đang an toàn</h2>
+          <p className="mx-auto mt-3 max-w-2xl leading-7 text-slate-600">
+            Không có booking nào bị gián đoạn. Rescue vẫn theo dõi các thay đổi từ
+            đối tác và chỉ mở một hồ sơ xử lý khi quyền lợi của bạn thực sự bị ảnh hưởng.
+          </p>
+        </div>
+
+        <div className="grid gap-px bg-slate-200 md:grid-cols-3">
+          {[
+            {
+              icon: 'notification_important',
+              step: '01',
+              title: 'Phát hiện gián đoạn',
+              text: 'Đối tác hủy lịch hoặc dịch vụ không thể tiếp tục theo booking đã xác nhận.',
+            },
+            {
+              icon: 'inventory_2',
+              step: '02',
+              title: 'Khóa phương án còn chỗ',
+              text: 'Hệ thống đối chiếu ngày, số khách, tồn kho và khoản tiền bạn đã trả.',
+            },
+            {
+              icon: 'touch_app',
+              step: '03',
+              title: 'Bạn quyết định',
+              text: 'Chọn vé thay thế phù hợp hoặc nhận hoàn 100% về phương thức thanh toán gốc.',
+            },
+          ].map((item) => (
+            <article className="bg-white p-6" key={item.step}>
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-teal-50 text-teal-800">
+                  <span className="material-symbols-outlined" aria-hidden="true">{item.icon}</span>
+                </span>
+                <span className="text-xs font-black text-slate-300">{item.step}</span>
+              </div>
+              <h3 className="mt-4 font-black text-slate-900">{item.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{item.text}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-100 p-6 sm:flex-row">
+          <p className="text-sm font-semibold text-slate-600">
+            Rescue không phải bảo hiểm và không tự đổi vé khi chưa có sự đồng ý của bạn.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link className="inline-flex rounded-xl border border-slate-300 px-5 py-3 text-sm font-bold text-slate-700" to="/my-tickets">
+              Xem vé của tôi
+            </Link>
+            <Link className="inline-flex rounded-xl bg-[#07545b] px-5 py-3 text-sm font-bold text-white" to="/journey">
+              Trung tâm hành trình
+            </Link>
+          </div>
+        </div>
       </div>
     )
   }

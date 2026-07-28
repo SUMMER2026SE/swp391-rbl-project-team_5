@@ -103,7 +103,7 @@ class LiveArrivalModelTests(unittest.TestCase):
             result["metrics"]["confidence_reasons"],
         )
 
-    def test_wait_prediction_uses_the_requested_horizon_as_a_rate(self):
+    def test_wait_prediction_uses_qr_service_throughput_not_arrival_demand(self):
         now = datetime(2026, 7, 1, 12, tzinfo=timezone.utc)
         current = LiveObservation(
             timestamp=now,
@@ -122,9 +122,37 @@ class LiveArrivalModelTests(unittest.TestCase):
 
         result = predict_wait(payload)
 
-        self.assertEqual(result["metrics"]["arrival_horizon_minutes"], 30)
+        self.assertEqual(result["predicted_p50"], 36)
+        self.assertEqual(result["training_source"], "live_qr_throughput_15m")
+        self.assertEqual(result["metrics"]["requested_horizon_minutes"], 30)
+        self.assertTrue(result["metrics"]["party_size_excluded_from_own_eta"])
         self.assertGreaterEqual(result["predicted_p90"], result["predicted_p50"])
         self.assertLessEqual(result["predicted_p90"], 240)
+
+    def test_wait_is_monotonic_in_guests_ahead_and_inverse_in_qr_throughput(self):
+        now = datetime(2026, 7, 1, 12, tzinfo=timezone.utc)
+
+        def estimate(guests_ahead: int, checkins: int, party_size: int = 1):
+            return predict_wait(
+                WaitPredictionRequest(
+                    attraction_id="attraction-1",
+                    observations=[],
+                    current=LiveObservation(
+                        timestamp=now,
+                        capacity=100,
+                        booked_guests=90,
+                        checkins_last_15m=checkins,
+                    ),
+                    horizon_minutes=15,
+                    guests_ahead=guests_ahead,
+                    party_size=party_size,
+                )
+            )["predicted_p50"]
+
+        self.assertGreater(estimate(20, 5), estimate(10, 5))
+        self.assertLess(estimate(20, 10), estimate(20, 5))
+        self.assertEqual(estimate(10, 5, 1), estimate(10, 5, 20))
+        self.assertEqual(estimate(0, 5), 0)
 
 
 class ConstrainedOptimizerTests(unittest.TestCase):

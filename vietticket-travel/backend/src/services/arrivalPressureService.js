@@ -72,10 +72,10 @@ function getPressureLevel(score, closed = false) {
 function getPressureLabel(level) {
   return {
     CLOSED: 'Đang đóng cửa',
-    VERY_BUSY: 'Rất đông',
-    BUSY: 'Đông',
-    MODERATE: 'Vừa phải',
-    QUIET: 'Thoáng',
+    VERY_BUSY: 'Nhu cầu VietTicket rất cao',
+    BUSY: 'Nhu cầu VietTicket cao',
+    MODERATE: 'Nhu cầu VietTicket vừa',
+    QUIET: 'Nhu cầu VietTicket thấp',
   }[level] || 'Chưa xác định';
 }
 
@@ -161,9 +161,26 @@ function calculatePressureScore({
 
 async function getHistoricalShowRate(client, attractionId, date) {
   const where = {
-    snapshotAttractionId: attractionId,
-    snapshotVisitDate: { lt: date },
+    isForecastTrainingSample: false,
     status: { in: ['COMPLETED', 'NO_SHOW'] },
+    OR: [
+      {
+        snapshotAttractionId: attractionId,
+        snapshotVisitDate: { lt: date },
+      },
+      {
+        snapshotAttractionId: attractionId,
+        snapshotVisitDate: null,
+        reservation: { date: { lt: date } },
+      },
+      {
+        snapshotAttractionId: null,
+        reservation: {
+          date: { lt: date },
+          ticketProduct: { attractionId },
+        },
+      },
+    ],
   };
   const [completed, noShow] = await Promise.all([
     client.booking.count({ where: { ...where, status: 'COMPLETED' } }),
@@ -238,7 +255,7 @@ async function getAttractionPressure(
     specialDate,
     timeSlots,
     showRateData,
-    checkinsLast15Minutes,
+    recentCheckins,
     activeQueueEntries,
   ] = await Promise.all([
     prismaClient.attractionDailyStock.findUnique({
@@ -264,7 +281,7 @@ async function getAttractionPressure(
       },
     }),
     getHistoricalShowRate(prismaClient, normalizedAttractionId, date),
-    prismaClient.ticketInstance.count({
+    prismaClient.ticketInstance.findMany({
       where: {
         status: 'USED',
         checkedInAt: {
@@ -272,9 +289,34 @@ async function getAttractionPressure(
           lte: referenceNow,
         },
         booking: {
-          snapshotAttractionId: normalizedAttractionId,
-          snapshotVisitDate: date,
+          isForecastTrainingSample: false,
           status: { in: ['CONFIRMED', 'COMPLETED'] },
+          OR: [
+            {
+              snapshotAttractionId: normalizedAttractionId,
+              snapshotVisitDate: date,
+            },
+            {
+              snapshotAttractionId: normalizedAttractionId,
+              snapshotVisitDate: null,
+              reservation: { date },
+            },
+            {
+              snapshotAttractionId: null,
+              reservation: {
+                date,
+                ticketProduct: { attractionId: normalizedAttractionId },
+              },
+            },
+          ],
+        },
+      },
+      select: {
+        id: true,
+        booking: {
+          select: {
+            reservation: { select: { timeSlotId: true } },
+          },
         },
       },
     }),
@@ -309,6 +351,13 @@ async function getAttractionPressure(
   const bookedQty = Number(dayStock?.bookedQty ?? slotBookedQty);
   const heldQty = Number(dayStock?.heldQty ?? slotHeldQty);
   const queueRows = Array.isArray(activeQueueEntries) ? activeQueueEntries : [];
+  const checkinRows = Array.isArray(recentCheckins) ? recentCheckins : [];
+  const checkinsLast15Minutes = checkinRows.length;
+  const checkinsByTimeSlot = checkinRows.reduce((counts, ticket) => {
+    const timeSlotId = ticket.booking?.reservation?.timeSlotId;
+    if (timeSlotId) counts.set(timeSlotId, (counts.get(timeSlotId) || 0) + 1);
+    return counts;
+  }, new Map());
   const waitingGuests = queueRows.reduce(
     (sum, entry) => sum + Math.max(0, Number(entry.partySize) || 0),
     0,
@@ -327,15 +376,10 @@ async function getAttractionPressure(
   };
   const summary = calculatePressureScore(commonScoreParams);
 
-  const currentVietnamDate = getVietnamDateKey(referenceNow);
-  const currentVietnamTime = getVietnamTimeKey(referenceNow);
   const slots = slotRows.map((slot) => {
     const slotStock = slot.timeSlotStocks?.[0] || {};
     const slotCapacity = Math.max(0, Number(slot.maxCapacity) || capacity);
-    const slotIsHappeningNow = dateKey === currentVietnamDate
-      && currentVietnamTime >= slot.startTime
-      && currentVietnamTime < slot.endTime;
-    const slotCheckinsLast15Minutes = slotIsHappeningNow ? checkinsLast15Minutes : 0;
+    const slotCheckinsLast15Minutes = checkinsByTimeSlot.get(slot.id) || 0;
     const slotWaitingGuests = queueRows.reduce((sum, entry) => {
       const scheduledTime = getVietnamTimeKey(entry.liveTripItem?.scheduledStart);
       if (!scheduledTime) return sum;
@@ -397,8 +441,12 @@ async function getAttractionPressure(
     showRate: round(showRateData.showRate, 3),
     showRateSampleBookings: showRateData.sampleBookings,
     showRateBasis: showRateData.basis,
+    confidenceBasis: 'HISTORICAL_VIETTICKET_SHOW_RATE_SAMPLE_SIZE',
+    coverageScope: 'VIETTICKET_CHANNEL_ONLY',
+    venueCoverageKnown: false,
+    venueCoverageRatio: null,
     dataBasis: 'BOOKING_STOCK_QR_AND_SMART_QUEUE',
-    measurementNote: 'Đây là chỉ số áp lực lượt đến từ booking, tồn chỗ, SmartQueue và QR check-in; không phải số người đếm bằng cảm biến.',
+    measurementNote: 'Chỉ số này chỉ phản ánh nhu cầu VietTicket quan sát được từ booking, tồn chỗ, SmartQueue và QR; không đại diện tổng số khách tại địa điểm và không phải số người đếm bằng cảm biến.',
     calculatedAt: serializeDate(referenceNow),
   };
 }

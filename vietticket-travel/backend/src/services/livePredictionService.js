@@ -3,6 +3,7 @@
 const prisma = require('../config/prisma');
 const {
   getAttractionPressure,
+  getDateKey,
   getVietnamDateKey,
 } = require('./arrivalPressureService');
 
@@ -29,6 +30,17 @@ function floorBucket(date, minutes = 15) {
   value.setUTCSeconds(0, 0);
   value.setUTCMinutes(Math.floor(value.getUTCMinutes() / minutes) * minutes);
   return value;
+}
+
+function vietnamDateBounds(dateKey) {
+  const start = new Date(`${dateKey}T00:00:00.000+07:00`);
+  if (Number.isNaN(start.getTime())) {
+    throw httpError(400, 'INVALID_DATE', 'Không thể xác định ranh giới ngày Việt Nam.');
+  }
+  return {
+    start,
+    end: new Date(start.getTime() + 24 * 60 * 60 * 1000),
+  };
 }
 
 function boundedInteger(value, { field, min, max, fallback }) {
@@ -283,6 +295,27 @@ async function applyRuntimeQualityGate(attractionId, result, {
   };
 }
 
+function scoreOptimizerSchedule(items, travelBufferMinutes) {
+  let score = 0;
+  for (const item of items) {
+    const duration = Math.max(1, item.end_minute - item.start_minute);
+    score += Number(item.priority || 0) * duration / 60;
+    score -= Number(item.risk_score || 0) * duration / 100;
+  }
+  for (let leftIndex = 0; leftIndex < items.length; leftIndex += 1) {
+    const left = items[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < items.length; rightIndex += 1) {
+      const right = items[rightIndex];
+      if (
+        left.day_index === right.day_index
+        && left.start_minute < right.end_minute + travelBufferMinutes
+        && right.start_minute < left.end_minute + travelBufferMinutes
+      ) score -= 1000;
+    }
+  }
+  return Math.round(score * 100) / 100;
+}
+
 function validateOptimizerResult(result, items, {
   liveTripId,
   maxShiftMinutes,
@@ -306,12 +339,18 @@ function validateOptimizerResult(result, items, {
   for (const proposal of result.proposals) {
     const id = String(proposal?.item_id || '');
     const item = itemById.get(id);
+    const originalStart = Number(proposal?.original_start_minute);
+    const originalEnd = Number(proposal?.original_end_minute);
     const proposedStart = Number(proposal?.proposed_start_minute);
     const proposedEnd = Number(proposal?.proposed_end_minute);
     if (
       !item
       || item.locked
       || seen.has(id)
+      || !Number.isInteger(originalStart)
+      || !Number.isInteger(originalEnd)
+      || originalStart !== item.start_minute
+      || originalEnd !== item.end_minute
       || !Number.isInteger(proposedStart)
       || !Number.isInteger(proposedEnd)
       || proposedStart < 0
@@ -347,16 +386,48 @@ function validateOptimizerResult(result, items, {
   const baselineScore = Number(result.baseline_score);
   const optimizedScore = Number(result.optimized_score);
   const totalShiftMinutes = Number(result.total_shift_minutes);
+  const protectedBookingCount = Number(result.protected_booking_count);
+  const expectedBaselineScore = scoreOptimizerSchedule(items, travelBufferMinutes);
+  const expectedOptimizedScore = scoreOptimizerSchedule(finalItems, travelBufferMinutes);
+  const expectedTotalShiftMinutes = result.proposals.reduce((total, proposal) => (
+    total + Math.abs(
+      Number(proposal.proposed_start_minute)
+      - Number(proposal.original_start_minute)
+    )
+  ), 0);
+  const expectedProtectedBookingCount = items.filter((item) => item.locked).length;
   if (
     !Number.isFinite(baselineScore)
     || !Number.isFinite(optimizedScore)
     || !Number.isInteger(totalShiftMinutes)
     || totalShiftMinutes < 0
+    || !Number.isInteger(protectedBookingCount)
+    || Math.abs(baselineScore - expectedBaselineScore) > 0.05
+    || Math.abs(optimizedScore - expectedOptimizedScore) > 0.05
+    || totalShiftMinutes !== expectedTotalShiftMinutes
+    || protectedBookingCount !== expectedProtectedBookingCount
+    || expectedOptimizedScore < expectedBaselineScore
     || Number(result.predicted_minutes_saved || 0) !== 0
   ) {
     throw new Error('ML optimizer trả metric không hợp lệ.');
   }
-  return result;
+  return {
+    ...result,
+    baseline_score: expectedBaselineScore,
+    optimized_score: expectedOptimizedScore,
+    total_shift_minutes: expectedTotalShiftMinutes,
+    protected_booking_count: expectedProtectedBookingCount,
+    constraints: {
+      ...(result.constraints && typeof result.constraints === 'object'
+        ? result.constraints
+        : {}),
+      locked_items_immutable: true,
+      max_shift_minutes: maxShiftMinutes,
+      travel_buffer_minutes: travelBufferMinutes,
+      timezone: 'Asia/Ho_Chi_Minh',
+      no_overlapping_windows: true,
+    },
+  };
 }
 
 async function loadObservationHistory(attractionId, { prismaClient = prisma } = {}) {
@@ -382,15 +453,26 @@ async function loadObservationHistory(attractionId, { prismaClient = prisma } = 
 
 async function recordArrivalObservation(attractionId, { now = new Date(), prismaClient = prisma } = {}) {
   if (!prismaClient?.arrivalObservation?.upsert) return null;
-  const pressure = await getAttractionPressure(attractionId, getVietnamDateKey(now), { prismaClient, now });
-  const bucketStart = floorBucket(now);
-  const observationKey = `${attractionId}:${bucketStart.toISOString()}`;
+  const observedAt = new Date(now);
+  if (Number.isNaN(observedAt.getTime())) {
+    throw httpError(400, 'INVALID_NOW', 'now phải là thời điểm hợp lệ.');
+  }
+  const pressure = await getAttractionPressure(
+    attractionId,
+    getVietnamDateKey(observedAt),
+    { prismaClient, now: observedAt },
+  );
+  // Keep the unique key bucket-aligned for durable idempotency, while the
+  // target window starts exactly at feature-capture time. Using the floored
+  // bucket as the target would leak already-observed check-ins into the label.
+  const bucketKey = floorBucket(observedAt);
+  const observationKey = `${attractionId}:${bucketKey.toISOString()}`;
   return prismaClient.arrivalObservation.upsert({
     where: { observationKey },
     create: {
       observationKey,
       attractionId,
-      bucketStart,
+      bucketStart: observedAt,
       capacity: Number(pressure.summary?.capacity || 0),
       bookedGuests: Number(pressure.summary?.bookedQty || 0),
       heldGuests: Number(pressure.summary?.heldQty || 0),
@@ -405,9 +487,10 @@ async function recordArrivalObservation(attractionId, { now = new Date(), prisma
 }
 
 async function evaluateArrivalObservations({ now = new Date(), prismaClient = prisma } = {}) {
-  if (!prismaClient?.arrivalObservation?.findMany) return { evaluated: 0 };
+  if (!prismaClient?.arrivalObservation?.findMany) return { evaluated: 0, failed: 0 };
   const cutoff = new Date(new Date(now).getTime() - 15 * 60 * 1000);
   let evaluated = 0;
+  let failed = 0;
   let lastId = null;
   while (true) {
     const rows = await prismaClient.arrivalObservation.findMany({
@@ -431,31 +514,45 @@ async function evaluateArrivalObservations({ now = new Date(), prismaClient = pr
             where: {
               status: 'USED',
               checkedInAt: { gte: row.bucketStart, lt: end },
-              booking: { snapshotAttractionId: row.attractionId },
+              booking: {
+                isForecastTrainingSample: false,
+                status: { in: ['CONFIRMED', 'COMPLETED'] },
+                OR: [
+                  { snapshotAttractionId: row.attractionId },
+                  {
+                    snapshotAttractionId: null,
+                    reservation: {
+                      ticketProduct: { attractionId: row.attractionId },
+                    },
+                  },
+                ],
+              },
             },
           });
           const result = await prismaClient.arrivalObservation.updateMany({
             where: { id: row.id, actualArrivalsNext15m: null },
             data: { actualArrivalsNext15m: actual, evaluatedAt: new Date(now) },
           });
-          return Number(result.count || 0);
+          return { evaluated: Number(result.count || 0), failed: 0 };
         } catch (error) {
           console.error(`[live-prediction] Không đánh giá được observation ${row.id}:`, error.message);
-          return 0;
+          return { evaluated: 0, failed: 1 };
         }
       },
     );
-    evaluated += counts.reduce((sum, count) => sum + count, 0);
+    evaluated += counts.reduce((sum, result) => sum + result.evaluated, 0);
+    failed += counts.reduce((sum, result) => sum + result.failed, 0);
     lastId = rows[rows.length - 1].id;
     if (rows.length < EVALUATION_BATCH_SIZE) break;
   }
-  return { evaluated };
+  return { evaluated, failed };
 }
 
 async function evaluateLivePredictions({ now = new Date(), prismaClient = prisma } = {}) {
-  if (!prismaClient?.livePrediction?.findMany) return { evaluated: 0 };
+  if (!prismaClient?.livePrediction?.findMany) return { evaluated: 0, failed: 0 };
   const referenceNow = new Date(now);
   let evaluated = 0;
+  let failed = 0;
   let lastId = null;
   while (true) {
     const rows = await prismaClient.livePrediction.findMany({
@@ -482,31 +579,44 @@ async function evaluateLivePredictions({ now = new Date(), prismaClient = prisma
         const windowEnd = new Date(
           new Date(row.predictedAt).getTime() + Number(row.horizonMinutes || 15) * 60 * 1000,
         );
-        if (windowEnd > referenceNow) return 0;
+        if (windowEnd > referenceNow) return { evaluated: 0, failed: 0 };
         try {
           const actual = await prismaClient.ticketInstance.count({
             where: {
               status: 'USED',
               checkedInAt: { gte: row.predictedAt, lt: windowEnd },
-              booking: { snapshotAttractionId: row.attractionId },
+              booking: {
+                isForecastTrainingSample: false,
+                status: { in: ['CONFIRMED', 'COMPLETED'] },
+                OR: [
+                  { snapshotAttractionId: row.attractionId },
+                  {
+                    snapshotAttractionId: null,
+                    reservation: {
+                      ticketProduct: { attractionId: row.attractionId },
+                    },
+                  },
+                ],
+              },
             },
           });
           const result = await prismaClient.livePrediction.updateMany({
             where: { id: row.id, actualValue: null },
             data: { actualValue: actual, evaluatedAt: referenceNow },
           });
-          return Number(result.count || 0);
+          return { evaluated: Number(result.count || 0), failed: 0 };
         } catch (error) {
           console.error(`[live-prediction] Không đánh giá được prediction ${row.id}:`, error.message);
-          return 0;
+          return { evaluated: 0, failed: 1 };
         }
       },
     );
-    evaluated += counts.reduce((sum, count) => sum + count, 0);
+    evaluated += counts.reduce((sum, result) => sum + result.evaluated, 0);
+    failed += counts.reduce((sum, result) => sum + result.failed, 0);
     lastId = rows[rows.length - 1].id;
     if (rows.length < EVALUATION_BATCH_SIZE) break;
   }
-  return { evaluated };
+  return { evaluated, failed };
 }
 
 async function predictLiveArrivals({
@@ -529,6 +639,7 @@ async function predictLiveArrivals({
     throw httpError(400, 'INVALID_NOW', 'now phải là thời điểm hợp lệ.');
   }
   const liveDate = assertLivePredictionDate(date, referenceNow);
+  const predictionDay = vietnamDateBounds(liveDate);
   const pressure = await getAttractionPressure(
     attractionId,
     liveDate,
@@ -542,7 +653,11 @@ async function predictLiveArrivals({
         predictionType: 'ARRIVALS',
         horizonMinutes: normalizedHorizon,
         predictedAt: {
-          gte: new Date(referenceNow.getTime() - PREDICTION_CACHE_MS),
+          gte: new Date(Math.max(
+            predictionDay.start.getTime(),
+            referenceNow.getTime() - PREDICTION_CACHE_MS,
+          )),
+          lt: predictionDay.end,
           lte: referenceNow,
         },
       },
@@ -682,20 +797,26 @@ async function predictLiveWait({ attractionId, date, guestsAhead, partySize, now
     );
   } catch {
     const throughput = Math.max(1, Number(current.checkins_last_15m || 0) || Number(current.capacity || 100) * 0.08);
-    const guests = Math.max(1, normalizedGuestsAhead + normalizedPartySize);
-    const p50 = Math.min(240, Math.ceil(guests / throughput * 15));
+    const guests = Math.max(0, normalizedGuestsAhead);
+    const p50 = guests === 0
+      ? 0
+      : Math.min(240, Math.ceil(guests / throughput * 15));
     return {
       prediction_type: 'WAIT_TIME',
       predicted_p50: p50,
       predicted_p90: Math.min(240, Math.ceil(p50 * 1.5)),
       confidence: 'LOW',
-      model_version: 'eta_fallback_node_v1',
+      model_version: 'eta_fallback_node_v2',
       training_source: 'operational_heuristic',
       used_fallback: true,
-      feature_contributions: { guests_ahead: normalizedGuestsAhead, throughput },
+      feature_contributions: {
+        guests_ahead: normalizedGuestsAhead,
+        qr_service_throughput_15m: throughput,
+      },
       metrics: {
         reason: 'ML_SERVICE_UNAVAILABLE',
-        wait_formula: 'guests_divided_by_conservative_throughput_rate',
+        party_size_excluded_from_own_eta: true,
+        wait_formula: 'guests_ahead_divided_by_qr_service_throughput',
       },
     };
   }
@@ -713,6 +834,15 @@ async function optimizeLiveTrip({
   });
   if (!trip) throw httpError(404, 'LIVE_TRIP_NOT_FOUND', 'Không tìm thấy LiveTrip đang hoạt động.');
   const referenceNow = new Date(now);
+  const currentDate = getVietnamDateKey(referenceNow);
+  const tripEndDate = getDateKey(trip.endDate);
+  if (tripEndDate && tripEndDate < currentDate) {
+    throw httpError(
+      409,
+      'LIVE_TRIP_ENDED',
+      'Chuyến đi đã kết thúc nên không thể chạy mô phỏng Autopilot mới.',
+    );
+  }
   const items = trip.items.filter((item) => {
     if (['COMPLETED', 'SKIPPED'].includes(item.status)) return false;
     const start = new Date(item.scheduledStart);
@@ -725,7 +855,6 @@ async function optimizeLiveTrip({
     const end = item.scheduledEnd ? new Date(item.scheduledEnd) : new Date(start.getTime() + 90 * 60 * 1000);
     const startMinute = vietnamMinuteOfDay(start);
     const itemDate = getVietnamDateKey(start);
-    const currentDate = getVietnamDateKey(referenceNow);
     const isOngoing = start <= referenceNow && end > referenceNow;
     const minutesUntilStart = itemDate === currentDate
       ? Math.max(0, startMinute - vietnamMinuteOfDay(referenceNow))
@@ -807,6 +936,7 @@ async function optimizeLiveTrip({
 }
 
 module.exports = {
+  applyRuntimeQualityGate,
   evaluateArrivalObservations,
   evaluateLivePredictions,
   assertLivePredictionDate,
@@ -816,4 +946,5 @@ module.exports = {
   predictLiveArrivals,
   predictLiveWait,
   recordArrivalObservation,
+  validateMlPrediction,
 };

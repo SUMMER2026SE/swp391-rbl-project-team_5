@@ -8,11 +8,11 @@ import phongNhaImg from '../assets/phong_nha.webp'
 import muiNeImg from '../assets/mui_ne.webp'
 
 export const navLinks = [
-  { label: 'Điểm tham quan', href: '/attractions' },
-  { label: 'Điểm đến', href: '#destinations' },
-  { label: 'Vé', href: '#services' },
+  { label: 'Khám phá', href: '/attractions' },
+  { label: 'Hành trình', href: '/journey' },
   { label: 'PartySync', href: '/party' },
-  { label: 'Hỗ trợ', href: '#support' },
+  { label: 'Rescue', href: '/rescue', activeKey: 'VietTicket Rescue' },
+  { label: 'Hỗ trợ', href: '/support' },
 ]
 
 export const sliderSlides = [

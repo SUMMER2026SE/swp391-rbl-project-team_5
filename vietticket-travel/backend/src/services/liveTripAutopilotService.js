@@ -8,6 +8,10 @@ const {
   getVietnamDateKey,
 } = require('./arrivalPressureService');
 const { recordLiveTripEvent } = require('./liveTripEventService');
+const {
+  applyRuntimeQualityGate,
+  validateMlPrediction,
+} = require('./livePredictionService');
 
 const PRESSURE_RISK_THRESHOLD = 70;
 const SAFE_SLOT_MAX_PRESSURE = PRESSURE_RISK_THRESHOLD - 1;
@@ -59,6 +63,9 @@ function normalizeNow(now) {
 
 async function getApplicableArrivalPrediction(prismaClient, item, pressure, now) {
   if (!prismaClient?.livePrediction?.findFirst) return null;
+  const vietnamDate = getVietnamDateKey(now);
+  const dayStart = new Date(`${vietnamDate}T00:00:00.000+07:00`);
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
   const prediction = await prismaClient.livePrediction.findFirst({
     where: {
       attractionId: item.attractionId,
@@ -67,7 +74,11 @@ async function getApplicableArrivalPrediction(prismaClient, item, pressure, now)
       confidence: { in: ['MEDIUM', 'HIGH'] },
       trainingSource: 'live_operational_history',
       predictedAt: {
-        gte: new Date(now.getTime() - LIVE_PREDICTION_MAX_AGE_MS),
+        gte: new Date(Math.max(
+          dayStart.getTime(),
+          now.getTime() - LIVE_PREDICTION_MAX_AGE_MS,
+        )),
+        lt: dayEnd,
         lte: now,
       },
     },
@@ -77,9 +88,12 @@ async function getApplicableArrivalPrediction(prismaClient, item, pressure, now)
       predictedP90: true,
       confidence: true,
       modelVersion: true,
+      trainingSource: true,
       usedFallback: true,
       horizonMinutes: true,
       predictedAt: true,
+      featureContributions: true,
+      qualityMetrics: true,
     },
   });
   if (
@@ -95,12 +109,48 @@ async function getApplicableArrivalPrediction(prismaClient, item, pressure, now)
   if (relevantAt > predictionEnd || itemEnd(item) <= now) return null;
 
   const capacity = Math.max(1, Number(pressure.summary?.capacity) || 1);
+  let gated;
+  try {
+    gated = await applyRuntimeQualityGate(
+      item.attractionId,
+      validateMlPrediction({
+        predicted_p50: prediction.predictedP50,
+        predicted_p90: prediction.predictedP90,
+        confidence: prediction.confidence,
+        model_version: prediction.modelVersion,
+        training_source: prediction.trainingSource,
+        used_fallback: prediction.usedFallback,
+        feature_contributions: prediction.featureContributions || {},
+        metrics: prediction.qualityMetrics || {},
+      }, {
+        predictionType: 'ARRIVALS',
+        maximum: capacity,
+      }),
+      { prismaClient },
+    );
+  } catch (error) {
+    // A malformed or stale stored prediction must not bring down the whole
+    // trip refresh. Autopilot will continue with deterministic pressure rules.
+    console.error(
+      `[live-trip] Bỏ qua prediction không hợp lệ cho ${item.attractionId}:`,
+      error.message,
+    );
+    return null;
+  }
+  if (
+    gated.used_fallback
+    || gated.training_source !== 'live_operational_history'
+    || !['MEDIUM', 'HIGH'].includes(gated.confidence)
+  ) return null;
   const expectedArrivals = Math.max(1, capacity * 0.25);
   const horizonMinutes = Math.max(5, Number(prediction.horizonMinutes) || 15);
   const p90Per15Minutes = Number(prediction.predictedP90 || 0) * 15 / horizonMinutes;
   const burstRatioP90 = p90Per15Minutes / expectedArrivals;
   return {
     ...prediction,
+    confidence: gated.confidence,
+    modelVersion: gated.model_version,
+    qualityMetrics: gated.metrics,
     p90Per15Minutes: Math.round(p90Per15Minutes * 100) / 100,
     burstRatioP90: Math.round(burstRatioP90 * 1000) / 1000,
     pressureEquivalent: Math.min(100, Math.round(burstRatioP90 * PRESSURE_RISK_THRESHOLD)),
@@ -353,7 +403,7 @@ async function markItemRecovered({ prismaClient, trip, item, proposal, now }) {
       type: 'ITEM_RECOVERED',
       severity: 'SUCCESS',
       title: 'Điều kiện tham quan đã ổn định',
-      message: 'Áp lực lượt đến đã giảm, hoạt động có thể tiếp tục theo lịch hiện tại.',
+      message: 'Nhu cầu quan sát được trên VietTicket đã giảm; hoạt động có thể tiếp tục theo lịch hiện tại.',
       data: { recoveredAt: now.toISOString() },
     });
     return true;
@@ -457,7 +507,7 @@ async function saveTimeShiftProposal({
     && sameInstant(existingProposal.proposedEnd, candidate.endsAt);
   if (unchanged) return { created: false, proposal: existingProposal };
 
-  const rationale = `Khung ${candidate.slot.startTime} - ${candidate.slot.endTime} có áp lực ${candidate.slot.score}/100, thấp hơn mức ${candidate.currentScore}/100 của lịch hiện tại.`;
+  const rationale = `Khung ${candidate.slot.startTime} - ${candidate.slot.endTime} có chỉ số nhu cầu VietTicket ${candidate.slot.score}/100, thấp hơn mức ${candidate.currentScore}/100 của lịch hiện tại. Đề xuất chỉ đổi kế hoạch và không giữ vé hay tồn chỗ.`;
   const snapshot = {
     bookingChanged: false,
     currentPressure: {
@@ -478,11 +528,53 @@ async function saveTimeShiftProposal({
       requiresCustomerConfirmation: true,
       noLinkedBooking: true,
       noScheduleConflict: true,
+      inventoryCheckedAtProposalTimeOnly: true,
+      doesNotReserveInventory: true,
       travelBufferMinutes: SCHEDULE_TRAVEL_BUFFER_MS / 60000,
     },
   };
 
   const result = await prismaClient.$transaction(async (tx) => {
+    const currentItem = tx.liveTripItem?.findUnique
+      ? await tx.liveTripItem.findUnique({
+        where: { id: item.id },
+        select: {
+          id: true,
+          liveTripId: true,
+          bookingId: true,
+          scheduledStart: true,
+          scheduledEnd: true,
+          status: true,
+        },
+      })
+      : item;
+    if (
+      !currentItem
+      || currentItem.liveTripId !== trip.id
+      || currentItem.bookingId
+      || ['COMPLETED', 'SKIPPED'].includes(currentItem.status)
+      || !sameInstant(currentItem.scheduledStart, item.scheduledStart)
+      || !sameInstant(currentItem.scheduledEnd, item.scheduledEnd)
+    ) {
+      return null;
+    }
+    // Claim the exact schedule revision before writing the proposal. If the
+    // customer/staff changed the item or linked a paid booking after the
+    // optimizer read it, the CAS affects zero rows and the transaction exits
+    // without publishing a stale proposal.
+    const claimed = await tx.liveTripItem.updateMany({
+      where: {
+        id: item.id,
+        liveTripId: trip.id,
+        bookingId: null,
+        scheduledStart: item.scheduledStart,
+        scheduledEnd: item.scheduledEnd,
+        status: { notIn: ['COMPLETED', 'SKIPPED'] },
+      },
+      data: { status: 'REVISION_PROPOSED' },
+    });
+    if (claimed.count !== 1) return null;
+
     const proposal = await tx.liveTripProposal.upsert({
       where: { activeKey: item.id },
       create: {
@@ -513,10 +605,6 @@ async function saveTimeShiftProposal({
         decidedAt: null,
       },
     });
-    await tx.liveTripItem.updateMany({
-      where: { id: item.id, bookingId: null },
-      data: { status: 'REVISION_PROPOSED' },
-    });
     await recordLiveTripEvent({
       client: tx,
       liveTripId: trip.id,
@@ -531,6 +619,7 @@ async function saveTimeShiftProposal({
     return proposal;
   });
 
+  if (!result) return { created: false, stale: true, proposal: null };
   emitLiveTripUpdated({
     customerId: trip.userId,
     tripId: trip.id,
@@ -718,7 +807,7 @@ async function refreshTripAutopilot(
         title: pressure.isClosed ? 'Điểm tham quan đang đóng cửa' : 'Khung giờ dự kiến đang đông',
         message: pressure.isClosed
           ? 'Booking được giữ nguyên để bảo vệ quyền lợi; hệ thống không tự ý đổi hoặc hủy vé.'
-          : 'Booking đã thanh toán được giữ nguyên. Bạn có thể dùng SmartQueue khi đủ điều kiện trong ngày tham quan.',
+          : 'Booking đã thanh toán được giữ nguyên. SmartQueue chỉ khả dụng nếu đối tác đã kích hoạt luồng check-in VietTicket trong ngày tham quan.',
         severity: pressure.isClosed ? 'CRITICAL' : 'WARNING',
         data: {
           bookingProtected: true,
@@ -751,8 +840,8 @@ async function refreshTripAutopilot(
         trip,
         item,
         reasonCode: pressure.isClosed ? 'ATTRACTION_CLOSED' : 'NO_SAFE_SLOT',
-        title: pressure.isClosed ? 'Điểm tham quan đang đóng cửa' : 'Chưa tìm thấy khung giờ thay thế an toàn',
-        message: 'Autopilot chỉ đề xuất khi có đủ chỗ và không xung đột các hoạt động khác.',
+        title: pressure.isClosed ? 'Điểm tham quan đang đóng cửa' : 'Chưa tìm thấy khung giờ thay thế phù hợp',
+        message: 'Autopilot chỉ đề xuất khi quota VietTicket còn chỗ tại thời điểm tính và không xung đột hoạt động khác; đề xuất không tự giữ chỗ.',
         severity: pressure.isClosed ? 'CRITICAL' : 'WARNING',
         data: {
           pressureScore: currentScore,
@@ -772,6 +861,7 @@ async function refreshTripAutopilot(
       existingProposal: pendingProposal,
       now: referenceNow,
     });
+    if (saved.stale) continue;
     if (saved.created) stats.proposalsCreated += 1;
     else stats.proposalsReused += 1;
   }
@@ -783,7 +873,9 @@ async function refreshTripAutopilot(
     },
   });
   let tripCompleted = false;
-  if (remainingItems === 0) {
+  const tripWindowEnded = (trip.items || []).length > 0
+    && (trip.items || []).every((item) => itemEnd(item) <= referenceNow);
+  if (remainingItems === 0 || tripWindowEnded) {
     const completed = await prismaClient.liveTrip.updateMany({
       where: { id: trip.id, userId: trip.userId, status: 'ACTIVE' },
       data: { status: 'COMPLETED' },
@@ -802,6 +894,9 @@ async function refreshTripAutopilot(
       decisionEngine: 'HYBRID_RULES_AND_ML_QUANTILES',
       predictionFreshnessMinutes: LIVE_PREDICTION_MAX_AGE_MS / 60000,
       maxSuggestedShiftMinutes: AUTOPILOT_MAX_SHIFT_MINUTES,
+      observedDemandScope: 'VIETTICKET_CHANNEL_ONLY',
+      venueCrowdCoverageKnown: false,
+      reservesInventory: false,
     },
     tripCompleted,
     stats,
@@ -1093,7 +1188,7 @@ async function decideProposal({
       type: 'AUTOPILOT_ACCEPTED',
       severity: 'SUCCESS',
       title: 'Đã áp dụng khung giờ mới',
-      message: 'Lịch hoạt động đã được cập nhật sau khi bạn xác nhận; không có booking nào bị thay đổi.',
+      message: 'Lịch hoạt động đã được cập nhật sau khi bạn xác nhận; không có booking hay tồn chỗ nào được tạo hoặc thay đổi.',
       data: {
         proposalId: proposal.id,
         originalStart: proposal.originalStart,
@@ -1128,43 +1223,77 @@ async function decideProposal({
 async function sweepAutopilotTrips({ prismaClient = prisma, now = new Date() } = {}) {
   const referenceNow = normalizeNow(now);
   const lookaheadEnd = new Date(referenceNow.getTime() + AUTOPILOT_LOOKAHEAD_MS);
-  const trips = await prismaClient.liveTrip.findMany({
+  // A trip can become terminal between worker ticks (for example every item
+  // was completed/skipped by check-in or a previous partial sweep). Such a trip
+  // no longer matches the active-item query below, so close it explicitly
+  // before looking for work. This prevents an archived journey from continuing
+  // to expose Autopilot and SmartQueue actions to the customer.
+  const terminalTrips = await prismaClient.liveTrip.updateMany({
     where: {
       status: 'ACTIVE',
       items: {
-        some: {
+        none: {
           status: { notIn: ['COMPLETED', 'SKIPPED'] },
-          OR: [
-            { booking: { is: { status: 'COMPLETED' } } },
-            {
-              scheduledEnd: { lte: referenceNow },
-            },
-            {
-              scheduledEnd: { gt: referenceNow },
-              scheduledStart: { lte: lookaheadEnd },
-            },
-            {
-              scheduledEnd: null,
-              scheduledStart: { lte: lookaheadEnd },
-            },
-          ],
         },
       },
     },
-    orderBy: { updatedAt: 'asc' },
-    take: AUTOPILOT_SWEEP_LIMIT,
-    select: { id: true, userId: true },
+    data: { status: 'COMPLETED' },
   });
   let refreshed = 0;
-  for (const trip of trips || []) {
-    try {
-      await refreshTripAutopilot(trip.id, trip.userId, { prismaClient, now: referenceNow });
-      refreshed += 1;
-    } catch (error) {
-      console.error(`[autopilot] Không thể làm mới chuyến ${trip.id}:`, error.message);
+  let scanned = 0;
+  let lastId = null;
+  while (true) {
+    const trips = await prismaClient.liveTrip.findMany({
+      where: {
+        status: 'ACTIVE',
+        ...(lastId ? { id: { gt: lastId } } : {}),
+        items: {
+          some: {
+            status: { notIn: ['COMPLETED', 'SKIPPED'] },
+            OR: [
+              { booking: { is: { status: 'COMPLETED' } } },
+              { scheduledEnd: { lte: referenceNow } },
+              {
+                scheduledEnd: { gt: referenceNow },
+                scheduledStart: { lte: lookaheadEnd },
+              },
+              {
+                scheduledEnd: null,
+                scheduledStart: { lte: lookaheadEnd },
+              },
+            ],
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+      take: AUTOPILOT_SWEEP_LIMIT,
+      select: { id: true, userId: true },
+    });
+    if (!trips?.length) break;
+    scanned += trips.length;
+    for (const trip of trips) {
+      try {
+        await refreshTripAutopilot(trip.id, trip.userId, {
+          prismaClient,
+          now: referenceNow,
+        });
+        refreshed += 1;
+      } catch (error) {
+        console.error(`[autopilot] Không thể làm mới chuyến ${trip.id}:`, error.message);
+      }
     }
+    const nextId = trips[trips.length - 1]?.id;
+    // Defensive progress guard prevents malformed test doubles from returning
+    // the same full page forever.
+    if (!nextId || nextId === lastId) break;
+    lastId = nextId;
+    if (trips.length < AUTOPILOT_SWEEP_LIMIT) break;
   }
-  return { scanned: trips?.length || 0, refreshed };
+  return {
+    scanned,
+    refreshed,
+    completed: terminalTrips?.count || 0,
+  };
 }
 
 module.exports = {

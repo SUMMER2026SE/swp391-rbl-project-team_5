@@ -386,30 +386,71 @@ def predict_arrivals(observations: list[Any], current: Any, horizon_minutes: int
 
 
 def predict_wait(payload: Any) -> dict[str, Any]:
-    arrival = predict_arrivals(payload.observations, payload.current, payload.horizon_minutes)
-    horizon_minutes = max(5, int(payload.horizon_minutes))
-    throughput_p50 = max(0.5, float(arrival["predicted_p50"]))
+    # Arrival demand is not gate service throughput. Using an arrival forecast
+    # as the denominator makes a busier forecast produce a shorter wait, which
+    # is directionally unsafe. The ETA uses observed QR admissions over their
+    # fixed 15-minute measurement window, then a labelled capacity fallback.
+    recent_qr_throughput = max(
+        0.0,
+        float(payload.current.checkins_last_15m or 0.0),
+    )
+    capacity = max(1.0, float(payload.current.capacity or 1.0))
+    has_recent_throughput = recent_qr_throughput > 0
+    throughput_p50 = (
+        recent_qr_throughput
+        if has_recent_throughput
+        else max(1.0, capacity * 0.08)
+    )
     throughput_p10 = max(
         0.5,
-        float(arrival.get("metrics", {}).get("predicted_p10", 0.0)),
+        throughput_p50 * (0.65 if has_recent_throughput else 0.75),
     )
-    guests = max(1, int(payload.guests_ahead) + int(payload.party_size))
-    # Convert the predicted count back to a per-minute service rate. This keeps
-    # ETA mathematically correct for every supported prediction horizon.
-    wait_p50 = ceil(guests / (throughput_p50 / horizon_minutes))
-    wait_p90 = ceil(guests / (throughput_p10 / horizon_minutes))
+    guests_ahead = max(0, int(payload.guests_ahead))
+    wait_p50 = (
+        0
+        if guests_ahead == 0
+        else ceil(guests_ahead / (throughput_p50 / 15.0))
+    )
+    wait_p90 = (
+        0
+        if guests_ahead == 0
+        else ceil(guests_ahead / (throughput_p10 / 15.0))
+    )
+    confidence = (
+        "HIGH"
+        if recent_qr_throughput >= 5
+        else "MEDIUM"
+        if has_recent_throughput
+        else "LOW"
+    )
     return {
-        **arrival,
         "predicted_p50": min(240, max(0, wait_p50)),
         "predicted_p90": min(240, max(wait_p50, wait_p90)),
         "prediction_type": "WAIT_TIME",
-        "model_version": f"{arrival['model_version']}:eta",
+        "confidence": confidence,
+        "model_version": "qr_service_throughput_eta_v2",
+        "training_source": (
+            "live_qr_throughput_15m"
+            if has_recent_throughput
+            else "capacity_based_operational_fallback"
+        ),
+        "used_fallback": not has_recent_throughput,
+        "feature_contributions": {
+            "guests_ahead": float(guests_ahead),
+            "qr_service_throughput_15m": round(throughput_p50, 2),
+        },
         "metrics": {
-            **arrival.get("metrics", {}),
-            "arrival_throughput_p10": round(throughput_p10, 2),
-            "arrival_throughput_p50": round(throughput_p50, 2),
-            "arrival_horizon_minutes": horizon_minutes,
-            "wait_formula": "guests_divided_by_conservative_throughput_rate",
+            "service_throughput_p10_15m": round(throughput_p10, 2),
+            "service_throughput_p50_15m": round(throughput_p50, 2),
+            "service_observation_window_minutes": 15,
+            "requested_horizon_minutes": max(5, int(payload.horizon_minutes)),
+            "party_size_excluded_from_own_eta": True,
+            "wait_formula": "guests_ahead_divided_by_qr_service_throughput",
+            "confidence_reasons": (
+                []
+                if has_recent_throughput
+                else ["NO_RECENT_QR_THROUGHPUT"]
+            ),
         },
     }
 

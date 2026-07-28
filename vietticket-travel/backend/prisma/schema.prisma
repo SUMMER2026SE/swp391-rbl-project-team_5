@@ -800,7 +800,7 @@ model TicketInstance {
 
 enum VoucherSource {
   PROMOTION // Mã khuyến mãi công khai do Admin tạo (dùng chung)
-  LOYALTY   // Voucher cá nhân sinh ra khi khách đổi điểm thưởng
+  LOYALTY // Voucher cá nhân sinh ra khi khách đổi điểm thưởng
 }
 
 model Voucher {
@@ -830,9 +830,9 @@ model Voucher {
 }
 
 enum LoyaltyTransactionType {
-  EARN       // Cộng điểm khi đơn CONFIRMED
-  REVERSAL   // Thu hồi điểm khi đơn đã cộng điểm bị hoàn tiền
-  REDEEM     // Trừ điểm khi đổi lấy voucher
+  EARN // Cộng điểm khi đơn CONFIRMED
+  REVERSAL // Thu hồi điểm khi đơn đã cộng điểm bị hoàn tiền
+  REDEEM // Trừ điểm khi đổi lấy voucher
   ADJUSTMENT // Điều chỉnh thủ công (dự phòng)
 }
 
@@ -1059,8 +1059,8 @@ model SavedItinerary {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  liveTrip LiveTrip?
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  liveTrip  LiveTrip?
   partyRoom PartyRoom? @relation("PartyRoomSavedItinerary")
 
   @@unique([userId, planId])
@@ -1110,8 +1110,8 @@ model PartyRoom {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
-  host           User            @relation("PartyRoomHost", fields: [hostUserId], references: [id], onDelete: Cascade)
-  savedItinerary SavedItinerary? @relation("PartyRoomSavedItinerary", fields: [savedItineraryId], references: [id], onDelete: SetNull)
+  host           User             @relation("PartyRoomHost", fields: [hostUserId], references: [id], onDelete: Cascade)
+  savedItinerary SavedItinerary?  @relation("PartyRoomSavedItinerary", fields: [savedItineraryId], references: [id], onDelete: SetNull)
   members        PartyMember[]
   candidates     PartyCandidate[]
   decisions      PartyDecision[]
@@ -1121,24 +1121,24 @@ model PartyRoom {
 }
 
 model PartyMember {
-  id               String          @id @default(uuid())
-  roomId           String
-  userId           String?
-  role             PartyMemberRole @default(GUEST)
-  displayName      String
+  id                    String          @id @default(uuid())
+  roomId                String
+  userId                String?
+  role                  PartyMemberRole @default(GUEST)
+  displayName           String
   displayNameNormalized String
-  avatarKey        String          @default("teal")
-  budgetCap        Decimal?        @db.Decimal(14, 2)
-  preferences      Json?
-  sessionTokenHash String?         @unique @db.VarChar(64)
-  sessionExpiresAt DateTime?
-  joinedAt         DateTime        @default(now())
-  lastSeenAt       DateTime        @default(now())
-  removedAt        DateTime?
-  updatedAt        DateTime        @updatedAt
+  avatarKey             String          @default("teal")
+  budgetCap             Decimal?        @db.Decimal(14, 2)
+  preferences           Json?
+  sessionTokenHash      String?         @unique @db.VarChar(64)
+  sessionExpiresAt      DateTime?
+  joinedAt              DateTime        @default(now())
+  lastSeenAt            DateTime        @default(now())
+  removedAt             DateTime?
+  updatedAt             DateTime        @updatedAt
 
-  room  PartyRoom  @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user  User?      @relation("PartyMemberUser", fields: [userId], references: [id], onDelete: SetNull)
+  room  PartyRoom   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user  User?       @relation("PartyMemberUser", fields: [userId], references: [id], onDelete: SetNull)
   votes PartyVote[]
 
   @@unique([roomId, userId])
@@ -1155,8 +1155,8 @@ model PartyCandidate {
   position     Int      @default(0)
   createdAt    DateTime @default(now())
 
-  room       PartyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  room       PartyRoom   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  attraction Attraction  @relation(fields: [attractionId], references: [id], onDelete: Cascade)
   votes      PartyVote[]
 
   @@unique([roomId, attractionId])
@@ -1385,22 +1385,28 @@ model SmartQueueEntry {
 // Operational policy is deliberately separate from attraction catalogue data:
 // changing queue rules must not create a new product revision or affect ticket sales.
 model SmartQueuePolicy {
-  id                      String         @id @default(uuid())
-  attractionId            String         @unique
-  enabled                 Boolean        @default(true)
-  mode                    SmartQueueMode @default(AUTO)
-  openBeforeMinutes       Int            @default(120)
-  readyGraceMinutes       Int            @default(10)
-  maxReadyParties         Int            @default(3)
-  maxActiveParties        Int            @default(100)
-  fallbackThroughput15m   Int            @default(8)
-  snapshotIntervalMinutes Int            @default(15)
-  pausedAt                DateTime?
-  pausedById              String?
-  pauseReason             String?
-  updatedById             String?
-  createdAt               DateTime       @default(now())
-  updatedAt               DateTime       @updatedAt
+  id                              String         @id @default(uuid())
+  attractionId                    String         @unique
+  enabled                         Boolean        @default(false)
+  mode                            SmartQueueMode @default(AUTO)
+  openBeforeMinutes               Int            @default(120)
+  readyGraceMinutes               Int            @default(10)
+  maxReadyParties                 Int            @default(3)
+  maxReadyGuests                  Int            @default(20)
+  maxActiveParties                Int            @default(100)
+  fallbackThroughput15m           Int            @default(8)
+  snapshotIntervalMinutes         Int            @default(15)
+  pausedAt                        DateTime?
+  pausedById                      String?
+  pauseReason                     String?
+  // A policy can only make an operational promise after the partner has
+  // explicitly confirmed staff and a VietTicket-managed gate flow. Keeping
+  // the acknowledgement timestamp prevents old enabled rows from silently
+  // bypassing the opt-in rule after a migration.
+  operationalReadinessConfirmedAt DateTime?
+  updatedById                     String?
+  createdAt                       DateTime       @default(now())
+  updatedAt                       DateTime       @updatedAt
 
   attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
   pausedBy   User?      @relation("SmartQueuePolicyPausedBy", fields: [pausedById], references: [id], onDelete: SetNull)

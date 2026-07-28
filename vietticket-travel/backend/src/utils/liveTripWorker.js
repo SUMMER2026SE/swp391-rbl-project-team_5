@@ -100,31 +100,58 @@ async function sweepLiveTripOperations({ now = new Date(), prismaClient = prisma
     // Process the complete active catalogue. A hard `take` would permanently
     // starve attractions after the first page; bounded concurrency keeps the
     // ML service and database load predictable.
-    await mapWithConcurrency(attractions || [], PREDICTION_CONCURRENCY, async (attraction) => {
-      await recordArrivalObservation(attraction.id, { now, prismaClient }).catch((error) => {
-        console.error(`[live-prediction] Không ghi được snapshot ${attraction.id}:`, error.message);
-      });
-      if (await predictionAlreadyRecorded(attraction.id, now, prismaClient)) return;
-      await predictLiveArrivals({
-        attractionId: attraction.id,
-        date: getVietnamDateKey(now),
-        now,
-        force: true,
-        prismaClient,
-      }).catch((error) => {
-        console.error(`[live-prediction] Không tạo được prediction ${attraction.id}:`, error.message);
-      });
-    });
-    await evaluateArrivalObservations({ now, prismaClient }).catch((error) => {
+    const attractionResults = await mapWithConcurrency(
+      attractions || [],
+      PREDICTION_CONCURRENCY,
+      async (attraction) => {
+        let completed = true;
+        try {
+          await recordArrivalObservation(attraction.id, { now, prismaClient });
+        } catch (error) {
+          completed = false;
+          console.error(`[live-prediction] Không ghi được snapshot ${attraction.id}:`, error.message);
+        }
+        try {
+          if (!await predictionAlreadyRecorded(attraction.id, now, prismaClient)) {
+            await predictLiveArrivals({
+              attractionId: attraction.id,
+              date: getVietnamDateKey(now),
+              now,
+              force: true,
+              prismaClient,
+            });
+          }
+        } catch (error) {
+          completed = false;
+          console.error(`[live-prediction] Không tạo được prediction ${attraction.id}:`, error.message);
+        }
+        return completed;
+      },
+    );
+    let evaluationsCompleted = true;
+    try {
+      const result = await evaluateArrivalObservations({ now, prismaClient });
+      if (Number(result?.failed || 0) > 0) evaluationsCompleted = false;
+    } catch (error) {
+      evaluationsCompleted = false;
       console.error('[live-prediction] Không đánh giá được observation:', error.message);
-    });
-    await evaluateLivePredictions({ now, prismaClient }).catch((error) => {
+    }
+    try {
+      const result = await evaluateLivePredictions({ now, prismaClient });
+      if (Number(result?.failed || 0) > 0) evaluationsCompleted = false;
+    } catch (error) {
+      evaluationsCompleted = false;
       console.error('[live-prediction] Không đánh giá được prediction:', error.message);
-    });
-    // Only mark the bucket after the catalogue query and all bounded workers
-    // have completed. If the catalogue query or worker orchestration itself
-    // fails, the next minute retries the same bucket instead of losing it.
-    lastPredictionBucketKey = currentBucketKey;
+    }
+    // Successful writes are idempotent. Retry an incomplete bucket so one
+    // temporary attraction/ML failure cannot create a permanent data hole.
+    if (attractionResults.every(Boolean) && evaluationsCompleted) {
+      lastPredictionBucketKey = currentBucketKey;
+    } else {
+      console.error(
+        `[live-prediction] Bucket ${currentBucketKey} chưa hoàn tất; worker sẽ thử lại ở vòng kế tiếp.`,
+      );
+    }
   }
   return { queue, autopilot };
 }

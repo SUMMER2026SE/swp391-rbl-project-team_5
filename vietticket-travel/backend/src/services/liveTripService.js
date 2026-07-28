@@ -420,31 +420,33 @@ function serializeTrip(trip) {
     status: trip.status,
     createdAt: trip.createdAt,
     updatedAt: trip.updatedAt,
-    items: (trip.items || []).map((item) => ({
-      id: item.id,
-      dayIndex: item.dayIndex,
-      orderIndex: item.orderIndex,
-      attractionId: item.attractionId,
-      bookingId: item.bookingId,
-      scheduledStart: item.scheduledStart,
-      scheduledEnd: item.scheduledEnd,
-      status: item.status,
-      snapshot: item.snapshot,
-      attraction: item.attraction || null,
-      booking: item.booking
-        ? {
+    items: (trip.items || [])
+      .filter((item) => item.snapshot?.hiddenFromPlan !== true)
+      .map((item) => ({
+        id: item.id,
+        dayIndex: item.dayIndex,
+        orderIndex: item.orderIndex,
+        attractionId: item.attractionId,
+        bookingId: item.bookingId,
+        scheduledStart: item.scheduledStart,
+        scheduledEnd: item.scheduledEnd,
+        status: item.status,
+        snapshot: item.snapshot,
+        attraction: item.attraction || null,
+        booking: item.booking
+          ? {
             id: item.booking.id,
             status: item.booking.status,
             snapshotVisitDate: item.booking.snapshotVisitDate,
             snapshotTimeSlotLabel: item.booking.snapshotTimeSlotLabel,
-          }
-        : null,
-      smartQueue: item.smartQueueEntry
-        ? serializeQueueEntry(item.smartQueueEntry)
-        : null,
-      createdAt: item.createdAt,
-      updatedAt: item.updatedAt,
-    })),
+            }
+          : null,
+        smartQueue: item.smartQueueEntry
+          ? serializeQueueEntry(item.smartQueueEntry)
+          : null,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      })),
     proposals: (trip.proposals || []).map(serializeProposal),
     events: (trip.events || []).map(serializeLiveTripEvent),
   };
@@ -559,30 +561,44 @@ async function activateLiveTrip({
   });
 
   let didCreate = true;
-  const createdId = await prismaClient.$transaction(async (tx) => {
-    const raceWinner = await tx.liveTrip.findUnique({
+  let createdId;
+  try {
+    createdId = await prismaClient.$transaction(async (tx) => {
+      const raceWinner = await tx.liveTrip.findUnique({
+        where: { savedItineraryId: saved.id },
+        select: { id: true },
+      });
+      if (raceWinner) {
+        didCreate = false;
+        return raceWinner.id;
+      }
+
+      const created = await tx.liveTrip.create({
+        data: {
+          userId,
+          savedItineraryId: saved.id,
+          title: saved.title || plan.title || 'Chuyến đi VietTicket',
+          startDate: start.date,
+          endDate,
+          status: 'ACTIVE',
+          items: { create: items },
+        },
+        select: { id: true },
+      });
+      return created.id;
+    });
+  } catch (error) {
+    if (error?.code !== 'P2002') throw error;
+    // The preflight and in-transaction checks can still race at the unique
+    // constraint. Reload the winner and preserve idempotent activation.
+    const raceWinner = await prismaClient.liveTrip.findUnique({
       where: { savedItineraryId: saved.id },
       select: { id: true },
     });
-    if (raceWinner) {
-      didCreate = false;
-      return raceWinner.id;
-    }
-
-    const created = await tx.liveTrip.create({
-      data: {
-        userId,
-        savedItineraryId: saved.id,
-        title: saved.title || plan.title || 'Chuyến đi VietTicket',
-        startDate: start.date,
-        endDate,
-        status: 'ACTIVE',
-        items: { create: items },
-      },
-      select: { id: true },
-    });
-    return created.id;
-  });
+    if (!raceWinner) throw error;
+    didCreate = false;
+    createdId = raceWinner.id;
+  }
   const created = await prismaClient.liveTrip.findUnique({
     where: { id: createdId },
     include: LIVE_TRIP_INCLUDE,
@@ -707,7 +723,7 @@ async function getLiveTripOverview(tripId, userId, { prismaClient = prisma, now 
       smartQueueAvailability: availabilityByItemId.get(item.id) || null,
     })),
     dataBasis: 'LIVE_TRIP_MATERIALIZED_PLAN',
-    measurementNote: 'Pressure là chỉ số áp lực lượt đến từ booking, tồn chỗ và QR check-in; không phải số người đếm bằng cảm biến.',
+    measurementNote: 'Chỉ số nhu cầu chỉ phản ánh dữ liệu VietTicket quan sát được từ booking, tồn chỗ, SmartQueue và QR; không đại diện tổng khách tại địa điểm.',
     calculatedAt: now.toISOString(),
   };
 }

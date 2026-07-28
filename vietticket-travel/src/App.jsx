@@ -8,6 +8,7 @@ import AppRoutes from './routes/AppRoutes.jsx'
 import ChatbotWidget from './components/ChatbotWidget.jsx'
 import RecoveryAlert from './components/RecoveryAlert.jsx'
 import RouteMetadata from './components/RouteMetadata.jsx'
+import LiveOperationsAlert from './components/LiveOperationsAlert.jsx'
 
 function ChatbotWithRouteCheck() {
   const location = useLocation()
@@ -29,6 +30,7 @@ function App() {
         <SocketProvider>
           <AppRoutes />
           <RecoveryAlert />
+          <LiveOperationsAlert />
           <ChatbotWithRouteCheck />
           <RouteMetadata />
           <ToastContainer

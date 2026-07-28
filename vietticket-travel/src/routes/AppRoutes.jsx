@@ -9,6 +9,7 @@ const BookingSuccessPage = lazy(() => import('../pages/BookingSuccessPage.jsx'))
 const ChangePasswordPage = lazy(() => import('../pages/ChangePasswordPage.jsx'))
 const CheckoutPage = lazy(() => import('../pages/CheckoutPage.jsx'))
 const ItineraryCheckoutPage = lazy(() => import('../pages/ItineraryCheckoutPage.jsx'))
+const JourneyCenterPage = lazy(() => import('../pages/JourneyCenterPage.jsx'))
 const ETicketPage = lazy(() => import('../pages/ETicketPage.jsx'))
 const EditProfilePage = lazy(() => import('../pages/EditProfilePage.jsx'))
 const ForgotPasswordPage = lazy(() => import('../pages/ForgotPasswordPage.jsx'))
@@ -391,6 +392,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <BookingSuccessPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/journey"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <JourneyCenterPage />
           </ProtectedRoute>
         }
       />

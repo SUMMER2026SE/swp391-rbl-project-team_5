@@ -13,6 +13,7 @@ const {
   buildOriginalSnapshot,
   findEligibleRecoveryOptions,
   resolveRecoveryFundingBooking,
+  synchronizeLiveTrip,
 } = require('../services/recoveryService');
 
 function makeContext(overrides = {}) {
@@ -257,5 +258,100 @@ describe('VietTicket Rescue funding trace', () => {
         paymentGateway: 'RECOVERY_CREDIT',
       }],
     })).resolves.toBeNull();
+  });
+});
+
+describe('VietTicket Rescue Live Trip continuity', () => {
+  test('preserves the old queue history and creates a clean replacement item', async () => {
+    const now = new Date('2026-08-14T02:00:00.000Z');
+    const tx = {
+      liveTripItem: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'item-old',
+          liveTripId: 'trip-1',
+          bookingId: 'booking-old',
+          attractionId: 'attraction-old',
+          dayIndex: 0,
+          orderIndex: 1,
+          scheduledStart: new Date('2026-08-15T02:00:00.000Z'),
+          scheduledEnd: new Date('2026-08-15T04:00:00.000Z'),
+          status: 'AT_RISK',
+          snapshot: { title: 'Điểm cũ' },
+          smartQueueEntry: {
+            id: 'queue-old',
+            status: 'WAITING',
+          },
+        }]),
+        create: jest.fn().mockResolvedValue({ id: 'item-replacement' }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      liveTripProposal: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      smartQueueEntry: {
+        update: jest.fn().mockResolvedValue({}),
+      },
+      liveTripEvent: {
+        create: jest.fn().mockResolvedValue({}),
+      },
+    };
+
+    const tripIds = await synchronizeLiveTrip(tx, {
+      userId: 'user-1',
+      originalBookingId: 'booking-old',
+      replacementBookingId: 'booking-new',
+      option: {
+        attractionId: 'attraction-new',
+        attractionTitle: 'Điểm thay thế',
+        city: 'Đà Nẵng',
+        visitDate: '2026-08-15',
+        startTime: '09:30',
+        endTime: '11:30',
+        timeSlotId: 'slot-new',
+      },
+      now,
+    });
+
+    expect(tripIds).toEqual(['trip-1']);
+    expect(tx.smartQueueEntry.update).toHaveBeenCalledWith({
+      where: { id: 'queue-old' },
+      data: { status: 'CANCELLED', cancelledAt: now },
+    });
+    expect(tx.liveTripItem.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        liveTripId: 'trip-1',
+        bookingId: 'booking-new',
+        attractionId: 'attraction-new',
+        dayIndex: 0,
+        orderIndex: 1,
+        status: 'PLANNED',
+        snapshot: expect.objectContaining({
+          bookingId: 'booking-new',
+          recoveredFromBookingId: 'booking-old',
+          recoveredFromLiveTripItemId: 'item-old',
+        }),
+      }),
+    });
+    expect(tx.liveTripItem.update).toHaveBeenCalledWith({
+      where: { id: 'item-old' },
+      data: {
+        status: 'SKIPPED',
+        snapshot: expect.objectContaining({
+          hiddenFromPlan: true,
+          recoveredByBookingId: 'booking-new',
+          recoveredByLiveTripItemId: 'item-replacement',
+        }),
+      },
+    });
+    expect(tx.liveTripProposal.updateMany).toHaveBeenCalledWith({
+      where: { liveTripItemId: 'item-old', status: 'PENDING' },
+      data: { status: 'SUPERSEDED', activeKey: null, decidedAt: now },
+    });
+    expect(tx.liveTripEvent.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        liveTripItemId: 'item-replacement',
+        type: 'ITEM_RECOVERED',
+      }),
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router'
 import AccountLayout from '../components/auth/AccountLayout.jsx'
 import {
   getLoyaltySummary,
@@ -118,6 +119,19 @@ function MyRewardsPage() {
     () => vouchers.filter((v) => v.state !== 'active'),
     [vouchers],
   )
+  const rewardTarget = useMemo(() => {
+    const sorted = [...catalog].sort(
+      (left, right) => Number(left.pointsCost || 0) - Number(right.pointsCost || 0),
+    )
+    const affordable = sorted.filter((tier) => Number(tier.pointsCost || 0) <= redeemable)
+    return affordable.at(-1) || sorted.find((tier) => Number(tier.pointsCost || 0) > redeemable) || null
+  }, [catalog, redeemable])
+  const rewardProgress = rewardTarget
+    ? Math.min(100, Math.max(0, (redeemable / Number(rewardTarget.pointsCost || 1)) * 100))
+    : 0
+  const rewardPointsNeeded = rewardTarget
+    ? Math.max(0, Number(rewardTarget.pointsCost || 0) - redeemable)
+    : 0
 
   return (
     <AccountLayout active="rewards">
@@ -183,6 +197,60 @@ function MyRewardsPage() {
             Điểm từ đơn chưa hoàn tất chuyến đi sẽ khả dụng để đổi sau khi bạn sử dụng vé (đơn hoàn
             thành). Điều này bảo vệ chương trình khỏi việc đổi điểm rồi hoàn vé.
           </p>
+        ) : null}
+        {!loading && rewardTarget ? (
+          <div className="mt-5 overflow-hidden rounded-2xl border border-teal-100 bg-gradient-to-br from-[#ecfffb] via-white to-[#f5f2ff]">
+            <div className="grid gap-5 p-5 sm:p-6 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-center">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full bg-teal-100 px-3 py-1 text-xs font-extrabold uppercase tracking-[0.12em] text-teal-800">
+                    Mục tiêu tiếp theo
+                  </span>
+                  {rewardPointsNeeded === 0 ? (
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                      Có thể đổi ngay
+                    </span>
+                  ) : null}
+                </div>
+                <h2 className="mt-3 text-2xl font-black text-slate-900">
+                  Voucher {formatCurrency(rewardTarget.discountValue)}
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {rewardPointsNeeded === 0
+                    ? `Bạn đã đủ ${formatPoints(rewardTarget.pointsCost)} điểm để mở khóa ưu đãi này.`
+                    : `Cần thêm ${formatPoints(rewardPointsNeeded)} điểm khả dụng. Điểm chỉ được mở khóa sau khi chuyến đi hoàn thành để tránh đổi điểm rồi hoàn vé.`}
+                </p>
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-3 text-xs font-bold text-slate-600">
+                    <span>{formatPoints(redeemable)} điểm</span>
+                    <span>{formatPoints(rewardTarget.pointsCost)} điểm</span>
+                  </div>
+                  <div className="mt-2 h-3 overflow-hidden rounded-full bg-white shadow-inner ring-1 ring-slate-200">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-teal-600 via-cyan-500 to-violet-500 transition-all duration-700"
+                      style={{ width: `${rewardProgress}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl bg-[#073f45] p-5 text-white shadow-sm">
+                <span className="material-symbols-outlined text-3xl text-cyan-200" aria-hidden="true">
+                  workspace_premium
+                </span>
+                <p className="mt-3 text-xs font-bold uppercase tracking-[0.13em] text-cyan-200">
+                  Giá trị mở khóa
+                </p>
+                <p className="mt-1 text-3xl font-black">{formatCurrency(rewardTarget.discountValue)}</p>
+                <p className="mt-2 text-xs leading-5 text-cyan-50/75">
+                  Đơn tối thiểu {formatCurrency(rewardTarget.minSpend)} · dùng trong {rewardTarget.validityDays} ngày.
+                </p>
+                <Link className="mt-4 inline-flex items-center gap-1 text-xs font-extrabold text-cyan-200 hover:text-white" to="/journey">
+                  Xem hành trình tích điểm
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">arrow_forward</span>
+                </Link>
+              </div>
+            </div>
+          </div>
         ) : null}
       </section>
 
