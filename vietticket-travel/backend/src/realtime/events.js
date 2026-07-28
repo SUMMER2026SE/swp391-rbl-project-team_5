@@ -126,6 +126,30 @@ function emitRecoveryCaseEvent({
   return true;
 }
 
+function emitRefundStatusUpdated({
+  customerId,
+  refundRequestId,
+  status,
+  amount = null,
+  sourceBookingId = null,
+  targetBookingId = null,
+  recoveryCaseId = null,
+  message = null,
+}) {
+  if (!socketServer || !customerId || !refundRequestId) return false;
+  socketServer.to(`user:${customerId}`).emit('REFUND_STATUS_UPDATED', {
+    refundRequestId,
+    status,
+    amount,
+    sourceBookingId,
+    targetBookingId,
+    recoveryCaseId,
+    message,
+    occurredAt: new Date().toISOString(),
+  });
+  return true;
+}
+
 function disconnectPartyMemberSockets(memberId) {
   if (!memberId) return 0;
   return disconnectMatchingSockets(
@@ -202,6 +226,7 @@ module.exports = {
   emitNewBooking,
   emitRecoveryCaseEvent,
   emitPartyRoomUpdated,
+  emitRefundStatusUpdated,
   emitSupportMessage,
   emitSupportTicketUpdated,
   publishNewBookingById,

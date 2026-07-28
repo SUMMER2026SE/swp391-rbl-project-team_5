@@ -6,10 +6,13 @@ import {
   formatRefundRequestReference,
 } from '../../utils/bookingReference.js'
 import {
+  adjudicateRefundRequest,
   listRefundRequests,
   processRefundRequest,
   reconcileRefundRequest,
 } from '../../services/staffApi.js'
+import { useAuth } from '../../context/useAuth.js'
+import { hasRole } from '../../utils/userRoles.js'
 
 const STATUS_META = {
   PENDING: {
@@ -88,7 +91,16 @@ function StatCard({ icon, iconClass, label, value, badge }) {
   )
 }
 
-function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, onReconcile }) {
+function RefundDrawer({
+  selected,
+  isProcessing,
+  isAdmin,
+  onClose,
+  onApprove,
+  onReject,
+  onReconcile,
+  onManualAdjudicate,
+}) {
   if (!selected) {
     return (
       <aside className="hidden w-[400px] shrink-0 border-l border-outline-variant bg-surface-container-lowest xl:flex xl:flex-col">
@@ -294,19 +306,38 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
             </p>
           </>
         ) : isReconciling ? (
-          <button
-            type="button"
-            className="flex w-full items-center justify-center gap-2 rounded-xl border-0 bg-primary px-4 py-3 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={onReconcile}
-            disabled={isProcessing}
-          >
-            <span className="material-symbols-outlined text-[20px]">sync</span>
-            {isProcessing
-              ? 'Đang đối soát...'
-              : isManualBankTransfer
-                ? 'Khôi phục ghi nhận hoàn chuyển khoản'
-                : 'Đối soát với VNPay'}
-          </button>
+          <div className="space-y-3">
+            <button
+              type="button"
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-0 bg-primary px-4 py-3 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={onReconcile}
+              disabled={isProcessing}
+            >
+              <span className="material-symbols-outlined text-[20px]">sync</span>
+              {isProcessing
+                ? 'Đang đối soát...'
+                : isManualBankTransfer
+                  ? 'Khôi phục ghi nhận hoàn chuyển khoản'
+                  : 'Đối soát tự động với VNPay'}
+            </button>
+            {isAdmin && latestTransaction && (
+              <>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-amber-400 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={onManualAdjudicate}
+                  disabled={isProcessing}
+                >
+                  <span className="material-symbols-outlined text-[20px]">verified_user</span>
+                  Phân xử bằng chứng thủ công
+                </button>
+                <p className="text-center text-[11px] leading-relaxed text-on-surface-variant">
+                  Chỉ dùng khi đã kiểm tra cổng quản trị VNPay hoặc sao kê ngân hàng.
+                  Mọi bằng chứng và người xác nhận đều được ghi nhật ký.
+                </p>
+              </>
+            )}
+          </div>
         ) : (
           <p className="text-center text-sm font-semibold text-on-surface-variant">
             Yêu cầu này đã được xử lý.
@@ -320,6 +351,8 @@ function RefundDrawer({ selected, isProcessing, onClose, onApprove, onReject, on
 const PAGE_SIZE = 20
 
 export default function RefundManagementPage() {
+  const { user } = useAuth()
+  const isAdmin = hasRole(user, 'ADMIN')
   const [requests, setRequests] = useState([])
   const [selected, setSelected] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -338,6 +371,12 @@ export default function RefundManagementPage() {
     open: false,
     notes: '',
     manualReference: '',
+  })
+  const [adjudicateModal, setAdjudicateModal] = useState({
+    open: false,
+    outcome: 'SUCCESS',
+    gatewayTransactionId: '',
+    evidenceNote: '',
   })
 
   // Bộ đếm để bỏ qua response cũ đến muộn (tránh race khi đổi trang/gõ tìm kiếm
@@ -449,6 +488,67 @@ export default function RefundManagementPage() {
     try {
       const response = await reconcileRefundRequest(selected.id)
       toast.success(response.message || 'Đã cập nhật kết quả đối soát.')
+      setSelected(null)
+      await fetchRequests()
+    } catch (error) {
+      toast.error(error.message)
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  function openManualAdjudication() {
+    if (!selected || !isAdmin) return
+    setAdjudicateModal({
+      open: true,
+      outcome: 'SUCCESS',
+      gatewayTransactionId: selected.refundTransactions?.[0]?.gatewayTransactionId || '',
+      evidenceNote: '',
+    })
+  }
+
+  async function handleManualAdjudication() {
+    if (!selected || !isAdmin) return
+    const transaction = selected.refundTransactions?.[0]
+    if (!transaction) {
+      toast.error('Không tìm thấy giao dịch đang chờ đối soát.')
+      return
+    }
+    const evidenceNote = adjudicateModal.evidenceNote.trim()
+    const gatewayTransactionId = adjudicateModal.gatewayTransactionId.trim()
+    if (evidenceNote.length < 10) {
+      toast.warning('Vui lòng mô tả bằng chứng đã kiểm tra (ít nhất 10 ký tự).')
+      return
+    }
+    if (adjudicateModal.outcome === 'SUCCESS' && !gatewayTransactionId) {
+      toast.warning('Vui lòng nhập mã giao dịch hoàn VNPay.')
+      return
+    }
+    const paymentTransactionRef = transaction.payment?.transactionId
+    if (!transaction.transactionType || !paymentTransactionRef) {
+      toast.error('Dữ liệu giao dịch chưa đủ để phân xử an toàn. Hãy tải lại trang.')
+      return
+    }
+
+    setIsProcessing(true)
+    try {
+      const response = await adjudicateRefundRequest(selected.id, {
+        outcome: adjudicateModal.outcome,
+        confirmAmount: Number(transaction.amount ?? selected.amount),
+        transactionType: transaction.transactionType,
+        paymentTransactionRef,
+        gatewayTransactionId: gatewayTransactionId || undefined,
+        evidenceNote,
+        gatewayResponseCode: adjudicateModal.outcome === 'SUCCESS' ? '00' : 'MANUAL_FAILED',
+        gatewayTransactionStatus: adjudicateModal.outcome === 'SUCCESS' ? '00' : 'MANUAL_FAILED',
+      })
+      toast.success(response.message || 'Đã lưu kết quả phân xử thủ công.')
+      setAdjudicateModal({
+        open: false,
+        outcome: 'SUCCESS',
+        gatewayTransactionId: '',
+        evidenceNote: '',
+      })
       setSelected(null)
       await fetchRequests()
     } catch (error) {
@@ -692,13 +792,228 @@ export default function RefundManagementPage() {
           <RefundDrawer
             selected={selected}
             isProcessing={isProcessing}
+            isAdmin={isAdmin}
             onClose={() => setSelected(null)}
             onApprove={() => setApproveModal({ open: true, notes: '', manualReference: '' })}
             onReject={() => setRejectModal({ open: true, notes: '' })}
             onReconcile={() => void handleReconcile()}
+            onManualAdjudicate={openManualAdjudication}
           />
         </div>
       </div>
+
+      {adjudicateModal.open && selected && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isProcessing) {
+              setAdjudicateModal({
+                open: false,
+                outcome: 'SUCCESS',
+                gatewayTransactionId: '',
+                evidenceNote: '',
+              })
+            }
+          }}
+        >
+          <form
+            className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-surface-container-lowest p-6 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="manual-adjudication-title"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void handleManualAdjudication()
+            }}
+          >
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-900">
+                  <span className="material-symbols-outlined text-[16px]">gpp_maybe</span>
+                  Quyền quản trị · Có nhật ký
+                </div>
+                <h3 id="manual-adjudication-title" className="text-xl font-semibold text-on-surface">
+                  Phân xử hoàn tiền bằng bằng chứng
+                </h3>
+                <p className="mt-1 text-sm leading-relaxed text-on-surface-variant">
+                  Chỉ xác nhận sau khi đối chiếu cổng quản trị VNPay hoặc sao kê ngân hàng.
+                  Thao tác thành công sẽ cập nhật sổ tài chính và không thể hoàn tác.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border-0 bg-transparent p-1 hover:bg-surface-container-high"
+                onClick={() => setAdjudicateModal({
+                  open: false,
+                  outcome: 'SUCCESS',
+                  gatewayTransactionId: '',
+                  evidenceNote: '',
+                })}
+                disabled={isProcessing}
+                aria-label="Đóng"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="mb-5 grid gap-3 rounded-xl border border-outline-variant bg-surface-container-low p-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-on-surface-variant">Booking</p>
+                <p className="mt-1 text-sm font-bold text-primary">
+                  {formatBookingReference(selected.booking?.id)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-on-surface-variant">Số tiền phải khớp</p>
+                <p className="mt-1 text-sm font-bold text-on-surface">
+                  {formatMoney(selected.refundTransactions?.[0]?.amount ?? selected.amount)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-on-surface-variant">Loại giao dịch</p>
+                <p className="mt-1 text-sm font-semibold text-on-surface">
+                  {selected.refundTransactions?.[0]?.transactionType === '02'
+                    ? '02 · Hoàn toàn phần'
+                    : '03 · Hoàn một phần'}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-on-surface-variant">Mã thanh toán gốc</p>
+                <p className="mt-1 break-all font-mono text-xs font-semibold text-on-surface">
+                  {selected.refundTransactions?.[0]?.payment?.transactionId || 'Thiếu dữ liệu'}
+                </p>
+              </div>
+            </div>
+
+            <fieldset className="mb-5">
+              <legend className="mb-2 text-sm font-semibold text-on-surface">Kết quả đã xác minh</legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  {
+                    value: 'SUCCESS',
+                    title: 'Đã hoàn thành công',
+                    description: 'Tiền đã được VNPay chấp nhận hoàn.',
+                    icon: 'verified',
+                  },
+                  {
+                    value: 'FAILED',
+                    title: 'Chưa hoàn thành công',
+                    description: 'Lần gửi trước thất bại; đưa lại hàng chờ.',
+                    icon: 'restart_alt',
+                  },
+                ].map((option) => (
+                  <label
+                    key={option.value}
+                    className={`cursor-pointer rounded-xl border p-4 transition-colors ${
+                      adjudicateModal.outcome === option.value
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                        : 'border-outline-variant bg-surface hover:bg-surface-container-low'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="manual-refund-outcome"
+                      className="sr-only"
+                      value={option.value}
+                      checked={adjudicateModal.outcome === option.value}
+                      onChange={(event) => setAdjudicateModal((current) => ({
+                        ...current,
+                        outcome: event.target.value,
+                      }))}
+                      disabled={isProcessing}
+                    />
+                    <span className="flex items-start gap-3">
+                      <span className="material-symbols-outlined text-primary">{option.icon}</span>
+                      <span>
+                        <span className="block text-sm font-bold text-on-surface">{option.title}</span>
+                        <span className="mt-1 block text-xs leading-relaxed text-on-surface-variant">
+                          {option.description}
+                        </span>
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <label
+              className="mb-2 block text-sm font-semibold text-on-surface"
+              htmlFor="manual-refund-gateway-id"
+            >
+              Mã giao dịch hoàn VNPay
+              {adjudicateModal.outcome === 'SUCCESS' && <span className="text-error"> *</span>}
+            </label>
+            <input
+              id="manual-refund-gateway-id"
+              className="mb-4 w-full rounded-xl border border-outline-variant bg-surface p-3 font-mono text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              placeholder="Ví dụ: 147258369"
+              value={adjudicateModal.gatewayTransactionId}
+              onChange={(event) => setAdjudicateModal((current) => ({
+                ...current,
+                gatewayTransactionId: event.target.value,
+              }))}
+              required={adjudicateModal.outcome === 'SUCCESS'}
+              maxLength={120}
+              disabled={isProcessing}
+              autoFocus
+            />
+
+            <label
+              className="mb-2 block text-sm font-semibold text-on-surface"
+              htmlFor="manual-refund-evidence"
+            >
+              Bằng chứng đã đối chiếu <span className="text-error">*</span>
+            </label>
+            <textarea
+              id="manual-refund-evidence"
+              className="min-h-28 w-full resize-y rounded-xl border border-outline-variant bg-surface p-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              placeholder="Ghi rõ nguồn kiểm tra, thời điểm, người/đơn vị xác nhận và kết quả nhìn thấy..."
+              value={adjudicateModal.evidenceNote}
+              onChange={(event) => setAdjudicateModal((current) => ({
+                ...current,
+                evidenceNote: event.target.value,
+              }))}
+              minLength={10}
+              maxLength={2000}
+              required
+              disabled={isProcessing}
+            />
+
+            <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                className="rounded-lg border border-outline-variant bg-white px-4 py-2.5 text-sm font-semibold text-on-surface"
+                onClick={() => setAdjudicateModal({
+                  open: false,
+                  outcome: 'SUCCESS',
+                  gatewayTransactionId: '',
+                  evidenceNote: '',
+                })}
+                disabled={isProcessing}
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                className={`flex items-center justify-center gap-2 rounded-lg border-0 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+                  adjudicateModal.outcome === 'SUCCESS' ? 'bg-primary' : 'bg-amber-700'
+                }`}
+                disabled={isProcessing}
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {adjudicateModal.outcome === 'SUCCESS' ? 'verified' : 'restart_alt'}
+                </span>
+                {isProcessing
+                  ? 'Đang ghi nhận...'
+                  : adjudicateModal.outcome === 'SUCCESS'
+                    ? 'Xác nhận đã hoàn thành công'
+                    : 'Xác nhận thất bại và mở lại'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {approveModal.open && selected && (
         <div

@@ -6,6 +6,7 @@ const {
   getRefundMode,
   isRefundableCapturedPayment,
 } = require('../utils/paymentGateway');
+const { enqueueRefundNotification } = require('./refundNotificationService');
 
 const REFUND_GATEWAY_OUTCOME = Object.freeze({
   SUCCESS: 'SUCCESS',
@@ -82,11 +83,45 @@ function classifyVnpayReconciliationResult(result, refundTransaction) {
   const expectedType = String(refundTransaction?.transactionType || '');
   const responseAmount = Number(result?.amount);
   const expectedAmount = Number(refundTransaction?.amount);
+  const returnedRequestId = String(
+    result?.refundRequestId
+      || result?.raw?.vnp_RequestId
+      || result?.raw?.vnp_RefundRequestId
+      || result?.raw?.vnp_RefundRequestID
+      || '',
+  ).trim();
+  const expectedRequestId = String(refundTransaction?.gatewayRequestId || '').trim();
+  const returnedGatewayTransactionId = String(
+    result?.raw?.vnp_TransactionNo || '',
+  ).trim();
+  const returnedTransactionRef = String(
+    result?.raw?.vnp_TxnRef
+      || result?.raw?.vnp_TxnRefNo
+      || '',
+  ).trim();
+  const expectedTransactionRef = String(
+    refundTransaction?.payment?.transactionId || '',
+  ).trim();
+  const transactionRefCompatible = !returnedTransactionRef
+    || Boolean(expectedTransactionRef && returnedTransactionRef === expectedTransactionRef);
+  const priorGatewayTransactionId = String(
+    refundTransaction?.gatewayTransactionId || '',
+  ).trim();
+  const hasExactIdentity = Boolean(
+    (expectedRequestId && returnedRequestId && returnedRequestId === expectedRequestId)
+      || (
+        priorGatewayTransactionId
+        && returnedGatewayTransactionId
+        && returnedGatewayTransactionId === priorGatewayTransactionId
+      ),
+  );
   const matchesRefund = responseCode === '00'
     && ['02', '03'].includes(transactionType)
     && transactionType === expectedType
     && Number.isFinite(responseAmount)
-    && responseAmount === expectedAmount;
+    && responseAmount === expectedAmount
+    && transactionRefCompatible
+    && hasExactIdentity;
 
   if (matchesRefund && transactionStatus === '00') {
     return REFUND_GATEWAY_OUTCOME.SUCCESS;
@@ -217,6 +252,16 @@ function buildGatewayTransactionData(result, now = new Date()) {
   };
 }
 
+async function lockPaymentForRefund(tx, paymentId) {
+  if (!paymentId || typeof tx?.$queryRaw !== 'function') return;
+  await tx.$queryRaw`
+    SELECT "id"
+    FROM "Payment"
+    WHERE "id" = ${paymentId}
+    FOR UPDATE
+  `;
+}
+
 async function hasOtherOutstandingMandatoryRefund(tx, bookingId, refundRequestId) {
   const remaining = await tx.refundRequest.count({
     where: {
@@ -240,6 +285,48 @@ async function finalizeSuccessfulRefund(
     now = new Date(),
   },
 ) {
+  let lockedTransaction = null;
+  let repairingSuccessfulTransaction = false;
+  if (refundTransactionId && typeof tx.$queryRaw === 'function') {
+    const rows = await tx.$queryRaw`
+      SELECT "id", "status", "refundRequestId"
+      FROM "RefundTransaction"
+      WHERE "id" = ${refundTransactionId}
+      FOR UPDATE
+    `;
+    lockedTransaction = rows?.[0] || null;
+    if (!lockedTransaction) {
+      throw httpError(404, 'KhÃ´ng tÃ¬m tháº¥y giao dá»‹ch hoÃ n tiá»n.');
+    }
+    // A second worker/manual reconciler may arrive after the first one has
+    // committed. Treat SUCCESS as idempotent, but never let a stale caller
+    // mutate a terminal FAILED/REJECTED row.
+    if (lockedTransaction.status === 'SUCCESS') {
+      const alreadyFinalized = await tx.refundRequest.findUnique({
+        where: { id: refundRequestId },
+      });
+      // A gateway SUCCESS can be committed just before the local request/
+      // booking finalization. Only short-circuit when both sides are already
+      // terminal; otherwise continue through the idempotent finalization path
+      // to repair the request and booking state.
+      if (!alreadyFinalized) {
+        throw httpError(404, 'KhÃ´ng tÃ¬m tháº¥y yÃªu cáº§u hoÃ n tiá»n.');
+      }
+      if (alreadyFinalized.status === 'APPROVED') {
+        return alreadyFinalized;
+      }
+      if (['PENDING', 'PROCESSING'].includes(alreadyFinalized.status)) {
+        repairingSuccessfulTransaction = true;
+      }
+    }
+    if (
+      lockedTransaction.status
+      && !ACTIVE_TRANSACTION_STATUSES.has(lockedTransaction.status)
+      && !repairingSuccessfulTransaction
+    ) {
+      throw httpError(409, 'Giao dá»‹ch hoÃ n tiá»n khÃ´ng cÃ²n á»Ÿ tráº¡ng thÃ¡i cÃ³ thá»ƒ hoÃ n táº¥t.');
+    }
+  }
   const refundRequest = await tx.refundRequest.findUnique({
     where: { id: refundRequestId },
     include: {
@@ -267,7 +354,10 @@ async function finalizeSuccessfulRefund(
   });
 
   if (!refundRequest) throw httpError(404, 'Không tìm thấy yêu cầu hoàn tiền.');
-  if (refundRequest.status === 'APPROVED') return refundRequest;
+  if (
+    refundRequest.status === 'APPROVED'
+    && (!refundTransactionId || lockedTransaction?.status === 'SUCCESS' || lockedTransaction?.status == null)
+  ) return refundRequest;
   if (!['PENDING', 'PROCESSING'].includes(refundRequest.status)) {
     throw httpError(409, 'Yêu cầu hoàn tiền không còn ở trạng thái có thể hoàn tất.');
   }
@@ -513,6 +603,13 @@ async function finalizeSuccessfulRefund(
     });
   }
 
+  await enqueueRefundNotification(tx, {
+    refundRequestId: refundRequest.id,
+    status: 'APPROVED',
+    amount: refundRequest.amount,
+    refundTransactionId,
+  });
+
   return updated;
 }
 
@@ -530,5 +627,6 @@ module.exports = {
   httpError,
   isMandatoryRefundRequest,
   isLocalDemoPayment,
+  lockPaymentForRefund,
   toVndAmount,
 };

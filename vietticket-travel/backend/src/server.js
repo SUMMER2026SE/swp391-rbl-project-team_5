@@ -17,6 +17,7 @@ const { startRefundWorker } = require('./utils/refundWorker');
 const { startPendingPartnerWorker } = require('./utils/pendingPartnerWorker');
 const { startLiveTripWorker } = require('./utils/liveTripWorker');
 const { startRecoveryWorker } = require('./utils/recoveryWorker');
+const { startNotificationOutboxWorker } = require('./utils/notificationOutboxWorker');
 
 const PORT = process.env.PORT || 5000;
 
@@ -45,6 +46,10 @@ const liveTripHandle = startLiveTripWorker();
 // Worker bảo đảm quyền hoàn 100% được kích hoạt ngay cả khi khách không mở lại website.
 const recoveryHandle = startRecoveryWorker();
 
+// Hàng đợi bền vững đảm bảo email/realtime hoàn tiền được giao lại sau khi
+// tiến trình bị gián đoạn ngay sau lúc commit giao dịch tài chính.
+const notificationOutboxHandle = startNotificationOutboxWorker();
+
 let shutdownPromise = null;
 
 async function closeHttpServer() {
@@ -67,6 +72,7 @@ function shutdown({ exit = true } = {}) {
   clearInterval(pendingPartnerHandle);
   clearInterval(liveTripHandle);
   clearInterval(recoveryHandle);
+  clearInterval(notificationOutboxHandle);
 
   shutdownPromise = (async () => {
     await closeSocketServer();

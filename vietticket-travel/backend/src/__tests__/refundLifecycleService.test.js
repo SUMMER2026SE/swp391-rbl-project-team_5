@@ -81,7 +81,11 @@ describe('classifyVnpayRefundResult', () => {
 });
 
 describe('classifyVnpayReconciliationResult', () => {
-  const transaction = { transactionType: '03', amount: 90000 };
+  const transaction = {
+    transactionType: '03',
+    amount: 90000,
+    gatewayRequestId: 'refund-request-1',
+  };
 
   test('chỉ thành công khi type, amount và status đều khớp', () => {
     expect(classifyVnpayReconciliationResult({
@@ -89,7 +93,34 @@ describe('classifyVnpayReconciliationResult', () => {
       transactionStatus: '00',
       transactionType: '03',
       amount: 90000,
+      raw: { vnp_RequestId: 'refund-request-1' },
     }, transaction)).toBe(REFUND_GATEWAY_OUTCOME.SUCCESS);
+  });
+
+  test('keeps same-amount query results pending without exact refund identity', () => {
+    expect(classifyVnpayReconciliationResult({
+      responseCode: '00',
+      transactionStatus: '00',
+      transactionType: '03',
+      amount: 90000,
+      raw: { vnp_TransactionNo: 'unrelated-payment-refund' },
+    }, transaction)).toBe(REFUND_GATEWAY_OUTCOME.PENDING_RECONCILIATION);
+  });
+
+  test('keeps a response pending when it points at a different payment reference', () => {
+    expect(classifyVnpayReconciliationResult({
+      responseCode: '00',
+      transactionStatus: '00',
+      transactionType: '03',
+      amount: 90000,
+      raw: {
+        vnp_RequestId: 'refund-request-1',
+        vnp_TxnRef: 'another-payment',
+      },
+    }, {
+      ...transaction,
+      payment: { transactionId: 'original-payment' },
+    })).toBe(REFUND_GATEWAY_OUTCOME.PENDING_RECONCILIATION);
   });
 
   test.each([

@@ -29,6 +29,13 @@ export function reconcileRefundRequest(refundId) {
   return apiRequest(`/staff/refunds/${refundId}/reconcile`, { method: 'POST' })
 }
 
+export function adjudicateRefundRequest(refundId, evidence) {
+  return apiRequest(`/staff/refunds/${refundId}/adjudicate`, {
+    method: 'POST',
+    body: evidence,
+  })
+}
+
 // ----- Cấp lại vé -----
 export function reissueTicket(bookingId, reasonCode, reason) {
   return apiRequest(`/staff/bookings/${bookingId}/reissue`, {
@@ -114,6 +121,7 @@ export function noShowSmartQueueEntry(entryId) {
 }
 
 const staffApi = {
+  adjudicateRefundRequest,
   listRefundRequests,
   processRefundRequest,
   reconcileRefundRequest,
