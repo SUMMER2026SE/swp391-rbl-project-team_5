@@ -17,7 +17,7 @@ const DEFAULT_INTERVAL_MS = 10 * 60 * 1000;
 const PARTNER_APPROVAL_TIMEOUT_MS = MANUAL_APPROVAL_TIMEOUT_MS;
 const JOB_NAME = 'expire_pending_partner_bookings';
 const LOCK_TTL_MS = DEFAULT_INTERVAL_MS * 2;
-const EXPIRY_REASON = 'Đối tác không xác nhận đơn trong thời hạn 24 giờ.';
+const EXPIRY_REASON = 'Đối tác không xác nhận trước hạn duyệt (tối đa 24 giờ kể từ thanh toán và không muộn hơn giờ bắt đầu hoạt động).';
 
 function successfulPaymentExpiredWhere(cutoff) {
   return {
@@ -109,6 +109,7 @@ async function expirePendingPartnerBooking(
         email: booking.email,
         fullName: booking.fullName,
         totalAmount: Number(booking.totalAmount),
+        approvalDeadline,
       };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -141,13 +142,14 @@ async function sweepExpiredPartnerApprovals({
         customerId: expired.userId,
         bookingId: expired.id,
         status: 'CANCELLED',
-        message: `Đơn ${formatBookingReference(expired.id)} đã tự động hủy vì quá 24 giờ chưa được đối tác xác nhận. Yêu cầu hoàn tiền 100% đã được tạo.`,
+        message: `Đơn ${formatBookingReference(expired.id)} đã tự động hủy vì quá hạn đối tác xác nhận. Yêu cầu hoàn tiền bắt buộc 100% đã được tạo.`,
       });
       sendPendingApprovalExpiredEmail({
         to: expired.email,
         fullName: expired.fullName,
         bookingId: expired.id,
         refundAmount: expired.totalAmount,
+        approvalDeadline: expired.approvalDeadline,
       }).catch((error) => {
         console.error(`[partner-approval] Không thể gửi email quá hạn cho ${expired.id}:`, error.message);
       });

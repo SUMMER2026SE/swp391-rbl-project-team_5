@@ -7,6 +7,7 @@ import Header from '../components/Header.jsx'
 import useSocket from '../context/useSocket.js'
 import bookingService from '../services/bookingService.js'
 import { formatBookingReference } from '../utils/bookingReference.js'
+import { getManualApprovalTiming } from '../utils/manualApproval.js'
 import {
   getTicketInstanceStatus,
   getTicketInstanceStatusMeta,
@@ -213,11 +214,12 @@ function ETicketPage() {
     ['confirmed', 'completed'].includes(booking.status) &&
     hasUsableQr
   const primaryUsableTicket = ticketInstances.find(isTicketInstanceUsable)
+  const approvalTiming = getManualApprovalTiming(booking)
   const qrUnavailableCopy = (() => {
     if (booking.status === 'pending_partner') {
       return {
         title: 'Vé đang chờ đối tác duyệt',
-        description: 'Mã QR sẽ xuất hiện sau khi đơn đặt vé được xác nhận.',
+        description: `Bạn đã thanh toán; đối tác cần phản hồi trước ${approvalTiming.deadlineLabel}. Nếu từ chối hoặc quá hạn, booking sẽ bị hủy và tạo hoàn tiền bắt buộc 100%.`,
         icon: 'hourglass_top',
       }
     }
@@ -251,11 +253,32 @@ function ETicketPage() {
       icon: 'hourglass_top',
     }
   })()
+  const operationalDetails = booking.operationalDetails || {}
+  const whatToBring = Array.isArray(operationalDetails.whatToBring)
+    ? operationalDetails.whatToBring.filter(Boolean)
+    : []
+  const inclusions = Array.isArray(operationalDetails.inclusions)
+    ? operationalDetails.inclusions.filter(Boolean)
+    : []
+  const exclusions = Array.isArray(operationalDetails.exclusions)
+    ? operationalDetails.exclusions.filter(Boolean)
+    : []
   const ticketInstructions = canShowQr
     ? [
-        { icon: 'qr_code_scanner', text: 'Xuất trình mã QR tại cổng soát vé.' },
-        { icon: 'schedule', text: 'Có mặt trước khung giờ ít nhất 15 phút.' },
-        { icon: 'badge', text: 'Mang theo giấy tờ tùy thân khi được yêu cầu.' },
+        {
+          icon: 'location_on',
+          text: operationalDetails.meetingPoint || booking.attractionLocation,
+        },
+        {
+          icon: 'qr_code_scanner',
+          text: operationalDetails.checkInInstructions || 'Xuất trình mã QR hợp lệ tại cổng.',
+        },
+        {
+          icon: 'badge',
+          text: whatToBring.length > 0
+            ? `Cần mang: ${whatToBring.join(', ')}.`
+            : 'Không có vật dụng bắt buộc được công bố.',
+        },
         { icon: 'signal_wifi_off', text: 'Bạn có thể lưu hoặc in vé để dùng ngoại tuyến.' },
       ]
     : [
@@ -280,8 +303,11 @@ function ETicketPage() {
       `Mã đặt chỗ: ${formatBookingReference(booking.id)}`,
       `Vé: ${booking.ticketName || 'Vé tham quan'}`,
       `Số lượng: ${quantityText}`,
-      'Có mặt trước giờ tham quan ít nhất 15 phút.',
-    ].join('\\n')
+      operationalDetails.meetingPoint
+        ? `Điểm gặp: ${operationalDetails.meetingPoint}`
+        : '',
+      operationalDetails.checkInInstructions || '',
+    ].filter(Boolean).join('\\n')
     const ics = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
@@ -366,7 +392,9 @@ function ETicketPage() {
                   : 'Mã QR chưa khả dụng'}
               </p>
               <p className="mt-1 text-sm">
-                Mã QR sẽ xuất hiện sau khi đơn đặt vé được xác nhận.
+                {booking.status === 'pending_partner'
+                  ? `Bạn đã thanh toán; đối tác cần phản hồi trước ${approvalTiming.deadlineLabel}. Nếu từ chối hoặc quá hạn, hệ thống hủy booking và tạo hoàn tiền bắt buộc 100%.`
+                  : 'Mã QR sẽ xuất hiện sau khi đơn đặt vé được xác nhận.'}
               </p>
             </div>
           )}
@@ -527,6 +555,44 @@ function ETicketPage() {
                   </span>
                   Cần hỗ trợ
                 </Link>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-4 border-t border-outline-variant/30 pt-5 md:grid-cols-2">
+              <div className="rounded-xl bg-surface-container-low p-4">
+                <p className="text-sm font-bold text-primary">Điểm gặp / quầy check-in</p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  {operationalDetails.meetingPoint || booking.attractionLocation}
+                </p>
+              </div>
+              <div className="rounded-xl bg-surface-container-low p-4">
+                <p className="text-sm font-bold text-primary">Cách check-in</p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  {operationalDetails.checkInInstructions || 'Xuất trình mã QR hợp lệ tại cổng.'}
+                </p>
+              </div>
+              <div className="rounded-xl bg-surface-container-low p-4">
+                <p className="text-sm font-bold text-primary">Giá vé bao gồm</p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  {inclusions.length > 0 ? inclusions.join(' • ') : 'Chưa có nội dung được công bố.'}
+                </p>
+              </div>
+              <div className="rounded-xl bg-surface-container-low p-4">
+                <p className="text-sm font-bold text-primary">Giá vé không bao gồm</p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  {exclusions.length > 0 ? exclusions.join(' • ') : 'Không có khoản loại trừ được công bố.'}
+                </p>
+              </div>
+              <div className="rounded-xl bg-surface-container-low p-4">
+                <p className="text-sm font-bold text-primary">Cần mang theo</p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  {whatToBring.length > 0 ? whatToBring.join(' • ') : 'Không có vật dụng bắt buộc được công bố.'}
+                </p>
+              </div>
+              <div className="rounded-xl bg-surface-container-low p-4">
+                <p className="text-sm font-bold text-primary">Khả năng tiếp cận</p>
+                <p className="mt-2 text-sm leading-6 text-on-surface-variant">
+                  {operationalDetails.accessibilityInfo || 'Vui lòng liên hệ điểm tham quan để xác nhận.'}
+                </p>
               </div>
             </div>
           </section>

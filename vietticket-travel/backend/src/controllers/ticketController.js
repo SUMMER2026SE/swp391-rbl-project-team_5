@@ -30,6 +30,10 @@ const {
   quoteSchedule,
   toPublicQuote,
 } = require('../services/dynamicPricingService');
+const {
+  getProductAdmissionCount,
+  toSellableTicketCount,
+} = require('../utils/ticketCapacity');
 
 const attractionInclude = {
   images: true,
@@ -41,6 +45,11 @@ const attractionInclude = {
 
 const HOLD_DURATION_MS = 10 * 60 * 1000;
 const MAX_ACTIVE_HOLDS_PER_USER = 3;
+
+function normalizeOperationalList(value) {
+  if (!Array.isArray(value)) return value;
+  return value.map((item) => String(item).trim()).filter(Boolean);
+}
 
 // Tìm vé và xác minh thuộc về đối tác hiện tại (qua điểm tham quan)
 async function findOwnedTicket(ticketId, partnerId) {
@@ -64,7 +73,10 @@ function buildTicketData(body) {
   const data = {};
   if (body.name !== undefined) data.name = String(body.name).trim();
   if (body.type !== undefined) data.type = String(body.type).toUpperCase();
+  if (body.admissionCount !== undefined) data.admissionCount = Number(body.admissionCount);
   if (body.description !== undefined) data.description = String(body.description || '').trim();
+  if (body.inclusions !== undefined) data.inclusions = normalizeOperationalList(body.inclusions);
+  if (body.exclusions !== undefined) data.exclusions = normalizeOperationalList(body.exclusions);
   if (body.originalPrice !== undefined) data.originalPrice = Number(body.originalPrice);
   if (body.sellingPrice !== undefined) data.sellingPrice = Number(body.sellingPrice);
   if (body.status !== undefined) data.status = ticketStatusFromClient(body.status);
@@ -133,6 +145,7 @@ async function createTicket(req, res, next) {
 
     const data = buildTicketData(req.body);
     if (!data.type) data.type = 'ADULT';
+    if (data.admissionCount === undefined) data.admissionCount = 1;
     if (!data.status) data.status = 'ACTIVE';
     if (!data.refundPolicy) data.refundPolicy = 'NON_REFUNDABLE';
     data.refundFeeRate = normalizeRefundFeeRate(data.refundPolicy, data.refundFeeRate);
@@ -147,7 +160,10 @@ async function createTicket(req, res, next) {
         id: ticketId,
         name: data.name,
         type: data.type,
+        admissionCount: data.admissionCount,
         description: data.description,
+        inclusions: data.inclusions ?? null,
+        exclusions: data.exclusions ?? null,
         originalPrice: data.originalPrice,
         sellingPrice: data.sellingPrice,
         status: data.status,
@@ -273,6 +289,13 @@ async function updateTicket(req, res, next) {
       assertPartnerCanEdit(attraction);
 
       const current = draft.tickets[ticketIndex];
+      const mergedValidationError = validateTicket(
+        { ...current, ...req.body },
+        { partial: false },
+      );
+      if (mergedValidationError) {
+        return res.status(400).json({ message: mergedValidationError });
+      }
       const original = req.body.originalPrice !== undefined ? Number(req.body.originalPrice) : current.originalPrice;
       const selling = req.body.sellingPrice !== undefined ? Number(req.body.sellingPrice) : current.sellingPrice;
       if (selling > original) {
@@ -294,7 +317,16 @@ async function updateTicket(req, res, next) {
         ...current,
         name: req.body.name !== undefined ? String(req.body.name).trim() : current.name,
         type: req.body.type !== undefined ? String(req.body.type).toUpperCase() : current.type,
+        admissionCount: req.body.admissionCount !== undefined
+          ? Number(req.body.admissionCount)
+          : Number(current.admissionCount ?? 1),
         description: req.body.description !== undefined ? String(req.body.description || '').trim() : current.description,
+        inclusions: req.body.inclusions !== undefined
+          ? normalizeOperationalList(req.body.inclusions)
+          : current.inclusions ?? null,
+        exclusions: req.body.exclusions !== undefined
+          ? normalizeOperationalList(req.body.exclusions)
+          : current.exclusions ?? null,
         originalPrice: original,
         sellingPrice: selling,
         status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
@@ -359,7 +391,10 @@ async function updateTicket(req, res, next) {
         id: existing.id,
         name: existing.name,
         type: existing.type,
+        admissionCount: Number(existing.admissionCount ?? 1),
         description: existing.description || '',
+        inclusions: Array.isArray(existing.inclusions) ? existing.inclusions : null,
+        exclusions: Array.isArray(existing.exclusions) ? existing.exclusions : null,
         originalPrice: Number(existing.originalPrice),
         sellingPrice: Number(existing.sellingPrice),
         status: existing.status,
@@ -388,7 +423,16 @@ async function updateTicket(req, res, next) {
         ...current,
         name: req.body.name !== undefined ? String(req.body.name).trim() : current.name,
         type: req.body.type !== undefined ? String(req.body.type).toUpperCase() : current.type,
+        admissionCount: req.body.admissionCount !== undefined
+          ? Number(req.body.admissionCount)
+          : Number(current.admissionCount ?? 1),
         description: req.body.description !== undefined ? String(req.body.description || '').trim() : current.description,
+        inclusions: req.body.inclusions !== undefined
+          ? normalizeOperationalList(req.body.inclusions)
+          : current.inclusions ?? null,
+        exclusions: req.body.exclusions !== undefined
+          ? normalizeOperationalList(req.body.exclusions)
+          : current.exclusions ?? null,
         originalPrice: original,
         sellingPrice: selling,
         status: req.body.status !== undefined ? ticketStatusFromClient(req.body.status) : current.status,
@@ -411,6 +455,11 @@ async function updateTicket(req, res, next) {
           ? [true, 1, '1', 'true'].includes(req.body.requiresAdult)
           : Boolean(current.requiresAdult),
       };
+
+      const mergedValidationError = validateTicket(updatedTicket, { partial: false });
+      if (mergedValidationError) {
+        return res.status(400).json({ message: mergedValidationError });
+      }
 
       if (idx !== -1) {
         tickets[idx] = updatedTicket;
@@ -439,6 +488,19 @@ async function updateTicket(req, res, next) {
     }
 
     const ticketData = buildTicketData(req.body);
+    const mergedValidationError = validateTicket(
+      {
+        ...existing,
+        originalPrice: Number(existing.originalPrice),
+        sellingPrice: Number(existing.sellingPrice),
+        admissionCount: Number(existing.admissionCount ?? 1),
+        ...req.body,
+      },
+      { partial: false },
+    );
+    if (mergedValidationError) {
+      return res.status(400).json({ message: mergedValidationError });
+    }
     if (ticketData.refundPolicy !== undefined || ticketData.refundFeeRate !== undefined) {
       const nextRefundPolicy = ticketData.refundPolicy || existing.refundPolicy;
       const nextRefundFeeRate = ticketData.refundFeeRate !== undefined
@@ -628,7 +690,10 @@ async function createTicketProduct(req, res, next) {
         id: ticketId,
         name,
         type: String(req.body.type || 'ADULT').toUpperCase(),
+        admissionCount: Number(req.body.admissionCount ?? 1),
         description,
+        inclusions: normalizeOperationalList(req.body.inclusions) ?? null,
+        exclusions: normalizeOperationalList(req.body.exclusions) ?? null,
         originalPrice: Number(originalPrice),
         sellingPrice: Number(sellingPrice),
         status: 'ACTIVE',
@@ -679,7 +744,10 @@ async function createTicketProduct(req, res, next) {
         attractionId,
         name,
         type: String(req.body.type || 'ADULT').toUpperCase(),
+        admissionCount: Number(req.body.admissionCount ?? 1),
         description,
+        inclusions: normalizeOperationalList(req.body.inclusions) ?? null,
+        exclusions: normalizeOperationalList(req.body.exclusions) ?? null,
         originalPrice,
         sellingPrice,
         refundPolicy: normalizedRefundPolicy,
@@ -797,6 +865,7 @@ async function checkAvailability(req, res, next) {
     if (!date) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid date format (YYYY-MM-DD)' } });
 
     const schedule = await getBookableSchedule(prisma, ticketProductId, date);
+    const admissionCount = getProductAdmissionCount(schedule.product);
     if (schedule.isClosed) {
       return res.status(200).json({
         success: true,
@@ -865,40 +934,52 @@ async function checkAvailability(req, res, next) {
               - Number(stock?.bookedQty || 0)
               - Number(stock?.heldQty || 0),
           );
+          const availableGuests = Math.min(
+            bookingClosed ? 0 : slotAvailable,
+            bookingClosed ? 0 : productAvailable,
+            bookingClosed ? 0 : attractionAvailable,
+          );
           return {
             id: slot.id,
             timeSlotId: slot.id,
             startTime: slot.startTime,
             endTime: slot.endTime,
             maxCapacity: getSlotCapacity(schedule, slot),
-            availableTickets: Math.min(
-              bookingClosed ? 0 : slotAvailable,
-              bookingClosed ? 0 : productAvailable,
-              bookingClosed ? 0 : attractionAvailable,
+            maxTicketPackages: toSellableTicketCount(
+              getSlotCapacity(schedule, slot),
+              admissionCount,
             ),
+            availableGuests,
+            availableTickets: toSellableTicketCount(availableGuests, admissionCount),
             bookingClosed,
             ...pricingOf(slot.id),
           };
         })
-      : [{
+      : (() => {
+          const bookingClosed = isBookingCutoffPassed({
+            date,
+            attraction: schedule.attraction,
+          });
+          const availableGuests = bookingClosed
+            ? 0
+            : Math.min(productAvailable, attractionAvailable);
+          return [{
           id: 'all-day',
           timeSlotId: null,
           startTime: schedule.attraction.openTime || null,
           endTime: schedule.attraction.closeTime || null,
           label: 'Vé sử dụng trong ngày',
           maxCapacity: Math.min(getProductCapacity(schedule), schedule.dayCapacity),
-          availableTickets: isBookingCutoffPassed({
-            date,
-            attraction: schedule.attraction,
-          })
-            ? 0
-            : Math.min(productAvailable, attractionAvailable),
-          bookingClosed: isBookingCutoffPassed({
-            date,
-            attraction: schedule.attraction,
-          }),
+          maxTicketPackages: toSellableTicketCount(
+            Math.min(getProductCapacity(schedule), schedule.dayCapacity),
+            admissionCount,
+          ),
+          availableGuests,
+          availableTickets: toSellableTicketCount(availableGuests, admissionCount),
+          bookingClosed,
           ...pricingOf(null),
         }];
+        })();
 
     return res.status(200).json({
       success: true,
@@ -908,6 +989,8 @@ async function checkAvailability(req, res, next) {
         slotSource: schedule.slotSource,
         dayCapacity: schedule.dayCapacity,
         listedPrice,
+        admissionCount,
+        capacityUnit: 'GUEST',
       },
     });
   } catch (error) {
@@ -1055,6 +1138,8 @@ async function reserveTickets(req, res, next) {
       const snapshotCommissionRate = Number.isFinite(rawCommissionRate)
         ? Math.min(Math.max(rawCommissionRate, 0), 1)
         : 0.10;
+      const snapshotAdmissionCount = getProductAdmissionCount(schedule.product);
+      const inventoryUnits = quantity * snapshotAdmissionCount;
 
       let selectedSlot = null;
       if (timeSlotId) {
@@ -1126,8 +1211,12 @@ async function reserveTickets(req, res, next) {
       const availableAttraction =
         attractionStock.capacity - attractionStock.bookedQty - attractionStock.heldQty;
       const availableForDay = Math.min(availableDaily, availableAttraction);
-      if (availableForDay < quantity) {
-        const err = new Error(`Không đủ vé. Còn lại: ${Math.max(0, availableForDay)} vé`);
+      if (availableForDay < inventoryUnits) {
+        const remainingPackages = toSellableTicketCount(
+          availableForDay,
+          snapshotAdmissionCount,
+        );
+        const err = new Error(`Không đủ chỗ. Còn lại: ${remainingPackages} gói vé`);
         err.statusCode = 409;
         throw err;
       }
@@ -1143,9 +1232,13 @@ async function reserveTickets(req, res, next) {
         }
         const availableSlot =
           getSlotCapacity(schedule, selectedSlot) - tstock.bookedQty - tstock.heldQty;
-        if (availableSlot < quantity) {
+        if (availableSlot < inventoryUnits) {
+          const remainingPackages = toSellableTicketCount(
+            availableSlot,
+            snapshotAdmissionCount,
+          );
           const err = new Error(
-            `Không đủ vé ở khung giờ này. Còn lại: ${Math.max(0, availableSlot)} vé`,
+            `Không đủ chỗ ở khung giờ này. Còn lại: ${remainingPackages} gói vé`,
           );
           err.statusCode = 409;
           throw err;
@@ -1181,16 +1274,16 @@ async function reserveTickets(req, res, next) {
 
       await tx.dailyStock.update({
         where: { id: daily.id },
-        data: { heldQuantity: { increment: quantity } },
+        data: { heldQuantity: { increment: inventoryUnits } },
       });
       await tx.attractionDailyStock.update({
         where: { id: attractionStock.id },
-        data: { heldQty: { increment: quantity } },
+        data: { heldQty: { increment: inventoryUnits } },
       });
       if (tstock) {
         await tx.timeSlotStock.update({
           where: { id: tstock.id },
-          data: { heldQty: { increment: quantity } },
+          data: { heldQty: { increment: inventoryUnits } },
         });
       }
 
@@ -1201,6 +1294,7 @@ async function reserveTickets(req, res, next) {
           timeSlotId: selectedSlot?.id || null,
           date,
           quantity,
+          snapshotAdmissionCount,
           status: 'HELD',
           expiresAt,
           paymentDeadline: expiresAt,
@@ -1246,6 +1340,8 @@ async function reserveTickets(req, res, next) {
         reservationId: reservation.id,
         ticketProductId,
         quantity,
+        admissionCount: snapshotAdmissionCount,
+        participantCount: inventoryUnits,
         expiresAt,
         unitPrice: snapshotUnitPrice,
         listedPrice: listedUnitPrice,

@@ -33,6 +33,7 @@ const {
 const { awardPointsForBooking } = require('../services/loyaltyService');
 const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
 const { formatBookingReference } = require('../utils/bookingReference');
+const { getInventoryUnits } = require('../utils/ticketCapacity');
 const {
   isDocumentOwnedByUser,
   removeUnreferencedDocumentsForUser,
@@ -119,7 +120,7 @@ function toPartnerResponse(partner, user) {
     bankAccountNumber: partner.bankAccountNumber || '',
     bankAccountName: partner.bankAccountName || '',
     swiftCode: partner.swiftCode || '',
-    payoutCurrency: partner.payoutCurrency || 'VND',
+    payoutCurrency: 'VND',
     website: partner.website || '',
     description: partner.description || '',
     kycConsentAccepted: Boolean(partner.kycConsentAccepted),
@@ -187,7 +188,7 @@ async function submitKyc(req, res, next) {
       bankAccountNumber: toNullable(req.body.bankAccountNumber) ?? null,
       bankAccountName: toNullable(req.body.bankAccountName) ?? null,
       swiftCode: toNullable(req.body.swiftCode) ?? null,
-      payoutCurrency: String(req.body.payoutCurrency || 'VND').trim().toUpperCase(),
+      payoutCurrency: 'VND',
       kycConsentAccepted: true,
       kycConsentVersion: CURRENT_KYC_CONSENT_VERSION,
       kycConsentAcceptedAt: consentAcceptedAt,
@@ -1027,6 +1028,9 @@ async function getPartnerBookings(req, res, next) {
 
     const data = bookings.map((b) => {
       const latestPayment = selectBookingPayment(b.payments);
+      const approvalDeadline = b.status === 'PENDING_PARTNER'
+        ? getManualApprovalDeadline(b)
+        : null;
       return {
         id: b.id,
         attraction: b.reservation.ticketProduct.attraction.title,
@@ -1055,6 +1059,10 @@ async function getPartnerBookings(req, res, next) {
         paymentStatus: latestPayment?.status || null,
         transactionId: latestPayment?.transactionId || null,
         paidAt: latestPayment?.paidAt || null,
+        approvalDeadline,
+        approvalDeadlineRule: approvalDeadline
+          ? 'EARLIER_OF_24_HOURS_OR_ACTIVITY_START'
+          : null,
         ticketInstances: b.ticketInstances || [],
         createdAt: b.createdAt,
       };
@@ -1375,14 +1383,15 @@ async function rejectBooking(req, res, next) {
         await releaseInventory(tx, booking);
       } else if (reservation.status === 'HELD') {
         // Nếu còn HELD thì hoàn lại heldQuantity
+        const inventoryUnits = getInventoryUnits(reservation);
         const dailyStock = await tx.dailyStock.updateMany({
           where: {
             ticketProductId: reservation.ticketProductId,
             date: reservation.date,
-            heldQuantity: { gte: reservation.quantity },
+            heldQuantity: { gte: inventoryUnits },
           },
           data: {
-            heldQuantity: { decrement: reservation.quantity },
+            heldQuantity: { decrement: inventoryUnits },
           },
         });
         if (dailyStock.count !== 1) {
@@ -1393,9 +1402,9 @@ async function rejectBooking(req, res, next) {
           where: {
             attractionId: reservation.ticketProduct.attractionId,
             date: reservation.date,
-            heldQty: { gte: reservation.quantity },
+            heldQty: { gte: inventoryUnits },
           },
-          data: { heldQty: { decrement: reservation.quantity } },
+          data: { heldQty: { decrement: inventoryUnits } },
         });
         if (attractionStock.count !== 1) {
           throw bookingConflict('Không thể hoàn trả kho giữ chỗ của điểm tham quan.');
@@ -1406,10 +1415,10 @@ async function rejectBooking(req, res, next) {
             where: {
               timeSlotId: reservation.timeSlotId,
               date: reservation.date,
-              heldQty: { gte: reservation.quantity },
+              heldQty: { gte: inventoryUnits },
             },
             data: {
-              heldQty: { decrement: reservation.quantity },
+              heldQty: { decrement: inventoryUnits },
             },
           });
           if (timeSlotStock.count !== 1) {

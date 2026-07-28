@@ -1,6 +1,10 @@
 'use strict';
 
 const { isBookingCutoffPassed } = require('../utils/activityTime');
+const {
+  getProductAdmissionCount,
+  toSellableTicketCount,
+} = require('../utils/ticketCapacity');
 const { isTicketProductSaleEnabled } = require('./catalogVisibilityService');
 
 function parseOpenDays(csv) {
@@ -102,6 +106,7 @@ function buildAvailabilityResult(
   { dailyStock, attractionStock, slotStocks = [] },
   { now = new Date() } = {},
 ) {
+  const admissionCount = getProductAdmissionCount(schedule.product);
   if (schedule.isClosed) {
     return {
       closed: true,
@@ -110,6 +115,8 @@ function buildAvailabilityResult(
       availableTickets: 0,
       productAvailable: 0,
       attractionAvailable: 0,
+      availableGuests: 0,
+      admissionCount,
       dayCapacity: schedule.dayCapacity,
       slotSource: schedule.slotSource,
     };
@@ -144,18 +151,24 @@ function buildAvailabilityResult(
             - Number(stock?.bookedQty || 0)
             - Number(stock?.heldQty || 0),
         );
+        const availableGuests = Math.min(
+          cutoffPassed ? 0 : slotAvailable,
+          cutoffPassed ? 0 : productAvailable,
+          cutoffPassed ? 0 : attractionAvailable,
+        );
         return {
           id: slot.id,
           timeSlotId: slot.id,
           startTime: slot.startTime,
           endTime: slot.endTime,
           maxCapacity: getSlotCapacity(schedule, slot),
-          slotAvailable,
-          availableTickets: Math.min(
-            cutoffPassed ? 0 : slotAvailable,
-            cutoffPassed ? 0 : productAvailable,
-            cutoffPassed ? 0 : attractionAvailable,
+          maxTicketPackages: toSellableTicketCount(
+            getSlotCapacity(schedule, slot),
+            admissionCount,
           ),
+          slotAvailable,
+          availableGuests,
+          availableTickets: toSellableTicketCount(availableGuests, admissionCount),
           bookingClosed: cutoffPassed,
         };
       })
@@ -165,6 +178,9 @@ function buildAvailabilityResult(
           attraction: schedule.attraction,
           now,
         });
+        const availableGuests = cutoffPassed
+          ? 0
+          : Math.min(productAvailable, attractionAvailable);
         return [{
           id: 'all-day',
           timeSlotId: null,
@@ -172,9 +188,12 @@ function buildAvailabilityResult(
           endTime: schedule.attraction.closeTime || null,
           label: 'Ve su dung trong ngay',
           maxCapacity: Math.min(getProductCapacity(schedule), schedule.dayCapacity),
-          availableTickets: cutoffPassed
-            ? 0
-            : Math.min(productAvailable, attractionAvailable),
+          maxTicketPackages: toSellableTicketCount(
+            Math.min(getProductCapacity(schedule), schedule.dayCapacity),
+            admissionCount,
+          ),
+          availableGuests,
+          availableTickets: toSellableTicketCount(availableGuests, admissionCount),
           bookingClosed: cutoffPassed,
         }];
       })();
@@ -188,6 +207,11 @@ function buildAvailabilityResult(
     ),
     productAvailable,
     attractionAvailable,
+    availableGuests: slots.reduce(
+      (max, slot) => Math.max(max, Number(slot.availableGuests || 0)),
+      0,
+    ),
+    admissionCount,
     dayCapacity: schedule.dayCapacity,
     slotSource: schedule.slotSource,
   };

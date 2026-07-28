@@ -12,6 +12,7 @@ import { listRecoveryCases } from '../services/recoveryApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 import { formatBookingReference } from '../utils/bookingReference.js'
 import { hasUsableTicketInstances } from '../utils/ticketInstanceStatus.js'
+import { getManualApprovalTiming } from '../utils/manualApproval.js'
 import { sortRecoveryCases } from '../utils/recoveryPresentation.js'
 import {
   filterBookingsByTicketTab,
@@ -669,6 +670,7 @@ function TicketCard({
   const isExpired = isPaymentExpired(booking, now)
   const hasUsableQr = hasUsableTicketInstances(booking.ticketInstances)
   const quantityText = `${booking.quantity || 1} vé`
+  const approvalTiming = getManualApprovalTiming(booking, now)
 
   return (
     <>
@@ -708,6 +710,20 @@ function TicketCard({
             />
           </div>
         </div>
+
+        {status === 'pending_partner' && (
+          <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+            <p className="font-extrabold">
+              {approvalTiming.isOverdue
+                ? 'Đã tới hạn phản hồi — hệ thống đang chuyển đơn sang hủy và hoàn tiền'
+                : `Đối tác cần phản hồi trước ${approvalTiming.deadlineLabel}`}
+            </p>
+            <p className="mt-1">
+              Bạn đã thanh toán nhưng QR chưa được phát hành. Nếu đối tác từ chối hoặc quá hạn,
+              booking này sẽ bị hủy và yêu cầu hoàn bắt buộc 100% được tạo về phương thức thanh toán gốc.
+            </p>
+          </div>
+        )}
 
         {(recoveryCase || sourceRecoveryCase) && (
           <div className="mb-4">
@@ -763,7 +779,7 @@ function TicketCard({
                   <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
                     currency_exchange
                   </span>
-                  Yêu cầu hoàn tiền
+                  Hủy toàn bộ booking & hoàn tiền
                 </button>
               )}
               <Link

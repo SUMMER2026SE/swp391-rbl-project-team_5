@@ -172,6 +172,22 @@ describe('registerPartner', () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
+  test('rejects KYC payout currencies that the settlement flow cannot process', async () => {
+    const { req, res, next } = mockReqRes({
+      ...VALID_KYC,
+      payoutCurrency: 'USD',
+    });
+
+    await registerPartner(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      message: 'Hiện tại hệ thống chỉ hỗ trợ thanh toán đối tác bằng VND.',
+    });
+    expect(mockPrisma.partnerProfile.create).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   test('rejects a KYC document that is not an existing upload owned by the applicant', async () => {
     isDocumentOwnedByUser.mockReturnValue(false);
     const { req, res, next } = mockReqRes({ ...VALID_KYC });
@@ -197,6 +213,24 @@ describe('getMyPartnerProfile', () => {
     await getMyPartnerProfile(req, res, next);
 
     expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  test('normalizes legacy profile currency in the public KYC response', async () => {
+    mockPrisma.partnerProfile.findUnique.mockResolvedValue({
+      id: 'p-legacy',
+      businessName: 'Legacy Partner',
+      payoutCurrency: 'USD',
+      status: 'APPROVED',
+    });
+    const { req, res, next } = mockReqRes();
+
+    await getMyPartnerProfile(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      partner: expect.objectContaining({ payoutCurrency: 'VND' }),
+    }));
+    expect(next).not.toHaveBeenCalled();
   });
 
   test('returns 404 when the profile does not exist', async () => {

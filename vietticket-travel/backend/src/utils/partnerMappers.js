@@ -122,6 +122,12 @@ function toAttractionListItem(attraction) {
     ),
     environment: draft?.environment ?? attraction.environment ?? 'MIXED',
     isFullDay: Boolean(draft?.isFullDay ?? attraction.isFullDay),
+    meetingPoint: draft?.meetingPoint ?? attraction.meetingPoint ?? '',
+    checkInInstructions: draft?.checkInInstructions ?? attraction.checkInInstructions ?? '',
+    accessibilityInfo: draft?.accessibilityInfo ?? attraction.accessibilityInfo ?? '',
+    whatToBring: Array.isArray(draft?.whatToBring)
+      ? draft.whatToBring
+      : (Array.isArray(attraction.whatToBring) ? attraction.whatToBring : []),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,
@@ -166,6 +172,12 @@ function toAttractionDetail(attraction) {
     ),
     environment: draft?.environment ?? attraction.environment ?? 'MIXED',
     isFullDay: Boolean(draft?.isFullDay ?? attraction.isFullDay),
+    meetingPoint: draft?.meetingPoint ?? attraction.meetingPoint ?? '',
+    checkInInstructions: draft?.checkInInstructions ?? attraction.checkInInstructions ?? '',
+    accessibilityInfo: draft?.accessibilityInfo ?? attraction.accessibilityInfo ?? '',
+    whatToBring: Array.isArray(draft?.whatToBring)
+      ? draft.whatToBring
+      : (Array.isArray(attraction.whatToBring) ? attraction.whatToBring : []),
     hasPublishedVersion: Boolean(attraction.publishedAt),
     hasUnpublishedChanges: Boolean(draft),
     submittedAt: attraction.submittedAt || null,
@@ -186,7 +198,10 @@ function toTicket(ticket) {
     id: ticket.id,
     name: ticket.name,
     type: ticket.type,
+    admissionCount: Number(ticket.admissionCount ?? 1),
     description: ticket.description || '',
+    inclusions: Array.isArray(ticket.inclusions) ? ticket.inclusions : [],
+    exclusions: Array.isArray(ticket.exclusions) ? ticket.exclusions : [],
     originalPrice: decimalToNumber(ticket.originalPrice),
     sellingPrice: decimalToNumber(ticket.sellingPrice),
     refundPolicy: refundPolicyToClient(ticket.refundPolicy),

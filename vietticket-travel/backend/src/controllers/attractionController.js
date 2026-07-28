@@ -251,6 +251,16 @@ function buildAttractionData(body) {
   if (body.isFullDay !== undefined) {
     data.isFullDay = parseBoolean(body.isFullDay);
   }
+  for (const field of ['meetingPoint', 'checkInInstructions', 'accessibilityInfo']) {
+    if (body[field] !== undefined) {
+      data[field] = String(body[field] || '').trim() || null;
+    }
+  }
+  if (body.whatToBring !== undefined) {
+    data.whatToBring = Array.isArray(body.whatToBring)
+      ? body.whatToBring.map((item) => String(item).trim()).filter(Boolean)
+      : body.whatToBring;
+  }
   if (body.status !== undefined) data.status = attractionStatusFromClient(body.status);
   return data;
 }
@@ -935,6 +945,7 @@ async function getAttractionDetail(req, res, next) {
       id: t.id,
       name: t.name,
       type: t.type,
+      admissionCount: Number(t.admissionCount ?? 1),
       description: t.description,
       originalPrice: t.originalPrice,
       sellingPrice: t.sellingPrice,
@@ -946,6 +957,8 @@ async function getAttractionDetail(req, res, next) {
       minHeightCm: t.minHeightCm,
       maxHeightCm: t.maxHeightCm,
       requiresAdult: t.requiresAdult,
+      inclusions: Array.isArray(t.inclusions) ? t.inclusions : [],
+      exclusions: Array.isArray(t.exclusions) ? t.exclusions : [],
     }));
 
     const result = {
@@ -954,6 +967,7 @@ async function getAttractionDetail(req, res, next) {
       description: attraction.description,
       address: attraction.address,
       city: attraction.city,
+      district: attraction.district,
       latitude: attraction.latitude,
       longitude: attraction.longitude,
       images: attraction.images,
@@ -966,6 +980,10 @@ async function getAttractionDetail(req, res, next) {
       recommendedVisitMinutes: attraction.recommendedVisitMinutes,
       environment: attraction.environment,
       isFullDay: attraction.isFullDay,
+      meetingPoint: attraction.meetingPoint,
+      checkInInstructions: attraction.checkInInstructions,
+      accessibilityInfo: attraction.accessibilityInfo,
+      whatToBring: Array.isArray(attraction.whatToBring) ? attraction.whatToBring : [],
       openTime: attraction.openTime,
       closeTime: attraction.closeTime,
       openDays: attraction.openDays,

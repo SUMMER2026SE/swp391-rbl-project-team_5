@@ -267,6 +267,7 @@ const mockPrisma = {
   },
   savedItinerary: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     findMany: jest.fn(),
   },
   liveTrip: {

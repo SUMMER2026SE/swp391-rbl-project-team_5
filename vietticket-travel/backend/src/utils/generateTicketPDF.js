@@ -36,16 +36,38 @@ function formatDate(value) {
   }).format(new Date(value));
 }
 
-function getAddress(attraction) {
-  return [attraction.address, attraction.district, attraction.city]
-    .filter(Boolean)
-    .join(', ');
-}
-
 function getTimeSlot(reservation) {
   return reservation.timeSlot
     ? `${reservation.timeSlot.startTime} - ${reservation.timeSlot.endTime}`
     : 'Sử dụng trong ngày đã chọn';
+}
+
+function getSnapshotAddress(booking, attraction) {
+  return [
+    booking.snapshotAttractionAddress ?? attraction.address,
+    booking.snapshotAttractionDistrict ?? attraction.district,
+    booking.snapshotAttractionCity ?? attraction.city,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function getOperationalDetails(booking, attraction, product) {
+  const list = (snapshotValue, currentValue) => (
+    Array.isArray(snapshotValue)
+      ? snapshotValue.map((item) => String(item)).filter(Boolean)
+      : (Array.isArray(currentValue) ? currentValue.map((item) => String(item)).filter(Boolean) : [])
+  );
+  return {
+    meetingPoint: booking.snapshotMeetingPoint ?? attraction.meetingPoint ?? '',
+    checkInInstructions:
+      booking.snapshotCheckInInstructions ?? attraction.checkInInstructions ?? '',
+    accessibilityInfo:
+      booking.snapshotAccessibilityInfo ?? attraction.accessibilityInfo ?? '',
+    whatToBring: list(booking.snapshotWhatToBring, attraction.whatToBring),
+    inclusions: list(booking.snapshotInclusions, product.inclusions),
+    exclusions: list(booking.snapshotExclusions, product.exclusions),
+  };
 }
 
 function drawLabelValue(doc, label, value, x, y, width) {
@@ -94,12 +116,12 @@ function drawTicketPage(doc, booking, ticket, qrDataUrl, index, totalTickets) {
     .font('NotoSansBold')
     .fontSize(17)
     .fillColor(COLORS.primary)
-    .text(attraction.title, margin, 158, { width: contentWidth });
+    .text(booking.snapshotAttractionTitle || attraction.title, margin, 158, { width: contentWidth });
   doc
     .font('NotoSans')
     .fontSize(9.5)
     .fillColor(COLORS.muted)
-    .text(getAddress(attraction), margin, 186, { width: contentWidth });
+    .text(getSnapshotAddress(booking, attraction), margin, 186, { width: contentWidth });
 
   doc.roundedRect(margin, 222, contentWidth, 106, 12).fill(COLORS.surface);
   drawLabelValue(doc, 'Khách hàng', booking.fullName, margin + 18, 241, 220);
@@ -125,10 +147,24 @@ function drawTicketPage(doc, booking, ticket, qrDataUrl, index, totalTickets) {
     .strokeColor(COLORS.border)
     .stroke();
 
-  drawLabelValue(doc, 'Loại vé', product.name, margin, 400, 225);
+  drawLabelValue(doc, 'Loại vé', booking.snapshotTicketName || product.name, margin, 400, 225);
   drawLabelValue(doc, 'Số lượng', reservation.quantity, margin + 260, 400, 100);
-  drawLabelValue(doc, 'Ngày tham quan', formatDate(reservation.date), margin, 452, 225);
-  drawLabelValue(doc, 'Khung giờ', getTimeSlot(reservation), margin + 260, 452, 245);
+  drawLabelValue(
+    doc,
+    'Ngày tham quan',
+    formatDate(booking.snapshotVisitDate || reservation.date),
+    margin,
+    452,
+    225,
+  );
+  drawLabelValue(
+    doc,
+    'Khung giờ',
+    booking.snapshotTimeSlotLabel || getTimeSlot(reservation),
+    margin + 260,
+    452,
+    245,
+  );
   drawLabelValue(
     doc,
     'Tổng tiền đã thanh toán',
@@ -172,6 +208,67 @@ function drawTicketPage(doc, booking, ticket, qrDataUrl, index, totalTickets) {
       796,
       { width: contentWidth, align: 'center' },
     );
+}
+
+function drawOperationalGuide(doc, booking) {
+  const reservation = booking.reservation;
+  const product = reservation.ticketProduct;
+  const attraction = product.attraction;
+  const details = getOperationalDetails(booking, attraction, product);
+  const margin = 44;
+  const contentWidth = doc.page.width - margin * 2;
+  let y = 44;
+
+  const addPageHeader = () => {
+    doc.rect(0, 0, doc.page.width, 92).fill(COLORS.primary);
+    doc
+      .font('NotoSansBold')
+      .fontSize(18)
+      .fillColor(COLORS.white)
+      .text('HƯỚNG DẪN SỬ DỤNG VÉ', margin, 32);
+    doc
+      .font('NotoSans')
+      .fontSize(8.5)
+      .fillColor('#d9f0f1')
+      .text(`Mã đặt chỗ: ${formatBookingReference(booking.id)}`, margin, 61);
+    y = 118;
+  };
+
+  const ensureSpace = (requiredHeight) => {
+    if (y + requiredHeight <= doc.page.height - 50) return;
+    doc.addPage();
+    addPageHeader();
+  };
+
+  const drawSection = (title, value, emptyText) => {
+    const body = Array.isArray(value)
+      ? (value.length > 0 ? value.map((item) => `• ${item}`).join('\n') : emptyText)
+      : (String(value || '').trim() || emptyText);
+    doc.font('NotoSans').fontSize(9.5);
+    const bodyHeight = doc.heightOfString(body, { width: contentWidth, lineGap: 3 });
+    ensureSpace(bodyHeight + 46);
+    doc
+      .font('NotoSansBold')
+      .fontSize(11)
+      .fillColor(COLORS.primary)
+      .text(title, margin, y, { width: contentWidth });
+    y += 22;
+    doc
+      .font('NotoSans')
+      .fontSize(9.5)
+      .fillColor(COLORS.text)
+      .text(body, margin, y, { width: contentWidth, lineGap: 3 });
+    y += bodyHeight + 24;
+  };
+
+  doc.addPage();
+  addPageHeader();
+  drawSection('Điểm gặp / quầy check-in', details.meetingPoint, 'Theo địa chỉ điểm tham quan trên vé.');
+  drawSection('Cách check-in', details.checkInInstructions, 'Xuất trình mã QR hợp lệ tại cổng.');
+  drawSection('Vé bao gồm', details.inclusions, 'Chưa có nội dung được công bố.');
+  drawSection('Vé không bao gồm', details.exclusions, 'Không có khoản loại trừ được công bố.');
+  drawSection('Cần mang theo', details.whatToBring, 'Không có vật dụng bắt buộc được công bố.');
+  drawSection('Hỗ trợ tiếp cận', details.accessibilityInfo, 'Vui lòng liên hệ điểm tham quan để xác nhận.');
 }
 
 async function generateTicketPDF(booking) {
@@ -223,6 +320,7 @@ async function generateTicketPDF(booking) {
       doc.addPage();
       drawTicketPage(doc, booking, ticket, qrImages[index], index, tickets.length);
     });
+    drawOperationalGuide(doc, booking);
 
     doc.end();
   });

@@ -61,7 +61,61 @@ function toMoney(value) {
   return Math.round(Number(value || 0));
 }
 
-function serializeSettlement(settlement) {
+function buildMakerCheckerControl(settlement, actorId = null) {
+  const makerRecorded = Boolean(settlement?.createdById);
+  const checkerRecorded = Boolean(settlement?.approvedById);
+  const makerCheckerSeparated = Boolean(
+    makerRecorded
+    && checkerRecorded
+    && settlement.createdById !== settlement.approvedById,
+  );
+  const actorIsMaker = Boolean(actorId && settlement?.createdById === actorId);
+  const canApprove = Boolean(
+    actorId
+    && settlement?.status === 'DRAFT'
+    && makerRecorded
+    && !actorIsMaker,
+  );
+  const canMarkPaid = Boolean(
+    actorId
+    && settlement?.status === 'APPROVED'
+    && makerCheckerSeparated
+    && !actorIsMaker,
+  );
+  const canCancel = Boolean(
+    actorId
+    && (
+      settlement?.status === 'DRAFT'
+      || (settlement?.status === 'APPROVED' && !actorIsMaker)
+    ),
+  );
+
+  let blockedReason = null;
+  if (settlement?.status === 'DRAFT' && !makerRecorded) {
+    blockedReason = 'Kỳ đối soát chưa có dấu vết người lập nên không thể duyệt.';
+  } else if (settlement?.status === 'DRAFT' && actorIsMaker) {
+    blockedReason = 'Người lập không được tự duyệt; cần một quản trị viên khác kiểm tra.';
+  } else if (settlement?.status === 'APPROVED' && !makerCheckerSeparated) {
+    blockedReason = 'Chưa chứng minh được người lập và người duyệt độc lập.';
+  } else if (settlement?.status === 'APPROVED' && actorIsMaker) {
+    blockedReason = 'Người lập không được tự ghi nhận chi trả.';
+  }
+
+  return {
+    mode: 'MAKER_CHECKER',
+    separationRequired: true,
+    makerRecorded,
+    checkerRecorded,
+    payerRecorded: Boolean(settlement?.paidById),
+    makerCheckerSeparated,
+    canApprove,
+    canMarkPaid,
+    canCancel,
+    blockedReason,
+  };
+}
+
+function serializeSettlement(settlement, actorId = null) {
   if (!settlement) return null;
   return {
     ...settlement,
@@ -70,6 +124,7 @@ function serializeSettlement(settlement) {
     netAmount: toMoney(settlement.netAmount),
     commissionAmount: toMoney(settlement.commissionAmount),
     payableAmount: toMoney(settlement.payableAmount),
+    control: buildMakerCheckerControl(settlement, actorId),
     items: settlement.items?.map((item) => ({
       ...item,
       grossAmount: toMoney(item.grossAmount),
@@ -139,7 +194,7 @@ async function listSettlements(req, res, next) {
     }
     return res.json({
       success: true,
-      data: settlements.map(serializeSettlement),
+      data: settlements.map((settlement) => serializeSettlement(settlement, req.user?.id)),
       stats,
       pagination: {
         page,
@@ -176,7 +231,7 @@ async function listPartnerSettlements(req, res, next) {
     ]);
     return res.json({
       success: true,
-      data: settlements.map(serializeSettlement),
+      data: settlements.map((settlement) => serializeSettlement(settlement)),
       pagination: {
         page,
         limit,
@@ -221,7 +276,10 @@ async function getSettlement(req, res, next) {
     if (!settlement) {
       return res.status(404).json({ message: 'Không tìm thấy kỳ đối soát.' });
     }
-    return res.json({ success: true, data: serializeSettlement(settlement) });
+    return res.json({
+      success: true,
+      data: serializeSettlement(settlement, req.user?.id),
+    });
   } catch (error) {
     return next(error);
   }
@@ -333,7 +391,7 @@ async function createSettlement(req, res, next) {
           partnerId,
           periodStart: period.periodStart,
           periodEnd: period.periodEnd,
-          currency: partner.payoutCurrency || 'VND',
+          currency: 'VND',
           ...totals,
           bookingCount: items.length,
           bankNameSnapshot: partner.bankName,
@@ -371,7 +429,7 @@ async function createSettlement(req, res, next) {
     return res.status(201).json({
       success: true,
       message: 'Đã lập kỳ đối soát ở trạng thái nháp.',
-      data: serializeSettlement(settlement),
+      data: serializeSettlement(settlement, req.user?.id),
     });
   } catch (error) {
     if (error?.statusCode) {
@@ -418,6 +476,10 @@ async function updateSettlementStatus(req, res, next) {
     if (!current) {
       return res.status(404).json({ message: 'Không tìm thấy kỳ đối soát.' });
     }
+    const actorId = String(req.user?.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ message: 'Không xác định được người thực hiện thao tác.' });
+    }
     const allowedFrom = {
       APPROVED: ['DRAFT'],
       PAID: ['APPROVED'],
@@ -428,6 +490,49 @@ async function updateSettlementStatus(req, res, next) {
         message: `Không thể chuyển kỳ đối soát từ ${current.status} sang ${targetStatus}.`,
       });
     }
+    if (targetStatus === 'APPROVED') {
+      if (!current.createdById) {
+        return res.status(409).json({
+          code: 'MAKER_CHECKER_VIOLATION',
+          message: 'Kỳ đối soát chưa có dấu vết người lập nên không thể duyệt.',
+        });
+      }
+      if (current.createdById === actorId) {
+        return res.status(409).json({
+          code: 'MAKER_CHECKER_VIOLATION',
+          message: 'Người lập không được tự duyệt kỳ đối soát. Vui lòng dùng quản trị viên khác để kiểm tra.',
+        });
+      }
+    }
+    if (targetStatus === 'PAID') {
+      if (
+        !current.createdById
+        || !current.approvedById
+        || current.createdById === current.approvedById
+      ) {
+        return res.status(409).json({
+          code: 'MAKER_CHECKER_VIOLATION',
+          message: 'Chưa chứng minh được người lập và người duyệt độc lập nên chưa thể ghi nhận chi trả.',
+        });
+      }
+      if (current.createdById === actorId) {
+        return res.status(409).json({
+          code: 'MAKER_CHECKER_VIOLATION',
+          message: 'Người lập không được tự ghi nhận chi trả cho kỳ đối soát này.',
+        });
+      }
+    }
+    if (
+      targetStatus === 'CANCELLED'
+      && current.status === 'APPROVED'
+      && current.createdById
+      && current.createdById === actorId
+    ) {
+      return res.status(409).json({
+        code: 'MAKER_CHECKER_VIOLATION',
+        message: 'Người lập không được tự hủy kỳ đã được quản trị viên khác duyệt.',
+      });
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       const now = new Date();
@@ -436,19 +541,19 @@ async function updateSettlementStatus(req, res, next) {
         data: targetStatus === 'APPROVED'
           ? {
               status: 'APPROVED',
-              approvedById: req.user.id,
+              approvedById: actorId,
               approvedAt: now,
             }
           : targetStatus === 'PAID'
             ? {
                 status: 'PAID',
-                paidById: req.user.id,
+                paidById: actorId,
                 paidAt: now,
                 bankReference,
               }
             : {
                 status: 'CANCELLED',
-                cancelledById: req.user.id,
+                cancelledById: actorId,
                 cancelledAt: now,
                 cancellationReason: reason,
               },
@@ -475,6 +580,13 @@ async function updateSettlementStatus(req, res, next) {
           status: targetStatus,
           ...(bankReference ? { bankReference } : {}),
           ...(reason ? { reason } : {}),
+          makerChecker: {
+            makerId: current.createdById,
+            checkerId: targetStatus === 'APPROVED'
+              ? actorId
+              : current.approvedById,
+            actorId,
+          },
         },
       });
       return tx.partnerSettlement.findUnique({
@@ -492,7 +604,7 @@ async function updateSettlementStatus(req, res, next) {
         : targetStatus === 'APPROVED'
           ? 'Đã duyệt kỳ đối soát.'
           : 'Đã hủy kỳ đối soát và giải phóng các booking.',
-      data: serializeSettlement(updated),
+      data: serializeSettlement(updated, req.user?.id),
     });
   } catch (error) {
     if (error?.statusCode) {

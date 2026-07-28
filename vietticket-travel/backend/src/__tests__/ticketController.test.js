@@ -32,6 +32,8 @@ function productWithSlots(slots = []) {
     id: 'tkt-001',
     status: 'ACTIVE',
     archivedAt: null,
+    type: 'ADULT',
+    admissionCount: 1,
     attractionId: attraction.id,
     sellingPrice: new Decimal(125001),
     refundPolicy: 'REFUND_WITH_FEE',
@@ -382,6 +384,54 @@ describe('reserveTickets - chống overbooking', () => {
     expect(tx.dynamicPriceAdjustment.create).not.toHaveBeenCalled();
   });
 
+  test('hai gói gia đình 4 người giữ 8 chỗ nhưng vẫn chỉ mua 2 gói', async () => {
+    const tx = makeTx({
+      daily: {
+        id: 'daily-family',
+        capacity: 100,
+        bookedQuantity: 10,
+        heldQuantity: 5,
+      },
+      attractionStock: {
+        id: 'attr-family',
+        capacity: 100,
+        bookedQty: 10,
+        heldQty: 5,
+      },
+      product: {
+        ...productWithSlots(),
+        type: 'FAMILY',
+        admissionCount: 4,
+      },
+    });
+    mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
+
+    const res = makeRes();
+    await reserveTickets(makeReq({ quantity: 2 }), res, jest.fn());
+
+    expect(tx.dailyStock.update).toHaveBeenCalledWith({
+      where: { id: 'daily-family' },
+      data: { heldQuantity: { increment: 8 } },
+    });
+    expect(tx.attractionDailyStock.update).toHaveBeenCalledWith({
+      where: { id: 'attr-family' },
+      data: { heldQty: { increment: 8 } },
+    });
+    expect(tx.reservation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        quantity: 2,
+        snapshotAdmissionCount: 4,
+      }),
+    });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        quantity: 2,
+        admissionCount: 4,
+        participantCount: 8,
+      }),
+    }));
+  });
+
   test('trả 409 khi kho sản phẩm không còn đủ vé', async () => {
     const tx = makeTx({
       daily: {
@@ -531,6 +581,36 @@ describe('checkAvailability', () => {
       data: expect.arrayContaining([
         expect.objectContaining({ availableTickets: 0 }),
       ]),
+    }));
+  });
+
+  test('availability của gói gia đình được làm tròn theo gói nguyên', async () => {
+    mockPrisma.ticketProduct.findUnique.mockResolvedValue({
+      ...productWithSlots([{ ...slot, maxCapacity: 11 }]),
+      type: 'FAMILY',
+      admissionCount: 4,
+    });
+    mockPrisma.timeSlotStock.findMany.mockResolvedValue([]);
+
+    const res = makeRes();
+    await checkAvailability(
+      { params: { ticketProductId: 'tkt-001' }, query: { date: VISIT_DATE } },
+      res,
+      jest.fn(),
+    );
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          availableGuests: 11,
+          availableTickets: 2,
+          maxTicketPackages: 2,
+        }),
+      ]),
+      meta: expect.objectContaining({
+        admissionCount: 4,
+        capacityUnit: 'GUEST',
+      }),
     }));
   });
 });

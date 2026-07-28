@@ -169,7 +169,7 @@ export default function SettlementManagementPage() {
       <div className="admin-page-header">
         <div>
           <h2>Đối soát và chi trả đối tác</h2>
-          <p>Chốt doanh thu theo booking đã hoàn tất, duyệt số tiền và lưu tham chiếu chuyển khoản.</p>
+          <p>Quy trình maker-checker: người lập khóa dữ liệu; một quản trị viên khác phải kiểm tra trước khi chi trả.</p>
         </div>
         <button
           type="button"
@@ -245,6 +245,11 @@ export default function SettlementManagementPage() {
                     {settlement.bankReference && (
                       <div className="financial-secondary-text">Mã: {settlement.bankReference}</div>
                     )}
+                    <div className="financial-secondary-text">
+                      Kiểm soát: {settlement.control?.makerRecorded ? 'đã có người lập' : 'thiếu người lập'}
+                      {' → '}
+                      {settlement.control?.checkerRecorded ? 'đã có người duyệt' : 'chờ người duyệt độc lập'}
+                    </div>
                   </td>
                   <td className="admin-table-cell--right">{settlement.bookingCount}</td>
                   <td className="admin-table-cell--right">{formatCurrency(settlement.netAmount)}</td>
@@ -262,8 +267,8 @@ export default function SettlementManagementPage() {
                         <button
                           type="button"
                           className="admin-row-action admin-row-action--primary"
-                          disabled={submitting}
-                          title="Duyệt đối soát"
+                          disabled={submitting || !settlement.control?.canApprove}
+                          title={settlement.control?.blockedReason || 'Duyệt đối soát với vai trò checker'}
                           onClick={() => void approve(settlement)}
                         >
                           <span className="material-symbols-outlined">approval</span>
@@ -273,8 +278,8 @@ export default function SettlementManagementPage() {
                         <button
                           type="button"
                           className="admin-row-action admin-row-action--primary"
-                          disabled={submitting}
-                          title="Ghi nhận chuyển khoản"
+                            disabled={submitting || !settlement.control?.canMarkPaid}
+                            title={settlement.control?.blockedReason || 'Ghi nhận chuyển khoản'}
                           onClick={() => {
                             setAction({ type: 'PAID', settlement })
                             setActionValue('')
@@ -287,8 +292,8 @@ export default function SettlementManagementPage() {
                         <button
                           type="button"
                           className="admin-row-action admin-row-action--danger"
-                          disabled={submitting}
-                          title="Hủy kỳ đối soát"
+                            disabled={submitting || !settlement.control?.canCancel}
+                            title={settlement.control?.blockedReason || 'Hủy kỳ đối soát'}
                           onClick={() => {
                             setAction({ type: 'CANCELLED', settlement })
                             setActionValue('')

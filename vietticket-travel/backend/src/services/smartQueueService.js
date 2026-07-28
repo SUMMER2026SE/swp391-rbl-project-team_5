@@ -204,7 +204,11 @@ function assertQueueEligibility(item, now, policy = DEFAULT_QUEUE_POLICY) {
 
   return {
     closesAt,
-    partySize: Math.max(1, Number(item.booking.reservation?.quantity) || 1),
+    partySize: Math.max(
+      1,
+      (Number(item.booking.reservation?.quantity) || 1)
+        * (Number(item.booking.reservation?.snapshotAdmissionCount) || 1),
+    ),
     visitDate,
     visitDateKey,
   };
@@ -232,7 +236,14 @@ async function loadOwnedItem(prismaClient, tripId, itemId, userId) {
           userId: true,
           status: true,
           snapshotVisitDate: true,
-          reservation: { select: { date: true, quantity: true, timeSlotId: true } },
+          reservation: {
+            select: {
+              date: true,
+              quantity: true,
+              snapshotAdmissionCount: true,
+              timeSlotId: true,
+            },
+          },
           ticketInstances: { select: { status: true } },
         },
       },

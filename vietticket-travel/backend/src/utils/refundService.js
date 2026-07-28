@@ -2,6 +2,7 @@
 
 const { getBookingActivityWindow } = require('./activityTime');
 const { isRefundableCapturedPayment } = require('./paymentGateway');
+const { getInventoryUnits } = require('./ticketCapacity');
 
 // Múi giờ nghiệp vụ của hệ thống (Việt Nam, UTC+7).
 const VN_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -169,15 +170,16 @@ async function releaseInventory(tx, booking) {
   const reservation = booking?.reservation;
   if (!reservation || reservation.status !== 'CONFIRMED') return;
 
-  const { ticketProductId, timeSlotId, date, quantity } = reservation;
+  const { ticketProductId, timeSlotId, date } = reservation;
+  const inventoryUnits = getInventoryUnits(reservation);
 
   const dailyStock = await tx.dailyStock.updateMany({
     where: {
       ticketProductId,
       date,
-      bookedQuantity: { gte: quantity },
+      bookedQuantity: { gte: inventoryUnits },
     },
-    data: { bookedQuantity: { decrement: quantity } },
+    data: { bookedQuantity: { decrement: inventoryUnits } },
   });
 
   if (dailyStock.count !== 1) {
@@ -196,9 +198,9 @@ async function releaseInventory(tx, booking) {
         where: {
           attractionId,
           date,
-          bookedQty: { gte: quantity },
+          bookedQty: { gte: inventoryUnits },
         },
-        data: { bookedQty: { decrement: quantity } },
+        data: { bookedQty: { decrement: inventoryUnits } },
       })
     : { count: 0 };
 
@@ -213,9 +215,9 @@ async function releaseInventory(tx, booking) {
       where: {
         timeSlotId,
         date,
-        bookedQty: { gte: quantity },
+        bookedQty: { gte: inventoryUnits },
       },
-      data: { bookedQty: { decrement: quantity } },
+      data: { bookedQty: { decrement: inventoryUnits } },
     });
 
     if (timeSlotStock.count !== 1) {
@@ -247,10 +249,11 @@ async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = 
   });
   if (claimed.count !== 1) return false;
 
-  const { ticketProductId, timeSlotId, date, quantity } = reservation;
+  const { ticketProductId, timeSlotId, date } = reservation;
+  const inventoryUnits = getInventoryUnits(reservation);
   const dailyStock = await tx.dailyStock.updateMany({
-    where: { ticketProductId, date, heldQuantity: { gte: quantity } },
-    data: { heldQuantity: { decrement: quantity } },
+    where: { ticketProductId, date, heldQuantity: { gte: inventoryUnits } },
+    data: { heldQuantity: { decrement: inventoryUnits } },
   });
   if (dailyStock.count !== 1) {
     const error = new Error('Không thể hoàn trả kho vé đang giữ theo ngày.');
@@ -265,8 +268,8 @@ async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = 
     }))?.attractionId;
   const attractionStock = attractionId
     ? await tx.attractionDailyStock.updateMany({
-        where: { attractionId, date, heldQty: { gte: quantity } },
-        data: { heldQty: { decrement: quantity } },
+        where: { attractionId, date, heldQty: { gte: inventoryUnits } },
+        data: { heldQty: { decrement: inventoryUnits } },
       })
     : { count: 0 };
   if (attractionStock.count !== 1) {
@@ -277,8 +280,8 @@ async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = 
 
   if (timeSlotId) {
     const timeSlotStock = await tx.timeSlotStock.updateMany({
-      where: { timeSlotId, date, heldQty: { gte: quantity } },
-      data: { heldQty: { decrement: quantity } },
+      where: { timeSlotId, date, heldQty: { gte: inventoryUnits } },
+      data: { heldQty: { decrement: inventoryUnits } },
     });
     if (timeSlotStock.count !== 1) {
       const error = new Error('Không thể hoàn trả kho vé đang giữ theo khung giờ.');

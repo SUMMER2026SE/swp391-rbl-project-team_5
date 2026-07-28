@@ -1,5 +1,7 @@
 'use strict';
 
+const { randomUUID } = require('crypto');
+
 // ============================================================
 // aiAssistantController.js
 // ------------------------------------------------------------
@@ -155,6 +157,9 @@ function parseParty({ people, adults, children }) {
  * Body: { message: string, history?: Array<{ role, content }> }
  */
 async function chat(req, res, next) {
+  const requestId = randomUUID();
+  const startedAt = Date.now();
+
   try {
     const { message, history } = req.body || {};
     const normalizedMessage = normalizeChatMessage(message);
@@ -179,14 +184,25 @@ async function chat(req, res, next) {
       fullName: req.user?.fullName,
     });
 
+    // Hội thoại có thể chứa dữ liệu tài khoản đã giảm thiểu; không cho proxy
+    // hoặc trình duyệt tái sử dụng response của lượt chat khác.
+    res.set?.('Cache-Control', 'no-store, private');
+    res.set?.('X-Request-Id', requestId);
+
     return res.status(200).json({
       success: true,
       data: {
         reply: result.reply,
         provider: result.provider,
+        meta: {
+          ...(result.meta || {}),
+          latencyMs: Date.now() - startedAt,
+          requestId,
+        },
       },
     });
   } catch (error) {
+    error.requestId = requestId;
     return next(error);
   }
 }

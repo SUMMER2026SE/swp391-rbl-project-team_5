@@ -54,6 +54,10 @@ function mapAttraction(attraction) {
     closeTime: attraction.closeTime,
     latitude: attraction.latitude,
     longitude: attraction.longitude,
+    meetingPoint: attraction.meetingPoint || '',
+    checkInInstructions: attraction.checkInInstructions || '',
+    accessibilityInfo: attraction.accessibilityInfo || '',
+    whatToBring: Array.isArray(attraction.whatToBring) ? attraction.whatToBring : [],
     reviewHistory: attraction.reviewHistory || [],
   };
 }
@@ -520,11 +524,46 @@ export default function AttractionApprovalPage() {
                 {selectedAttraction.tickets.length === 0 ? (
                   <p style={{ fontSize: 13, color: '#ba1a1a', margin: 0 }}>Chưa cấu hình gói vé hoạt động.</p>
                 ) : selectedAttraction.tickets.map((ticket) => (
-                  <div key={ticket.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderTop: '1px solid #eef0f1', fontSize: 13 }}>
-                    <span>{ticket.name} ({ticket.type})</span>
-                    <strong>{formatCurrency(ticket.sellingPrice)}</strong>
+                  <div key={ticket.id} style={{ padding: '10px 0', borderTop: '1px solid #eef0f1', fontSize: 13 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <span>{ticket.name} ({ticket.type})</span>
+                      <strong>{formatCurrency(ticket.sellingPrice)}</strong>
+                    </div>
+                    <p style={{ margin: '6px 0 0', color: '#3f484a' }}>
+                      <strong>Bao gồm:</strong>{' '}
+                      {Array.isArray(ticket.inclusions) && ticket.inclusions.length > 0
+                        ? ticket.inclusions.join(' · ')
+                        : 'Chưa khai báo'}
+                    </p>
+                    <p style={{ margin: '4px 0 0', color: '#3f484a' }}>
+                      <strong>Không bao gồm:</strong>{' '}
+                      {Array.isArray(ticket.exclusions) && ticket.exclusions.length > 0
+                        ? ticket.exclusions.join(' · ')
+                        : 'Không có khoản loại trừ'}
+                    </p>
                   </div>
                 ))}
+              </div>
+
+              <div style={{ borderTop: '1px solid #e1e3e4', paddingTop: 20, marginTop: 20 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, textTransform: 'uppercase', color: '#6f797a', margin: '0 0 10px' }}>
+                  Thông tin vận hành phải kiểm duyệt
+                </h4>
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: '6px 0' }}>
+                  <strong>Điểm gặp/check-in:</strong> {selectedAttraction.meetingPoint || 'Chưa khai báo'}
+                </p>
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: '6px 0', whiteSpace: 'pre-wrap' }}>
+                  <strong>Hướng dẫn check-in:</strong> {selectedAttraction.checkInInstructions || 'Chưa khai báo'}
+                </p>
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: '6px 0', whiteSpace: 'pre-wrap' }}>
+                  <strong>Khả năng tiếp cận:</strong> {selectedAttraction.accessibilityInfo || 'Chưa khai báo'}
+                </p>
+                <p style={{ fontSize: 13, lineHeight: 1.6, margin: '6px 0' }}>
+                  <strong>Cần mang theo:</strong>{' '}
+                  {selectedAttraction.whatToBring.length > 0
+                    ? selectedAttraction.whatToBring.join(' · ')
+                    : 'Không có vật dụng bắt buộc'}
+                </p>
               </div>
 
               {selectedAttraction.status === 'rejected' && selectedAttraction.rejectReason && (

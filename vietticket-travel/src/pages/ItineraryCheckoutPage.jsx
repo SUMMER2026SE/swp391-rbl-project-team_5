@@ -6,7 +6,7 @@ import { useAuth } from '../context/useAuth.js'
 import { getItineraryBookingProgress } from '../services/bookingService.js'
 import { footerLinks } from '../data/landingData.js'
 import {
-  buildItineraryQueueBookingUrl,
+  buildItineraryQueueActionUrl,
   getItineraryQueueProgress,
   getNextItineraryQueueStep,
   loadItineraryBookingQueue,
@@ -27,6 +27,15 @@ const STATUS_LABELS = {
   booking_created: 'Chờ hoàn tất thanh toán',
   action_required: 'Cần đặt lại dòng vé này',
   completed: 'Đã thanh toán',
+  refund_pending: 'Đang xử lý hoàn tiền',
+}
+
+const getNextActionLabel = (item, completedCount) => {
+  if (item?.status === 'booking_created' || item?.status === 'reserved') {
+    return 'Tiếp tục thanh toán đơn đang giữ'
+  }
+  if (item?.status === 'action_required') return 'Đặt lại dòng vé cần xử lý'
+  return completedCount === 0 ? 'Bắt đầu giữ vé đầu tiên' : 'Tiếp tục dòng vé tiếp theo'
 }
 
 export default function ItineraryCheckoutPage() {
@@ -76,7 +85,7 @@ export default function ItineraryCheckoutPage() {
 
   const progress = getItineraryQueueProgress(queue)
   const nextItem = getNextItineraryQueueStep(queue)
-  const nextUrl = nextItem ? buildItineraryQueueBookingUrl(queue, nextItem) : ''
+  const nextUrl = nextItem ? buildItineraryQueueActionUrl(queue, nextItem) : ''
   const estimatedTotal = queue.items.reduce(
     (sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0),
     0,
@@ -93,6 +102,18 @@ export default function ItineraryCheckoutPage() {
             <p className="mt-3 max-w-3xl text-sm leading-6 text-[#596365]">
               Đây là một quy trình gồm {queue.items.length} dòng vé. Mỗi dòng được giữ chỗ và thanh toán riêng để đúng tồn kho, ngày đi và chính sách của từng đối tác; hệ thống luôn đưa bạn trở lại danh sách này sau mỗi giao dịch.
             </p>
+            <div className="mt-4 rounded-2xl border border-[#b8d8d9] bg-[#f2fbfb] p-4 text-sm leading-6 text-[#00474d]">
+              <strong>Không phải một đơn hàng gộp:</strong> mỗi dòng tạo một booking và một giao dịch độc lập.
+              Nếu một dòng sau thất bại hoặc bạn dừng giữa chừng, các booking đã thanh toán trước đó vẫn giữ nguyên
+              hiệu lực; hệ thống không tự hủy hay hoàn ngược toàn bộ lịch trình.
+            </div>
+            {progress.completed > 0 && !progress.isComplete && (
+              <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+                Lịch trình đang hoàn tất một phần: {progress.completed} dòng đã thanh toán.
+                Bạn có thể tiếp tục các dòng còn lại hoặc dừng; hãy tự hủy từng booking đã mua nếu không còn nhu cầu,
+                theo đúng chính sách của booking đó.
+              </p>
+            )}
             {syncWarning && (
               <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                 {syncWarning}
@@ -130,10 +151,29 @@ export default function ItineraryCheckoutPage() {
                             <span className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
                               item.status === 'action_required'
                                 ? 'bg-amber-100 text-amber-900'
+                                : item.status === 'refund_pending'
+                                  ? 'bg-blue-100 text-blue-900'
                                 : 'bg-[#eef3f4] text-[#3f484a]'
                             }`}>
                               {STATUS_LABELS[item.status] || 'Đang xử lý'}
                             </span>
+                          )}
+                          {item.status === 'booking_created' && (
+                            <p className="mt-2 text-xs leading-5 text-[#596365]">
+                              Tiếp tục booking đang giữ chỗ; không tạo thêm một reservation trùng cho dòng này.
+                            </p>
+                          )}
+                          {item.status === 'refund_pending' && (
+                            <p className="mt-2 text-xs leading-5 text-blue-900">
+                              Booking này đang có quy trình hoàn tiền riêng. Bạn vẫn có thể đặt các dòng phía sau,
+                              nhưng không nên tạo lại dòng này cho tới khi kiểm tra trạng thái trong Vé của tôi.
+                            </p>
+                          )}
+                          {item.status === 'action_required' && item.paid && (
+                            <p className="mt-2 text-xs leading-5 text-amber-900">
+                              Booking cũ đã ghi nhận tiền nhưng không còn cung cấp vé. Khoản hoàn được theo dõi riêng;
+                              kiểm tra Vé của tôi trước khi thanh toán lại để tránh chi hai lần ngoài ý muốn.
+                            </p>
                           )}
                         </div>
                       </div>
@@ -147,16 +187,30 @@ export default function ItineraryCheckoutPage() {
               <h2 className="text-lg font-bold text-[#191c1d]">Tóm tắt</h2>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex justify-between gap-4"><span className="text-[#596365]">Tiến độ</span><strong>{progress.completed}/{progress.total} dòng vé</strong></div>
-                <div className="flex justify-between gap-4"><span className="text-[#596365]">Tạm tính toàn lịch trình</span><strong>{formatCurrency(estimatedTotal)}</strong></div>
+                {progress.paymentPending > 0 && (
+                  <div className="flex justify-between gap-4"><span className="text-[#596365]">Đang thanh toán</span><strong>{progress.paymentPending} dòng</strong></div>
+                )}
+                {progress.refundPending > 0 && (
+                  <div className="flex justify-between gap-4"><span className="text-[#596365]">Đang hoàn tiền</span><strong>{progress.refundPending} dòng</strong></div>
+                )}
+                {progress.actionRequired > 0 && (
+                  <div className="flex justify-between gap-4"><span className="text-[#596365]">Cần đặt lại</span><strong>{progress.actionRequired} dòng</strong></div>
+                )}
+                <div className="flex justify-between gap-4"><span className="text-[#596365]">Dự toán ban đầu</span><strong>{formatCurrency(estimatedTotal)}</strong></div>
               </div>
               <p className="mt-4 rounded-xl bg-[#fff7e6] p-3 text-xs leading-5 text-[#5d4300]">
-                Giá, voucher và tồn vé được xác nhận lại ở từng bước giữ chỗ. Một dòng chỉ hoàn tất khi hệ thống đã xác nhận thanh toán qua VNPay hoặc chuyển khoản ngân hàng và đơn vẫn có khả năng cung cấp vé.
+                Dự toán không phải số tiền của một giao dịch chung. Giá, voucher và tồn vé được xác nhận lại ở từng bước giữ chỗ;
+                tổng thực trả là tổng của các booking mà bạn thực sự hoàn tất.
               </p>
               {progress.isComplete ? (
                 <Link className="mt-5 flex w-full items-center justify-center rounded-xl bg-[#006068] px-4 py-3 text-sm font-bold text-white" to="/my-tickets">Xem toàn bộ vé đã đặt</Link>
-              ) : (
+              ) : nextItem && nextUrl ? (
                 <Link className="mt-5 flex w-full items-center justify-center rounded-xl bg-[#006068] px-4 py-3 text-sm font-bold text-white" to={nextUrl}>
-                  {progress.completed === 0 ? 'Bắt đầu giữ vé' : 'Tiếp tục dòng vé tiếp theo'}
+                  {getNextActionLabel(nextItem, progress.completed)}
+                </Link>
+              ) : (
+                <Link className="mt-5 flex w-full items-center justify-center rounded-xl bg-[#006068] px-4 py-3 text-sm font-bold text-white" to="/my-tickets">
+                  Theo dõi các booking và khoản hoàn
                 </Link>
               )}
               <Link className="mt-3 flex w-full items-center justify-center rounded-xl border border-[#9aa5a7] px-4 py-3 text-sm font-semibold text-[#00474d]" to="/attractions">Quay lại lịch trình</Link>

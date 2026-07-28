@@ -19,8 +19,17 @@ function readMaxTicketsPerOrder(value = process.env.MAX_TICKETS_PER_ORDER) {
 }
 
 const MAX_TICKETS_PER_ORDER = readMaxTicketsPerOrder();
+const CUSTOMER_BOOKING_CHANGE_POLICY = Object.freeze({
+  cancellationScope: 'WHOLE_BOOKING',
+  partialCancellationSupported: false,
+  visitDateChangeSupported: false,
+  timeSlotChangeSupported: false,
+  ticketProductChangeSupported: false,
+  recoveryReplacementIsOperationalException: true,
+});
 
 module.exports = {
+  CUSTOMER_BOOKING_CHANGE_POLICY,
   DEFAULT_MAX_TICKETS_PER_ORDER,
   HARD_MAX_TICKETS_PER_ORDER,
   MAX_TICKETS_PER_ORDER,

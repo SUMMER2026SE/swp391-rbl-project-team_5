@@ -5,18 +5,28 @@ import { useAuth } from '../context/useAuth.js'
 import { aiChat } from '../services/aiApi.js'
 
 const WELCOME_MESSAGE =
-  'Xin chào! Tôi là trợ lý VietTicket. Tôi có thể giúp bạn về chính sách đặt vé, hoàn vé, thanh toán. Bạn cần hỗ trợ gì?'
+  'Xin chào! Mình là Trợ lý VietTicket. Mình có thể giúp bạn tìm điểm đến, so sánh vé, giải đáp chính sách, kiểm tra đơn đã đăng nhập và trả lời các câu hỏi du lịch. Bạn muốn bắt đầu từ đâu?'
 
 const INTERNAL_LINK_SPLIT_RE =
-  /(\/(?:attractions|tickets|support|my-tickets|my-support)(?:\/[A-Za-z0-9-]+)?(?:\?[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?(?:#[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?)/g
+  /(\/(?:(?:attractions|tickets|support|my-tickets|my-support)(?:\/[A-Za-z0-9-]+)?|about|faq|terms|privacy|login|partner\/register)(?:\?[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?(?:#[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?)/g
 const INTERNAL_LINK_RE =
-  /^\/(?:attractions|tickets|support|my-tickets|my-support)(?:\/[A-Za-z0-9-]+)?(?:\?[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?(?:#[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?$/
+  /^\/(?:(?:attractions|tickets|support|my-tickets|my-support)(?:\/[A-Za-z0-9-]+)?|about|faq|terms|privacy|login|partner\/register)(?:\?[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?(?:#[A-Za-z0-9_~!$&%()*+,;=:@/?-]*)?$/
 const BOLD_TEXT_SPLIT_RE = /(\*\*[^*]+\*\*)/g
 const LEGACY_CHAT_HISTORY_KEY = 'vietticket_chat_history'
 const CHAT_HISTORY_KEY_PREFIX = 'vietticket_chat_history'
 const MAX_CHAT_INPUT_LENGTH = 1200
 const MAX_STORED_CHAT_MESSAGES = 20
 const CHAT_HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const DEFAULT_SUGGESTIONS = [
+  'Gợi ý điểm tham quan ở Đà Nẵng',
+  'Chính sách hoàn vé thế nào?',
+  'Tôi nhận vé QR khi nào?',
+]
+const CONFIDENCE_LABELS = {
+  verified: 'Đã kiểm tra dữ liệu VietTicket',
+  grounded: 'Theo chính sách VietTicket',
+  general: 'Thông tin tham khảo từ AI',
+}
 
 function renderPlainText(part, keyPrefix) {
   return String(part || '')
@@ -58,7 +68,12 @@ function renderMessageText(text) {
 }
 
 function getWelcomeMessages() {
-  return [{ id: 'welcome', sender: 'bot', text: WELCOME_MESSAGE }]
+  return [{
+    id: 'welcome',
+    sender: 'bot',
+    text: WELCOME_MESSAGE,
+    meta: { confidence: 'grounded', suggestions: DEFAULT_SUGGESTIONS },
+  }]
 }
 
 function normalizeStoredMessages(messages) {
@@ -167,8 +182,18 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
     [messages],
   )
 
-  const handleSend = useCallback(async () => {
-    const trimmedInput = inputValue.trim()
+  const activeSuggestions = useMemo(() => {
+    const latestBotMessage = [...messages]
+      .reverse()
+      .find((message) => message.sender === 'bot' && !message.loading)
+    const suggestions = latestBotMessage?.meta?.suggestions
+    return Array.isArray(suggestions) && suggestions.length > 0
+      ? suggestions.slice(0, 3)
+      : DEFAULT_SUGGESTIONS
+  }, [messages])
+
+  const handleSend = useCallback(async (messageOverride = '') => {
+    const trimmedInput = String(messageOverride || inputValue).trim()
     if (!trimmedInput || loading) return
     if (trimmedInput.length > MAX_CHAT_INPUT_LENGTH) {
       toast.warning('Nội dung chat quá dài. Vui lòng rút gọn câu hỏi.')
@@ -198,15 +223,29 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
       const result = await aiChat(trimmedInput, history.slice(-10))
       const reply = result.data?.reply ||
         'Xin lỗi, tôi chưa nhận được phản hồi. Vui lòng thử lại sau.'
+      const meta = result.data?.meta || {}
 
       setMessages((current) =>
         current
           .filter((message) => message.id !== loadingMessage.id)
-          .concat({ id: `bot-${Date.now()}`, sender: 'bot', text: reply })
+          .concat({ id: `bot-${Date.now()}`, sender: 'bot', text: reply, meta })
           .slice(-MAX_STORED_CHAT_MESSAGES),
       )
     } catch (error) {
-      setMessages((current) => current.filter((message) => message.id !== loadingMessage.id))
+      setMessages((current) =>
+        current
+          .filter((message) => message.id !== loadingMessage.id)
+          .concat({
+            id: `bot-error-${Date.now()}`,
+            sender: 'bot',
+            text: 'Mình đang gặp lỗi kết nối. Bạn có thể thử lại hoặc mở /support nếu cần hỗ trợ gấp.',
+            meta: {
+              confidence: 'grounded',
+              suggestions: ['Thử lại câu hỏi vừa rồi', 'Cách tạo Support Ticket'],
+            },
+          })
+          .slice(-MAX_STORED_CHAT_MESSAGES),
+      )
       toast.error(error?.status === 400 && error.message
         ? error.message
         : 'Trợ lý tạm thời không khả dụng, vui lòng thử lại sau.')
@@ -239,7 +278,7 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
   return (
     <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
       {open && (
-        <div className="w-[92vw] sm:w-[400px] rounded-3xl border border-[#cbd5db] bg-white shadow-2xl">
+        <div className="flex h-[min(640px,calc(100vh-6.5rem))] w-[92vw] flex-col overflow-hidden rounded-3xl border border-[#cbd5db] bg-white shadow-2xl sm:w-[400px]">
           <div className="flex items-center justify-between rounded-t-3xl bg-[#00474d] px-4 py-3 text-white">
             <div>
               <h2 className="text-sm font-bold">Trợ lý VietTicket</h2>
@@ -266,14 +305,18 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
             </div>
           </div>
 
-          <div className="max-h-[60vh] sm:max-h-[500px] space-y-3 overflow-y-auto px-4 py-4 text-sm text-[#1f2933]">
+          <div
+            aria-live="polite"
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 text-sm text-[#1f2933]"
+            role="log"
+          >
             {messages.map((message) => (
               <div
                 key={message.id}
                 className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[78%] rounded-3xl px-4 py-3 text-sm shadow-sm ${
+                  className={`max-w-[84%] rounded-3xl px-4 py-3 text-sm shadow-sm ${
                     message.sender === 'user'
                       ? 'bg-[#00474d] text-white'
                       : 'bg-[#f3f6f7] text-[#1f2933]'
@@ -286,7 +329,54 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
                       <span className="animate-pulse delay-200">.</span>
                     </div>
                   ) : (
-                    renderMessageText(message.text)
+                    <>
+                      {renderMessageText(message.text)}
+                      {message.sender === 'bot' && message.meta?.confidence && (
+                        <div className="mt-3 border-t border-[#dbe4e7] pt-2">
+                          <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#5b6f75]">
+                            <span className="material-symbols-outlined text-[14px]">
+                              {message.meta.confidence === 'verified' ? 'verified' : 'info'}
+                            </span>
+                            {CONFIDENCE_LABELS[message.meta.confidence] || CONFIDENCE_LABELS.general}
+                          </p>
+                          {message.meta.currentInformationWarning && (
+                            <p className="mt-1 text-[11px] leading-4 text-[#7a5b12]">
+                              Thông tin này có thể thay đổi theo thời gian; hãy kiểm tra nguồn chính thức trước khi quyết định.
+                            </p>
+                          )}
+                          {Array.isArray(message.meta.sources) && message.meta.sources.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {message.meta.sources
+                                .filter((source) => INTERNAL_LINK_RE.test(source?.href || ''))
+                                .map((source) => (
+                                  <Link
+                                    className="rounded-full border border-[#bdd0d4] bg-white px-2 py-1 text-[10px] font-semibold text-[#00474d] hover:border-[#00474d]"
+                                    key={`${message.id}-${source.id}`}
+                                    to={source.href}
+                                  >
+                                    {source.label}
+                                  </Link>
+                                ))}
+                            </div>
+                          )}
+                          {Array.isArray(message.meta.actions) && message.meta.actions.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {message.meta.actions
+                                .filter((action) => INTERNAL_LINK_RE.test(action?.href || ''))
+                                .map((action) => (
+                                  <Link
+                                    className="rounded-xl bg-[#00474d] px-3 py-2 text-[11px] font-bold text-white hover:bg-[#00629d]"
+                                    key={`${message.id}-${action.href}`}
+                                    to={action.href}
+                                  >
+                                    {action.label}
+                                  </Link>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -295,25 +385,41 @@ function ChatbotWidgetSession({ allowLegacyHistory, storageKey }) {
           </div>
 
           <div className="rounded-b-3xl border-t border-[#cbd5db] bg-[#f8fafb] p-4">
+            {!loading && activeSuggestions.length > 0 && (
+              <div className="mb-3 flex gap-2 overflow-x-auto pb-1" aria-label="Câu hỏi gợi ý">
+                {activeSuggestions.map((suggestion) => (
+                  <button
+                    className="shrink-0 rounded-full border border-[#9fb8bd] bg-white px-3 py-2 text-left text-[11px] font-semibold text-[#00474d] transition hover:border-[#00474d] hover:bg-[#eef7f7]"
+                    key={suggestion}
+                    onClick={() => handleSend(suggestion)}
+                    type="button"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2">
-              <input
+              <textarea
                 ref={inputRef}
                 aria-describedby="chatbot-privacy-note"
-                className="min-w-0 flex-1 rounded-2xl border border-[#cbd5db] bg-white px-4 py-3 text-sm text-[#1f2933] outline-none transition focus:border-[#00474d] focus:ring-2 focus:ring-[#00474d]/20"
+                aria-label="Tin nhắn cho Trợ lý VietTicket"
+                className="max-h-28 min-h-12 min-w-0 flex-1 resize-none rounded-2xl border border-[#cbd5db] bg-white px-4 py-3 text-sm text-[#1f2933] outline-none transition focus:border-[#00474d] focus:ring-2 focus:ring-[#00474d]/20"
                 maxLength={MAX_CHAT_INPUT_LENGTH}
-                placeholder="Nhập tin nhắn..."
+                placeholder="Hỏi bất cứ điều gì..."
+                rows={1}
                 value={inputValue}
                 onChange={(event) => setInputValue(event.target.value)}
                 onKeyDown={handleKeyDown}
-                type="text"
               />
               <button
                 className="inline-flex h-12 items-center justify-center rounded-2xl bg-[#00474d] px-4 text-sm font-semibold text-white transition hover:bg-[#00629d] active:scale-[0.98]"
                 disabled={loading}
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 type="button"
               >
-                Gửi
+                <span className="material-symbols-outlined">send</span>
+                <span className="sr-only">Gửi</span>
               </button>
             </div>
             <p id="chatbot-privacy-note" className="mt-2 text-[11px] leading-4 text-[#64748b]">

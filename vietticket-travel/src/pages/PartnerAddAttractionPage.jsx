@@ -45,6 +45,10 @@ function PartnerAddAttractionPage() {
     recommendedVisitMinutes: '150',
     environment: 'MIXED',
     isFullDay: false,
+    meetingPoint: '',
+    checkInInstructions: '',
+    accessibilityInfo: '',
+    whatToBringText: '',
   })
   const [categories, setCategories] = useState([])
 
@@ -183,6 +187,13 @@ function PartnerAddAttractionPage() {
       recommendedVisitMinutes: visitMinutes,
       environment: form.environment,
       isFullDay: form.isFullDay,
+      meetingPoint: form.meetingPoint,
+      checkInInstructions: form.checkInInstructions,
+      accessibilityInfo: form.accessibilityInfo,
+      whatToBring: form.whatToBringText
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean),
     }
 
     try {
@@ -325,6 +336,55 @@ function PartnerAddAttractionPage() {
                 {form.description.length}/5000 ký tự
               </p>
             </FormField>
+            <div className="rounded-xl border border-[#b8d8d9] bg-[#f2fbfb] p-5">
+              <SectionHeading>Thông tin vận hành cho khách</SectionHeading>
+              <p className="mb-5 mt-2 text-xs leading-5 text-[#3f484a]">
+                Có thể lưu bản nháp khi chưa hoàn tất, nhưng các trường này phải đầy đủ trước khi gửi duyệt.
+                Nội dung sẽ được đóng băng vào vé tại thời điểm khách đặt.
+              </p>
+              <div className="space-y-5">
+                <FormField label="Điểm gặp / quầy check-in" required>
+                  <textarea
+                    value={form.meetingPoint}
+                    onChange={(e) => updateForm('meetingPoint', e.target.value)}
+                    rows={2}
+                    maxLength={1000}
+                    placeholder="VD: Quầy vé VietTicket, cổng chính số 1, đối diện bãi đỗ xe."
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                </FormField>
+                <FormField label="Hướng dẫn check-in" required>
+                  <textarea
+                    value={form.checkInInstructions}
+                    onChange={(e) => updateForm('checkInInstructions', e.target.value)}
+                    rows={3}
+                    maxLength={3000}
+                    placeholder="Nêu thời gian nên có mặt, giấy tờ cần xuất trình và thứ tự kiểm tra QR."
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                </FormField>
+                <FormField label="Khả năng tiếp cận" required>
+                  <textarea
+                    value={form.accessibilityInfo}
+                    onChange={(e) => updateForm('accessibilityInfo', e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="Nêu rõ có/không hỗ trợ xe lăn, thang máy, xe đẩy trẻ em hoặc người cần hỗ trợ."
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                </FormField>
+                <FormField label="Cần mang theo (mỗi dòng một mục)">
+                  <textarea
+                    value={form.whatToBringText}
+                    onChange={(e) => updateForm('whatToBringText', e.target.value)}
+                    rows={4}
+                    placeholder={'Giấy tờ tùy thân có ảnh\nÁo mưa hoặc ô\nNước uống cá nhân'}
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                  <p className="mt-1 text-xs text-[#6f797a]">Để trống nếu không có vật dụng bắt buộc.</p>
+                </FormField>
+              </div>
+            </div>
             <FormField label="Danh mục" required>
               <select
                 value={form.category}
@@ -396,7 +456,8 @@ function PartnerAddAttractionPage() {
                 >
                   <span className="block text-sm font-semibold text-[#191c1d]">Partner xác nhận thủ công</span>
                   <span className="mt-1 block text-xs text-[#3f484a]">
-                    Khách thanh toán xong, đơn chờ đối tác duyệt trước khi phát hành vé QR.
+                    Khách thanh toán trước; đối tác phải duyệt trong tối đa 24 giờ và không muộn hơn giờ bắt đầu.
+                    Từ chối hoặc quá hạn sẽ hủy booking và tạo hoàn tiền bắt buộc 100%.
                   </span>
                 </button>
                 <button

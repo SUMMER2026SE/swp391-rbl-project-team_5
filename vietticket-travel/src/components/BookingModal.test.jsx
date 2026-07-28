@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
+import {
+  normalizeInitialQuantity,
+  updateSingleTicketQuantity,
+} from '../utils/bookingQuantity.js'
 
 describe('normalizeInitialQuantity', () => {
   it('keeps valid positive quantities', () => {
@@ -15,5 +18,12 @@ describe('normalizeInitialQuantity', () => {
 
   it('uses a whole ticket quantity', () => {
     expect(normalizeInitialQuantity(2.9)).toBe(2)
+  })
+})
+
+describe('updateSingleTicketQuantity', () => {
+  it('keeps exactly one ticket product selected for a booking', () => {
+    expect(updateSingleTicketQuantity({ adult: 2 }, 'child', 1)).toEqual({ child: 1 })
+    expect(updateSingleTicketQuantity({ child: 1 }, 'child', 1)).toEqual({ child: 2 })
   })
 })

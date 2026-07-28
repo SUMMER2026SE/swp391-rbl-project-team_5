@@ -6,6 +6,7 @@ const prisma = require('../config/prisma');
 const { sendHoldExpiredEmail } = require('./mailer');
 const { BANK_TRANSFER_METHOD } = require('./bankTransferPolicy');
 const { writeAuditLog } = require('./auditLog');
+const { getInventoryUnits } = require('./ticketCapacity');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000; // chạy mỗi 1 phút
 const DEFAULT_GRACE_MS = 3 * 60 * 1000; // chừa 3 phút cho IPN trả trễ
@@ -109,11 +110,16 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
                 },
               },
               ticketProduct: {
-                select: { attractionId: true, attraction: { select: { title: true } } },
+                select: {
+                  attractionId: true,
+                  admissionCount: true,
+                  attraction: { select: { title: true } },
+                },
               },
             },
           });
           if (!r || r.status !== 'HELD') return;
+          const inventoryUnits = getInventoryUnits(r);
 
           await tx.reservation.update({
             where: { id },
@@ -125,17 +131,17 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
             where: {
               ticketProductId: r.ticketProductId,
               date: r.date,
-              heldQuantity: { gte: r.quantity },
+              heldQuantity: { gte: inventoryUnits },
             },
-            data: { heldQuantity: { decrement: r.quantity } },
+            data: { heldQuantity: { decrement: inventoryUnits } },
           });
           await tx.attractionDailyStock.updateMany({
             where: {
               attractionId: r.ticketProduct.attractionId,
               date: r.date,
-              heldQty: { gte: r.quantity },
+              heldQty: { gte: inventoryUnits },
             },
-            data: { heldQty: { decrement: r.quantity } },
+            data: { heldQty: { decrement: inventoryUnits } },
           });
 
           if (r.timeSlotId) {
@@ -143,9 +149,9 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
               where: {
                 timeSlotId: r.timeSlotId,
                 date: r.date,
-                heldQty: { gte: r.quantity },
+                heldQty: { gte: inventoryUnits },
               },
-              data: { heldQty: { decrement: r.quantity } },
+              data: { heldQty: { decrement: inventoryUnits } },
             });
           }
 

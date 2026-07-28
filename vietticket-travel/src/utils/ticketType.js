@@ -19,6 +19,11 @@ function optionalInteger(value) {
 
 export function getTicketEligibilityLabel(ticket) {
   const conditions = []
+  const type = String(ticket?.type || 'ADULT').toUpperCase()
+  const admissionCount = optionalInteger(ticket?.admissionCount)
+  const packageLabel = ['FAMILY', 'GROUP'].includes(type) && admissionCount != null
+    ? `Một gói áp dụng cho ${admissionCount} khách`
+    : ''
   const minAge = optionalInteger(ticket?.minAgeYears)
   const maxAge = optionalInteger(ticket?.maxAgeYears)
   const minHeight = optionalInteger(ticket?.minHeightCm)
@@ -33,13 +38,17 @@ export function getTicketEligibilityLabel(ticket) {
   else if (maxHeight != null) conditions.push(`cao không quá ${maxHeight} cm`)
 
   if (ticket?.requiresAdult) conditions.push('phải đi cùng người lớn')
-  if (conditions.length > 0) return `Áp dụng cho khách ${conditions.join(', ')}`
+  if (conditions.length > 0) {
+    return [
+      packageLabel,
+      `Áp dụng cho khách ${conditions.join(', ')}`,
+    ].filter(Boolean).join('. ')
+  }
 
-  const type = String(ticket?.type || 'ADULT').toUpperCase()
   if (type === 'CHILD') return 'Chưa có điều kiện tuổi/chiều cao; hãy kiểm tra mô tả vé'
   if (type === 'STUDENT') return 'Cần xuất trình giấy tờ học sinh hoặc sinh viên còn hiệu lực'
-  if (type === 'FAMILY') return 'Một vé tương ứng với một gói gia đình'
-  if (type === 'GROUP') return 'Một vé tương ứng với một gói nhóm'
+  if (type === 'FAMILY') return packageLabel || 'Gói gia đình chưa khai báo số khách'
+  if (type === 'GROUP') return packageLabel || 'Gói nhóm chưa khai báo số khách'
   return 'Áp dụng theo điều kiện của gói vé'
 }
 

@@ -51,6 +51,10 @@ function PartnerEditAttractionPage() {
     recommendedVisitMinutes: '150',
     environment: 'MIXED',
     isFullDay: false,
+    meetingPoint: '',
+    checkInInstructions: '',
+    accessibilityInfo: '',
+    whatToBringText: '',
   })
   const [categories, setCategories] = useState([])
   const [images, setImages] = useState([])
@@ -85,6 +89,10 @@ function PartnerEditAttractionPage() {
         recommendedVisitMinutes: String(data.recommendedVisitMinutes ?? 150),
         environment: data.environment ?? 'MIXED',
         isFullDay: Boolean(data.isFullDay),
+        meetingPoint: data.meetingPoint ?? '',
+        checkInInstructions: data.checkInInstructions ?? '',
+        accessibilityInfo: data.accessibilityInfo ?? '',
+        whatToBringText: Array.isArray(data.whatToBring) ? data.whatToBring.join('\n') : '',
       }))
       if (Array.isArray(data.images)) {
         setImages(
@@ -170,6 +178,9 @@ function PartnerEditAttractionPage() {
     if (!form.province) { toast.error('Vui lòng chọn tỉnh / thành phố.'); setActiveTab(1); return }
     if (!form.category) { toast.error('Vui lòng chọn danh mục điểm tham quan.'); setActiveTab(0); return }
     if (submitForReview && form.description.trim().length < 50) { toast.error('Mô tả cần ít nhất 50 ký tự trước khi gửi duyệt.'); setActiveTab(0); return }
+    if (submitForReview && form.meetingPoint.trim().length < 5) { toast.error('Vui lòng mô tả rõ điểm gặp/check-in.'); setActiveTab(0); return }
+    if (submitForReview && form.checkInInstructions.trim().length < 20) { toast.error('Hướng dẫn check-in cần ít nhất 20 ký tự.'); setActiveTab(0); return }
+    if (submitForReview && form.accessibilityInfo.trim().length < 10) { toast.error('Vui lòng công bố rõ khả năng hỗ trợ tiếp cận.'); setActiveTab(0); return }
     if (submitForReview && (!form.openTime || !form.closeTime || form.openTime >= form.closeTime)) { toast.error('Vui lòng nhập giờ mở cửa và đóng cửa hợp lệ.'); setActiveTab(0); return }
     if (submitForReview && (!form.lat || !form.lng)) { toast.error('Vui lòng bổ sung tọa độ bản đồ trước khi gửi duyệt.'); setActiveTab(1); return }
     if (submitForReview && images.length === 0) { toast.error('Vui lòng tải lên ít nhất một ảnh trước khi gửi duyệt.'); setActiveTab(2); return }
@@ -201,6 +212,13 @@ function PartnerEditAttractionPage() {
       recommendedVisitMinutes: visitMinutes,
       environment: form.environment,
       isFullDay: form.isFullDay,
+      meetingPoint: form.meetingPoint,
+      checkInInstructions: form.checkInInstructions,
+      accessibilityInfo: form.accessibilityInfo,
+      whatToBring: form.whatToBringText
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean),
     }
 
     try {
@@ -406,7 +424,8 @@ function PartnerEditAttractionPage() {
                 >
                   <span className="block text-sm font-semibold text-[#191c1d]">Partner xác nhận thủ công</span>
                   <span className="mt-1 block text-xs text-[#3f484a]">
-                    Khách thanh toán xong, đơn chờ đối tác duyệt trước khi phát hành vé QR.
+                    Khách thanh toán trước; đối tác phải duyệt trong tối đa 24 giờ và không muộn hơn giờ bắt đầu.
+                    Từ chối hoặc quá hạn sẽ hủy booking và tạo hoàn tiền bắt buộc 100%.
                   </span>
                 </button>
                 <button
@@ -438,6 +457,54 @@ function PartnerEditAttractionPage() {
                 {form.description.length}/5000 ký tự
               </p>
             </FormField>
+            <div className="rounded-xl border border-[#b8d8d9] bg-[#f2fbfb] p-5">
+              <SectionHeading>Thông tin vận hành cho khách</SectionHeading>
+              <p className="mb-5 mt-2 text-xs leading-5 text-[#3f484a]">
+                Các nội dung này bắt buộc trước khi gửi duyệt và sẽ được đóng băng vào từng booking.
+              </p>
+              <div className="space-y-5">
+                <FormField label="Điểm gặp / quầy check-in" required>
+                  <textarea
+                    value={form.meetingPoint}
+                    onChange={(e) => updateForm('meetingPoint', e.target.value)}
+                    rows={2}
+                    maxLength={1000}
+                    placeholder="VD: Quầy vé VietTicket tại cổng chính số 1."
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                </FormField>
+                <FormField label="Hướng dẫn check-in" required>
+                  <textarea
+                    value={form.checkInInstructions}
+                    onChange={(e) => updateForm('checkInInstructions', e.target.value)}
+                    rows={3}
+                    maxLength={3000}
+                    placeholder="Nêu thời gian nên có mặt, giấy tờ cần xuất trình và thứ tự kiểm tra QR."
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                </FormField>
+                <FormField label="Khả năng tiếp cận" required>
+                  <textarea
+                    value={form.accessibilityInfo}
+                    onChange={(e) => updateForm('accessibilityInfo', e.target.value)}
+                    rows={3}
+                    maxLength={2000}
+                    placeholder="Nêu rõ có/không hỗ trợ xe lăn, thang máy, xe đẩy hoặc người cần hỗ trợ."
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                </FormField>
+                <FormField label="Cần mang theo (mỗi dòng một mục)">
+                  <textarea
+                    value={form.whatToBringText}
+                    onChange={(e) => updateForm('whatToBringText', e.target.value)}
+                    rows={4}
+                    placeholder={'Giấy tờ tùy thân có ảnh\nÁo mưa hoặc ô'}
+                    className="w-full resize-y rounded-lg border border-[#bec8ca] bg-white px-4 py-3 text-sm outline-none focus:border-[#00474d] focus:ring-1 focus:ring-[#00474d]"
+                  />
+                  <p className="mt-1 text-xs text-[#6f797a]">Để trống nếu không có vật dụng bắt buộc.</p>
+                </FormField>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <FormField label="Giờ mở cửa">
                 <TimeInput value={form.openTime} onChange={(v) => updateForm('openTime', v)} />

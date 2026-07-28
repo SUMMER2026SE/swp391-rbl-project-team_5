@@ -96,7 +96,13 @@ describe('arrivalPressureService', () => {
     mockPrisma.timeSlot.findMany.mockResolvedValue([]);
     mockPrisma.booking.count.mockResolvedValueOnce(20).mockResolvedValueOnce(5);
     mockPrisma.ticketInstance.findMany.mockResolvedValue([
-      { id: 'used-1', booking: { reservation: { timeSlotId: null } } },
+      {
+        id: 'used-1',
+        booking: {
+          snapshotAdmissionCount: 4,
+          reservation: { timeSlotId: null, snapshotAdmissionCount: 4 },
+        },
+      },
       { id: 'used-2', booking: { reservation: { timeSlotId: null } } },
       { id: 'used-3', booking: { reservation: { timeSlotId: null } } },
     ]);
@@ -113,7 +119,7 @@ describe('arrivalPressureService', () => {
 
     expect(result.summary.bookedQty).toBe(50);
     expect(result.summary.heldQty).toBe(5);
-    expect(result.summary.checkinsLast15Minutes).toBe(3);
+    expect(result.summary.checkinsLast15Minutes).toBe(6);
     expect(result.summary.waitingGuests).toBe(7);
     expect(result.showRate).toBe(0.8);
     expect(result.dataBasis).toBe('BOOKING_STOCK_QR_AND_SMART_QUEUE');

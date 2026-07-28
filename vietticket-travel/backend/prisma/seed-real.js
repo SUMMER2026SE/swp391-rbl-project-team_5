@@ -180,6 +180,15 @@ async function createAttraction(partner, a) {
       openDays: a.openDays || '1,1,1,1,1,1,1',
       defaultCapacity: a.defaultCapacity || 100,
       ...visitProfile,
+      meetingPoint: a.meetingPoint || `Quầy kiểm soát vé tại ${a.address}`,
+      checkInInstructions: a.checkInInstructions
+        || 'Xuất trình mã QR VietTicket còn hiệu lực tại quầy kiểm soát; mang theo giấy tờ tùy thân khi nhân viên yêu cầu đối chiếu.',
+      accessibilityInfo: a.accessibilityInfo
+        || 'Thông tin hỗ trợ xe lăn và nhu cầu tiếp cận đặc biệt cần được xác nhận trước với điểm tham quan.',
+      whatToBring: a.whatToBring || [
+        'Mã QR VietTicket',
+        'Giấy tờ tùy thân có ảnh khi được yêu cầu',
+      ],
       status: 'APPROVED', // bắt buộc để hiện ở trang tìm kiếm công khai
       publicationStatus: 'ACTIVE',
       publishedAt: new Date(),
@@ -207,6 +216,8 @@ async function createAttraction(partner, a) {
             name: tp.name,
             type: tp.type || 'ADULT',
             description: tp.description || '',
+            inclusions: tp.inclusions || ['Quyền vào cửa theo đúng tên và điều kiện của gói vé'],
+            exclusions: tp.exclusions || ['Chi phí cá nhân và dịch vụ không được nêu trong mô tả gói vé'],
             originalPrice: tp.originalPrice,
             sellingPrice: tp.sellingPrice,
             status: 'ACTIVE', // bắt buộc để hiện giá & cho đặt vé

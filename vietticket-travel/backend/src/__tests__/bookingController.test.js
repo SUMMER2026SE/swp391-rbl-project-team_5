@@ -4,7 +4,10 @@ const { Prisma } = require('@prisma/client');
 const mockPrisma = require('./helpers/mockPrisma');
 const {
   createBooking,
+  buildManualApprovalView,
+  confirmReservationAndStock,
   extractItineraryTicketItems,
+  getItineraryBookingProgress,
   itineraryContainsReservation,
   resolveBookingPaymentStatus,
   validateItineraryBookingContext,
@@ -35,6 +38,78 @@ describe('resolveBookingPaymentStatus', () => {
       { id: 'duplicate', status: 'SUCCESS', isDuplicate: true },
       { id: 'failed-attempt', status: 'FAILED', isDuplicate: false },
     ])).toBe('FAILED');
+  });
+});
+
+describe('manual approval booking view', () => {
+  test('exposes payment-before-approval policy and the exact earlier deadline', () => {
+    const view = buildManualApprovalView({
+      status: 'PENDING_PARTNER',
+      snapshotVisitDate: new Date('2026-07-29T00:00:00.000Z'),
+      snapshotActivityStartTime: '08:00',
+      payments: [{
+        status: 'SUCCESS',
+        isDuplicate: false,
+        paidAt: new Date('2026-07-28T10:00:00.000Z'),
+      }],
+      reservation: {},
+    });
+
+    expect(view).toEqual({
+      required: true,
+      paymentCapturedBeforeApproval: true,
+      approvalDeadline: new Date('2026-07-29T01:00:00.000Z'),
+      maximumResponseHours: 24,
+      deadlineRule: 'EARLIER_OF_24_HOURS_OR_ACTIVITY_START',
+      timeoutOutcome: 'CANCEL_AND_MANDATORY_FULL_REFUND',
+    });
+  });
+
+  test('does not expose a pending approval policy for an already confirmed booking', () => {
+    expect(buildManualApprovalView({ status: 'CONFIRMED' })).toBeNull();
+  });
+});
+
+describe('confirmReservationAndStock', () => {
+  test('chuyển đúng 8 chỗ cho 2 gói gia đình 4 khách', async () => {
+    const tx = {
+      dailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      attractionDailyStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      timeSlotStock: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      reservation: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const reservation = {
+      id: 'reservation-family',
+      ticketProductId: 'ticket-family',
+      timeSlotId: 'slot-family',
+      date: new Date('2026-08-20T00:00:00.000Z'),
+      quantity: 2,
+      snapshotAdmissionCount: 4,
+      status: 'HELD',
+      ticketProduct: { attractionId: 'attraction-1' },
+    };
+
+    await confirmReservationAndStock(tx, reservation);
+
+    expect(tx.dailyStock.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ heldQuantity: { gte: 8 } }),
+      data: {
+        heldQuantity: { decrement: 8 },
+        bookedQuantity: { increment: 8 },
+      },
+    }));
+    expect(tx.attractionDailyStock.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        heldQty: { decrement: 8 },
+        bookedQty: { increment: 8 },
+      },
+    }));
+    expect(tx.timeSlotStock.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        heldQty: { decrement: 8 },
+        bookedQty: { increment: 8 },
+      },
+    }));
   });
 });
 
@@ -124,6 +199,140 @@ describe('itinerary booking context', () => {
     })).rejects.toMatchObject({ statusCode: 409 });
     expect(tx.booking.findFirst).not.toHaveBeenCalled();
     expect(tx.partyRoom.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('getItineraryBookingProgress', () => {
+  test('reports independent partial outcomes without reopening blocked refund lines', async () => {
+    mockPrisma.savedItinerary.findFirst.mockResolvedValue({
+      id: 'itinerary-progress',
+      planId: 'plan-progress',
+      title: 'Lịch trình kiểm thử',
+      data: {
+        days: [{
+          activities: [{
+            attractionId: 'attraction-1',
+            ticketItems: [
+              { ticketId: 'ticket-1', quantity: 1 },
+              { ticketId: 'ticket-2', quantity: 1 },
+              { ticketId: 'ticket-3', quantity: 1 },
+              { ticketId: 'ticket-4', quantity: 1 },
+            ],
+          }],
+        }],
+      },
+    });
+    mockPrisma.booking.findMany.mockResolvedValue([
+      {
+        id: 'booking-no-show',
+        itineraryVersion: 1,
+        itineraryItemId: 'item-completed',
+        status: 'NO_SHOW',
+        reservationId: 'reservation-1',
+        paymentMethod: 'vnpay',
+        refundRequired: false,
+        totalAmount: new Decimal(100000),
+        createdAt: new Date('2026-07-28T04:00:00.000Z'),
+        reservation: { expiresAt: new Date('2026-07-28T04:15:00.000Z') },
+        refundRequests: [],
+        payments: [{
+          status: 'SUCCESS',
+          isDuplicate: false,
+          paymentGateway: 'VNPAY',
+          paidAt: new Date('2026-07-28T03:00:00.000Z'),
+        }],
+      },
+      {
+        id: 'booking-refund',
+        itineraryVersion: 1,
+        itineraryItemId: 'item-refund',
+        status: 'REFUND_REQUESTED',
+        reservationId: 'reservation-2',
+        paymentMethod: 'vnpay',
+        refundRequired: true,
+        totalAmount: new Decimal(200000),
+        createdAt: new Date('2026-07-28T03:00:00.000Z'),
+        reservation: { expiresAt: new Date('2026-07-28T03:15:00.000Z') },
+        refundRequests: [{
+          id: 'refund-1',
+          mandatory: false,
+          status: 'PROCESSING',
+          amount: new Decimal(200000),
+        }],
+        payments: [{
+          status: 'SUCCESS',
+          isDuplicate: false,
+          paymentGateway: 'VNPAY',
+          paidAt: new Date('2026-07-28T02:00:00.000Z'),
+        }],
+      },
+      {
+        id: 'booking-cancelled',
+        itineraryVersion: 1,
+        itineraryItemId: 'item-retry',
+        status: 'CANCELLED',
+        reservationId: 'reservation-3',
+        paymentMethod: 'bank_transfer',
+        refundRequired: true,
+        totalAmount: new Decimal(300000),
+        createdAt: new Date('2026-07-28T02:00:00.000Z'),
+        reservation: { expiresAt: new Date('2026-07-28T02:15:00.000Z') },
+        refundRequests: [],
+        payments: [{
+          status: 'SUCCESS',
+          isDuplicate: false,
+          paymentGateway: 'BANK_TRANSFER',
+          paidAt: new Date('2026-07-28T01:00:00.000Z'),
+        }],
+      },
+    ]);
+    const req = {
+      params: { itineraryId: 'itinerary-progress' },
+      user: { id: 'user-1' },
+    };
+    const res = makeResponse();
+    const next = jest.fn();
+
+    await getItineraryBookingProgress(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({
+        transactionPolicy: {
+          mode: 'SEQUENTIAL_INDEPENDENT',
+          atomic: false,
+          rollbackCompletedBookingsOnLaterFailure: false,
+        },
+        summary: {
+          plannedItemCount: 4,
+          startedCount: 3,
+          completedCount: 1,
+          paymentPendingCount: 0,
+          refundPendingCount: 1,
+          actionRequiredCount: 1,
+        },
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            bookingId: 'booking-no-show',
+            fulfilled: true,
+            lineState: 'COMPLETED',
+          }),
+          expect.objectContaining({
+            bookingId: 'booking-refund',
+            lineState: 'REFUND_PENDING',
+            nextAction: 'TRACK_REFUND',
+            replacementAllowed: false,
+          }),
+          expect.objectContaining({
+            bookingId: 'booking-cancelled',
+            lineState: 'ACTION_REQUIRED',
+            nextAction: 'CREATE_REPLACEMENT',
+            replacementAllowed: true,
+          }),
+        ]),
+      }),
+    }));
+    expect(next).not.toHaveBeenCalled();
   });
 });
 
@@ -312,10 +521,25 @@ describe('createBooking', () => {
       snapshotCommissionRate: new Decimal('0.25'),
       ticketProduct: {
         id: 'ticket-1',
+        name: 'Vé người lớn',
+        type: 'ADULT',
+        description: 'Vé tham quan tiêu chuẩn',
+        inclusions: ['Vé vào cổng', 'Bảo hiểm tham quan'],
+        exclusions: ['Đồ ăn'],
         status: 'ACTIVE',
         archivedAt: null,
         sellingPrice: new Decimal(120000),
         attraction: {
+          id: 'attraction-1',
+          title: 'Test Attraction',
+          address: '1 Test',
+          district: null,
+          city: 'Đà Nẵng',
+          images: [],
+          meetingPoint: 'Quầy vé cổng chính',
+          checkInInstructions: 'Xuất trình mã QR tại quầy kiểm soát trước khi vào cổng.',
+          accessibilityInfo: 'Có hỗ trợ xe lăn.',
+          whatToBring: ['CCCD'],
           publishedAt: new Date('2026-06-01T00:00:00.000Z'),
           publicationStatus: 'ACTIVE',
           status: 'APPROVED',
@@ -439,6 +663,14 @@ describe('createBooking', () => {
       minHeightCm: 120,
       maxHeightCm: 210,
       requiresAdult: true,
+    });
+    expect(createData).toMatchObject({
+      snapshotMeetingPoint: 'Quầy vé cổng chính',
+      snapshotCheckInInstructions: 'Xuất trình mã QR tại quầy kiểm soát trước khi vào cổng.',
+      snapshotAccessibilityInfo: 'Có hỗ trợ xe lăn.',
+      snapshotWhatToBring: ['CCCD'],
+      snapshotInclusions: ['Vé vào cổng', 'Bảo hiểm tham quan'],
+      snapshotExclusions: ['Đồ ăn'],
     });
     expect(createData.commissionRateSnapshot).toBe(0.25);
     expect(createData.commissionAmountSnapshot.toString()).toBe('45002');

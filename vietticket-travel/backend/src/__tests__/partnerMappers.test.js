@@ -95,12 +95,14 @@ describe('bộ chuyển đổi bản ghi', () => {
 
   test('toTicket', () => {
     const t = toTicket({
-      id: 'tkt-001', name: 'Vé', type: 'ADULT', description: 'desc',
+      id: 'tkt-001', name: 'Vé', type: 'ADULT', admissionCount: 1, description: 'desc',
       originalPrice: '150000', sellingPrice: '120000',
       refundPolicy: 'FREE_CANCELLATION', status: 'ACTIVE',
     });
     expect(t).toEqual({
-      id: 'tkt-001', name: 'Vé', type: 'ADULT', description: 'desc',
+      id: 'tkt-001', name: 'Vé', type: 'ADULT', admissionCount: 1, description: 'desc',
+      inclusions: [],
+      exclusions: [],
       originalPrice: 150000,
       sellingPrice: 120000,
       refundPolicy: 'FULL',

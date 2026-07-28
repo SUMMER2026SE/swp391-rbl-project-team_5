@@ -14,7 +14,10 @@ import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favo
 import reviewService from '../services/reviewService.js'
 import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
 import { loadItineraryBookingQueue } from '../utils/aiItineraryBookingQueue.js'
-import { normalizeInitialQuantity } from '../utils/bookingQuantity.js'
+import {
+  normalizeInitialQuantity,
+  updateSingleTicketQuantity,
+} from '../utils/bookingQuantity.js'
 import { formatAttractionLocation } from '../utils/location.js'
 import { saveRecentlyViewedAttraction } from '../utils/recentlyViewedAttractions.js'
 import fallbackDetailImage from '../assets/halong_bay.webp'
@@ -34,6 +37,7 @@ const fallbackImages = [
 
 const tabItems = [
   { id: 'intro', label: 'Giới thiệu' },
+  { id: 'prepare', label: 'Chuẩn bị & check-in' },
   { id: 'amenity', label: 'Tiện ích' },
   { id: 'review', label: 'Đánh giá' },
 ]
@@ -57,8 +61,8 @@ const getRefundPolicyLabel = (ticket) => {
   if (ticket?.refundPolicy === 'REFUND_WITH_FEE') {
     const feeRate = Number(ticket?.refundFeeRate || 0)
     return feeRate > 0
-      ? `Hoàn một phần khi hủy ${cutoffLabel}, phí ${Math.round(feeRate * 100)}%`
-      : 'Hoàn một phần theo chính sách'
+      ? `Hủy toàn bộ booking ${cutoffLabel}, hoàn tiền sau khi trừ phí ${Math.round(feeRate * 100)}%`
+      : 'Hủy toàn bộ booking và hoàn tiền sau khi trừ phí'
   }
   return 'Không hoàn tiền'
 }
@@ -389,11 +393,7 @@ export default function AttractionDetailPage() {
   ]
 
   const handleQuantityChange = (ticketId, delta) => {
-    setTicketQuantities((prev) => {
-      const currentQty = prev[ticketId] || 0
-      const newQty = Math.max(1, currentQty + delta)
-      return { [ticketId]: newQty }
-    })
+    setTicketQuantities((prev) => updateSingleTicketQuantity(prev, ticketId, delta))
   }
 
   const calculateTotal = () => {
@@ -410,6 +410,9 @@ export default function AttractionDetailPage() {
     const amount = Number(qty) || 0
     return amount > 0 ? sum + amount : sum
   }, 0)
+  const selectedTicketForSummary = ticketProducts.find(
+    (ticket) => (ticketQuantities[ticket.id] || 0) > 0,
+  ) || null
 
   const handleOpenBookingModal = (ticket, quantity = getBookingQuantity(ticket), options = {}) => {
     const effectiveDate = options.date || aiRecommendationContext?.date || ''
@@ -433,6 +436,12 @@ export default function AttractionDetailPage() {
     if (selectedTicket) {
       handleOpenBookingModal(selectedTicket, getBookingQuantity(selectedTicket))
     }
+  }
+
+  const handleChooseTicket = (ticket) => {
+    const quantity = getBookingQuantity(ticket)
+    setTicketQuantities({ [ticket.id]: quantity })
+    handleOpenBookingModal(ticket, quantity)
   }
 
   const goToGalleryImage = (direction) => {
@@ -672,6 +681,7 @@ export default function AttractionDetailPage() {
 
                 <div className="py-4 text-base leading-7 text-[#3f484a]">
                   {activeTab === 'intro' && <IntroTab attraction={attraction} />}
+                  {activeTab === 'prepare' && <OperationalTab attraction={attraction} />}
                   {activeTab === 'amenity' && <AmenityTab attraction={attraction} />}
                   {activeTab === 'review' && <ReviewTab attraction={attraction} />}
                 </div>
@@ -781,12 +791,19 @@ export default function AttractionDetailPage() {
                   </div>
                 )}
 
+                {ticketProducts.length > 0 && (
+                  <div className="rounded-xl border border-[#b8d8d9] bg-[#f2fbfb] p-3 text-xs font-semibold leading-5 text-[#00474d]">
+                    Mỗi đơn thanh toán một loại vé để tồn kho, QR và chính sách hoàn/hủy không bị trộn.
+                    Nếu nhóm có nhiều loại khách, hãy hoàn tất từng loại vé thành các đơn riêng.
+                  </div>
+                )}
+
                 {ticketProducts.length > 0 ? (
-                  ticketProducts.map((ticket, index) => (
+                  ticketProducts.map((ticket) => (
                     <TicketProductCard
-                      isFeatured={index === 0}
+                      isSelected={selectedTicketForSummary?.id === ticket.id}
                       key={ticket.id}
-                      onChoose={() => handleOpenBookingModal(ticket, getBookingQuantity(ticket))}
+                      onChoose={() => handleChooseTicket(ticket)}
                       onQuantityChange={(delta) => handleQuantityChange(ticket.id, delta)}
                       quantity={ticketQuantities[ticket.id] || 0}
                       ticket={ticket}
@@ -801,7 +818,7 @@ export default function AttractionDetailPage() {
                 <div className="space-y-4 border-t border-[#bec8ca] pt-4">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-bold text-[#3f484a]">
-                      Tổng cộng ({selectedTicketCount} vé)
+                      Tạm tính {selectedTicketForSummary?.name || 'loại vé đang chọn'} ({selectedTicketCount} vé)
                     </span>
                     <span className="text-xl font-bold text-[#00474d]">{formatCurrency(calculateTotal())}</span>
                   </div>
@@ -814,10 +831,10 @@ export default function AttractionDetailPage() {
                     <span className="material-symbols-outlined" aria-hidden="true">
                       shopping_cart_checkout
                     </span>
-                    Đặt vé ngay
+                    Tiếp tục với loại vé này
                   </button>
                   <p className="text-center text-[11px] font-semibold text-[#3f484a]">
-                    Không mất phí đặt vé - Hỗ trợ 24/7
+                    Đơn này chỉ gồm một loại vé; giá và điều kiện được kiểm tra ở bước tiếp theo
                   </p>
                 </div>
               </div>
@@ -854,7 +871,9 @@ export default function AttractionDetailPage() {
           <div className="mx-auto flex max-w-[1280px] items-center gap-3 pr-16">
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase text-[#3f484a]">
-                {selectedTicketCount > 0 ? `Tạm tính ${selectedTicketCount} vé` : 'Giá từ'}
+                {selectedTicketCount > 0
+                  ? `Tạm tính ${selectedTicketForSummary?.name || 'loại vé'} · ${selectedTicketCount} vé`
+                  : 'Giá từ'}
               </p>
               <p className="truncate text-lg font-extrabold text-[#00474d]">
                 {formatCurrency(calculateTotal() || lowestTicketPrice)}
@@ -924,7 +943,7 @@ function IntroTab({ attraction }) {
         <FeatureBox
           description={
             attraction.requiresManualApproval
-              ? 'Vé QR được phát hành sau khi đối tác xác nhận đơn'
+              ? 'Thu tiền trước; đối tác duyệt tối đa 24 giờ và trước giờ hoạt động, nếu quá hạn sẽ hoàn bắt buộc 100%'
               : 'Nhận vé QR sau khi thanh toán thành công'
           }
           icon="verified_user"
@@ -936,6 +955,87 @@ function IntroTab({ attraction }) {
           title="Giờ hoạt động"
         />
       </div>
+    </div>
+  )
+}
+
+function OperationalList({ emptyText, items, positive = true }) {
+  const values = Array.isArray(items) ? items.filter(Boolean) : []
+  if (values.length === 0) {
+    return <p className="text-sm text-[#5b6668]">{emptyText}</p>
+  }
+  return (
+    <ul className="space-y-2">
+      {values.map((item, index) => (
+        <li className="flex gap-2 text-sm" key={`${item}-${index}`}>
+          <span
+            aria-hidden="true"
+            className={`material-symbols-outlined text-[18px] ${
+              positive ? 'text-[#137333]' : 'text-[#ba1a1a]'
+            }`}
+          >
+            {positive ? 'check_circle' : 'cancel'}
+          </span>
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function OperationalTab({ attraction }) {
+  const ticketProducts = attraction.ticketProducts || []
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-2">
+        <FeatureBox
+          description={attraction.meetingPoint || 'Theo địa chỉ điểm tham quan được công bố.'}
+          icon="location_on"
+          title="Điểm gặp / check-in"
+        />
+        <FeatureBox
+          description={attraction.checkInInstructions || 'Xuất trình mã QR hợp lệ tại cổng.'}
+          icon="qr_code_scanner"
+          title="Cách check-in"
+        />
+        <FeatureBox
+          description={attraction.accessibilityInfo || 'Vui lòng liên hệ điểm tham quan để xác nhận.'}
+          icon="accessible"
+          title="Khả năng tiếp cận"
+        />
+        <div className="rounded-xl border border-[#bec8ca] bg-white p-4">
+          <h3 className="font-bold text-[#00474d]">Cần mang theo</h3>
+          <div className="mt-3">
+            <OperationalList
+              emptyText="Không có vật dụng bắt buộc được công bố."
+              items={attraction.whatToBring}
+            />
+          </div>
+        </div>
+      </div>
+
+      {ticketProducts.map((ticket) => (
+        <div className="rounded-xl border border-[#bec8ca] bg-white p-5" key={ticket.id}>
+          <h3 className="text-lg font-bold text-[#00474d]">{ticket.name}</h3>
+          <div className="mt-4 grid gap-5 md:grid-cols-2">
+            <div>
+              <p className="mb-3 text-sm font-bold text-[#137333]">Giá vé bao gồm</p>
+              <OperationalList
+                emptyText="Chưa có dịch vụ bao gồm được công bố."
+                items={ticket.inclusions}
+              />
+            </div>
+            <div>
+              <p className="mb-3 text-sm font-bold text-[#ba1a1a]">Giá vé không bao gồm</p>
+              <OperationalList
+                emptyText="Không có khoản loại trừ được công bố."
+                items={ticket.exclusions}
+                positive={false}
+              />
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -963,7 +1063,7 @@ function AmenityTab({ attraction }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FeatureBox description="Hỗ trợ khách hàng trong quá trình đặt vé" icon="support_agent" title="Hỗ trợ 24/7" />
+        <FeatureBox description="Gửi và theo dõi yêu cầu có lưu vết trong tài khoản" icon="support_agent" title="Trung tâm hỗ trợ" />
         <FeatureBox description="Thanh toán bảo mật và giữ vé tạm thời" icon="lock" title="Thanh toán an toàn" />
       </div>
 
@@ -1307,11 +1407,19 @@ function DecisionHighlight({ icon, title, value }) {
   )
 }
 
-function TicketProductCard({ isFeatured, onChoose, onQuantityChange, quantity, ticket }) {
+function TicketProductCard({
+  isSelected,
+  onChoose,
+  onQuantityChange,
+  quantity,
+  ticket,
+}) {
   return (
     <div
       className={`space-y-3 rounded-xl border p-4 transition hover:border-[#00474d] ${
-        isFeatured ? 'border-[#00474d]/20 bg-[#00474d]/5' : 'border-[#bec8ca] bg-white'
+        isSelected
+          ? 'border-2 border-[#00474d] bg-[#00474d]/5'
+          : 'border-[#bec8ca] bg-white'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -1352,7 +1460,7 @@ function TicketProductCard({ isFeatured, onChoose, onQuantityChange, quantity, t
         </div>
         <button
           className={`rounded-lg px-4 py-2 text-sm font-bold transition active:scale-95 ${
-            isFeatured
+            isSelected
               ? 'bg-[#00474d] text-white'
               : 'border border-[#00474d] text-[#00474d] hover:bg-[#00474d]/5'
           }`}

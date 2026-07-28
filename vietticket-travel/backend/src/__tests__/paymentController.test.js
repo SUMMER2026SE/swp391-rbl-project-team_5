@@ -206,6 +206,31 @@ beforeEach(() => {
 });
 
 describe('Rescue replacement refund request', () => {
+  test('rejects partial ticket cancellation or date-change fields before mutation', async () => {
+    const req = {
+      user: { id: 'user-1' },
+      body: {
+        bookingId: 'booking-1',
+        reason: 'Khách thay đổi kế hoạch',
+        quantity: 1,
+        newVisitDate: '2026-08-30',
+      },
+    };
+    const res = makeRes();
+    const next = jest.fn();
+
+    await createRefundRequest(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      code: 'WHOLE_BOOKING_CANCELLATION_ONLY',
+      message: 'Bản demo chỉ hỗ trợ hủy và hoàn cho toàn bộ booking; không đổi ngày/khung giờ và không hủy riêng một phần số vé.',
+      unsupportedFields: ['quantity', 'newVisitDate'],
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   test('attaches the request to the VNPay funding booking and targets the replacement', async () => {
     const replacement = {
       id: 'booking-replacement',

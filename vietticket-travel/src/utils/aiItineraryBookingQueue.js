@@ -249,21 +249,34 @@ export function syncItineraryBookingQueueProgress(
     const items = queue.items.map((item) => {
       const progress = progressByItem.get(String(item.id))
       if (!progress) return item
-      const completed = progress.fulfilled === true
+      const completed = progress.fulfilled === true || progress.lineState === 'COMPLETED'
+      const status = completed
+        ? 'completed'
+        : progress.lineState === 'REFUND_PENDING'
+          ? 'refund_pending'
+          : progress.lineState === 'ACTION_REQUIRED'
+            ? 'action_required'
+            : ['CANCELLED', 'REFUNDED'].includes(progress.bookingStatus)
+              ? 'action_required'
+              : 'booking_created'
       return {
         ...item,
         bookingId: progress.bookingId || item.bookingId || null,
+        reservationId: progress.reservationId || item.reservationId || null,
         bookingStatus: progress.bookingStatus || item.bookingStatus || null,
-        status: completed
-          ? 'completed'
-          : ['CANCELLED', 'REFUNDED'].includes(progress.bookingStatus)
-            ? 'action_required'
-            : 'booking_created',
+        paymentMethod: progress.paymentMethod || item.paymentMethod || null,
+        paid: progress.paid === true,
+        paidAmount: Number(progress.paidAmount) || 0,
+        refund: progress.refund || null,
+        refundRequired: progress.refundRequired === true,
+        status,
         ...(completed ? { completedAt: progress.paidAt || updatedAt } : {}),
         updatedAt,
       }
     })
-    const nextIndex = items.findIndex((item) => item.status !== 'completed')
+    const nextIndex = items.findIndex(
+      (item) => !['completed', 'refund_pending'].includes(item.status),
+    )
     return {
       ...queue,
       currentIndex: nextIndex === -1 ? items.length : nextIndex,
@@ -282,22 +295,75 @@ export function getNextItineraryQueueStep(queue) {
     items.length,
   )
 
-  return items.find((item, index) => index >= startIndex && item.status !== 'completed') || null
+  return items.find(
+    (item, index) => (
+      index >= startIndex
+      && !['completed', 'refund_pending'].includes(item.status)
+    ),
+  ) || null
 }
 
 export function getItineraryQueueProgress(queue) {
   const items = Array.isArray(queue?.items) ? queue.items : []
   const completed = items.filter((item) => item.status === 'completed').length
+  const actionRequired = items.filter((item) => item.status === 'action_required').length
+  const paymentPending = items.filter(
+    (item) => ['reserved', 'booking_created'].includes(item.status),
+  ).length
+  const refundPending = items.filter((item) => item.status === 'refund_pending').length
+  const notStarted = items.filter((item) => !item.status).length
   const nextItem = getNextItineraryQueueStep(queue)
   const nextIndex = nextItem ? items.findIndex((item) => item.id === nextItem.id) : -1
 
   return {
+    actionRequired,
     completed,
     isComplete: items.length > 0 && completed >= items.length,
+    isBookingFlowClosed: items.length > 0
+      && completed + refundPending >= items.length,
     nextIndex,
+    notStarted,
+    paymentPending,
+    refundPending,
     remaining: Math.max(0, items.length - completed),
     total: items.length,
   }
+}
+
+function buildQueueContextSearchParams(queue, item) {
+  const params = new URLSearchParams({
+    aiQueueId: queue.id,
+    aiQueueItemId: item.id,
+  })
+  if (queue.itineraryId) params.set('itineraryId', queue.itineraryId)
+  if (queue.itineraryVersion) {
+    params.set('itineraryVersion', String(queue.itineraryVersion))
+  }
+  return params
+}
+
+export function buildItineraryQueueActionUrl(queue, item) {
+  if (!queue?.id || !item?.id) return ''
+
+  if (
+    ['reserved', 'booking_created'].includes(item.status)
+    && item.reservationId
+  ) {
+    if (
+      String(item.paymentMethod || '').toLowerCase() === 'bank_transfer'
+      && item.bookingId
+    ) {
+      return `/bank-transfer/${encodeURIComponent(item.bookingId)}`
+    }
+    const params = buildQueueContextSearchParams(queue, item)
+    return `/checkout/${encodeURIComponent(item.reservationId)}?${params.toString()}`
+  }
+
+  if (item.status === 'refund_pending') {
+    return '/my-tickets'
+  }
+
+  return buildItineraryQueueBookingUrl(queue, item)
 }
 
 export function buildItineraryQueueBookingUrl(queue, item) {

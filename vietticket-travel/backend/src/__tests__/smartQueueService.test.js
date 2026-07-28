@@ -105,6 +105,19 @@ test('queue eligibility requires a confirmed owned booking on the visit date', (
   }), NOW)).toThrow('đã xác nhận');
 });
 
+test('queue party size counts admitted guests instead of QR packages', () => {
+  const item = queueItem();
+  item.booking.reservation = {
+    ...item.booking.reservation,
+    quantity: 2,
+    snapshotAdmissionCount: 4,
+  };
+
+  expect(assertQueueEligibility(item, NOW)).toMatchObject({
+    partySize: 8,
+  });
+});
+
 test('queue eligibility normalizes an ISO snapshot without shifting the Vietnam visit day', () => {
   expect(assertQueueEligibility(queueItem({
     snapshot: {

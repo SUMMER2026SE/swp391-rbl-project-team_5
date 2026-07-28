@@ -30,6 +30,11 @@ const {
   buildTicketRestrictions,
   hasTicketRestrictions,
 } = require('../utils/ticketRestrictions');
+const {
+  getProductAdmissionCount,
+  getSnapshotAdmissionCount,
+  parseAdmissionCount,
+} = require('../utils/ticketCapacity');
 
 const { Decimal } = Prisma;
 const DEFAULT_RECOVERY_WINDOW_MS = 30 * 60 * 1000;
@@ -305,6 +310,8 @@ function buildRecoveryOptionFingerprint(option = {}) {
     ticketName: normalizeText(option.ticketName),
     visitDate: option.visitDate || null,
     quantity: Number(option.quantity || 0),
+    admissionCount: Number(option.admissionCount || 1),
+    participantCount: Number(option.participantCount || 0),
     unitPrice: Math.round(Number(option.unitPrice || 0)),
     totalAmount: Math.round(Number(option.totalAmount || 0)),
     refundAmount: Math.round(Number(option.refundAmount || 0)),
@@ -408,6 +415,9 @@ function buildOriginalSnapshot(booking) {
       || 'MIXED',
     ticketName: booking.snapshotTicketName || ticketProduct.name,
     ticketType: booking.snapshotTicketType || ticketProduct.type,
+    admissionCount:
+      Number(booking.snapshotAdmissionCount)
+      || getSnapshotAdmissionCount(reservation),
     visitDate: dateKey(booking.snapshotVisitDate || reservation.date),
     timeSlotLabel,
     startTime: snapshotSlot.startTime
@@ -427,6 +437,11 @@ function buildOriginalSnapshot(booking) {
       || attraction.closeTime
       || null,
     quantity: reservation.quantity,
+    participantCount:
+      reservation.quantity * (
+        Number(booking.snapshotAdmissionCount)
+        || getSnapshotAdmissionCount(reservation)
+      ),
     totalAmount: Number(booking.totalAmount),
     refundPolicy: normalizeRefundPolicy(
       booking.snapshotRefundPolicy ?? ticketProduct.refundPolicy,
@@ -562,11 +577,18 @@ async function findEligibleRecoveryOptions(
 
   const affordableProducts = products.filter((product) => {
     const unitPrice = parseVndInteger(product.sellingPrice);
+    const candidateAdmissionCount = parseAdmissionCount(
+      product.admissionCount
+      ?? (['FAMILY', 'GROUP'].includes(String(product.type || '').toUpperCase())
+        ? null
+        : 1),
+    );
     return isNoStricterThanOriginal(product, original)
       // Cutoff comparison needs the selected slot's actual start time; the
       // product row alone has no visit date/slot and must only be screened for
       // policy rank and fee here.
       && isNoWorseRefundTerms(product, original, { compareCutoff: false })
+      && candidateAdmissionCount === Number(original.admissionCount || 1)
       && unitPrice != null
       && unitPrice * original.quantity <= creditAmount;
   });
@@ -620,6 +642,7 @@ async function findEligibleRecoveryOptions(
           totalReviews: product.attraction.totalReviews,
           ticketName: product.name,
           ticketType: product.type,
+          admissionCount: Number(product.admissionCount || 1),
           ticketDescription: product.description,
           restrictions: buildTicketRestrictions(product),
           refundPolicy: normalizeRefundPolicy(product.refundPolicy),
@@ -630,6 +653,8 @@ async function findEligibleRecoveryOptions(
           refundCutoffHours: normalizeRefundCutoffHours(product.refundCutoffHours),
           unitPrice,
           quantity: original.quantity,
+          participantCount:
+            original.quantity * Number(product.admissionCount || 1),
           totalAmount,
           refundAmount,
           creditAmount,
@@ -960,9 +985,22 @@ async function claimConfirmedInventory(tx, {
   timeSlotId,
   date,
   quantity,
+  expectedAdmissionCount,
   now,
 }) {
   const schedule = await getBookableSchedule(tx, ticketProductId, date);
+  const admissionCount = getProductAdmissionCount(schedule.product);
+  if (
+    expectedAdmissionCount != null
+    && admissionCount !== Number(expectedAdmissionCount)
+  ) {
+    throw createRecoveryError(
+      409,
+      'OPTION_CHANGED',
+      'Quy mô khách của gói thay thế vừa thay đổi. Vui lòng chọn lại.',
+    );
+  }
+  const inventoryUnits = quantity * admissionCount;
   if (schedule.isClosed) {
     throw createRecoveryError(409, 'OPTION_UNAVAILABLE', 'Địa điểm vừa ngừng nhận khách trong ngày này.');
   }
@@ -1003,11 +1041,11 @@ async function claimConfirmedInventory(tx, {
       bookedQuantity: daily.bookedQuantity,
       heldQuantity: daily.heldQuantity,
       capacity: daily.capacity,
-      ...(daily.bookedQuantity + daily.heldQuantity + quantity <= daily.capacity
+      ...(daily.bookedQuantity + daily.heldQuantity + inventoryUnits <= daily.capacity
         ? {}
         : { id: '__insufficient__' }),
     },
-    data: { bookedQuantity: { increment: quantity } },
+    data: { bookedQuantity: { increment: inventoryUnits } },
   });
   if (claimedDaily.count !== 1) {
     throw createRecoveryError(409, 'OPTION_UNAVAILABLE', 'Phương án vừa hết vé.');
@@ -1035,12 +1073,12 @@ async function claimConfirmedInventory(tx, {
       bookedQty: attractionStock.bookedQty,
       heldQty: attractionStock.heldQty,
       capacity: attractionStock.capacity,
-      ...(attractionStock.bookedQty + attractionStock.heldQty + quantity
+      ...(attractionStock.bookedQty + attractionStock.heldQty + inventoryUnits
         <= attractionStock.capacity
         ? {}
         : { id: '__insufficient__' }),
     },
-    data: { bookedQty: { increment: quantity } },
+    data: { bookedQty: { increment: inventoryUnits } },
   });
   if (claimedAttraction.count !== 1) {
     throw createRecoveryError(409, 'OPTION_UNAVAILABLE', 'Địa điểm vừa đạt giới hạn sức chứa.');
@@ -1061,18 +1099,18 @@ async function claimConfirmedInventory(tx, {
         id: slotStock.id,
         bookedQty: slotStock.bookedQty,
         heldQty: slotStock.heldQty,
-        ...(slotStock.bookedQty + slotStock.heldQty + quantity <= slotCapacity
+        ...(slotStock.bookedQty + slotStock.heldQty + inventoryUnits <= slotCapacity
           ? {}
           : { id: '__insufficient__' }),
       },
-      data: { bookedQty: { increment: quantity } },
+      data: { bookedQty: { increment: inventoryUnits } },
     });
     if (claimedSlot.count !== 1) {
       throw createRecoveryError(409, 'OPTION_UNAVAILABLE', 'Khung giờ vừa hết chỗ.');
     }
   }
 
-  return { schedule, selectedSlot };
+  return { schedule, selectedSlot, admissionCount };
 }
 
 async function synchronizeLiveTrip(tx, {
@@ -1283,11 +1321,12 @@ async function acceptRecoveryOption({
 
     const date = new Date(`${option.visitDate}T00:00:00.000Z`);
     const quantity = Number(recoveryCase.originalSnapshot.quantity);
-    const { schedule, selectedSlot } = await claimConfirmedInventory(tx, {
+    const { schedule, selectedSlot, admissionCount } = await claimConfirmedInventory(tx, {
       ticketProductId,
       timeSlotId,
       date,
       quantity,
+      expectedAdmissionCount: Number(recoveryCase.originalSnapshot.admissionCount || 1),
       now,
     });
 
@@ -1314,6 +1353,7 @@ async function acceptRecoveryOption({
         timeSlotId: selectedSlot?.id || null,
         date,
         quantity,
+        snapshotAdmissionCount: admissionCount,
         status: 'CONFIRMED',
         expiresAt: now,
         paymentDeadline: now,
@@ -1357,6 +1397,7 @@ async function acceptRecoveryOption({
         snapshotPartnerName: schedule.attraction.partner?.businessName || null,
         snapshotTicketName: option.ticketName,
         snapshotTicketType: option.ticketType,
+        snapshotAdmissionCount: admissionCount,
         snapshotTicketDescription: option.ticketDescription,
         snapshotTicketRestrictions: buildTicketRestrictions(schedule.product),
         snapshotUnitPrice: unitPrice,

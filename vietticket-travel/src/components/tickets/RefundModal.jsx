@@ -8,7 +8,7 @@ const formatMoney = (value) =>
 
 const POLICY_LABEL = {
   FREE_CANCELLATION: 'Hủy miễn phí — hoàn 100%',
-  REFUND_WITH_FEE: 'Hủy mất phí',
+  REFUND_WITH_FEE: 'Hủy toàn bộ booking — hoàn sau khi trừ phí',
   NON_REFUNDABLE: 'Không hoàn tiền',
 }
 
@@ -101,6 +101,11 @@ function RefundModal({ booking, onClose, onSuccess }) {
           </p>
         ) : (
           <>
+            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-950">
+              Yêu cầu này hủy toàn bộ booking và toàn bộ {preview.bookingQuantity || booking.quantity || 1} mã QR.
+              Bản demo không hỗ trợ hủy bớt số vé hoặc đổi ngày/khung giờ. “Hoàn sau khi trừ phí”
+              chỉ nói về số tiền nhận lại, không phải số lượng vé bị hủy.
+            </div>
             <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
               <div className="flex items-center justify-between gap-4">
                 <span className="text-sm text-on-surface-variant">Giá trị đơn gốc</span>

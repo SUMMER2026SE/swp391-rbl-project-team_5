@@ -142,6 +142,11 @@ function PartnerTicketsPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-bold text-[#191c1d]">{ticket.name}</p>
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${TYPE_COLOR[ticket.type]}`}>{TYPE_LABEL[ticket.type]}</span>
+                      {Number(ticket.admissionCount || 1) > 1 && (
+                        <span className="rounded-full bg-[#e0f4f5] px-2 py-0.5 text-xs font-semibold text-[#00474d]">
+                          1 gói = {ticket.admissionCount} khách
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-4 mt-1 flex-wrap">
                       <div className="flex items-center gap-1">

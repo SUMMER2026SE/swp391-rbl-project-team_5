@@ -1,6 +1,7 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const { getSnapshotAdmissionCount } = require('../utils/ticketCapacity');
 
 const DEFAULT_SHOW_RATE = 0.9;
 const MIN_SHOW_RATE = 0.6;
@@ -315,7 +316,13 @@ async function getAttractionPressure(
         id: true,
         booking: {
           select: {
-            reservation: { select: { timeSlotId: true } },
+            snapshotAdmissionCount: true,
+            reservation: {
+              select: {
+                timeSlotId: true,
+                snapshotAdmissionCount: true,
+              },
+            },
           },
         },
       },
@@ -352,10 +359,26 @@ async function getAttractionPressure(
   const heldQty = Number(dayStock?.heldQty ?? slotHeldQty);
   const queueRows = Array.isArray(activeQueueEntries) ? activeQueueEntries : [];
   const checkinRows = Array.isArray(recentCheckins) ? recentCheckins : [];
-  const checkinsLast15Minutes = checkinRows.length;
+  const checkinsLast15Minutes = checkinRows.reduce(
+    (sum, ticket) => (
+      sum + getSnapshotAdmissionCount({
+        snapshotAdmissionCount:
+          ticket.booking?.snapshotAdmissionCount
+          || ticket.booking?.reservation?.snapshotAdmissionCount,
+      })
+    ),
+    0,
+  );
   const checkinsByTimeSlot = checkinRows.reduce((counts, ticket) => {
     const timeSlotId = ticket.booking?.reservation?.timeSlotId;
-    if (timeSlotId) counts.set(timeSlotId, (counts.get(timeSlotId) || 0) + 1);
+    const admittedGuests = getSnapshotAdmissionCount({
+      snapshotAdmissionCount:
+        ticket.booking?.snapshotAdmissionCount
+        || ticket.booking?.reservation?.snapshotAdmissionCount,
+    });
+    if (timeSlotId) {
+      counts.set(timeSlotId, (counts.get(timeSlotId) || 0) + admittedGuests);
+    }
     return counts;
   }, new Map());
   const waitingGuests = queueRows.reduce(

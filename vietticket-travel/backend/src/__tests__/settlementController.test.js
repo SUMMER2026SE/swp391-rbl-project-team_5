@@ -342,4 +342,101 @@ describe('partner settlement ledger', () => {
     expect(res.status).toHaveBeenCalledWith(409);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  test('enforces that the settlement maker cannot approve their own draft', async () => {
+    prisma.partnerSettlement.findUnique.mockResolvedValue({
+      id: 'settlement-maker-checker',
+      status: 'DRAFT',
+      createdById: 'admin-maker',
+      approvedById: null,
+    });
+    const res = createRes();
+
+    await updateSettlementStatus({
+      params: { id: 'settlement-maker-checker' },
+      body: { status: 'APPROVED' },
+      user: { id: 'admin-maker' },
+    }, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'MAKER_CHECKER_VIOLATION',
+      message: expect.stringContaining('không được tự duyệt'),
+    }));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  test('allows a different checker to approve and records the checker identity', async () => {
+    prisma.partnerSettlement.findUnique.mockResolvedValue({
+      id: 'settlement-maker-checker',
+      status: 'DRAFT',
+      createdById: 'admin-maker',
+      approvedById: null,
+    });
+    const updated = {
+      id: 'settlement-maker-checker',
+      status: 'APPROVED',
+      createdById: 'admin-maker',
+      approvedById: 'admin-checker',
+      grossAmount: 100000,
+      refundAmount: 0,
+      netAmount: 100000,
+      commissionAmount: 10000,
+      payableAmount: 90000,
+    };
+    const tx = {
+      partnerSettlement: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue(updated),
+      },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+    };
+    prisma.$transaction.mockImplementation((callback) => callback(tx));
+    const res = createRes();
+
+    await updateSettlementStatus({
+      params: { id: 'settlement-maker-checker' },
+      body: { status: 'APPROVED' },
+      user: { id: 'admin-checker' },
+      headers: {},
+    }, res, jest.fn());
+
+    expect(tx.partnerSettlement.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'APPROVED',
+        approvedById: 'admin-checker',
+      }),
+    }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        control: expect.objectContaining({
+          makerCheckerSeparated: true,
+          canMarkPaid: true,
+        }),
+      }),
+    }));
+  });
+
+  test('blocks the maker from recording payment even after independent approval', async () => {
+    prisma.partnerSettlement.findUnique.mockResolvedValue({
+      id: 'settlement-maker-checker',
+      status: 'APPROVED',
+      createdById: 'admin-maker',
+      approvedById: 'admin-checker',
+    });
+    const res = createRes();
+
+    await updateSettlementStatus({
+      params: { id: 'settlement-maker-checker' },
+      body: { status: 'PAID', bankReference: 'FT-2026-001' },
+      user: { id: 'admin-maker' },
+    }, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'MAKER_CHECKER_VIOLATION',
+      message: expect.stringContaining('không được tự ghi nhận chi trả'),
+    }));
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
 });

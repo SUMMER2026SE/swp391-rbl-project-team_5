@@ -1056,7 +1056,7 @@ function AIItineraryPlanner() {
                                           )}
                                           {bookableTicketLines.length > 1 && (
                                             <p className="text-center text-[11px] font-semibold text-[#64748b]">
-                                              Đã gộp {bookableTicketLines.length} loại vé của hoạt động này.
+                                              Có {bookableTicketLines.length} dòng vé độc lập cho hoạt động này.
                                             </p>
                                           )}
                                         </div>

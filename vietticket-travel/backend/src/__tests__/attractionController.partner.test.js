@@ -592,11 +592,15 @@ describe('submitAttraction (gửi duyệt)', () => {
       city: 'TP. HCM',
       openTime: '08:00',
       closeTime: '17:00',
+      meetingPoint: 'Quầy vé tại cổng chính',
+      checkInInstructions: 'Xuất trình mã QR tại quầy kiểm soát trước khi vào cổng.',
+      accessibilityInfo: 'Có lối đi hỗ trợ xe lăn.',
+      whatToBring: [],
       latitude: 10.8,
       longitude: 106.7,
       images: [{ id: 'img-1', imageUrl: '/a.jpg', isPrimary: true }],
       categories: [{ category: { id: 'cat-1', name: 'Công viên' } }],
-      ticketProducts: [{ id: 't-1', name: 'Vé', originalPrice: 100, sellingPrice: 80, status: 'ACTIVE', refundPolicy: 'NON_REFUNDABLE', refundFeeRate: 0 }],
+      ticketProducts: [{ id: 't-1', name: 'Vé', type: 'ADULT', admissionCount: 1, inclusions: ['Vé vào cổng'], exclusions: [], originalPrice: 100, sellingPrice: 80, status: 'ACTIVE', refundPolicy: 'NON_REFUNDABLE', refundFeeRate: 0 }],
       timeSlots: [{ id: 's-1', startTime: '08:00', endTime: '17:00', maxCapacity: 100, isActive: true }],
     });
     const tx = {

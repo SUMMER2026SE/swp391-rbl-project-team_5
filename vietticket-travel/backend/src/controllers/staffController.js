@@ -43,6 +43,7 @@ const {
   emitRecoveryCaseEvent,
   emitRefundStatusUpdated,
 } = require('../realtime/events');
+const { getSnapshotAdmissionCount } = require('../utils/ticketCapacity');
 
 function getClientIp(req) {
   return getRequestIp(req) || '127.0.0.1';
@@ -1712,6 +1713,8 @@ function toCheckinTicket(instance) {
   const visitDate = booking.snapshotVisitDate || reservation.date;
   const visitDay = new Date(visitDate).toISOString().slice(0, 10);
   const timeSlot = reservation.timeSlot;
+  const admissionCount = Number(booking.snapshotAdmissionCount)
+    || getSnapshotAdmissionCount(reservation);
 
   return {
     bookingId: booking.id,
@@ -1725,6 +1728,9 @@ function toCheckinTicket(instance) {
     ticketName: booking.snapshotTicketName || reservation.ticketProduct.name,
     quantity: 1,
     bookingQuantity: reservation.quantity,
+    admissionCount,
+    admittedGuests: admissionCount,
+    bookingParticipantCount: reservation.quantity * admissionCount,
     visitDate: visitDay,
     timeSlot:
       booking.snapshotTimeSlotLabel
@@ -2053,6 +2059,8 @@ async function checkInTicket(req, res, next) {
         // updateMany với guard status VALID: hai nhân viên quét cùng lúc thì chỉ
         // một request thực sự check-in, request sau thấy count = 0 -> đã dùng.
         const checkedInAt = new Date();
+        const admittedGuestCount = Number(instance.booking.snapshotAdmissionCount)
+          || getSnapshotAdmissionCount(instance.booking.reservation);
         const updated = await tx.ticketInstance.updateMany({
           where: { id: instance.id, status: 'VALID' },
           data: {
@@ -2091,6 +2099,7 @@ async function checkInTicket(req, res, next) {
             bookingId: instance.bookingId,
             attractionId,
             checkedInCount: updated.count,
+            admittedGuestCount,
             ticketInstanceId: instance.id,
           },
         });
@@ -2107,6 +2116,7 @@ async function checkInTicket(req, res, next) {
         return {
           instance,
           checkedInCount: updated.count,
+          admittedGuestCount,
           checkedInAt,
           bookingStatus,
           smartQueue,
@@ -2125,11 +2135,12 @@ async function checkInTicket(req, res, next) {
 
     return res.json({
       success: true,
-      message: `Check-in thành công ${result.checkedInCount} vé.`,
+      message: `Check-in thành công ${result.checkedInCount} vé (${result.admittedGuestCount} khách).`,
       data: {
         ...toCheckinTicket(result.instance),
         ticketStatus: 'USED',
         checkedInCount: result.checkedInCount,
+        admittedGuestCount: result.admittedGuestCount,
         checkedInAt: result.checkedInAt,
         checkedInBy: req.user.email,
         bookingStatus: result.bookingStatus,

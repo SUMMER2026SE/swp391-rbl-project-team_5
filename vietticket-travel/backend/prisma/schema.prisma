@@ -263,6 +263,7 @@ model Reservation {
   timeSlotId                String?
   date                      DateTime          @db.Date
   quantity                  Int
+  snapshotAdmissionCount    Int               @default(1)
   status                    ReservationStatus @default(HELD)
   expiresAt                 DateTime
   paymentDeadline           DateTime?
@@ -359,6 +360,10 @@ model Attraction {
   recommendedVisitMinutes Int                         @default(150)
   environment             AttractionEnvironment       @default(MIXED)
   isFullDay               Boolean                     @default(false)
+  meetingPoint            String?                     @db.Text
+  checkInInstructions     String?                     @db.Text
+  accessibilityInfo       String?                     @db.Text
+  whatToBring             Json?
   latitude                Float?
   longitude               Float?
   status                  AttractionStatus            @default(DRAFT)
@@ -462,6 +467,7 @@ model TicketProduct {
   attractionId      String
   name              String
   type              TicketType       @default(ADULT)
+  admissionCount    Int              @default(1)
   description       String           @db.Text
   originalPrice     Decimal          @db.Decimal(12, 2)
   sellingPrice      Decimal          @db.Decimal(12, 2)
@@ -474,6 +480,8 @@ model TicketProduct {
   minHeightCm       Int?
   maxHeightCm       Int?
   requiresAdult     Boolean          @default(false)
+  inclusions        Json?
+  exclusions        Json?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   archivedAt        DateTime?
@@ -623,6 +631,10 @@ model Booking {
   snapshotAttractionLatitude Decimal?         @db.Decimal(10, 7)
   snapshotAttractionLongitude Decimal?        @db.Decimal(10, 7)
   snapshotAttractionEnvironment String?
+  snapshotMeetingPoint       String?          @db.Text
+  snapshotCheckInInstructions String?          @db.Text
+  snapshotAccessibilityInfo  String?          @db.Text
+  snapshotWhatToBring        Json?
   // Immutable payout owner captured at checkout. Attraction ownership may
   // change later, but historical revenue/refunds must remain with the owner
   // who sold the ticket.
@@ -630,8 +642,11 @@ model Booking {
   snapshotPartnerName        String?
   snapshotTicketName         String           @default("")
   snapshotTicketType         TicketType       @default(ADULT)
+  snapshotAdmissionCount     Int              @default(1)
   snapshotTicketDescription  String?          @db.Text
   snapshotTicketRestrictions Json?
+  snapshotInclusions         Json?
+  snapshotExclusions         Json?
   snapshotUnitPrice          Decimal          @default(0.0) @db.Decimal(12, 2)
   snapshotRefundPolicy       RefundPolicyType @default(NON_REFUNDABLE)
   snapshotRefundFeeRate      Decimal          @default(0.0) @db.Decimal(5, 2)

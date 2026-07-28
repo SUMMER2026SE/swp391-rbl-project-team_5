@@ -18,6 +18,10 @@ function validSnapshot() {
     recommendedVisitMinutes: 180,
     environment: 'MIXED',
     isFullDay: false,
+    meetingPoint: 'Quầy vé tại cổng chính số 1',
+    checkInInstructions: 'Có mặt tại quầy, xuất trình mã QR và giấy tờ tùy thân để đối chiếu.',
+    accessibilityInfo: 'Có lối đi và nhà vệ sinh hỗ trợ xe lăn.',
+    whatToBring: ['Giấy tờ tùy thân có ảnh'],
     latitude: 10.7,
     longitude: 106.7,
     category: { id: 'category-1', name: 'Vui chơi' },
@@ -26,6 +30,8 @@ function validSnapshot() {
       id: 'draft-ticket-1',
       name: 'Vé người lớn',
       type: 'ADULT',
+      inclusions: ['Vé vào cổng'],
+      exclusions: ['Đồ ăn và thức uống'],
       originalPrice: 120000,
       sellingPrice: 100000,
       status: 'ACTIVE',
@@ -46,6 +52,25 @@ function validSnapshot() {
 
 test('chấp nhận snapshot đầy đủ và hợp lệ', () => {
   expect(validateSubmissionSnapshot(validSnapshot())).toEqual([]);
+});
+
+test('không cho gửi duyệt khi thiếu thông tin vận hành hoặc phạm vi giá vé', () => {
+  const snapshot = validSnapshot();
+  snapshot.meetingPoint = '';
+  snapshot.checkInInstructions = '';
+  snapshot.accessibilityInfo = '';
+  snapshot.whatToBring = null;
+  snapshot.tickets[0].inclusions = [];
+  snapshot.tickets[0].exclusions = null;
+
+  expect(validateSubmissionSnapshot(snapshot)).toEqual(expect.arrayContaining([
+    'điểm gặp/check-in tối thiểu 5 ký tự',
+    'hướng dẫn check-in tối thiểu 20 ký tự',
+    'thông tin hỗ trợ tiếp cận tối thiểu 10 ký tự',
+    'danh sách cần mang theo (có thể để trống)',
+    'gói vé 1: ít nhất một dịch vụ bao gồm',
+    'gói vé 1: danh sách dịch vụ không bao gồm (có thể để trống)',
+  ]));
 });
 
 test('chặn giá vé sai, slot chồng lấn và tổng sức chứa vượt giới hạn', () => {
@@ -114,6 +139,48 @@ test('metadata thời lượng và môi trường được lưu trong snapshot v
     recommendedVisitMinutes: 420,
     environment: 'MIXED',
     isFullDay: true,
+  });
+});
+
+test('thông tin vận hành được lưu trong snapshot và merge draft', () => {
+  const snapshot = buildAttractionSnapshot({
+    meetingPoint: 'Cổng A',
+    checkInInstructions: 'Quét mã QR tại quầy kiểm soát trước khi vào cổng.',
+    accessibilityInfo: 'Có hỗ trợ xe lăn.',
+    whatToBring: ['CCCD'],
+    ticketProducts: [{
+      id: 'ticket-1',
+      name: 'Vé chuẩn',
+      type: 'ADULT',
+      description: '',
+      inclusions: ['Vé vào cổng'],
+      exclusions: [],
+      originalPrice: 100000,
+      sellingPrice: 90000,
+      status: 'ACTIVE',
+      refundPolicy: 'NON_REFUNDABLE',
+    }],
+    timeSlots: [],
+    specialDates: [],
+    images: [],
+    categories: [],
+  });
+
+  expect(snapshot).toMatchObject({
+    schemaVersion: 2,
+    meetingPoint: 'Cổng A',
+    whatToBring: ['CCCD'],
+    tickets: [expect.objectContaining({
+      inclusions: ['Vé vào cổng'],
+      exclusions: [],
+    })],
+  });
+  expect(mergeSnapshot(snapshot, {
+    meetingPoint: 'Cổng B',
+    whatToBring: ['Hộ chiếu'],
+  })).toMatchObject({
+    meetingPoint: 'Cổng B',
+    whatToBring: ['Hộ chiếu'],
   });
 });
 

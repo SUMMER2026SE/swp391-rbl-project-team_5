@@ -19,6 +19,7 @@ const {
   releaseInventory,
 } = require('../utils/refundService');
 const { isRefundableCapturedPayment } = require('../utils/paymentGateway');
+const { CUSTOMER_BOOKING_CHANGE_POLICY } = require('../config/bookingPolicy');
 const {
   isTicketProductSaleEnabled,
   publicAttractionWhere,
@@ -745,9 +746,20 @@ async function createRefundRequest(req, res, next) {
   try {
     const bookingId = String(req.body?.bookingId || '').trim();
     const reason = String(req.body?.reason || '').trim();
+    const allowedFields = new Set(['bookingId', 'reason']);
+    const unsupportedFields = Object.keys(req.body || {}).filter(
+      (field) => !allowedFields.has(field),
+    );
 
     if (!bookingId) {
       return res.status(400).json({ message: 'bookingId là bắt buộc.' });
+    }
+    if (unsupportedFields.length > 0) {
+      return res.status(400).json({
+        code: 'WHOLE_BOOKING_CANCELLATION_ONLY',
+        message: 'Bản demo chỉ hỗ trợ hủy và hoàn cho toàn bộ booking; không đổi ngày/khung giờ và không hủy riêng một phần số vé.',
+        unsupportedFields,
+      });
     }
     if (reason.length < 5) {
       return res.status(400).json({ message: 'Vui lòng nhập lý do hoàn tiền (tối thiểu 5 ký tự).' });
@@ -966,6 +978,8 @@ async function getRefundPreview(req, res, next) {
         refundable: eligibility.refundable,
         notRefundableReason: eligibility.notRefundableReason,
         hasRefundRequest: Boolean(eligibility.customerRequest),
+        changePolicy: CUSTOMER_BOOKING_CHANGE_POLICY,
+        bookingQuantity: Number(booking.reservation.quantity),
         visitDate: booking.reservation.date,
       },
     });
@@ -1020,7 +1034,7 @@ async function refundViaVnpay({
     throw httpError(422, 'Hoàn toàn phần phải bằng đúng số tiền của giao dịch gốc.');
   }
   if (transactionType === '03' && refundAmount >= capturedAmount) {
-    throw httpError(422, 'Hoàn một phần phải nhỏ hơn số tiền của giao dịch gốc.');
+    throw httpError(422, 'Khoản hoàn sau phí (một phần giá trị giao dịch) phải nhỏ hơn số tiền giao dịch gốc.');
   }
 
   const params = {

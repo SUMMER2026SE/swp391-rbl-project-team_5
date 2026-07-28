@@ -77,6 +77,11 @@ describe('validateKyc', () => {
   test('rejects a future registration date', () => {
     expect(validateKyc({ ...validKyc, registrationDate: '2999-01-01' })).not.toBe('');
   });
+  test.each(['USD', 'EUR'])('rejects unsupported payout currency %s', (payoutCurrency) => {
+    expect(validateKyc({ ...validKyc, payoutCurrency })).toBe(
+      'Hiện tại hệ thống chỉ hỗ trợ thanh toán đối tác bằng VND.',
+    );
+  });
 });
 
 describe('validateAttraction', () => {
@@ -115,6 +120,19 @@ describe('validateAttraction', () => {
       isFullDay: true,
     }, { partial: false })).toContain('ít nhất 360 phút');
   });
+  test('validates operational text and list fields when supplied', () => {
+    expect(validateAttraction({
+      ...valid,
+      meetingPoint: 'Cổng chính',
+      checkInInstructions: 'Xuất trình QR tại quầy.',
+      accessibilityInfo: 'Có hỗ trợ xe lăn.',
+      whatToBring: ['CCCD'],
+    })).toBe('');
+    expect(validateAttraction({ ...valid, whatToBring: 'CCCD' }))
+      .toBe('Danh sách cần mang theo phải là một danh sách.');
+    expect(validateAttraction({ ...valid, meetingPoint: 'x'.repeat(1001) }))
+      .toContain('không được vượt quá 1000');
+  });
 });
 
 describe('validateTicket', () => {
@@ -139,6 +157,20 @@ describe('validateTicket', () => {
   test('❌ type không hợp lệ', () => {
     expect(validateTicket({ ...valid, type: 'VIP' })).not.toBe('');
   });
+  test('vé gia đình/nhóm khai báo số khách có cấu trúc', () => {
+    expect(validateTicket({ ...valid, type: 'FAMILY' }, { partial: false }))
+      .toContain('phải khai báo');
+    expect(validateTicket({
+      ...valid,
+      type: 'FAMILY',
+      admissionCount: 4,
+    }, { partial: false })).toBe('');
+    expect(validateTicket({
+      ...valid,
+      type: 'ADULT',
+      admissionCount: 2,
+    }, { partial: false })).toContain('chỉ được áp dụng cho 1 khách');
+  });
   test('✅ refundPolicy chấp nhận cả format portal lẫn DB', () => {
     expect(validateTicket({ refundPolicy: 'FULL' }, { partial: true })).toBe('');
     expect(validateTicket({ refundPolicy: 'FREE_CANCELLATION' }, { partial: true })).toBe('');
@@ -162,5 +194,16 @@ describe('validateTicket', () => {
       minAgeYears: 12,
       maxAgeYears: 3,
     }, { partial: false })).not.toBe('');
+  });
+  test('validates inclusions and exclusions as bounded string lists', () => {
+    expect(validateTicket({
+      ...valid,
+      inclusions: ['Vé vào cổng'],
+      exclusions: [],
+    }, { partial: false })).toBe('');
+    expect(validateTicket({ ...valid, inclusions: 'Vé vào cổng' }, { partial: false }))
+      .toBe('Danh sách dịch vụ bao gồm phải là một danh sách.');
+    expect(validateTicket({ ...valid, exclusions: [''] }, { partial: false }))
+      .toBe('Danh sách dịch vụ không bao gồm không được chứa mục trống.');
   });
 });

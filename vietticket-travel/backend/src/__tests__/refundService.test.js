@@ -221,6 +221,7 @@ describe('releaseInventory', () => {
         timeSlotId: 'slot-1',
         date: new Date('2026-06-10T00:00:00.000Z'),
         quantity: 2,
+        snapshotAdmissionCount: 4,
         status: 'CONFIRMED',
         ticketProduct: { attractionId: 'attraction-1' },
       },
@@ -230,12 +231,12 @@ describe('releaseInventory', () => {
 
     expect(tx.dailyStock.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { bookedQuantity: { decrement: 2 } },
+        data: { bookedQuantity: { decrement: 8 } },
       }),
     );
     expect(tx.timeSlotStock.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { bookedQty: { decrement: 2 } },
+        data: { bookedQty: { decrement: 8 } },
       }),
     );
     expect(tx.reservation.update).toHaveBeenCalledWith({

@@ -513,24 +513,35 @@ async function sendPendingApprovalExpiredEmail({
   fullName,
   bookingId,
   refundAmount,
+  approvalDeadline,
 }) {
   const frontendUrl = getFrontendUrl();
   const link = `${frontendUrl}/my-tickets`;
   const safeName = escapeHtml(fullName || 'bạn');
   const shortId = formatBookingReference(bookingId);
   const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
+  const formattedDeadline = approvalDeadline
+    ? new Date(approvalDeadline).toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      })
+    : 'thời hạn duyệt';
 
   return sendMail({
     to,
     subject: `Đơn đặt vé #${shortId} đã quá hạn xác nhận - VietTicket Travel`,
     text:
-      `Xin chào ${fullName || 'bạn'}, đơn đặt vé ${bookingId} đã tự động hủy vì đối tác không xác nhận trong 24 giờ. `
+      `Xin chào ${fullName || 'bạn'}, đơn đặt vé ${bookingId} đã tự động hủy vì đối tác không xác nhận trước ${formattedDeadline}. `
       + `Yêu cầu hoàn lại toàn bộ ${formattedAmount} VND đã được tạo và sẽ được xử lý trong 3-5 ngày làm việc.`,
     fallbackLink: link,
     html: createEmailTemplate({
       title: 'Đơn đặt vé đã quá hạn xác nhận',
       preview:
-        `Xin chào ${safeName}, đơn đặt vé <strong>#${shortId}</strong> đã tự động hủy vì đối tác không xác nhận trong 24 giờ.<br /><br />`
+        `Xin chào ${safeName}, đơn đặt vé <strong>#${shortId}</strong> đã tự động hủy vì đối tác không xác nhận trước <strong>${escapeHtml(formattedDeadline)}</strong>.<br /><br />`
         + `Yêu cầu hoàn lại toàn bộ <strong>${formattedAmount} VND</strong> đã được tạo và sẽ được xử lý trong 3-5 ngày làm việc.`,
       buttonText: 'Xem vé của tôi',
       link,

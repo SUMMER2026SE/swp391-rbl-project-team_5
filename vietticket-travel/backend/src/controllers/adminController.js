@@ -573,6 +573,7 @@ async function getPartners(req, res, next) {
       );
       return {
         ...partner,
+        payoutCurrency: 'VND',
         businessLicenseUrl: documentIsValid ? partner.businessLicenseUrl : '',
         documentValidationStatus: documentIsValid ? 'VALID' : 'MISSING_OR_UNTRUSTED',
       };
@@ -616,6 +617,11 @@ function mapModerationAttraction(attraction, auditLogs, reviewerNames) {
     isPrimary: image.isPrimary,
   }));
   const category = snapshot?.category || attraction.categories?.[0]?.category || null;
+  const ticketProducts = snapshot?.tickets || attraction.ticketProducts || [];
+  const activeTicketPrices = ticketProducts
+    .filter((ticket) => String(ticket.status || 'ACTIVE').toUpperCase() === 'ACTIVE')
+    .map((ticket) => Number(ticket.sellingPrice))
+    .filter((price) => Number.isFinite(price) && price > 0);
 
   return {
     id: attraction.id,
@@ -628,6 +634,12 @@ function mapModerationAttraction(attraction, auditLogs, reviewerNames) {
     closeTime: snapshot?.closeTime ?? attraction.closeTime,
     latitude: snapshot?.latitude ?? attraction.latitude,
     longitude: snapshot?.longitude ?? attraction.longitude,
+    meetingPoint: snapshot?.meetingPoint ?? attraction.meetingPoint,
+    checkInInstructions: snapshot?.checkInInstructions ?? attraction.checkInInstructions,
+    accessibilityInfo: snapshot?.accessibilityInfo ?? attraction.accessibilityInfo,
+    whatToBring: Array.isArray(snapshot?.whatToBring)
+      ? snapshot.whatToBring
+      : (Array.isArray(attraction.whatToBring) ? attraction.whatToBring : []),
     status: attraction.status,
     publicationStatus: attraction.publicationStatus,
     operationalStatus: attraction.operationalStatus,
@@ -648,20 +660,20 @@ function mapModerationAttraction(attraction, auditLogs, reviewerNames) {
     images,
     primaryImage: images.find((image) => image.isPrimary)?.url || images[0]?.url || null,
     category,
-    minPrice: attraction.ticketProducts?.[0]
-      ? Number(attraction.ticketProducts[0].sellingPrice)
-      : null,
-    ticketProducts: (attraction.ticketProducts || []).map((ticket) => ({
+    minPrice: activeTicketPrices.length > 0 ? Math.min(...activeTicketPrices) : null,
+    ticketProducts: ticketProducts.map((ticket) => ({
       ...ticket,
       originalPrice: Number(ticket.originalPrice),
       sellingPrice: Number(ticket.sellingPrice),
       refundFeeRate: Number(ticket.refundFeeRate),
+      inclusions: Array.isArray(ticket.inclusions) ? ticket.inclusions : [],
+      exclusions: Array.isArray(ticket.exclusions) ? ticket.exclusions : [],
     })),
     schedule: {
-      openDays: attraction.openDays,
-      defaultCapacity: attraction.defaultCapacity,
-      timeSlots: attraction.timeSlots || [],
-      specialDates: attraction.specialDates || [],
+      openDays: snapshot?.schedule?.openDays ?? attraction.openDays,
+      defaultCapacity: snapshot?.schedule?.defaultCapacity ?? attraction.defaultCapacity,
+      timeSlots: snapshot?.schedule?.timeSlots ?? attraction.timeSlots ?? [],
+      specialDates: snapshot?.schedule?.specialDates ?? attraction.specialDates ?? [],
     },
     reviewHistory: auditLogs,
   };

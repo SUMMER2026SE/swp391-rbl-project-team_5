@@ -410,7 +410,23 @@ function CheckoutPage() {
                 <span className="material-symbols-outlined mr-2 align-[-4px] text-[20px]" aria-hidden="true">
                   route
                 </span>
-                Bạn đang thanh toán một vé trong lịch trình AI. Sau khi thanh toán thành công, hệ thống sẽ gợi ý vé tiếp theo trong lịch trình.
+                Bạn đang thanh toán một dòng vé trong lịch trình AI. Đây là giao dịch riêng; sau khi giao dịch được xác nhận, hệ thống sẽ đưa bạn tới dòng tiếp theo.
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-[#d7e4e5] bg-white p-4 text-sm leading-6 text-[#3f484a]">
+              <strong className="text-[#00474d]">Phạm vi đơn:</strong> đơn này chỉ gồm
+              {' '}{booking.ticketName}. Nếu cần thêm loại vé khác (ví dụ vé trẻ em), hãy tạo một đơn riêng sau khi hoàn tất bước này.
+              Sau thanh toán, bản demo không sửa ngày/khung giờ/số lượng; nếu còn đủ điều kiện, bạn chỉ có thể
+              yêu cầu hủy toàn bộ booking rồi đặt đơn mới theo giá và tồn kho lúc đó.
+            </div>
+
+            {booking.requiresManualApproval && (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                <strong>Thanh toán trước, xác nhận sau:</strong> số tiền sẽ được ghi nhận trước khi đối tác duyệt.
+                Đối tác có tối đa 24 giờ nhưng không được phản hồi muộn hơn giờ bắt đầu hoạt động.
+                Nếu đối tác từ chối hoặc quá hạn, booking bị hủy và hệ thống tạo yêu cầu hoàn bắt buộc 100%
+                về phương thức thanh toán gốc; mã QR chỉ xuất hiện sau khi duyệt.
               </div>
             )}
 
@@ -423,6 +439,9 @@ function CheckoutPage() {
                 <BookingRow icon="calendar_month" label="Ngày tham quan" value={formatDate(booking.visitDate)} />
                 <BookingRow icon="schedule" label="Khung giờ" value={booking.timeSlotLabel} />
                 <BookingRow icon="confirmation_number" label="Loại vé" value={`${booking.ticketName} (${booking.quantity} vé)`} />
+                {Number(booking.participantCount || booking.quantity) !== Number(booking.quantity) && (
+                  <BookingRow icon="groups" label="Số khách được vào" value={`${booking.participantCount} khách`} />
+                )}
                 <BookingRow icon="tag" label="Mã giữ chỗ" value={formatReservationReference(booking.id)} mono />
               </div>
             </section>

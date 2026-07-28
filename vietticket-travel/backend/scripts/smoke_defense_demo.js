@@ -25,6 +25,7 @@ const ACCOUNTS = {
   gateStaff: SEED_ACCOUNTS.gateStaff.email,
   platformStaff: SEED_ACCOUNTS.platformStaff.email,
   admin: SEED_ACCOUNTS.admin.email,
+  settlementChecker: SEED_ACCOUNTS.settlementChecker.email,
 };
 
 function resetDemoData() {
@@ -161,12 +162,13 @@ async function run() {
   const prisma = require('../src/config/prisma');
 
   try {
-    const [customer, partner, gateStaff, platformStaff, admin] = await Promise.all([
+    const [customer, partner, gateStaff, platformStaff, admin, settlementChecker] = await Promise.all([
       login(app, 'CUSTOMER', ACCOUNTS.customer),
       login(app, 'PARTNER', ACCOUNTS.partner),
       login(app, 'GATE STAFF', ACCOUNTS.gateStaff),
       login(app, 'PLATFORM STAFF', ACCOUNTS.platformStaff),
       login(app, 'ADMIN', ACCOUNTS.admin),
+      login(app, 'ADMIN CHECKER', ACCOUNTS.settlementChecker),
     ]);
 
     const refundPreview = await call(
@@ -302,11 +304,11 @@ async function run() {
     );
     await call(
       'Admin duyệt kỳ đối soát nháp',
-      admin.patch(`/api/admin/settlements/${fixtureId('settlement', 'draft')}/status`).send({ status: 'APPROVED' }),
+      settlementChecker.patch(`/api/admin/settlements/${fixtureId('settlement', 'draft')}/status`).send({ status: 'APPROVED' }),
     );
     await call(
       'Admin ghi nhận đã chuyển khoản kỳ đối soát',
-      admin.patch(`/api/admin/settlements/${fixtureId('settlement', 'approved')}/status`).send({
+      settlementChecker.patch(`/api/admin/settlements/${fixtureId('settlement', 'approved')}/status`).send({
         status: 'PAID',
         bankReference: OPERATIONAL_VALUES.settlementBankReference,
       }),

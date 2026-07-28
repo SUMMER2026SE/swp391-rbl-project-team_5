@@ -56,6 +56,7 @@ export default function PartnerSettlementsPage() {
             <h2 className="text-xl font-bold text-[#191c1d]">Lịch sử đối soát</h2>
             <p className="mt-1 text-sm text-[#5f696b]">
               Số tiền được chốt từ booking đã hoàn tất sau khi trừ hoàn tiền và hoa hồng nền tảng.
+              Mỗi kỳ phải được một quản trị viên khác người lập kiểm tra trước khi chi trả.
             </p>
           </div>
           <select

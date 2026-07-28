@@ -7,6 +7,8 @@ const VIETNAM_PHONE_REGEX = /^0(3|5|7|8|9)\d{8}$/;
 const BANK_ACCOUNT_REGEX = /^\d{6,20}$/;
 const SWIFT_CODE_REGEX = /^[A-Z0-9]{8,11}$/i;
 const ATTRACTION_ENVIRONMENTS = ['INDOOR', 'OUTDOOR', 'MIXED'];
+const OPERATIONAL_LIST_MAX_ITEMS = 20;
+const OPERATIONAL_LIST_ITEM_MAX_LENGTH = 300;
 
 function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
@@ -21,6 +23,22 @@ function isValidDate(value) {
   if (!DATE_REGEX.test(dateKey)) return false;
   const parsed = new Date(`${dateKey}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === dateKey;
+}
+
+function validateOperationalList(value, label) {
+  if (!Array.isArray(value)) {
+    return `${label} phải là một danh sách.`;
+  }
+  if (value.length > OPERATIONAL_LIST_MAX_ITEMS) {
+    return `${label} không được vượt quá ${OPERATIONAL_LIST_MAX_ITEMS} mục.`;
+  }
+  if (value.some((item) => !isNonEmptyString(item))) {
+    return `${label} không được chứa mục trống.`;
+  }
+  if (value.some((item) => item.trim().length > OPERATIONAL_LIST_ITEM_MAX_LENGTH)) {
+    return `${label} không được chứa mục dài quá ${OPERATIONAL_LIST_ITEM_MAX_LENGTH} ký tự.`;
+  }
+  return '';
 }
 
 function validateBankDetails(body = {}) {
@@ -145,6 +163,22 @@ function validateAttraction(body, { partial = false } = {}) {
     return 'Mô tả không được vượt quá 5000 ký tự.';
   }
 
+  const operationalTextLimits = [
+    ['meetingPoint', 'Điểm gặp/check-in', 1000],
+    ['checkInInstructions', 'Hướng dẫn check-in', 3000],
+    ['accessibilityInfo', 'Thông tin hỗ trợ tiếp cận', 2000],
+  ];
+  for (const [field, label, maxLength] of operationalTextLimits) {
+    if (has(field) && String(body[field] || '').trim().length > maxLength) {
+      return `${label} không được vượt quá ${maxLength} ký tự.`;
+    }
+  }
+
+  if (has('whatToBring')) {
+    const listError = validateOperationalList(body.whatToBring, 'Danh sách cần mang theo');
+    if (listError) return listError;
+  }
+
   if (has('openTime') && body.openTime && !isValidTime(body.openTime)) {
     return 'Giờ mở cửa không hợp lệ (định dạng HH:MM).';
   }
@@ -217,6 +251,33 @@ function validateTicket(body, { partial = false } = {}) {
     return 'Loại vé không hợp lệ.';
   }
 
+  for (const [field, label] of [
+    ['inclusions', 'Danh sách dịch vụ bao gồm'],
+    ['exclusions', 'Danh sách dịch vụ không bao gồm'],
+  ]) {
+    if (has(field)) {
+      const listError = validateOperationalList(body[field], label);
+      if (listError) return listError;
+    }
+  }
+
+  const {
+    parseAdmissionCount,
+    validateAdmissionCount,
+  } = require('./ticketCapacity');
+  if (partial && has('admissionCount') && !has('type')) {
+    if (parseAdmissionCount(body.admissionCount) == null) {
+      return 'Số khách trên mỗi gói phải là số nguyên từ 1 đến 50.';
+    }
+  } else if (!partial || has('type') || has('admissionCount')) {
+    const admissionError = validateAdmissionCount(
+      body.type || 'ADULT',
+      body.admissionCount,
+      { required: !partial || has('type') },
+    );
+    if (admissionError) return admissionError;
+  }
+
   const original = Number(body.originalPrice);
   const selling = Number(body.sellingPrice);
 
@@ -258,10 +319,10 @@ function validateTicket(body, { partial = false } = {}) {
   const isPartialRefund = ['PARTIAL', 'REFUND_WITH_FEE'].includes(normalizedPolicy);
 
   if (isPartialRefund && (!has('refundFeeRate') || body.refundFeeRate === '')) {
-    return 'Vui lòng nhập phí hoàn/hủy cho chính sách hoàn một phần.';
+    return 'Vui lòng nhập phí hủy cho chính sách hoàn tiền sau khi trừ phí.';
   }
 
-  // refundFeeRate là phân số (vd 0.1 = 10%). Với hoàn một phần, 0% và 100%
+  // refundFeeRate là phân số (vd 0.1 = 10%). Với hoàn tiền sau phí, 0% và 100%
   // phải dùng chính sách hoàn toàn phần hoặc không hoàn để tránh diễn giải mơ hồ.
   if (has('refundFeeRate') && body.refundFeeRate !== null && body.refundFeeRate !== '') {
     const feeRate = Number(body.refundFeeRate);
@@ -269,7 +330,7 @@ function validateTicket(body, { partial = false } = {}) {
       return 'Phí hoàn/hủy phải là tỉ lệ trong khoảng 0 đến 1 (vd 0.1 = 10%).';
     }
     if (isPartialRefund && (feeRate <= 0 || feeRate >= 1)) {
-      return 'Phí hoàn/hủy một phần phải lớn hơn 0 và nhỏ hơn 1 (từ 1% đến 99%).';
+      return 'Phí hủy phải lớn hơn 0% và nhỏ hơn 100% đối với chính sách hoàn tiền sau phí.';
     }
   }
 
@@ -337,4 +398,5 @@ module.exports = {
   validateKyc,
   validateAttraction,
   validateTicket,
+  validateOperationalList,
 };

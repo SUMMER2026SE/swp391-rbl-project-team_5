@@ -1,9 +1,21 @@
 const {
+  CUSTOMER_BOOKING_CHANGE_POLICY,
   DEFAULT_MAX_TICKETS_PER_ORDER,
   readMaxTicketsPerOrder,
 } = require('../config/bookingPolicy');
 
 describe('bookingPolicy', () => {
+  test('customer changes are whole-booking only in the demo scope', () => {
+    expect(CUSTOMER_BOOKING_CHANGE_POLICY).toEqual({
+      cancellationScope: 'WHOLE_BOOKING',
+      partialCancellationSupported: false,
+      visitDateChangeSupported: false,
+      timeSlotChangeSupported: false,
+      ticketProductChangeSupported: false,
+      recoveryReplacementIsOperationalException: true,
+    });
+  });
+
   test('mặc định giới hạn 20 vé mỗi đơn', () => {
     expect(readMaxTicketsPerOrder(undefined)).toBe(DEFAULT_MAX_TICKETS_PER_ORDER);
     expect(DEFAULT_MAX_TICKETS_PER_ORDER).toBe(20);

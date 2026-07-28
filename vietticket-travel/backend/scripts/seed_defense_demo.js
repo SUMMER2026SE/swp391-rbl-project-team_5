@@ -108,6 +108,7 @@ const IDS = Object.freeze({
     gateStaff: fixtureId('user', 'gate-staff'),
     platformStaff: fixtureId('user', 'platform-staff'),
     admin: fixtureId('user', 'admin'),
+    settlementChecker: fixtureId('user', 'settlement-checker'),
     forecastCustomer: fixtureId('user', 'forecast-history'),
     kycApprove: fixtureId('user', 'kyc-approve'),
     kycReject: fixtureId('user', 'kyc-reject'),
@@ -177,6 +178,13 @@ const ACCOUNTS = Object.freeze({
     fullName: 'Vũ Ngọc Lan',
     role: 'ADMIN',
     phone: '0963158274',
+  },
+  settlementChecker: {
+    id: IDS.users.settlementChecker,
+    email: 'minh.quan.ngo@vietticket.local',
+    fullName: 'Ngô Minh Quân',
+    role: 'ADMIN',
+    phone: '0973164285',
   },
   forecastCustomer: {
     id: IDS.users.forecastCustomer,
@@ -439,12 +447,16 @@ function buildSubmittedSnapshot({
   sellingPrice,
 }) {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     title,
     description,
     address,
     city,
     district,
+    meetingPoint: `Quầy tiếp nhận khách tại ${address}.`,
+    checkInInstructions: 'Xuất trình mã QR VietTicket và giấy tờ tùy thân có ảnh trùng với thông tin người đặt trước khi sử dụng dịch vụ.',
+    accessibilityInfo: 'Khách cần hỗ trợ tiếp cận hoặc hỗ trợ đặc biệt vui lòng liên hệ đối tác trước ngày sử dụng để được xác nhận phương án phục vụ.',
+    whatToBring: ['Mã QR VietTicket', 'Giấy tờ tùy thân có ảnh'],
     openTime: '08:00',
     closeTime: '18:00',
     latitude,
@@ -467,6 +479,9 @@ function buildSubmittedSnapshot({
       originalPrice: sellingPrice + 50000,
       sellingPrice,
       status: 'ACTIVE',
+      admissionCount: 1,
+      inclusions: ['Quyền sử dụng đúng các hạng mục được nêu trong tên và mô tả gói vé.'],
+      exclusions: ['Chi phí cá nhân và các dịch vụ không được nêu trong mô tả gói vé.'],
       refundPolicy: 'FREE_CANCELLATION',
       refundFeeRate: 0,
       refundCutoffHours: 24,
@@ -857,6 +872,7 @@ async function seedIdentitiesAndPartners() {
   await createIdentity(ACCOUNTS.gateStaff, passwordHash);
   await createIdentity(ACCOUNTS.platformStaff, passwordHash);
   await createIdentity(ACCOUNTS.admin, passwordHash);
+  await createIdentity(ACCOUNTS.settlementChecker, passwordHash);
   for (const account of BACKGROUND_CUSTOMERS) {
     await createIdentity(account, passwordHash);
   }
@@ -1001,7 +1017,7 @@ async function seedCatalog() {
       imageUrl: 'https://commons.wikimedia.org/wiki/Special:Redirect/file/Bach%20Dang%20Station%20-%20Sai%20Gon%20Water%20Bus.jpg?width=1280',
       tickets: [
         { id: IDS.tickets.cruiseAdult, name: 'Vé du thuyền người lớn', type: 'ADULT', originalPrice: 350000, sellingPrice: 280000, refundPolicy: 'REFUND_WITH_FEE', refundFeeRate: 0.3, minAgeYears: 12 },
-        { id: IDS.tickets.cruiseFamily, name: 'Gói gia đình 2 người lớn + 2 trẻ em', type: 'FAMILY', originalPrice: 1050000, sellingPrice: 920000, refundPolicy: 'REFUND_WITH_FEE', refundFeeRate: 0.3, requiresAdult: true },
+        { id: IDS.tickets.cruiseFamily, name: 'Gói gia đình 2 người lớn + 2 trẻ em', type: 'FAMILY', admissionCount: 4, originalPrice: 1050000, sellingPrice: 920000, refundPolicy: 'REFUND_WITH_FEE', refundFeeRate: 0.3, requiresAdult: true },
       ],
     },
     {
@@ -1032,6 +1048,10 @@ async function seedCatalog() {
         address: attraction.address,
         city: attraction.city,
         district: attraction.district,
+        meetingPoint: `Quầy tiếp nhận khách tại ${attraction.address}.`,
+        checkInInstructions: 'Xuất trình mã QR VietTicket và giấy tờ tùy thân có ảnh trùng với thông tin người đặt trước khi sử dụng dịch vụ.',
+        accessibilityInfo: 'Khách cần hỗ trợ tiếp cận hoặc hỗ trợ đặc biệt vui lòng liên hệ đối tác trước ngày sử dụng để được xác nhận phương án phục vụ.',
+        whatToBring: ['Mã QR VietTicket', 'Giấy tờ tùy thân có ảnh'],
         openTime: attraction.openTime,
         closeTime: attraction.closeTime,
         openDays: '1,1,1,1,1,1,1',
@@ -1057,8 +1077,11 @@ async function seedCatalog() {
         },
         ticketProducts: {
           create: attraction.tickets.map((ticket) => ({
-            ...ticket,
+             ...ticket,
+            admissionCount: Number(ticket.admissionCount ?? 1),
             description: `${ticket.name}; sử dụng đúng ngày, khung giờ và điều kiện độ tuổi đã chọn.`,
+            inclusions: ['Quyền sử dụng đúng các hạng mục được nêu trong tên và mô tả gói vé.'],
+            exclusions: ['Chi phí cá nhân và các dịch vụ không được nêu trong mô tả gói vé.'],
             status: 'ACTIVE',
             refundFeeRate: ticket.refundFeeRate || 0,
             refundCutoffHours: 24,
@@ -1149,6 +1172,10 @@ async function seedCatalog() {
         description: definition.description,
         address: definition.address,
         city: 'Hồ Chí Minh',
+        meetingPoint: `Quầy tiếp nhận khách tại ${definition.address}.`,
+        checkInInstructions: 'Xuất trình mã QR VietTicket và giấy tờ tùy thân có ảnh trùng với thông tin người đặt trước khi sử dụng dịch vụ.',
+        accessibilityInfo: 'Khách cần hỗ trợ tiếp cận hoặc hỗ trợ đặc biệt vui lòng liên hệ đối tác trước ngày sử dụng để được xác nhận phương án phục vụ.',
+        whatToBring: ['Mã QR VietTicket', 'Giấy tờ tùy thân có ảnh'],
         openTime: '08:00', closeTime: '18:00', openDays: '1,1,1,1,1,1,1',
         defaultCapacity: 120,
         recommendedVisitMinutes: 180,
@@ -1165,6 +1192,8 @@ async function seedCatalog() {
           description: 'Vé người lớn, áp dụng theo lịch vận hành.',
           originalPrice: definition.sellingPrice + 50000,
           sellingPrice: definition.sellingPrice,
+          inclusions: ['Quyền sử dụng đúng các hạng mục được nêu trong tên và mô tả gói vé.'],
+          exclusions: ['Chi phí cá nhân và các dịch vụ không được nêu trong mô tả gói vé.'],
           status: 'ACTIVE', refundPolicy: 'FREE_CANCELLATION', refundCutoffHours: 24,
           minAgeYears: 12,
         } },
@@ -1182,6 +1211,10 @@ async function seedCatalog() {
       title: 'Khu vui chơi Ven sông Sài Gòn',
       description: 'Khu vui chơi ngoài trời ven sông với các hoạt động gia đình; hiện tạm ngừng vận hành để hoàn tất biện pháp khắc phục an toàn.',
       address: 'Thành phố Thủ Đức', city: 'Hồ Chí Minh', district: 'Thủ Đức',
+      meetingPoint: 'Quầy tiếp nhận khách tại cổng chính khu vui chơi.',
+      checkInInstructions: 'Xuất trình mã QR VietTicket và giấy tờ tùy thân có ảnh tại quầy tiếp nhận khi điểm tham quan được phép hoạt động trở lại.',
+      accessibilityInfo: 'Khách cần hỗ trợ tiếp cận vui lòng liên hệ đối tác trước ngày sử dụng để được xác nhận phương án phục vụ.',
+      whatToBring: ['Mã QR VietTicket', 'Giấy tờ tùy thân có ảnh'],
       openTime: '08:00', closeTime: '20:00', openDays: '1,1,1,1,1,1,1',
       defaultCapacity: 150, recommendedVisitMinutes: 180, environment: 'OUTDOOR',
       latitude: 10.8021, longitude: 106.7501,
@@ -1195,6 +1228,8 @@ async function seedCatalog() {
       ticketProducts: { create: {
         id: IDS.tickets.suspended, name: 'Vé vui chơi trong ngày', type: 'ADULT',
         description: 'Vé trải nghiệm khu vui chơi.', originalPrice: 220000, sellingPrice: 190000,
+        inclusions: ['Quyền sử dụng các hạng mục được nêu trong mô tả vé.'],
+        exclusions: ['Chi phí cá nhân và dịch vụ không được nêu trong mô tả vé.'],
         status: 'ACTIVE', refundPolicy: 'FREE_CANCELLATION', refundCutoffHours: 24,
       } },
       timeSlots: { create: { id: `${IDS.attractions.suspended}-slot`, startTime: '08:00', endTime: '20:00', maxCapacity: 150, isActive: true } },
@@ -1208,6 +1243,10 @@ async function seedCatalog() {
       title: 'Tour Ẩm thực Chợ Lớn – Bản nháp',
       description: 'Tour đi bộ buổi tối khám phá ẩm thực Chợ Lớn cùng hướng dẫn viên địa phương và các món ăn đặc trưng.',
       address: 'Quận 5, Thành phố Hồ Chí Minh', city: 'Hồ Chí Minh', district: 'Quận 5',
+      meetingPoint: 'Quầy thông tin tại cổng chính Chợ Bình Tây, Quận 5.',
+      checkInInstructions: 'Xuất trình mã QR VietTicket và giấy tờ tùy thân có ảnh cho hướng dẫn viên tại điểm hẹn trước khi tour bắt đầu.',
+      accessibilityInfo: 'Lộ trình đi bộ ngoài trời; khách cần hỗ trợ di chuyển vui lòng liên hệ đối tác trước ngày sử dụng.',
+      whatToBring: ['Mã QR VietTicket', 'Giấy tờ tùy thân có ảnh', 'Giày đi bộ phù hợp'],
       openTime: '17:00', closeTime: '21:00', openDays: '0,0,0,1,1,1,1',
       defaultCapacity: 40, recommendedVisitMinutes: 180, environment: 'MIXED',
       latitude: 10.7542, longitude: 106.6635,
@@ -1218,6 +1257,8 @@ async function seedCatalog() {
       ticketProducts: { create: {
         id: IDS.tickets.draft, name: 'Tour ẩm thực người lớn', type: 'ADULT',
         description: 'Tour đi bộ có hướng dẫn viên và món ăn mẫu.', originalPrice: 380000, sellingPrice: 320000,
+        inclusions: ['Hướng dẫn viên địa phương', 'Các món ăn mẫu được nêu trong mô tả tour.'],
+        exclusions: ['Chi phí cá nhân', 'Món ăn và đồ uống gọi thêm.'],
         status: 'ACTIVE', refundPolicy: 'REFUND_WITH_FEE', refundFeeRate: 0.2, refundCutoffHours: 24,
       } },
       timeSlots: { create: { id: `${IDS.attractions.draft}-slot`, startTime: '17:00', endTime: '20:00', maxCapacity: 40, isActive: true } },
@@ -1477,6 +1518,7 @@ async function createScenarioBooking(definition, ticket) {
       timeSlotId: selectedTimeSlot?.id || null,
       date: visitDate,
       quantity: definition.quantity,
+      snapshotAdmissionCount: Number(ticket.admissionCount ?? 1),
       status: definition.reservationStatus,
       expiresAt: definition.reservationStatus === 'HELD'
         ? new Date(now.getTime() + holdMs)
@@ -1519,6 +1561,7 @@ async function createScenarioBooking(definition, ticket) {
       snapshotAttractionImage: ticket.attraction.images[0]?.imageUrl || null,
       snapshotTicketName: ticket.name,
       snapshotTicketType: ticket.type,
+      snapshotAdmissionCount: Number(ticket.admissionCount ?? 1),
       snapshotTicketDescription: ticket.description,
       snapshotUnitPrice: unitPrice,
       snapshotRefundPolicy: ticket.refundPolicy,
@@ -1819,14 +1862,15 @@ async function seedInventory(scenarioBookings) {
           heldQty: 0,
         }
       : null;
+    const inventoryUnits = booking.quantity * Number(booking.ticket.admissionCount ?? 1);
     if (isHeld) {
-      ticketRow.heldQuantity += booking.quantity;
-      attractionRow.heldQty += booking.quantity;
-      if (timeSlotRow) timeSlotRow.heldQty += booking.quantity;
+      ticketRow.heldQuantity += inventoryUnits;
+      attractionRow.heldQty += inventoryUnits;
+      if (timeSlotRow) timeSlotRow.heldQty += inventoryUnits;
     } else {
-      ticketRow.bookedQuantity += booking.quantity;
-      attractionRow.bookedQty += booking.quantity;
-      if (timeSlotRow) timeSlotRow.bookedQty += booking.quantity;
+      ticketRow.bookedQuantity += inventoryUnits;
+      attractionRow.bookedQty += inventoryUnits;
+      if (timeSlotRow) timeSlotRow.bookedQty += inventoryUnits;
     }
     ticketByDate.set(ticketKey, ticketRow);
     attractionByDate.set(attractionKey, attractionRow);
@@ -1891,6 +1935,7 @@ async function seedForecastHistory(attractionDefinitions) {
         ticketProductId: ticketId,
         date: visitDate,
         quantity,
+        snapshotAdmissionCount: Number(attraction.tickets[0].admissionCount ?? 1),
         status: 'CONFIRMED',
         expiresAt: new Date(createdAt.getTime() + 15 * 60 * 1000),
         snapshotUnitPrice: price,
@@ -1922,6 +1967,7 @@ async function seedForecastHistory(attractionDefinitions) {
         snapshotAttractionImage: attraction.imageUrl,
         snapshotTicketName: attraction.tickets[0].name,
         snapshotTicketType: attraction.tickets[0].type,
+        snapshotAdmissionCount: Number(attraction.tickets[0].admissionCount ?? 1),
         snapshotTicketDescription: 'Gói vé tiêu chuẩn đã bao gồm quyền vào cửa.',
         snapshotUnitPrice: price,
         snapshotRefundPolicy: 'FREE_CANCELLATION',
@@ -2012,9 +2058,9 @@ async function seedSettlements(scenarioBookings) {
         bankAccountNameSnapshot: 'CONG TY DU LICH TRAI NGHIEM VIET',
         bankAccountLast4Snapshot: '3910',
         createdById: IDS.users.admin,
-        approvedById: status !== 'DRAFT' ? IDS.users.admin : null,
+        approvedById: status !== 'DRAFT' ? IDS.users.settlementChecker : null,
         approvedAt: status !== 'DRAFT' ? now : null,
-        paidById: status === 'PAID' ? IDS.users.admin : null,
+        paidById: status === 'PAID' ? IDS.users.settlementChecker : null,
         paidAt: status === 'PAID' ? now : null,
         bankReference: status === 'PAID'
           ? `VCB-${vietnamDateKey(now).replaceAll('-', '')}-0001`
@@ -2028,7 +2074,9 @@ async function seedSettlements(scenarioBookings) {
             netAmount: row.total,
             commissionAmount: row.commission,
             payableAmount: row.partnerNet,
-            releasedAt: status === 'PAID' ? now : null,
+            // PAID items remain attached to the immutable settlement ledger.
+            // Only cancellation may release an item for a future settlement.
+            releasedAt: null,
           })),
         },
       },
@@ -2822,6 +2870,7 @@ function printHandoff(
   console.log(`- Staff check-in: ${ACCOUNTS.gateStaff.email}`);
   console.log(`- Staff hỗ trợ:   ${ACCOUNTS.platformStaff.email}`);
   console.log(`- Admin:          ${ACCOUNTS.admin.email}`);
+  console.log(`- Admin checker:  ${ACCOUNTS.settlementChecker.email}`);
   console.log('\nCổng soát vé:');
   console.log(`- Khung giờ vé check-in hôm nay: ${(readiness.checkinWindows || []).join(', ') || '—'}`);
   console.log(`- Số vé quét được ngay lúc này:  ${readiness.checkinReadyNow ?? 0}`);

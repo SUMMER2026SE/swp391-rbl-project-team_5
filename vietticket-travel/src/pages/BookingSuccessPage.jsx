@@ -4,6 +4,7 @@ import Footer from '../components/Footer.jsx'
 import Header from '../components/Header.jsx'
 import bookingService from '../services/bookingService.js'
 import { formatBookingReference } from '../utils/bookingReference.js'
+import { getManualApprovalTiming } from '../utils/manualApproval.js'
 import {
   buildItineraryQueueBookingUrl,
   completeItineraryQueueItemByBookingId,
@@ -173,6 +174,7 @@ function BookingSuccessPage() {
   const isUnknown = outcome === 'unknown'
   const isVerifying = outcome === 'verifying'
   const isPendingPartner = booking?.status === 'pending_partner'
+  const approvalTiming = getManualApprovalTiming(booking)
   const isRetryAllowed = canRetryBookingPayment(booking)
   const nextAiBookingUrl = aiQueueResult?.nextUrl || ''
   const failureReason = isUnknown
@@ -316,7 +318,7 @@ function BookingSuccessPage() {
           <p className="mt-3 leading-relaxed text-on-surface-variant">
             {isSuccess
               ? isPendingPartner
-                ? 'Thanh toán đã được ghi nhận. VietTicket sẽ phát hành mã QR ngay khi đối tác xác nhận vé.'
+                ? 'Thanh toán đã được ghi nhận trước khi duyệt. VietTicket chỉ phát hành mã QR khi đối tác xác nhận.'
                 : 'Thanh toán đã được ghi nhận và vé điện tử của bạn đã sẵn sàng.'
               : isVerifying
                 ? 'VietTicket đang đối chiếu trạng thái đơn và thanh toán trực tiếp với máy chủ. Vui lòng chờ trong giây lát.'
@@ -339,6 +341,17 @@ function BookingSuccessPage() {
               <SummaryRow icon="tag" label="Mã đặt chỗ" value={formatBookingReference(booking.id)} mono />
               <SummaryRow icon="location_on" label="Địa điểm" value={booking.attractionTitle} />
               <SummaryRow icon="calendar_month" label="Ngày tham quan" value={formatDate(booking.visitDate)} />
+            </div>
+          )}
+
+          {isSuccess && isPendingPartner && booking?.manualApproval && (
+            <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-left text-sm leading-6 text-amber-950">
+              <p className="font-extrabold">Hạn đối tác phản hồi: {approvalTiming.deadlineLabel}</p>
+              <p className="mt-1">
+                Hạn này là thời điểm sớm hơn giữa 24 giờ sau thanh toán và giờ bắt đầu hoạt động.
+                Nếu đối tác từ chối hoặc không phản hồi đúng hạn, booking sẽ bị hủy và hệ thống tạo
+                yêu cầu hoàn bắt buộc 100% về phương thức thanh toán gốc.
+              </p>
             </div>
           )}
 

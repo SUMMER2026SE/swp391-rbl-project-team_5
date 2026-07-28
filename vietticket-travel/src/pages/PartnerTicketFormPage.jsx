@@ -13,13 +13,13 @@ const TICKET_TYPES = [
   { value: 'ADULT',  label: 'Người lớn',  icon: 'person',        desc: 'Theo điều kiện của điểm' },
   { value: 'CHILD',  label: 'Trẻ em',     icon: 'child_care',    desc: 'Cần khai báo tuổi/chiều cao' },
   { value: 'STUDENT', label: 'Học sinh / sinh viên', icon: 'school', desc: 'Yêu cầu xuất trình giấy tờ hợp lệ' },
-  { value: 'FAMILY', label: 'Gia đình',   icon: 'family_restroom', desc: 'Nêu rõ phạm vi gói trong mô tả' },
-  { value: 'GROUP',  label: 'Nhóm',       icon: 'groups',        desc: 'Nêu rõ quy mô nhóm trong mô tả' },
+  { value: 'FAMILY', label: 'Gia đình',   icon: 'family_restroom', desc: 'Một gói cho nhiều khách' },
+  { value: 'GROUP',  label: 'Nhóm',       icon: 'groups',        desc: 'Một gói cho nhiều khách' },
 ]
 
 const REFUND_POLICIES = [
   { value: 'NONE',    label: 'Không hoàn tiền',         desc: 'Không hỗ trợ hoàn tiền trong bất kỳ trường hợp nào.', color: 'border-[#ba1a1a] bg-[#ffdad6]/30 text-[#ba1a1a]' },
-  { value: 'PARTIAL', label: 'Hoàn tiền một phần',       desc: 'Khách nhận lại tiền sau khi trừ phí hủy đã công bố.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
+  { value: 'PARTIAL', label: 'Hoàn sau khi trừ phí',       desc: 'Hủy toàn bộ booking; khách nhận lại số tiền còn lại sau phí hủy đã công bố, không phải hủy bớt số vé.', color: 'border-[#725000] bg-[#ffdea8]/30 text-[#725000]' },
   { value: 'FULL',    label: 'Hoàn tiền toàn bộ',        desc: 'Hoàn 100% nếu khách hủy trước thời hạn đã công bố.', color: 'border-[#137333] bg-[#E6F4EA]/30 text-[#137333]' },
 ]
 
@@ -34,8 +34,9 @@ function PartnerTicketFormPage() {
   const [touched, setTouched] = useState({})
 
   const [form, setForm] = useState({
-    name: '', type: 'ADULT', originalPrice: '', sellingPrice: '',
+    name: '', type: 'ADULT', admissionCount: '1', originalPrice: '', sellingPrice: '',
     description: '', refundPolicy: 'PARTIAL', refundFeePercent: '10',
+    inclusionsText: '', exclusionsText: '',
     refundCutoffHours: '24', status: 'active',
     minAgeYears: '', maxAgeYears: '', minHeightCm: '', maxHeightCm: '',
     requiresAdult: false,
@@ -59,9 +60,12 @@ function PartnerTicketFormPage() {
         setForm({
           name: t.name ?? '',
           type: t.type ?? 'ADULT',
+          admissionCount: String(t.admissionCount ?? 1),
           originalPrice: t.originalPrice ?? '',
           sellingPrice: t.sellingPrice ?? '',
           description: t.description ?? '',
+          inclusionsText: Array.isArray(t.inclusions) ? t.inclusions.join('\n') : '',
+          exclusionsText: Array.isArray(t.exclusions) ? t.exclusions.join('\n') : '',
           refundPolicy: t.refundPolicy ?? 'PARTIAL',
           refundFeePercent: String(Math.round(Number(t.refundFeeRate ?? 0.1) * 100)),
           refundCutoffHours: String(t.refundCutoffHours ?? 24),
@@ -89,12 +93,30 @@ function PartnerTicketFormPage() {
   // Validation
   const errors = {
     name: !form.name.trim() ? 'Tên gói vé không được để trống.' : '',
+    inclusions: !form.inclusionsText
+      .split('\n')
+      .some((item) => item.trim())
+      ? 'Cần công bố ít nhất một dịch vụ có trong giá vé.'
+      : '',
     originalPrice: !form.originalPrice || Number(form.originalPrice) <= 0 ? 'Giá gốc phải lớn hơn 0.' : '',
     sellingPrice: !form.sellingPrice || Number(form.sellingPrice) <= 0
       ? 'Giá bán phải lớn hơn 0.'
       : Number(form.sellingPrice) > Number(form.originalPrice)
         ? 'Giá bán không được vượt quá giá gốc.'
         : '',
+    admissionCount: (() => {
+      const value = Number(form.admissionCount)
+      if (!Number.isInteger(value) || value < 1 || value > 50) {
+        return 'Số khách trên mỗi gói phải là số nguyên từ 1 đến 50.'
+      }
+      if (['FAMILY', 'GROUP'].includes(form.type) && value < 2) {
+        return 'Gói gia đình/nhóm phải áp dụng cho ít nhất 2 khách.'
+      }
+      if (!['FAMILY', 'GROUP'].includes(form.type) && value !== 1) {
+        return 'Vé cá nhân chỉ được áp dụng cho 1 khách.'
+      }
+      return ''
+    })(),
     refundFeePercent: form.refundPolicy === 'PARTIAL'
       && (!Number.isInteger(Number(form.refundFeePercent))
         || Number(form.refundFeePercent) < 1
@@ -148,8 +170,10 @@ function PartnerTicketFormPage() {
   const handleSubmit = async () => {
     setTouched({
       name: true,
+      inclusions: true,
       originalPrice: true,
       sellingPrice: true,
+      admissionCount: true,
       refundFeePercent: true,
       refundCutoffHours: true,
       eligibility: true,
@@ -158,7 +182,16 @@ function PartnerTicketFormPage() {
     const payload = {
       name: form.name,
       type: form.type,
+      admissionCount: Number(form.admissionCount),
       description: form.description,
+      inclusions: form.inclusionsText
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean),
+      exclusions: form.exclusionsText
+        .split('\n')
+        .map((item) => item.trim())
+        .filter(Boolean),
       originalPrice: Number(form.originalPrice),
       sellingPrice: Number(form.sellingPrice),
       refundPolicy: form.refundPolicy,
@@ -173,7 +206,8 @@ function PartnerTicketFormPage() {
       maxAgeYears: form.maxAgeYears === '' ? null : Number(form.maxAgeYears),
       minHeightCm: form.minHeightCm === '' ? null : Number(form.minHeightCm),
       maxHeightCm: form.maxHeightCm === '' ? null : Number(form.maxHeightCm),
-      requiresAdult: form.type === 'CHILD' && form.requiresAdult,
+      requiresAdult: ['CHILD', 'FAMILY', 'GROUP'].includes(form.type)
+        && form.requiresAdult,
     }
     setIsSubmitting(true)
     try {
@@ -245,12 +279,33 @@ function PartnerTicketFormPage() {
                   className={`${inputCls(false)} resize-none`}
                 />
               </FormField>
-              {form.type === 'GROUP' && (
-                <div className="rounded-lg bg-[#00474d]/5 border border-[#00474d]/20 p-3 text-xs text-[#00474d] font-semibold flex items-start gap-2">
-                  <span className="material-symbols-outlined text-[16px] mt-0.5" aria-hidden="true">info</span>
-                  <p>Mẹo: Hãy nêu rõ số lượng khách tối thiểu áp dụng cho gói vé Nhóm (ví dụ: Áp dụng khi mua từ 10 vé trở lên) trong Mô tả gói vé.</p>
-                </div>
-              )}
+              <div className="grid gap-5 md:grid-cols-2">
+                <FormField
+                  label="Giá vé bao gồm"
+                  required
+                  error={touched.inclusions && errors.inclusions}
+                >
+                  <textarea
+                    value={form.inclusionsText}
+                    onChange={(e) => update('inclusionsText', e.target.value)}
+                    onBlur={() => touch('inclusions')}
+                    rows={5}
+                    placeholder={'Vé vào cổng\nMột lượt cáp treo khứ hồi\nBảo hiểm tham quan'}
+                    className={`${inputCls(touched.inclusions && errors.inclusions)} resize-y`}
+                  />
+                  <p className="mt-1 text-xs text-[#6f797a]">Mỗi dòng một dịch vụ; bắt buộc ít nhất một mục.</p>
+                </FormField>
+                <FormField label="Giá vé không bao gồm">
+                  <textarea
+                    value={form.exclusionsText}
+                    onChange={(e) => update('exclusionsText', e.target.value)}
+                    rows={5}
+                    placeholder={'Đồ ăn và thức uống\nChi phí di chuyển đến địa điểm'}
+                    className={`${inputCls(false)} resize-y`}
+                  />
+                  <p className="mt-1 text-xs text-[#6f797a]">Để trống khi không có khoản loại trừ.</p>
+                </FormField>
+              </div>
             </div>
           </FormCard>
 
@@ -260,7 +315,17 @@ function PartnerTicketFormPage() {
               {TICKET_TYPES.map((t) => (
                 <button
                   key={t.value} type="button"
-                  onClick={() => update('type', t.value)}
+                  onClick={() => setForm((prev) => {
+                    const nextIsPackage = ['FAMILY', 'GROUP'].includes(t.value)
+                    const currentIsPackage = ['FAMILY', 'GROUP'].includes(prev.type)
+                    return {
+                      ...prev,
+                      type: t.value,
+                      admissionCount: nextIsPackage
+                        ? (currentIsPackage ? prev.admissionCount : '2')
+                        : '1',
+                    }
+                  })}
                   className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center ${
                     form.type === t.value
                       ? 'border-[#00474d] bg-[#00474d]/5'
@@ -273,6 +338,39 @@ function PartnerTicketFormPage() {
                 </button>
               ))}
             </div>
+            {['FAMILY', 'GROUP'].includes(form.type) ? (
+              <div className="mt-5 rounded-xl border border-[#b8d8d9] bg-[#f2fbfb] p-4">
+                <FormField
+                  label="Số khách được vào trên mỗi gói"
+                  required
+                  error={touched.admissionCount && errors.admissionCount}
+                >
+                  <div className="relative max-w-xs">
+                    <input
+                      type="number"
+                      min="2"
+                      max="50"
+                      step="1"
+                      value={form.admissionCount}
+                      onChange={(event) => update('admissionCount', event.target.value)}
+                      onBlur={() => touch('admissionCount')}
+                      className={`${inputCls(touched.admissionCount && errors.admissionCount)} pr-16`}
+                    />
+                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-xs text-[#6f797a]">
+                      khách
+                    </span>
+                  </div>
+                </FormField>
+                <p className="mt-2 text-xs leading-5 text-[#3f484a]">
+                  Mỗi gói sẽ sinh 1 mã QR, tính giá 1 lần và giữ đúng {Number(form.admissionCount) || 0} chỗ trong sức chứa.
+                  Hãy mô tả rõ thành phần khách, ví dụ “2 người lớn + 2 trẻ em”.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-4 text-xs text-[#3f484a]">
+                Vé cá nhân luôn tương ứng với 1 khách và 1 mã QR.
+              </p>
+            )}
           </FormCard>
 
           <FormCard title="Điều kiện áp dụng" icon="rule">
@@ -304,7 +402,7 @@ function PartnerTicketFormPage() {
                 </FormField>
               ))}
             </div>
-            {form.type === 'CHILD' && (
+            {['CHILD', 'FAMILY', 'GROUP'].includes(form.type) && (
               <label className="mt-4 flex items-center gap-3 rounded-lg border border-[#dbe4e8] bg-[#f8fafb] p-3 text-sm">
                 <input
                   type="checkbox"
@@ -312,7 +410,9 @@ function PartnerTicketFormPage() {
                   onChange={(e) => update('requiresAdult', e.target.checked)}
                   className="accent-[#00474d]"
                 />
-                Trẻ phải đi cùng ít nhất một người lớn
+                {form.type === 'CHILD'
+                  ? 'Trẻ phải đi cùng ít nhất một người lớn'
+                  : 'Gói phải có ít nhất một người lớn đi cùng'}
               </label>
             )}
             {touched.eligibility && errors.eligibility && (

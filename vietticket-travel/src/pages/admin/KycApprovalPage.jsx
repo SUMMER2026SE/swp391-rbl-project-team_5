@@ -48,7 +48,7 @@ function mapPartner(partner) {
     bankAccountNumber: partner.bankAccountNumber || '',
     bankAccountName: partner.bankAccountName || '',
     swiftCode: partner.swiftCode || '',
-    payoutCurrency: partner.payoutCurrency || 'VND',
+    payoutCurrency: 'VND',
     website: partner.website || '',
     description: partner.description || '',
     documentValidationStatus: partner.documentValidationStatus || 'MISSING_OR_UNTRUSTED',

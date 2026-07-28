@@ -875,7 +875,7 @@ export default function RefundManagementPage() {
                 <p className="mt-1 text-sm font-semibold text-on-surface">
                   {selected.refundTransactions?.[0]?.transactionType === '02'
                     ? '02 · Hoàn toàn phần'
-                    : '03 · Hoàn một phần'}
+                    : '03 · Hoàn số tiền sau phí (một phần giao dịch)'}
                 </p>
               </div>
               <div>

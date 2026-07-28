@@ -6,6 +6,7 @@ const {
   getDateKey,
   getVietnamDateKey,
 } = require('./arrivalPressureService');
+const { getSnapshotAdmissionCount } = require('../utils/ticketCapacity');
 
 const ML_SERVICE_URL = String(process.env.ML_SERVICE_URL || 'http://localhost:8000').replace(/\/+$/, '');
 const ML_SERVICE_API_KEY = String(process.env.ML_SERVICE_API_KEY || '').trim();
@@ -17,6 +18,35 @@ const RUNTIME_QUALITY_WINDOW = 48;
 const MIN_RUNTIME_QUALITY_ROWS = 12;
 const PREDICTION_CACHE_MS = 15 * 60 * 1000;
 const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+async function countAdmittedGuests(prismaClient, where) {
+  if (prismaClient?.ticketInstance?.findMany) {
+    const rows = await prismaClient.ticketInstance.findMany({
+      where,
+      select: {
+        booking: {
+          select: {
+            snapshotAdmissionCount: true,
+            reservation: { select: { snapshotAdmissionCount: true } },
+          },
+        },
+      },
+    });
+    if (Array.isArray(rows)) {
+      return rows.reduce(
+        (sum, row) => (
+          sum + getSnapshotAdmissionCount({
+            snapshotAdmissionCount:
+              row.booking?.snapshotAdmissionCount
+              || row.booking?.reservation?.snapshotAdmissionCount,
+          })
+        ),
+        0,
+      );
+    }
+  }
+  return prismaClient.ticketInstance.count({ where });
+}
 
 function httpError(statusCode, code, message) {
   const error = new Error(message);
@@ -510,8 +540,7 @@ async function evaluateArrivalObservations({ now = new Date(), prismaClient = pr
       async (row) => {
         try {
           const end = new Date(new Date(row.bucketStart).getTime() + 15 * 60 * 1000);
-          const actual = await prismaClient.ticketInstance.count({
-            where: {
+          const actual = await countAdmittedGuests(prismaClient, {
               status: 'USED',
               checkedInAt: { gte: row.bucketStart, lt: end },
               booking: {
@@ -527,7 +556,6 @@ async function evaluateArrivalObservations({ now = new Date(), prismaClient = pr
                   },
                 ],
               },
-            },
           });
           const result = await prismaClient.arrivalObservation.updateMany({
             where: { id: row.id, actualArrivalsNext15m: null },
@@ -581,8 +609,7 @@ async function evaluateLivePredictions({ now = new Date(), prismaClient = prisma
         );
         if (windowEnd > referenceNow) return { evaluated: 0, failed: 0 };
         try {
-          const actual = await prismaClient.ticketInstance.count({
-            where: {
+          const actual = await countAdmittedGuests(prismaClient, {
               status: 'USED',
               checkedInAt: { gte: row.predictedAt, lt: windowEnd },
               booking: {
@@ -598,7 +625,6 @@ async function evaluateLivePredictions({ now = new Date(), prismaClient = prisma
                   },
                 ],
               },
-            },
           });
           const result = await prismaClient.livePrediction.updateMany({
             where: { id: row.id, actualValue: null },

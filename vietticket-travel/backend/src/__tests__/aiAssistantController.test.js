@@ -16,11 +16,13 @@ jest.mock('../utils/refundService', () => ({
 }));
 
 const {
+  chatWithUser,
   generateItinerary,
   recommendAttractions,
 } = require('../services/aiAssistantService');
 const prisma = require('../config/prisma');
 const {
+  chat,
   itinerary,
   recommend,
   saveItinerary,
@@ -30,11 +32,51 @@ function mockResponse() {
   const res = {};
   res.status = jest.fn(() => res);
   res.json = jest.fn(() => res);
+  res.set = jest.fn(() => res);
   return res;
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+describe('aiAssistantController chat', () => {
+  test('returns enterprise metadata and privacy-safe response headers', async () => {
+    chatWithUser.mockResolvedValue({
+      reply: 'Câu trả lời',
+      provider: 'mock',
+      meta: {
+        confidence: 'grounded',
+        intent: 'refund',
+        sources: [{ id: 'refund', label: 'Hủy vé và hoàn tiền', href: '/terms' }],
+      },
+    });
+    const req = {
+      body: { message: 'Chính sách hoàn vé?' },
+      user: { id: 'user-1' },
+    };
+    const res = mockResponse();
+    const next = jest.fn();
+
+    await chat(req, res, next);
+
+    expect(res.set).toHaveBeenCalledWith('Cache-Control', 'no-store, private');
+    expect(res.set).toHaveBeenCalledWith('X-Request-Id', expect.any(String));
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({
+        reply: 'Câu trả lời',
+        meta: expect.objectContaining({
+          confidence: 'grounded',
+          intent: 'refund',
+          latencyMs: expect.any(Number),
+          requestId: expect.any(String),
+        }),
+      }),
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 describe('aiAssistantController itinerary', () => {

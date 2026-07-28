@@ -135,6 +135,8 @@ export default function BookingModal({
     'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
   ]
 
+  const admissionCount = Math.max(1, Number(ticketProduct?.admissionCount) || 1)
+  const participantCount = quantity * admissionCount
   const ticketTypeMeta =
     TICKET_TYPE_META[String(ticketProduct?.type || 'ADULT').toUpperCase()]
     || TICKET_TYPE_META.ADULT
@@ -180,20 +182,20 @@ export default function BookingModal({
   // Chính sách hoàn tiền của loại vé (hiển thị TRƯỚC khi khách thanh toán).
   const refundPolicyText = (() => {
     const policy = ticketProduct?.refundPolicy
-    if (policy === 'FREE_CANCELLATION') return 'Hoàn tiền 100% nếu hủy trước ngày tham quan.'
+    if (policy === 'FREE_CANCELLATION') return 'Hủy toàn bộ booking và hoàn 100% nếu còn trước hạn hủy.'
     if (policy === 'REFUND_WITH_FEE') {
       const rate = Number(ticketProduct?.refundFeeRate || 0)
       if (rate > 0) {
         return `Hoàn tiền trước ngày tham quan, phí hủy ${Math.round(rate * 100)}%.`
       }
-      return 'Có hỗ trợ hoàn tiền một phần theo chính sách của đối tác.'
+      return 'Hủy toàn bộ booking; số tiền hoàn được tính sau khi trừ phí theo chính sách đối tác.'
     }
     if (policy === 'NON_REFUNDABLE') return 'Vé không hỗ trợ hoàn / hủy sau khi thanh toán.'
     return null
   })()
 
   const confirmationPolicyText = requiresManualApproval
-    ? 'Sau khi thanh toán, đơn sẽ chờ đối tác xác nhận trước khi phát hành vé QR.'
+    ? 'Tiền được ghi nhận trước khi đối tác duyệt. Đối tác phải phản hồi trong tối đa 24 giờ và không muộn hơn giờ bắt đầu hoạt động. Nếu từ chối hoặc quá hạn, đúng booking này bị hủy và hệ thống tạo hoàn tiền bắt buộc 100%; QR chỉ phát hành sau khi duyệt.'
     : 'Vé QR được phát hành tự động sau khi thanh toán thành công.'
 
   const renderCalendarCells = () => {
@@ -638,7 +640,7 @@ export default function BookingModal({
                           {disabled
                             ? 'Hết vé'
                             : typeof slot.availableTickets === 'number'
-                              ? `Còn ${slot.availableTickets} vé`
+                              ? `Còn ${slot.availableTickets} ${admissionCount > 1 ? 'gói' : 'vé'}`
                               : 'Sẵn sàng'}
                         </span>
                         {!disabled && slot.dynamicPricing && (
@@ -690,9 +692,14 @@ export default function BookingModal({
                 onChange={handleQtyChange}
                 price={unitPrice}
               />
+              {admissionCount > 1 && (
+                <p className="rounded-xl border border-[#bce4df] bg-[#effaf8] p-3 text-xs font-semibold leading-5 text-[#00504e]">
+                  1 gói = {admissionCount} khách. Bạn đang đặt {quantity} gói cho tổng cộng {participantCount} khách và nhận {quantity} mã QR.
+                </p>
+              )}
               {maxQuantity !== null && (
                 <p className="text-xs font-semibold text-[#6e797a]">
-                  Khung giờ đang chọn còn {maxQuantity} vé.
+                  Khung giờ đang chọn còn {maxQuantity} {admissionCount > 1 ? 'gói' : 'vé'}.
                 </p>
               )}
               {isLockedItineraryLine && (
@@ -730,6 +737,12 @@ export default function BookingModal({
                   </span>
                 </div>
               )}
+              {admissionCount > 1 && (
+                <div className="flex justify-between text-[#3e494a]">
+                  <span>Số khách được vào</span>
+                  <span className="font-semibold">{participantCount} khách</span>
+                </div>
+              )}
             </div>
 
             <div className="mb-4 flex items-end justify-between gap-4 border-t border-dashed border-[#bdc9ca]/60 pt-4">
@@ -738,7 +751,7 @@ export default function BookingModal({
                 <div className="text-3xl font-bold text-[#006068]">{formatCurrency(totalPrice)}</div>
               </div>
               <span className="text-right text-xs font-semibold text-[#6e797a]">
-                Đã bao gồm VAT & phí dịch vụ
+                Số tiền của giao dịch demo; chưa phát hành hóa đơn VAT
               </span>
             </div>
 

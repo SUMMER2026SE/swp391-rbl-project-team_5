@@ -2,13 +2,20 @@ const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { isTicketProductSaleEnabled } = require('../services/catalogVisibilityService');
-const { MAX_TICKETS_PER_ORDER } = require('../config/bookingPolicy');
+const {
+  CUSTOMER_BOOKING_CHANGE_POLICY,
+  MAX_TICKETS_PER_ORDER,
+} = require('../config/bookingPolicy');
 const { formatLocation } = require('../utils/location');
 const {
   MIN_VNPAY_AMOUNT,
   parseVndInteger,
 } = require('../utils/money');
 const { buildTicketRestrictions } = require('../utils/ticketRestrictions');
+const {
+  getInventoryUnits,
+  getSnapshotAdmissionCount,
+} = require('../utils/ticketCapacity');
 
 const { Decimal } = Prisma;
 const {
@@ -17,6 +24,7 @@ const {
 } = require('../utils/bankTransferPolicy');
 const { getBankTransferConfig } = require('../config/runtimeConfig');
 const { isCapturedPayment } = require('../utils/paymentGateway');
+const { getManualApprovalDeadline } = require('../utils/activityTime');
 
 // Chỉ mở phương thức chuyển khoản khi nền tảng đã cấu hình tài khoản nhận tiền,
 // tránh việc khách chọn được rồi lại không có mã QR để chuyển.
@@ -299,6 +307,10 @@ function getTimeSlotLabel(timeSlot) {
     : 'Theo ngày đã chọn';
 }
 
+function operationalList(value) {
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
 function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
   const product = reservation.ticketProduct;
   const attraction = product.attraction;
@@ -315,13 +327,20 @@ function buildBookingSnapshot(reservation, snapshotAt = new Date()) {
     snapshotAttractionLatitude: attraction.latitude ?? null,
     snapshotAttractionLongitude: attraction.longitude ?? null,
     snapshotAttractionEnvironment: attraction.environment || null,
+    snapshotMeetingPoint: attraction.meetingPoint || null,
+    snapshotCheckInInstructions: attraction.checkInInstructions || null,
+    snapshotAccessibilityInfo: attraction.accessibilityInfo || null,
+    snapshotWhatToBring: operationalList(attraction.whatToBring),
     snapshotPartnerId: attraction.partnerId || attraction.partner?.id || null,
     snapshotPartnerName: attraction.partner?.businessName || null,
     snapshotTicketName: product.name,
     snapshotTicketType: product.type || 'ADULT',
+    snapshotAdmissionCount: getSnapshotAdmissionCount(reservation),
     snapshotTicketDescription: product.description || null,
     snapshotTicketRestrictions:
       reservation.snapshotTicketRestrictions ?? buildTicketRestrictions(product),
+    snapshotInclusions: operationalList(product.inclusions),
+    snapshotExclusions: operationalList(product.exclusions),
     snapshotUnitPrice: reservation.snapshotUnitPrice ?? product.sellingPrice,
     snapshotRefundPolicy:
       reservation.snapshotRefundPolicy ?? product.refundPolicy ?? 'NON_REFUNDABLE',
@@ -355,12 +374,21 @@ function getBookingSnapshotView(booking) {
       attractionLocation: getAttractionLocation(attraction),
       attractionImage: attraction.images?.[0]?.imageUrl || '',
       ticketName: product.name,
+      admissionCount: getSnapshotAdmissionCount(reservation),
       visitDate: reservation.date,
       timeSlotLabel: getTimeSlotLabel(reservation.timeSlot),
       unitPrice: product.sellingPrice,
       refundPolicy: product.refundPolicy,
       refundFeeRate: product.refundFeeRate,
       refundCutoffHours: product.refundCutoffHours ?? 24,
+      operationalDetails: {
+        meetingPoint: attraction.meetingPoint || '',
+        checkInInstructions: attraction.checkInInstructions || '',
+        accessibilityInfo: attraction.accessibilityInfo || '',
+        whatToBring: operationalList(attraction.whatToBring),
+        inclusions: operationalList(product.inclusions),
+        exclusions: operationalList(product.exclusions),
+      },
     };
   }
 
@@ -374,6 +402,9 @@ function getBookingSnapshotView(booking) {
     }),
     attractionImage: booking.snapshotAttractionImage || attraction.images?.[0]?.imageUrl || '',
     ticketName: booking.snapshotTicketName || product.name,
+    admissionCount:
+      Number(booking.snapshotAdmissionCount)
+      || getSnapshotAdmissionCount(reservation),
     visitDate: booking.snapshotVisitDate || reservation.date,
     timeSlotLabel: booking.snapshotTimeSlotLabel || getTimeSlotLabel(reservation.timeSlot),
     unitPrice: booking.snapshotUnitPrice,
@@ -381,6 +412,22 @@ function getBookingSnapshotView(booking) {
     refundFeeRate: booking.snapshotRefundFeeRate ?? product.refundFeeRate,
     refundCutoffHours:
       booking.snapshotRefundCutoffHours ?? product.refundCutoffHours ?? 24,
+    operationalDetails: {
+      meetingPoint: booking.snapshotMeetingPoint ?? attraction.meetingPoint ?? '',
+      checkInInstructions:
+        booking.snapshotCheckInInstructions ?? attraction.checkInInstructions ?? '',
+      accessibilityInfo:
+        booking.snapshotAccessibilityInfo ?? attraction.accessibilityInfo ?? '',
+      whatToBring: Array.isArray(booking.snapshotWhatToBring)
+        ? operationalList(booking.snapshotWhatToBring)
+        : operationalList(attraction.whatToBring),
+      inclusions: Array.isArray(booking.snapshotInclusions)
+        ? operationalList(booking.snapshotInclusions)
+        : operationalList(product.inclusions),
+      exclusions: Array.isArray(booking.snapshotExclusions)
+        ? operationalList(booking.snapshotExclusions)
+        : operationalList(product.exclusions),
+    },
   };
 }
 
@@ -401,11 +448,25 @@ function toReservationResponse(reservation) {
     attractionTitle: attraction.title,
     attractionLocation: getAttractionLocation(attraction),
     attractionImage: attraction.images[0]?.imageUrl || '',
+    requiresManualApproval: Boolean(attraction.requiresManualApproval),
+    operationalDetails: {
+      meetingPoint: attraction.meetingPoint || '',
+      checkInInstructions: attraction.checkInInstructions || '',
+      accessibilityInfo: attraction.accessibilityInfo || '',
+      whatToBring: operationalList(attraction.whatToBring),
+      inclusions: operationalList(product.inclusions),
+      exclusions: operationalList(product.exclusions),
+    },
     ticketName: product.name,
+    bookingScope: 'SINGLE_TICKET_PRODUCT',
+    lineItemCount: 1,
+    changePolicy: CUSTOMER_BOOKING_CHANGE_POLICY,
     visitDate: dateOnly(reservation.date),
     timeSlotId: reservation.timeSlotId,
     timeSlotLabel: getTimeSlotLabel(reservation.timeSlot),
     quantity: reservation.quantity,
+    admissionCount: getSnapshotAdmissionCount(reservation),
+    participantCount: reservation.quantity * getSnapshotAdmissionCount(reservation),
     unitPrice: decimalToNumber(unitPrice),
     subtotalAmount: decimalToNumber(subtotalAmount),
     discountAmount: 0,
@@ -432,6 +493,7 @@ function toBookingResponse(booking) {
   ].sort((left, right) => (
     new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
   ))[0] || null;
+  const manualApproval = buildManualApprovalView(booking);
 
   return {
     id: booking.id,
@@ -443,10 +505,15 @@ function toBookingResponse(booking) {
     attractionLocation: snapshot.attractionLocation,
     attractionImage: snapshot.attractionImage,
     ticketName: snapshot.ticketName,
+    bookingScope: 'SINGLE_TICKET_PRODUCT',
+    lineItemCount: 1,
+    changePolicy: CUSTOMER_BOOKING_CHANGE_POLICY,
     visitDate: dateOnly(snapshot.visitDate),
     timeSlotId: reservation.timeSlotId,
     timeSlotLabel: snapshot.timeSlotLabel,
     quantity: reservation.quantity,
+    admissionCount: Number(snapshot.admissionCount || 1),
+    participantCount: reservation.quantity * Number(snapshot.admissionCount || 1),
     unitPrice: decimalToNumber(snapshot.unitPrice),
     subtotalAmount: decimalToNumber(booking.subtotalAmount),
     subtotal: decimalToNumber(booking.subtotalAmount),
@@ -474,6 +541,9 @@ function toBookingResponse(booking) {
     status: booking.status.toLowerCase().replace('pending_payment', 'unpaid'),
     paymentStatus: paymentStatus.toLowerCase(),
     paymentMethod: booking.paymentMethod || '',
+    manualApproval,
+    operationalDetails: snapshot.operationalDetails,
+    refundRequired: Boolean(booking.refundRequired),
     refundPolicy: snapshot.refundPolicy,
     refundFeeRate: decimalToNumber(snapshot.refundFeeRate),
     refundCutoffHours: Number(snapshot.refundCutoffHours ?? 24),
@@ -502,6 +572,19 @@ function toBookingResponse(booking) {
       qrCodeToken: ticket.qrCodeToken,
       status: ticket.status.toLowerCase(),
     })),
+  };
+}
+
+function buildManualApprovalView(booking) {
+  if (booking?.status !== 'PENDING_PARTNER') return null;
+  const approvalDeadline = getManualApprovalDeadline(booking);
+  return {
+    required: true,
+    paymentCapturedBeforeApproval: true,
+    approvalDeadline,
+    maximumResponseHours: 24,
+    deadlineRule: 'EARLIER_OF_24_HOURS_OR_ACTIVITY_START',
+    timeoutOutcome: 'CANCEL_AND_MANDATORY_FULL_REFUND',
   };
 }
 
@@ -610,16 +693,17 @@ async function findVoucher(client, voucherCode, subtotalAmount, now, userId = nu
 
 async function confirmReservationAndStock(tx, reservation) {
   if (reservation.status === 'CONFIRMED') return;
+  const inventoryUnits = getInventoryUnits(reservation);
 
   const dailyStock = await tx.dailyStock.updateMany({
     where: {
       ticketProductId: reservation.ticketProductId,
       date: reservation.date,
-      heldQuantity: { gte: reservation.quantity },
+      heldQuantity: { gte: inventoryUnits },
     },
     data: {
-      heldQuantity: { decrement: reservation.quantity },
-      bookedQuantity: { increment: reservation.quantity },
+      heldQuantity: { decrement: inventoryUnits },
+      bookedQuantity: { increment: inventoryUnits },
     },
   });
   if (dailyStock.count !== 1) {
@@ -643,11 +727,11 @@ async function confirmReservationAndStock(tx, reservation) {
     where: {
       attractionId,
       date: reservation.date,
-      heldQty: { gte: reservation.quantity },
+      heldQty: { gte: inventoryUnits },
     },
     data: {
-      heldQty: { decrement: reservation.quantity },
-      bookedQty: { increment: reservation.quantity },
+      heldQty: { decrement: inventoryUnits },
+      bookedQty: { increment: inventoryUnits },
     },
   });
   if (attractionStock.count !== 1) {
@@ -661,11 +745,11 @@ async function confirmReservationAndStock(tx, reservation) {
       where: {
         timeSlotId: reservation.timeSlotId,
         date: reservation.date,
-        heldQty: { gte: reservation.quantity },
+        heldQty: { gte: inventoryUnits },
       },
       data: {
-        heldQty: { decrement: reservation.quantity },
-        bookedQty: { increment: reservation.quantity },
+        heldQty: { decrement: inventoryUnits },
+        bookedQty: { increment: inventoryUnits },
       },
     });
     if (timeSlotStock.count !== 1) {
@@ -1061,7 +1145,7 @@ async function getItineraryBookingProgress(req, res, next) {
     const itineraryId = String(req.params.itineraryId || '').trim();
     const itinerary = await prisma.savedItinerary.findFirst({
       where: { id: itineraryId, userId: req.user.id },
-      select: { id: true, planId: true, title: true },
+      select: { id: true, planId: true, title: true, data: true },
     });
     if (!itinerary) {
       return res.status(404).json({ message: 'Không tìm thấy lịch trình thuộc tài khoản của bạn.' });
@@ -1074,7 +1158,26 @@ async function getItineraryBookingProgress(req, res, next) {
         itineraryVersion: true,
         itineraryItemId: true,
         status: true,
+        reservationId: true,
+        paymentMethod: true,
+        refundRequired: true,
+        totalAmount: true,
         createdAt: true,
+        reservation: {
+          select: {
+            expiresAt: true,
+          },
+        },
+        refundRequests: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            mandatory: true,
+            status: true,
+            amount: true,
+          },
+        },
         payments: {
           where: { status: 'SUCCESS', isDuplicate: false },
           select: {
@@ -1093,23 +1196,72 @@ async function getItineraryBookingProgress(req, res, next) {
         isCapturedPayment(payment, { allowInternalCredit: true })
       ));
       const fulfilled = Boolean(capturedPayment)
-        && ['PENDING_PARTNER', 'CONFIRMED', 'COMPLETED'].includes(booking.status);
+        && ['PENDING_PARTNER', 'CONFIRMED', 'COMPLETED', 'NO_SHOW'].includes(booking.status);
+      const latestRefund = booking.refundRequests?.[0] || null;
+      let lineState = 'ACTION_REQUIRED';
+      let nextAction = 'CREATE_REPLACEMENT';
+      if (fulfilled) {
+        lineState = 'COMPLETED';
+        nextAction = 'NONE';
+      } else if (booking.status === 'REFUND_REQUESTED') {
+        lineState = 'REFUND_PENDING';
+        nextAction = 'TRACK_REFUND';
+      } else if (booking.status === 'PENDING_PAYMENT') {
+        lineState = 'PAYMENT_PENDING';
+        nextAction = 'CONTINUE_PAYMENT';
+      }
       latestByItem.set(booking.itineraryItemId, {
         itemId: booking.itineraryItemId,
         bookingId: booking.id,
+        reservationId: booking.reservationId,
         version: booking.itineraryVersion,
         bookingStatus: booking.status,
+        paymentMethod: booking.paymentMethod,
+        reservationExpiresAt: booking.reservation?.expiresAt || null,
         paid: Boolean(capturedPayment),
         fulfilled,
+        lineState,
+        nextAction,
+        replacementAllowed: ['CANCELLED', 'REFUNDED'].includes(booking.status),
+        paidAmount: capturedPayment ? decimalToNumber(booking.totalAmount) : 0,
+        refundRequired: Boolean(booking.refundRequired),
+        refund: latestRefund
+          ? {
+              id: latestRefund.id,
+              mandatory: latestRefund.mandatory,
+              status: latestRefund.status,
+              amount: decimalToNumber(latestRefund.amount),
+            }
+          : null,
         paidAt: capturedPayment?.paidAt || null,
         createdAt: booking.createdAt,
       });
     }
+    const items = [...latestByItem.values()];
+    const plannedItemCount = extractItineraryTicketItems({ data: itinerary.data }).length;
+    const countState = (state) => items.filter((item) => item.lineState === state).length;
     return res.json({
       success: true,
       data: {
-        itinerary,
-        items: [...latestByItem.values()],
+        itinerary: {
+          id: itinerary.id,
+          planId: itinerary.planId,
+          title: itinerary.title,
+        },
+        transactionPolicy: {
+          mode: 'SEQUENTIAL_INDEPENDENT',
+          atomic: false,
+          rollbackCompletedBookingsOnLaterFailure: false,
+        },
+        summary: {
+          plannedItemCount,
+          startedCount: items.length,
+          completedCount: countState('COMPLETED'),
+          paymentPendingCount: countState('PAYMENT_PENDING'),
+          refundPendingCount: countState('REFUND_PENDING'),
+          actionRequiredCount: countState('ACTION_REQUIRED'),
+        },
+        items,
       },
     });
   } catch (error) {
@@ -1128,6 +1280,7 @@ module.exports = {
   confirmReservationAndStock,
   createTicketInstances,
   buildBookingSnapshot,
+  buildManualApprovalView,
   getBookingSnapshotView,
   resolveBookingPaymentStatus,
   selectBookingPayment,

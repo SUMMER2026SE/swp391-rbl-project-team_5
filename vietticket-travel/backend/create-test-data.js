@@ -53,6 +53,7 @@ async function createTestData() {
         ticketProductId: ticketProduct.id,
         date: visitDate,
         quantity: 1,
+        snapshotAdmissionCount: Number(ticketProduct.admissionCount ?? 1),
         status: 'CONFIRMED',
         expiresAt: new Date(),
       },
@@ -75,6 +76,7 @@ async function createTestData() {
         email: user.email,
         phone: '0987654321',
         note: 'Đơn hàng thử nghiệm đánh giá dịch vụ.',
+        snapshotAdmissionCount: Number(ticketProduct.admissionCount ?? 1),
       },
     });
 

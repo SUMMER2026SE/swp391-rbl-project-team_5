@@ -4,6 +4,7 @@ const { Prisma } = require('@prisma/client');
 const {
   isValidDate,
   isValidTime,
+  validateOperationalList,
   validateTicket,
 } = require('../utils/partnerValidators');
 const { normalizeRefundFeeRate } = require('../utils/refundService');
@@ -36,6 +37,11 @@ function normalizeImages(images = []) {
   });
 }
 
+function normalizeOperationalList(value) {
+  if (!Array.isArray(value)) return null;
+  return value.map((item) => String(item).trim()).filter(Boolean);
+}
+
 function buildAttractionSnapshot(attraction) {
   const tickets = (attraction.ticketProducts || [])
     .filter((t) => t.archivedAt == null)
@@ -43,7 +49,10 @@ function buildAttractionSnapshot(attraction) {
       id: t.id,
       name: t.name,
       type: t.type,
+      admissionCount: Number(t.admissionCount ?? 1),
       description: t.description || '',
+      inclusions: normalizeOperationalList(t.inclusions),
+      exclusions: normalizeOperationalList(t.exclusions),
       originalPrice: Number(t.originalPrice),
       sellingPrice: Number(t.sellingPrice),
       status: t.status,
@@ -76,7 +85,7 @@ function buildAttractionSnapshot(attraction) {
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     title: attraction.title || '',
     description: attraction.description || '',
     address: attraction.address || '',
@@ -90,6 +99,10 @@ function buildAttractionSnapshot(attraction) {
     recommendedVisitMinutes: Number(attraction.recommendedVisitMinutes ?? 150),
     environment: attraction.environment || 'MIXED',
     isFullDay: Boolean(attraction.isFullDay),
+    meetingPoint: attraction.meetingPoint || '',
+    checkInInstructions: attraction.checkInInstructions || '',
+    accessibilityInfo: attraction.accessibilityInfo || '',
+    whatToBring: normalizeOperationalList(attraction.whatToBring),
     category: attraction.categories?.[0]?.category
       ? {
           id: attraction.categories[0].category.id,
@@ -131,6 +144,16 @@ function mergeSnapshot(snapshot, data, category) {
       : {}),
     ...(data.environment !== undefined ? { environment: data.environment } : {}),
     ...(data.isFullDay !== undefined ? { isFullDay: Boolean(data.isFullDay) } : {}),
+    ...(data.meetingPoint !== undefined ? { meetingPoint: data.meetingPoint } : {}),
+    ...(data.checkInInstructions !== undefined
+      ? { checkInInstructions: data.checkInInstructions }
+      : {}),
+    ...(data.accessibilityInfo !== undefined
+      ? { accessibilityInfo: data.accessibilityInfo }
+      : {}),
+    ...(data.whatToBring !== undefined
+      ? { whatToBring: normalizeOperationalList(data.whatToBring) }
+      : {}),
     ...(category !== undefined
       ? { category: category ? { id: category.id, name: category.name } : null }
       : {}),
@@ -152,6 +175,30 @@ function validateSubmissionSnapshot(snapshot) {
   else if (description.length > 5000) missing.push('mô tả không quá 5000 ký tự');
   if (!String(snapshot.address || '').trim()) missing.push('địa chỉ');
   if (!String(snapshot.city || '').trim()) missing.push('tỉnh/thành phố');
+  if (String(snapshot.meetingPoint || '').trim().length < 5) {
+    missing.push('điểm gặp/check-in tối thiểu 5 ký tự');
+  } else if (String(snapshot.meetingPoint).trim().length > 1000) {
+    missing.push('điểm gặp/check-in không quá 1000 ký tự');
+  }
+  if (String(snapshot.checkInInstructions || '').trim().length < 20) {
+    missing.push('hướng dẫn check-in tối thiểu 20 ký tự');
+  } else if (String(snapshot.checkInInstructions).trim().length > 3000) {
+    missing.push('hướng dẫn check-in không quá 3000 ký tự');
+  }
+  if (String(snapshot.accessibilityInfo || '').trim().length < 10) {
+    missing.push('thông tin hỗ trợ tiếp cận tối thiểu 10 ký tự');
+  } else if (String(snapshot.accessibilityInfo).trim().length > 2000) {
+    missing.push('thông tin hỗ trợ tiếp cận không quá 2000 ký tự');
+  }
+  if (!Array.isArray(snapshot.whatToBring)) {
+    missing.push('danh sách cần mang theo (có thể để trống)');
+  } else {
+    const whatToBringError = validateOperationalList(
+      snapshot.whatToBring,
+      'Danh sách cần mang theo',
+    );
+    if (whatToBringError) missing.push(whatToBringError);
+  }
   if (!snapshot.category?.id) missing.push('danh mục hợp lệ');
   if (!isValidTime(snapshot.openTime) || !isValidTime(snapshot.closeTime)) {
     missing.push('giờ mở cửa và đóng cửa');
@@ -203,6 +250,12 @@ function validateSubmissionSnapshot(snapshot) {
     snapshot.tickets.forEach((ticket, index) => {
       const ticketError = validateTicket(ticket || {}, { partial: false });
       if (ticketError) missing.push(`gói vé ${index + 1}: ${ticketError}`);
+      if (!Array.isArray(ticket?.inclusions) || ticket.inclusions.length === 0) {
+        missing.push(`gói vé ${index + 1}: ít nhất một dịch vụ bao gồm`);
+      }
+      if (!Array.isArray(ticket?.exclusions)) {
+        missing.push(`gói vé ${index + 1}: danh sách dịch vụ không bao gồm (có thể để trống)`);
+      }
 
       if (!['ACTIVE', 'INACTIVE'].includes(String(ticket?.status || 'ACTIVE').toUpperCase())) {
         missing.push(`gói vé ${index + 1}: trạng thái không hợp lệ`);
@@ -453,6 +506,10 @@ async function applyApprovedSnapshot(tx, attractionId, snapshot) {
       recommendedVisitMinutes: Number(snapshot.recommendedVisitMinutes ?? 150),
       environment: snapshot.environment || 'MIXED',
       isFullDay: Boolean(snapshot.isFullDay),
+      meetingPoint: String(snapshot.meetingPoint || '').trim() || null,
+      checkInInstructions: String(snapshot.checkInInstructions || '').trim() || null,
+      accessibilityInfo: String(snapshot.accessibilityInfo || '').trim() || null,
+      whatToBring: normalizeOperationalList(snapshot.whatToBring) || [],
     },
   });
 
@@ -499,7 +556,10 @@ async function applyApprovedSnapshot(tx, attractionId, snapshot) {
           data: {
             name: ticket.name,
             type: ticket.type,
+            admissionCount: Number(ticket.admissionCount ?? 1),
             description: ticket.description || '',
+            inclusions: normalizeOperationalList(ticket.inclusions) || [],
+            exclusions: normalizeOperationalList(ticket.exclusions) || [],
             originalPrice: ticket.originalPrice,
             sellingPrice: ticket.sellingPrice,
             status: ticket.status,
@@ -527,7 +587,10 @@ async function applyApprovedSnapshot(tx, attractionId, snapshot) {
             attractionId,
             name: ticket.name,
             type: ticket.type,
+            admissionCount: Number(ticket.admissionCount ?? 1),
             description: ticket.description || '',
+            inclusions: normalizeOperationalList(ticket.inclusions) || [],
+            exclusions: normalizeOperationalList(ticket.exclusions) || [],
             originalPrice: ticket.originalPrice,
             sellingPrice: ticket.sellingPrice,
             status: ticket.status || 'ACTIVE',

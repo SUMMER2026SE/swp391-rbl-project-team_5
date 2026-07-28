@@ -37,7 +37,8 @@ const completionHandle = startCompletionWorker();
 // Worker đối soát hoàn tiền VNPay tự động.
 const refundHandle = startRefundWorker();
 
-// Worker tự hủy và tạo yêu cầu hoàn tiền cho đơn đã chờ đối tác quá 24 giờ.
+// Worker tự hủy và tạo hoàn tiền bắt buộc khi quá hạn duyệt:
+// sớm hơn giữa 24 giờ sau thanh toán và thời điểm hoạt động bắt đầu.
 const pendingPartnerHandle = startPendingPartnerWorker();
 
 // Worker điều phối SmartQueue và tạo đề xuất Autopilot có kiểm soát.

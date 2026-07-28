@@ -5,6 +5,7 @@ import useSocket from '../context/useSocket.js'
 import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 import { formatBookingReference, formatTicketReference } from '../utils/bookingReference.js'
+import { getManualApprovalTiming } from '../utils/manualApproval.js'
 import { getTicketTypeLabel } from '../utils/ticketType.js'
 
 // Nhãn + màu trạng thái lấy từ nguồn dùng chung (utils/bookingStatus.js)
@@ -274,6 +275,11 @@ function PartnerBookingsPage() {
                         <td className="px-5 py-3.5 font-semibold text-[#00474d] whitespace-nowrap">{formatVND(b.amount)}</td>
                         <td className="px-5 py-3.5">
                           <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${si.cls}`}>{si.label}</span>
+                          {b.status === 'pending_partner' && (
+                            <p className="mt-1 max-w-[150px] text-[11px] font-semibold leading-4 text-amber-800">
+                              Hạn: {getManualApprovalTiming(b).deadlineLabel}
+                            </p>
+                          )}
                         </td>
                         <td className="px-5 py-3.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
@@ -527,6 +533,18 @@ function PartnerBookingsPage() {
                   </div>
                 </div>
               </div>
+
+              {selectedBooking.status === 'pending_partner' && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
+                  <p className="font-extrabold">
+                    Phải duyệt hoặc từ chối trước {getManualApprovalTiming(selectedBooking).deadlineLabel}
+                  </p>
+                  <p className="mt-1">
+                    Khách đã thanh toán. Nếu quá hạn, hệ thống sẽ hủy booking, hoàn kho và tạo yêu cầu
+                    hoàn tiền bắt buộc 100%; sau thời điểm này thao tác duyệt sẽ bị từ chối.
+                  </p>
+                </div>
+              )}
 
               {/* Danh sách mã QR vé */}
               <div className="border border-[#e1e3e4] rounded-xl p-4">
