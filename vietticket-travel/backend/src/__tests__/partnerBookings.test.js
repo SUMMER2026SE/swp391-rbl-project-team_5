@@ -74,6 +74,10 @@ function makeBooking(statusOverride = 'PENDING_PARTNER') {
           partnerId: PARTNER_ID,
           openTime: '08:00',
           closeTime: '17:00',
+          operationalStatus: 'ACTIVE',
+          publicationStatus: 'ACTIVE',
+          archivedAt: null,
+          partner: { status: 'APPROVED' },
         },
       },
     },
@@ -267,6 +271,15 @@ function makeApproveTx(booking, { existingTicketCount = 0, claimCount = 1 } = {}
       create:     jest.fn().mockResolvedValue({ id: 'lt-earn' }),
     },
     user: { update: jest.fn().mockResolvedValue({ loyaltyPoints: 100 }) },
+    voucher: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    refundRequest: {
+      upsert: jest.fn().mockResolvedValue({ id: 'refund-request-1' }),
+    },
+    refundTransaction: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'refund-transaction-1', status: 'PENDING' }),
+    },
+    auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
 }
 
@@ -417,6 +430,27 @@ describe('approveBooking', () => {
     );
   });
 
+  test('không phát hành vé nếu PENDING_PARTNER không có giao dịch đã thu hợp lệ', async () => {
+    const booking = makeBooking('PENDING_PARTNER');
+    booking.payments = [];
+    let capturedTx;
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+    mockPrisma.$transaction.mockImplementation(async (fn) => {
+      capturedTx = makeApproveTx(booking);
+      return fn(capturedTx);
+    });
+
+    const { req, next } = makeReqRes({ params: { id: BOOKING_ID } });
+    await approveBooking(req, {}, next);
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({
+      statusCode: 409,
+      message: expect.stringContaining('không có giao dịch đã thu tiền hợp lệ'),
+    }));
+    expect(capturedTx.booking.updateMany).not.toHaveBeenCalled();
+    expect(capturedTx.ticketInstance.createMany).not.toHaveBeenCalled();
+  });
+
   test('❌ Trả 400 khi booking đã CONFIRMED', async () => {
     const booking = makeBooking('CONFIRMED');
     mockPrisma.booking.findUnique.mockResolvedValue(booking);
@@ -453,6 +487,124 @@ describe('approveBooking', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+describe('approveBooking operational guards', () => {
+  test('tạm dừng bán không hủy oan đơn cũ đã thanh toán', async () => {
+    const booking = makeBooking('PENDING_PARTNER');
+    booking.reservation.ticketProduct.status = 'INACTIVE';
+    booking.reservation.ticketProduct.archivedAt = new Date();
+    booking.reservation.ticketProduct.attraction.publicationStatus = 'PAUSED';
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+    mockPrisma.$transaction.mockImplementation(async (fn) => fn(makeApproveTx(booking)));
+
+    const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
+    await approveBooking(req, res, next);
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      success: true,
+      data: expect.objectContaining({ status: 'confirmed' }),
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('quá hạn ngay sau pre-check vẫn bị hủy và hoàn tiền trong transaction', async () => {
+    const booking = makeBooking('PENDING_PARTNER');
+    booking.reservation.status = 'CONFIRMED';
+    booking.payments[0].paidAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    booking.payments[0].createdAt = booking.payments[0].paidAt;
+    mockPrisma.booking.findUnique.mockResolvedValue(booking);
+    let tx;
+    mockPrisma.$transaction.mockImplementation(async (fn) => {
+      tx = makeApproveTx(booking);
+      return fn(tx);
+    });
+
+    const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
+    await approveBooking(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      error: expect.objectContaining({ code: 'APPROVAL_DEADLINE_PASSED' }),
+      data: expect.objectContaining({
+        status: 'cancelled',
+        refundRequired: true,
+      }),
+    }));
+    expect(tx.booking.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'CANCELLED',
+        cancellationSource: 'SYSTEM_APPROVAL_TIMEOUT',
+      }),
+    }));
+    expect(tx.refundRequest.upsert).toHaveBeenCalled();
+    expect(tx.ticketInstance.createMany).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    [
+      (booking) => {
+        booking.reservation.ticketProduct.attraction.operationalStatus = 'SUSPENDED';
+      },
+      'ATTRACTION_NOT_OPERATIONAL',
+      'SYSTEM_ATTRACTION_SUSPENSION',
+    ],
+    [
+      (booking) => {
+        booking.reservation.ticketProduct.attraction.partner.status = 'SUSPENDED';
+      },
+      'PARTNER_NOT_OPERATIONAL',
+      'SYSTEM_PARTNER_SUSPENSION',
+    ],
+  ])(
+    'chặn duyệt, giải phóng kho và tạo hoàn tiền khi vận hành bị đình chỉ %#',
+    async (suspend, expectedCode, expectedSource) => {
+      const booking = makeBooking('PENDING_PARTNER');
+      booking.reservation.status = 'CONFIRMED';
+      suspend(booking);
+      mockPrisma.booking.findUnique.mockResolvedValue(booking);
+      let tx;
+      mockPrisma.$transaction.mockImplementation(async (fn) => {
+        tx = makeApproveTx(booking);
+        return fn(tx);
+      });
+
+      const { req, res, next } = makeReqRes({ params: { id: BOOKING_ID } });
+      await approveBooking(req, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({ code: expectedCode }),
+        data: {
+          id: BOOKING_ID,
+          status: 'cancelled',
+          refundRequired: true,
+        },
+      }));
+      expect(tx.booking.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'CANCELLED',
+          refundRequired: true,
+          cancellationSource: expectedSource,
+        }),
+      }));
+      expect(tx.dailyStock.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        data: { bookedQuantity: { decrement: 2 } },
+      }));
+      expect(tx.refundRequest.upsert).toHaveBeenCalled();
+      expect(tx.refundTransaction.create).toHaveBeenCalled();
+      expect(tx.ticketInstance.createMany).not.toHaveBeenCalled();
+      expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'BOOKING_APPROVAL_BLOCKED',
+          metadata: expect.objectContaining({ reasonCode: expectedCode }),
+        }),
+      }));
+    },
+  );
+});
+
 // 3. rejectBooking
 // ═══════════════════════════════════════════════════════════════════════════
 describe('rejectBooking', () => {

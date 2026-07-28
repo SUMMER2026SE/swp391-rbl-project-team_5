@@ -4,8 +4,9 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { emitBookingStatusUpdated } = require('../realtime/events');
 const { sendPendingApprovalExpiredEmail } = require('./mailer');
-const { releaseInventory } = require('./refundService');
-const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
+const {
+  cancelPendingPartnerBooking,
+} = require('../services/pendingPartnerCancellationService');
 const { formatBookingReference } = require('./bookingReference');
 const { acquireJobLock, releaseJobLock, INSTANCE_ID } = require('./cleanupWorker');
 const {
@@ -73,35 +74,12 @@ async function expirePendingPartnerBooking(
       const approvalDeadline = getManualApprovalDeadline(booking, timeoutMs);
       if (!approvalDeadline || now < approvalDeadline) return null;
 
-      const claimed = await tx.booking.updateMany({
-        where: { id: bookingId, status: 'PENDING_PARTNER' },
-        data: {
-          status: 'CANCELLED',
-          refundRequired: true,
-          cancelledAt: now,
-          cancellationReason: EXPIRY_REASON,
-          cancellationSource: 'SYSTEM_APPROVAL_TIMEOUT',
-        },
-      });
-      if (claimed.count !== 1) return null;
-
-      await releaseInventory(tx, booking);
-
-      if (booking.voucherId) {
-        await tx.voucher.updateMany({
-          where: { id: booking.voucherId, usedCount: { gt: 0 } },
-          data: { usedCount: { decrement: 1 } },
-        });
-      }
-
-      const queuedRefund = await queueMandatoryRefund(tx, booking, {
-        type: 'SYSTEM_CANCELLATION',
-        reason: `Hệ thống tự động hủy đơn. ${EXPIRY_REASON}`,
+      const cancelled = await cancelPendingPartnerBooking(tx, booking, {
         now,
+        reason: EXPIRY_REASON,
+        cancellationSource: 'SYSTEM_APPROVAL_TIMEOUT',
       });
-      if (!queuedRefund?.refundRequest) {
-        throw new Error('Không thể tạo yêu cầu hoàn tiền VNPay tự động; cần Staff đối soát.');
-      }
+      if (!cancelled) return null;
 
       return {
         id: booking.id,

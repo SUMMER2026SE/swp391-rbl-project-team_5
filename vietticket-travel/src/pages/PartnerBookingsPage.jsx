@@ -508,10 +508,38 @@ function PartnerBookingsPage() {
                       <span className="text-[#6f797a]">Voucher giảm giá:</span>
                       <span>-{formatVND(selectedBooking.discountAmount || 0)}</span>
                     </div>
+                    {Number(selectedBooking.discountAmount || 0) > 0 && (
+                      <>
+                        <div className="flex justify-between pl-3 text-xs text-[#6f797a]">
+                          <span>Nền tảng tài trợ:</span>
+                          <span>{formatVND(selectedBooking.platformDiscountAmount || 0)}</span>
+                        </div>
+                        <div className="flex justify-between pl-3 text-xs text-[#6f797a]">
+                          <span>Đối tác tài trợ:</span>
+                          <span>{formatVND(selectedBooking.partnerDiscountAmount || 0)}</span>
+                        </div>
+                      </>
+                    )}
                     <div className="flex justify-between border-t border-[#f2f4f5] pt-2 font-bold text-[#00474d] text-base">
                       <span>Tổng thanh toán:</span>
                       <span>{formatVND(selectedBooking.amount)}</span>
                     </div>
+                    {Number(selectedBooking.commissionBaseAmount || 0) > 0 && (
+                      <div className="mt-2 space-y-1 border-t border-dashed border-[#d8ddde] pt-2 text-xs">
+                        <div className="flex justify-between text-[#6f797a]">
+                          <span>Cơ sở tính hoa hồng:</span>
+                          <span>{formatVND(selectedBooking.commissionBaseAmount)}</span>
+                        </div>
+                        <div className="flex justify-between text-[#6f797a]">
+                          <span>Hoa hồng nền tảng:</span>
+                          <span>{formatVND(selectedBooking.commissionAmount || 0)}</span>
+                        </div>
+                        <div className="flex justify-between font-bold text-[#00474d]">
+                          <span>Phải trả đối tác (gốc):</span>
+                          <span>{formatVND(selectedBooking.partnerNetAmount || 0)}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-1 bg-[#f8fafb] p-3 rounded-lg border border-[#e1e3e4] text-xs">
                     <div>

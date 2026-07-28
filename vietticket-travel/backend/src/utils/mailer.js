@@ -597,6 +597,39 @@ async function sendBookingCancelledByPartnerEmail({
   });
 }
 
+async function sendBookingCancelledForSafetyEmail({
+  to,
+  fullName,
+  bookingId,
+  reason,
+  refundAmount,
+}) {
+  const frontendUrl = getFrontendUrl();
+  const link = `${frontendUrl}/my-tickets`;
+  const safeName = escapeHtml(fullName || 'bạn');
+  const safeReason = escapeHtml(reason || 'Dịch vụ hiện không thể tiếp nhận khách.');
+  const shortId = formatBookingReference(bookingId);
+  const formattedAmount = Number(refundAmount || 0).toLocaleString('vi-VN');
+
+  return sendMail({
+    to,
+    subject: `Đơn đặt vé #${shortId} không thể xác nhận - VietTicket Travel`,
+    text:
+      `Xin chào ${fullName || 'bạn'}, đơn ${bookingId} không thể xác nhận vì: ${reason}. `
+      + `Yêu cầu hoàn 100% ${formattedAmount} VND đã được tạo.`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Đơn đặt vé không thể xác nhận',
+      preview:
+        `Xin chào ${safeName}, đơn <strong>#${shortId}</strong> không thể được phát hành vé vì lý do vận hành.`
+        + `<br /><br /><strong>Lý do:</strong> ${safeReason}`
+        + `<br /><br />Yêu cầu hoàn 100% <strong>${formattedAmount} VND</strong> đã được tạo về phương thức thanh toán ban đầu.`,
+      buttonText: 'Theo dõi hoàn tiền',
+      link,
+    }),
+  });
+}
+
 async function sendRecoveryCaseCreatedEmail({
   to,
   fullName,
@@ -681,6 +714,7 @@ module.exports = {
   sendReissueTicketEmail,
   sendBookingRejectedEmail,
   sendBookingCancelledByPartnerEmail,
+  sendBookingCancelledForSafetyEmail,
   sendRecoveryCaseCreatedEmail,
   sendPendingApprovalExpiredEmail,
   sendHoldExpiredEmail,

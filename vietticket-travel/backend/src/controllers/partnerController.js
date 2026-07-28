@@ -7,6 +7,7 @@ const { emitBookingStatusUpdated, emitRecoveryCaseEvent } = require('../realtime
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
 const {
   sendBookingCancelledByPartnerEmail,
+  sendBookingCancelledForSafetyEmail,
   sendBookingRejectedEmail,
   sendRecoveryCaseCreatedEmail,
 } = require('../utils/mailer');
@@ -20,7 +21,7 @@ const {
   getBookingActivityWindow,
   getManualApprovalDeadline,
 } = require('../utils/activityTime');
-const { expirePendingPartnerBooking } = require('../utils/pendingPartnerWorker');
+const { EXPIRY_REASON } = require('../utils/pendingPartnerWorker');
 const {
   queueMandatoryRefund,
   queueRecoveryFullRefund,
@@ -31,6 +32,12 @@ const {
   resolveRecoveryFundingBooking,
 } = require('../services/recoveryService');
 const { awardPointsForBooking } = require('../services/loyaltyService');
+const {
+  evaluateExistingBookingFulfillment,
+} = require('../services/existingBookingFulfillmentPolicy');
+const {
+  cancelPendingPartnerBooking,
+} = require('../services/pendingPartnerCancellationService');
 const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
 const { formatBookingReference } = require('../utils/bookingReference');
 const { getInventoryUnits } = require('../utils/ticketCapacity');
@@ -59,6 +66,42 @@ function toVietnamDateString(value) {
 }
 
 const CURRENT_KYC_CONSENT_VERSION = '2026-07-17-v1';
+const PENDING_APPROVAL_BOOKING_INCLUDE = {
+  payments: {
+    where: { status: 'SUCCESS', isDuplicate: false },
+    select: {
+      id: true,
+      status: true,
+      isDuplicate: true,
+      paymentGateway: true,
+      amount: true,
+      paidAt: true,
+      createdAt: true,
+    },
+  },
+  ticketInstances: { select: { id: true } },
+  refundRequests: { select: { id: true, status: true } },
+  reservation: {
+    include: {
+      timeSlot: true,
+      ticketProduct: {
+        include: {
+          attraction: {
+            select: {
+              id: true,
+              partnerId: true,
+              openTime: true,
+              closeTime: true,
+              operationalStatus: true,
+              suspensionReason: true,
+              partner: { select: { status: true } },
+            },
+          },
+        },
+      },
+    },
+  },
+};
 const KYC_REVIEW_FIELDS = [
   'businessName',
   'businessLicenseUrl',
@@ -470,6 +513,7 @@ async function getDashboard(req, res, next) {
           commissionRateSnapshot: true,
           commissionAmountSnapshot: true,
           partnerNetAmountSnapshot: true,
+          platformDiscountAmountSnapshot: true,
           payments: { where: { status: 'SUCCESS', isDuplicate: false }, select: { amount: true } },
           refundTransactions: {
             where: { status: 'SUCCESS' },
@@ -648,6 +692,15 @@ async function getDashboard(req, res, next) {
               amount: Number(b.totalAmount),
               subtotalAmount: Number(b.subtotalAmount),
               discountAmount: Number(b.discountAmount),
+              voucherFundingSource: b.voucherFundingSourceSnapshot || null,
+              voucherPlatformFundingPercent:
+                b.voucherPlatformFundingPercentSnapshot ?? null,
+              platformDiscountAmount: Number(b.platformDiscountAmountSnapshot || 0),
+              partnerDiscountAmount: Number(b.partnerDiscountAmountSnapshot || 0),
+              commissionBaseAmount: Number(b.commissionBaseAmountSnapshot || 0),
+              commissionAmount: Number(b.commissionAmountSnapshot || 0),
+              partnerNetAmount: Number(b.partnerNetAmountSnapshot || 0),
+              platformNetRevenue: Number(b.platformNetRevenueSnapshot || 0),
               snapshotTicketType: b.snapshotTicketType,
               snapshotUnitPrice: Number(b.snapshotUnitPrice),
               status: b.status.toLowerCase().replace('pending_payment', 'pending'),
@@ -713,6 +766,7 @@ async function getReports(req, res, next) {
         commissionRateSnapshot: true,
         commissionAmountSnapshot: true,
         partnerNetAmountSnapshot: true,
+        platformDiscountAmountSnapshot: true,
         payments: {
           where: { status: 'SUCCESS', isDuplicate: false },
           select: { amount: true },
@@ -993,6 +1047,7 @@ async function getPartnerBookings(req, res, next) {
           commissionRateSnapshot: true,
           commissionAmountSnapshot: true,
           partnerNetAmountSnapshot: true,
+          platformDiscountAmountSnapshot: true,
           payments: {
             where: { status: 'SUCCESS', isDuplicate: false },
             select: { amount: true },
@@ -1050,6 +1105,15 @@ async function getPartnerBookings(req, res, next) {
         amount: Number(b.totalAmount),
         subtotalAmount: Number(b.subtotalAmount),
         discountAmount: Number(b.discountAmount),
+        voucherFundingSource: b.voucherFundingSourceSnapshot || null,
+        voucherPlatformFundingPercent:
+          b.voucherPlatformFundingPercentSnapshot ?? null,
+        platformDiscountAmount: Number(b.platformDiscountAmountSnapshot || 0),
+        partnerDiscountAmount: Number(b.partnerDiscountAmountSnapshot || 0),
+        commissionBaseAmount: Number(b.commissionBaseAmountSnapshot || 0),
+        commissionAmount: Number(b.commissionAmountSnapshot || 0),
+        partnerNetAmount: Number(b.partnerNetAmountSnapshot || 0),
+        platformNetRevenue: Number(b.platformNetRevenueSnapshot || 0),
         snapshotTicketType: b.snapshotTicketType,
         snapshotUnitPrice: Number(b.snapshotUnitPrice),
         status: b.status.toLowerCase(),
@@ -1109,31 +1173,7 @@ async function approveBooking(req, res, next) {
     // Kiểm tra booking tồn tại và lấy đủ thông tin cần thiết
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      include: {
-        payments: {
-          where: { status: 'SUCCESS', isDuplicate: false },
-          select: {
-            id: true,
-            status: true,
-            isDuplicate: true,
-            paidAt: true,
-            createdAt: true,
-          },
-        },
-        ticketInstances: { select: { id: true } },
-        reservation: {
-          include: {
-            timeSlot: true,
-            ticketProduct: {
-              include: {
-                attraction: {
-                  select: { partnerId: true, openTime: true, closeTime: true },
-                },
-              },
-            },
-          },
-        },
-      },
+      include: PENDING_APPROVAL_BOOKING_INCLUDE,
     });
 
     if (!booking || booking.isForecastTrainingSample) {
@@ -1155,45 +1195,12 @@ async function approveBooking(req, res, next) {
       });
     }
 
-    const now = new Date();
-    const approvalDeadline = getManualApprovalDeadline(booking);
-    if (!approvalDeadline || now >= approvalDeadline) {
-      await expirePendingPartnerBooking(bookingId, { now });
-      return res.status(409).json({
-        success: false,
-        message: 'Đơn đã quá thời hạn duyệt hoặc hoạt động đã bắt đầu. Hệ thống đã chuyển đơn sang quy trình hoàn tiền.',
-      });
-    }
-
-    await prisma.$transaction(async (tx) => {
+    const outcome = await prisma.$transaction(async (tx) => {
       // Re-read TRONG transaction: guard bằng dữ liệu mới nhất để hai request
       // duyệt đồng thời không trừ kho / tạo vé hai lần.
       const current = await tx.booking.findUnique({
         where: { id: bookingId },
-        include: {
-          payments: {
-            where: { status: 'SUCCESS', isDuplicate: false },
-            select: {
-              id: true,
-              status: true,
-              isDuplicate: true,
-              paidAt: true,
-              createdAt: true,
-            },
-          },
-          reservation: {
-            include: {
-              timeSlot: true,
-              ticketProduct: {
-                include: {
-                  attraction: {
-                    select: { partnerId: true, openTime: true, closeTime: true },
-                  },
-                },
-              },
-            },
-          },
-        },
+        include: PENDING_APPROVAL_BOOKING_INCLUDE,
       });
       if (!current || current.isForecastTrainingSample || current.status !== 'PENDING_PARTNER') {
         const err = new Error('Đơn đặt vé đã được xử lý trước đó.');
@@ -1203,10 +1210,65 @@ async function approveBooking(req, res, next) {
       if (current.reservation.ticketProduct.attraction.partnerId !== partnerId) {
         throw bookingConflict('Bạn không có quyền duyệt đơn này.');
       }
+      if (!getCapturedPayment(current)) {
+        throw bookingConflict(
+          'Đơn chờ duyệt không có giao dịch đã thu tiền hợp lệ; không thể phát hành vé.',
+        );
+      }
       const currentDeadline = getManualApprovalDeadline(current);
       if (!currentDeadline || new Date() >= currentDeadline) {
-        throw bookingConflict('Đơn đã quá thời hạn duyệt hoặc hoạt động đã bắt đầu.');
+        const cancelled = await cancelPendingPartnerBooking(tx, current, {
+          now: new Date(),
+          reason: EXPIRY_REASON,
+          cancellationSource: 'SYSTEM_APPROVAL_TIMEOUT',
+        });
+        if (!cancelled) throw bookingConflict();
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: 'BOOKING_APPROVAL_BLOCKED',
+          entityType: 'BOOKING',
+          entityId: bookingId,
+          metadata: {
+            reasonCode: 'APPROVAL_DEADLINE_PASSED',
+            cancellationSource: 'SYSTEM_APPROVAL_TIMEOUT',
+          },
+        });
+        return {
+          status: 'CANCELLED',
+          reasonCode: 'APPROVAL_DEADLINE_PASSED',
+          reason: EXPIRY_REASON,
+        };
       }
+
+      const fulfillment = evaluateExistingBookingFulfillment(
+        current.reservation.ticketProduct,
+      );
+      if (!fulfillment.allowed) {
+        const cancelled = await cancelPendingPartnerBooking(tx, current, {
+          now: new Date(),
+          reason: fulfillment.reason,
+          cancellationSource: fulfillment.cancellationSource,
+        });
+        if (!cancelled) throw bookingConflict();
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: 'BOOKING_APPROVAL_BLOCKED',
+          entityType: 'BOOKING',
+          entityId: bookingId,
+          metadata: {
+            reasonCode: fulfillment.code,
+            cancellationSource: fulfillment.cancellationSource,
+          },
+        });
+        return {
+          status: 'CANCELLED',
+          reasonCode: fulfillment.code,
+          reason: fulfillment.reason,
+        };
+      }
+
       const claimed = await tx.booking.updateMany({
         where: { id: bookingId, status: 'PENDING_PARTNER', isForecastTrainingSample: false },
         data: { status: 'CONFIRMED' },
@@ -1242,7 +1304,38 @@ async function approveBooking(req, res, next) {
         totalAmount: current.totalAmount,
         isForecastTrainingSample: current.isForecastTrainingSample,
       });
-    });
+      return { status: 'CONFIRMED' };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (outcome.status === 'CANCELLED') {
+      emitBookingStatusUpdated({
+        customerId: booking.userId,
+        bookingId,
+        status: 'CANCELLED',
+        message: `Đơn ${formatBookingReference(bookingId)} không thể xác nhận. Yêu cầu hoàn tiền bắt buộc 100% đã được tạo.`,
+      });
+      sendBookingCancelledForSafetyEmail({
+        to: booking.email,
+        fullName: booking.fullName,
+        bookingId,
+        reason: outcome.reason,
+        refundAmount: Number(booking.totalAmount),
+      }).catch((emailError) => {
+        console.error(`[partner-approval] Không thể gửi email hủy an toàn cho ${bookingId}:`, emailError.message);
+      });
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: outcome.reasonCode,
+          message: `${outcome.reason} Đơn đã được hủy và tạo yêu cầu hoàn tiền 100%.`,
+        },
+        data: {
+          id: bookingId,
+          status: 'cancelled',
+          refundRequired: true,
+        },
+      });
+    }
 
     emitBookingStatusUpdated({
       customerId: booking.userId,

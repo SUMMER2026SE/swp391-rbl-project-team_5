@@ -93,7 +93,11 @@ test('hủy đơn quá 24 giờ, hoàn kho và tạo yêu cầu hoàn 100%', asy
     where: expect.objectContaining({ status: 'PENDING_PARTNER' }),
   }));
   expect(tx.booking.updateMany).toHaveBeenCalledWith({
-    where: { id: 'booking-expired', status: 'PENDING_PARTNER' },
+    where: {
+      id: 'booking-expired',
+      status: 'PENDING_PARTNER',
+      isForecastTrainingSample: false,
+    },
     data: expect.objectContaining({
       status: 'CANCELLED',
       refundRequired: true,
