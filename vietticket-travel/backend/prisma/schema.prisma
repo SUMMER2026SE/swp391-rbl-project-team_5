@@ -270,6 +270,7 @@ model Reservation {
   snapshotRefundPolicy      RefundPolicyType?
   snapshotRefundFeeRate     Decimal?          @db.Decimal(5, 2)
   snapshotRefundCutoffHours Int?
+  snapshotTicketRestrictions Json?
   snapshotCommissionRate    Decimal?          @db.Decimal(5, 2)
   createdAt                 DateTime          @default(now())
 
@@ -614,15 +615,29 @@ model Booking {
   snapshotAttractionCity     String           @default("")
   snapshotAttractionDistrict String?
   snapshotAttractionImage    String?
+  snapshotAttractionLatitude Decimal?         @db.Decimal(10, 7)
+  snapshotAttractionLongitude Decimal?        @db.Decimal(10, 7)
+  snapshotAttractionEnvironment String?
+  // Immutable payout owner captured at checkout. Attraction ownership may
+  // change later, but historical revenue/refunds must remain with the owner
+  // who sold the ticket.
+  snapshotPartnerId          String?
+  snapshotPartnerName        String?
   snapshotTicketName         String           @default("")
   snapshotTicketType         TicketType       @default(ADULT)
   snapshotTicketDescription  String?          @db.Text
+  snapshotTicketRestrictions Json?
   snapshotUnitPrice          Decimal          @default(0.0) @db.Decimal(12, 2)
   snapshotRefundPolicy       RefundPolicyType @default(NON_REFUNDABLE)
   snapshotRefundFeeRate      Decimal          @default(0.0) @db.Decimal(5, 2)
   snapshotRefundCutoffHours  Int              @default(24)
   snapshotVisitDate          DateTime?        @db.Date
   snapshotTimeSlotLabel      String?
+  // Immutable activity window captured at checkout. This is intentionally
+  // separate from the human-readable slot label so all-day tickets keep the
+  // original opening hours even if the attraction later changes its schedule.
+  snapshotActivityStartTime  String?
+  snapshotActivityEndTime    String?
   commissionRateSnapshot     Decimal          @default(0.10) @db.Decimal(5, 2)
   commissionAmountSnapshot   Decimal          @default(0.0) @db.Decimal(12, 2)
   partnerNetAmountSnapshot   Decimal          @default(0.0) @db.Decimal(12, 2)
@@ -981,6 +996,9 @@ model RefundTransaction {
   @@index([paymentId])
   @@index([refundRequestId])
   @@index([status])
+  // A gateway refund number is immutable evidence. It must never be attached
+  // to two different refund rows, even when a retry/query response is replayed.
+  @@unique([gateway, gatewayTransactionId], map: "RefundTransaction_gateway_gatewayTransactionId_key")
 }
 
 model ScheduledJobLock {
@@ -989,6 +1007,25 @@ model ScheduledJobLock {
   lockedUntil DateTime?
   updatedAt   DateTime  @updatedAt
   createdAt   DateTime  @default(now())
+}
+
+model NotificationOutbox {
+  id            String    @id @default(uuid())
+  dedupeKey     String    @unique
+  topic         String
+  aggregateId   String
+  payload       Json?
+  status        String    @default("PENDING")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lockedAt      DateTime?
+  sentAt        DateTime?
+  lastError     String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([topic, aggregateId])
 }
 
 model AuditLog {
