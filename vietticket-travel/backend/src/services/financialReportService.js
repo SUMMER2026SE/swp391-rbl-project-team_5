@@ -196,6 +196,25 @@ function partnerFromBooking(booking) {
   return relation;
 }
 
+// Mọi cột tiền của một dòng đối tác. Liệt kê tường minh thay vì quét động để
+// một cột tiền mới được thêm sau này không lặng lẽ lọt khỏi phép kiểm tra.
+const PARTNER_ACTIVITY_FIELDS = Object.freeze([
+  'capturedAmount',
+  'duplicateCapturedAmount',
+  'refundedAmount',
+  'recognizedGrossAmount',
+  'recognizedRefundAmount',
+  'recognizedNetAmount',
+  'commissionRevenueAmount',
+  'platformPromotionCostAmount',
+  'platformNetRevenueAmount',
+  'partnerPayableAmount',
+]);
+
+function hasPartnerActivity(metrics) {
+  return PARTNER_ACTIVITY_FIELDS.some((field) => Number(metrics?.[field] || 0) !== 0);
+}
+
 function createPartnerMetrics(partner) {
   return {
     id: partner.id,
@@ -430,6 +449,12 @@ function buildPartnerBreakdown(partners, payments, refunds, recognizedBookings) 
   }
 
   return [...byPartner.values()]
+    // Mọi hồ sơ đối tác đều được nạp để đơn cũ của đối tác đã bị đình chỉ vẫn
+    // quy được về đúng chủ. Nhưng chỉ những đối tác có phát sinh trong kỳ mới
+    // được lên bảng — nếu không, báo cáo tài chính sẽ bị độn thêm mọi hồ sơ
+    // chờ duyệt / bị từ chối dưới dạng dòng toàn số 0. Dòng 0 không đóng góp
+    // gì vào tổng nên bỏ đi không làm lệch đối soát.
+    .filter((metrics) => hasPartnerActivity(metrics))
     .map((metrics) => ({
       ...metrics,
       netCashAmount:
