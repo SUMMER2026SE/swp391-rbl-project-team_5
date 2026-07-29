@@ -19,11 +19,15 @@ const {
 } = require('../utils/validators');
 const { getEffectiveRoles } = require('../utils/userRoles');
 const { getRequestIp } = require('../utils/auditLog');
+const { writeAuditLog } = require('../utils/auditLog');
+const {
+  CURRENT_PRIVACY_VERSION,
+  CURRENT_TERMS_VERSION,
+  hasCurrentPolicyConsent,
+} = require('../config/policyVersions');
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY_MINUTES = 30;
-const CURRENT_TERMS_VERSION = '2026-07-17-v1';
-const CURRENT_PRIVACY_VERSION = '2026-07-17-v1';
 const SAFE_FORGOT_PASSWORD_MESSAGE =
   'Nếu email tồn tại trên hệ thống, mã đặt lại mật khẩu đã được tạo.';
 
@@ -41,6 +45,7 @@ function sanitizeUser(user) {
     role: user.role,
     roles: getEffectiveRoles(user),
     employerPartnerId: user.employerPartnerId || null,
+    staffAccessLevel: user.staffAccessLevel || null,
     provider: user.provider,
     isEmailVerified: user.isEmailVerified,
     status: user.status,
@@ -49,6 +54,9 @@ function sanitizeUser(user) {
     termsAcceptedAt: user.termsAcceptedAt || null,
     termsVersion: user.termsVersion || null,
     privacyVersion: user.privacyVersion || null,
+    currentTermsVersion: CURRENT_TERMS_VERSION,
+    currentPrivacyVersion: CURRENT_PRIVACY_VERSION,
+    requiresPolicyAcceptance: !hasCurrentPolicyConsent(user),
     profile: user.profile || null,
   };
 }
@@ -544,6 +552,50 @@ async function getMe(req, res, next) {
   }
 }
 
+async function acceptCurrentPolicies(req, res, next) {
+  try {
+    if (req.body?.acceptedTerms !== true || req.body?.acceptedPrivacy !== true) {
+      return res.status(400).json({
+        code: 'POLICY_CONSENT_REQUIRED',
+        message: 'Bạn phải chủ động đồng ý cả Điều khoản dịch vụ và Chính sách bảo mật.',
+      });
+    }
+    const acceptedAt = new Date();
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: req.user.id },
+        data: {
+          termsAcceptedAt: acceptedAt,
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          consentIpAddress: getRequestIp(req),
+        },
+        include: { profile: true, roleMemberships: true },
+      });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'CURRENT_POLICIES_ACCEPTED',
+        entityType: 'User',
+        entityId: req.user.id,
+        metadata: {
+          termsVersion: CURRENT_TERMS_VERSION,
+          privacyVersion: CURRENT_PRIVACY_VERSION,
+          acceptedAt: acceptedAt.toISOString(),
+        },
+      });
+      return updated;
+    });
+    return res.json({
+      success: true,
+      message: 'Đã ghi nhận đồng ý điều khoản và chính sách bảo mật hiện hành.',
+      user: sanitizeUser(user),
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 async function logout(req, res, next) {
   try {
     if (req.authSession?.id) {
@@ -561,6 +613,7 @@ async function logout(req, res, next) {
 }
 
 module.exports = {
+  acceptCurrentPolicies,
   forgotPassword,
   getMe,
   googleLogin,

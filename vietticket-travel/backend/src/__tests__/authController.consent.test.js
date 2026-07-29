@@ -13,7 +13,10 @@ jest.mock('../utils/mailer', () => ({
 const bcrypt = require('bcrypt');
 const prisma = require('./helpers/mockPrisma');
 const { sendVerificationEmail } = require('../utils/mailer');
-const { register } = require('../controllers/authController');
+const {
+  acceptCurrentPolicies,
+  register,
+} = require('../controllers/authController');
 
 function makeReqRes(body) {
   const req = {
@@ -81,8 +84,8 @@ describe('registration consent evidence', () => {
     expect(prisma.user.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         termsAcceptedAt: expect.any(Date),
-        termsVersion: '2026-07-17-v1',
-        privacyVersion: '2026-07-17-v1',
+        termsVersion: '2026-07-29-v2',
+        privacyVersion: '2026-07-29-v2',
         consentIpAddress: '203.0.113.10',
       }),
     }));
@@ -91,6 +94,52 @@ describe('registration consent evidence', () => {
       token: expect.any(String),
     }));
     expect(res.status).toHaveBeenCalledWith(201);
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('policy re-acceptance', () => {
+  test('updates both current versions and writes an audit record', async () => {
+    const updatedUser = {
+      id: 'user-legacy',
+      fullName: 'Legacy User',
+      email: 'legacy@example.com',
+      role: 'CUSTOMER',
+      status: 'ACTIVE',
+      termsAcceptedAt: new Date(),
+      termsVersion: '2026-07-29-v2',
+      privacyVersion: '2026-07-29-v2',
+      roleMemberships: [{ role: 'CUSTOMER' }],
+      profile: {},
+    };
+    prisma.user.update.mockResolvedValue(updatedUser);
+    prisma.auditLog.create.mockResolvedValue({ id: 'audit-1' });
+    const { req, res, next } = makeReqRes({
+      acceptedTerms: true,
+      acceptedPrivacy: true,
+    });
+    req.user = { id: 'user-legacy' };
+
+    await acceptCurrentPolicies(req, res, next);
+
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'user-legacy' },
+      data: expect.objectContaining({
+        termsAcceptedAt: expect.any(Date),
+        termsVersion: '2026-07-29-v2',
+        privacyVersion: '2026-07-29-v2',
+        consentIpAddress: '203.0.113.10',
+      }),
+    }));
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'CURRENT_POLICIES_ACCEPTED',
+        entityId: 'user-legacy',
+      }),
+    }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      user: expect.objectContaining({ requiresPolicyAcceptance: false }),
+    }));
     expect(next).not.toHaveBeenCalled();
   });
 });

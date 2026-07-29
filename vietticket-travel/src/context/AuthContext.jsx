@@ -349,6 +349,22 @@ export function AuthProvider({ children }) {
     }
   }
 
+  const acceptCurrentPolicies = async () => {
+    try {
+      const data = await apiRequest('/auth/accept-policies', {
+        method: 'POST',
+        body: {
+          acceptedTerms: true,
+          acceptedPrivacy: true,
+        },
+      })
+      const nextUser = persistUser(data.user)
+      return { ok: true, user: nextUser, message: data.message }
+    } catch (error) {
+      return getErrorResult(error)
+    }
+  }
+
   const logout = async () => {
     try {
       await apiRequest('/auth/logout', { method: 'POST' })
@@ -375,6 +391,7 @@ export function AuthProvider({ children }) {
     updateProfile,
     uploadAvatar,
     changePassword,
+    acceptCurrentPolicies,
     logout,
   }
 

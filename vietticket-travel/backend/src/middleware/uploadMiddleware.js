@@ -203,6 +203,24 @@ function isDocumentOwnedByUser(url, userId, req) {
   }
 }
 
+function isPublicUploadOwnedByUser(url, userId, req) {
+  const trustedOrigin = getTrustedDocumentOrigin(req);
+  if (!trustedOrigin) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.origin !== trustedOrigin || parsed.search || parsed.hash) return false;
+    const prefix = '/uploads/';
+    if (!parsed.pathname.startsWith(prefix)) return false;
+    const filename = parsed.pathname.slice(prefix.length);
+    if (!filename.startsWith(`${userId}-`) || path.basename(filename) !== filename) return false;
+    const resolved = path.resolve(publicUploadDir, filename);
+    if (!resolved.startsWith(`${path.resolve(publicUploadDir)}${path.sep}`)) return false;
+    return fs.statSync(resolved).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function createUserUploadQuota(directory, { maxFiles, maxBytes }) {
   return async (req, res, next) => {
     try {
@@ -269,6 +287,7 @@ module.exports = {
   getTrustedDocumentOrigin,
   getDocumentFilenameFromUrl,
   isDocumentOwnedByUser,
+  isPublicUploadOwnedByUser,
   enforcePublicUploadQuota,
   enforceDocumentUploadQuota,
   removeUnreferencedDocumentsForUser,

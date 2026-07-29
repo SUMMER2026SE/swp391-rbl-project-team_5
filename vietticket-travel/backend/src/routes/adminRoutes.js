@@ -30,6 +30,8 @@ const { restrictTo } = require('../middleware/roleMiddleware');
 const reviewController = require('../controllers/reviewController');
 const bankTransferController = require('../controllers/bankTransferController');
 const settlementController = require('../controllers/settlementController');
+const questionController = require('../controllers/questionController');
+const kycChangeController = require('../controllers/kycChangeController');
 
 const router = express.Router();
 
@@ -66,10 +68,16 @@ router.get('/partners', getPartners);
 router.get('/attractions', getAttractions);
 router.put('/partners/:id/review', reviewPartner);
 router.patch('/partners/:id/status', changePartnerOperationalStatus);
+router.get('/kyc-change-requests', kycChangeController.listKycChangeRequests);
+router.patch(
+  '/kyc-change-requests/:id/review',
+  kycChangeController.reviewKycChangeRequest,
+);
 router.patch('/partners/:id/commission', changePartnerCommissionRate);
 router.put('/attractions/:id/review', reviewAttraction);
 router.put('/attractions/:id/hide', hideAttraction);
 router.put('/attractions/:id/restore', restoreAttraction);
+router.patch('/questions/:questionId/moderate', questionController.moderateQuestion);
 
 // Kiểm duyệt Đánh giá
 router.get('/reviews', reviewController.listAdminReviews);

@@ -19,7 +19,7 @@ THÔNG TIN NỀN TẢNG VIETTICKET TRAVEL:
 CHÍNH SÁCH ĐẶT VÉ:
 - Vé điện tử (e-ticket) được gửi qua email/tài khoản sau khi thanh toán và đơn được xác nhận; sản phẩm duyệt thủ công cần đối tác phê duyệt trước khi phát hành QR.
 - Mỗi vé có khung giờ (time slot) cụ thể, khách cần đến đúng khung giờ đã đặt (trừ khi vé ghi "linh hoạt cả ngày").
-- Một số điểm tham quan thu tiền trước rồi yêu cầu đối tác duyệt thủ công trước khi phát hành QR. Hạn phản hồi là thời điểm sớm hơn giữa 24 giờ sau thanh toán và giờ bắt đầu hoạt động; từ chối hoặc quá hạn sẽ hủy đúng booking và tạo hoàn tiền bắt buộc 100%.
+- Một số điểm tham quan yêu cầu đối tác duyệt thủ công trước khi thu tiền. Khách chưa bị thu tiền trong lúc chờ; sau khi duyệt, khách thanh toán trong thời hạn mới để nhận QR. Từ chối hoặc quá hạn duyệt sẽ hủy đúng booking và hoàn kho.
 
 CHÍNH SÁCH HỦY BOOKING VÀ HOÀN TIỀN (tuỳ theo từng loại vé, ghi rõ trên trang chi tiết vé):
 - FREE_CANCELLATION: Có thể được hoàn toàn bộ nếu vé còn đủ điều kiện và yêu cầu được gửi trước hạn hủy của chính sản phẩm (mặc định thường là 24 giờ trước khi hoạt động bắt đầu, nhưng có thể khác).

@@ -14,6 +14,7 @@ const NAV_ITEMS_ADMIN = [
   { to: '/admin/reports',             icon: 'finance',        label: 'Báo cáo tài chính' },
   { to: '/admin/settlements',         icon: 'request_quote',  label: 'Đối soát đối tác' },
   { to: '/admin/kyc-approval',        icon: 'verified_user',  label: 'Duyệt hồ sơ KYC' },
+  { to: '/admin/kyc-change-requests', icon: 'published_with_changes', label: 'Yêu cầu đổi KYC' },
   { to: '/admin/attraction-approval', icon: 'location_on',    label: 'Duyệt địa điểm' },
   { to: '/admin/violations',          icon: 'report_problem', label: 'Quản lý vi phạm' },
   { to: '/admin/categories',          icon: 'category',       label: 'Quản lý danh mục' },
@@ -31,6 +32,7 @@ const NAV_ITEMS_CHECKIN_STAFF = [
 const NAV_ITEMS_PLATFORM_STAFF = [
   { to: '/staff/tickets', icon: 'support_agent', label: 'Hỗ trợ khách hàng' },
   { to: '/staff/refunds', icon: 'currency_exchange', label: 'Quản lý hoàn tiền' },
+  { to: '/staff/reports', icon: 'finance', label: 'Báo cáo tài chính' },
   { to: '/admin/reviews', icon: 'rate_review', label: 'Kiểm duyệt đánh giá' },
 ];
 
@@ -41,9 +43,15 @@ export default function AdminSidebar({ isOpen, onClose }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isAdmin = hasRole(user, 'ADMIN');
   const isPartnerStaff = hasRole(user, 'STAFF') && Boolean(user?.employerPartnerId);
-  const isPlatformStaff = hasRole(user, 'STAFF') && !user?.employerPartnerId;
+  const isPartnerManager = isPartnerStaff
+    && (user?.staffAccessLevel || 'SCANNER') === 'MANAGER';
+  const isPlatformStaff = hasRole(user, 'STAFF')
+    && !user?.employerPartnerId
+    && (user?.staffAccessLevel || 'MANAGER') === 'MANAGER';
   const staffNavItems = [
-    ...(isAdmin || isPartnerStaff ? NAV_ITEMS_CHECKIN_STAFF : []),
+    ...(isAdmin || isPartnerStaff
+      ? NAV_ITEMS_CHECKIN_STAFF.filter((item) => item.to !== '/staff/smart-queue' || isAdmin || isPartnerManager)
+      : []),
     ...(isAdmin || isPlatformStaff ? NAV_ITEMS_PLATFORM_STAFF : []),
   ];
   const portalTitle = isAdmin ? 'VietTicket Admin' : 'VietTicket Operations';

@@ -1,3 +1,5 @@
+const { parseExchangeRates } = require('../utils/payoutCurrency');
+
 function isProduction() {
   return process.env.NODE_ENV === 'production';
 }
@@ -23,6 +25,29 @@ function parseOriginList(value) {
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function getTrustProxySetting(value = process.env.TRUST_PROXY) {
+  const raw = String(value ?? '').trim();
+  if (!raw || /^(false|off|no|0)$/i.test(raw)) return false;
+  // Express boolean `true` trusts every proxy. Preserve the old env value but
+  // map it to exactly one trusted hop instead.
+  if (/^(true|on|yes)$/i.test(raw)) return 1;
+  if (/^[1-9]\d{0,2}$/u.test(raw)) return Number(raw);
+
+  const trustedNames = new Set(['loopback', 'linklocal', 'uniquelocal']);
+  const entries = raw.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (
+    entries.length > 0
+    && entries.every((entry) => trustedNames.has(entry.toLowerCase())
+      || /^[a-f0-9:.]+(?:\/\d{1,3})?$/iu.test(entry))
+  ) {
+    return entries;
+  }
+
+  throw new Error(
+    'TRUST_PROXY must be false, true/number of trusted hops, or a comma-separated trusted IP/subnet list.',
+  );
 }
 
 function getFrontendUrl() {
@@ -67,6 +92,7 @@ function validateProductionEnv() {
     'MAIL_FROM',
     'ML_SERVICE_URL',
     'ML_SERVICE_API_KEY',
+    'TRUST_PROXY',
   ];
   const missing = required.filter((name) => !String(process.env[name] || '').trim());
 
@@ -83,6 +109,9 @@ function validateProductionEnv() {
   if (String(process.env.ML_SERVICE_API_KEY || '').trim().length < 32) {
     throw new Error('ML_SERVICE_API_KEY must be at least 32 characters in production.');
   }
+
+  getTrustProxySetting();
+  parseExchangeRates();
 
   const localhostVars = [
     'FRONTEND_URL',
@@ -122,6 +151,7 @@ function getBankTransferConfig() {
 module.exports = {
   getBankTransferConfig,
   getFrontendUrl,
+  getTrustProxySetting,
   isProduction,
   normalizeUrl,
   parseOriginList,

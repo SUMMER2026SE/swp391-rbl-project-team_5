@@ -24,6 +24,7 @@ const PartnerStaffPage = lazy(() => import('../pages/PartnerStaffPage.jsx'))
 const PartnerDashboardPage = lazy(() => import('../pages/PartnerDashboardPage.jsx'))
 const PartnerEditAttractionPage = lazy(() => import('../pages/PartnerEditAttractionPage.jsx'))
 const PartnerKycPage = lazy(() => import('../pages/PartnerKycPage.jsx'))
+const PartnerKycChangeRequestPage = lazy(() => import('../pages/PartnerKycChangeRequestPage.jsx'))
 const PartnerPendingPage = lazy(() => import('../pages/PartnerPendingPage.jsx'))
 const PartnerRegisterPage = lazy(() => import('../pages/PartnerRegisterPage.jsx'))
 const PartnerReportsPage = lazy(() => import('../pages/PartnerReportsPage.jsx'))
@@ -53,6 +54,7 @@ const BankTransferManagementPage = lazy(() =>
 const VerifyEmailPage = lazy(() => import('../pages/VerifyEmailPage.jsx'))
 const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard.jsx'))
 const KycApprovalPage = lazy(() => import('../pages/admin/KycApprovalPage.jsx'))
+const KycChangeRequestsPage = lazy(() => import('../pages/admin/KycChangeRequestsPage.jsx'))
 const AttractionApprovalPage = lazy(() => import('../pages/admin/AttractionApprovalPage.jsx'))
 const ViolationManagementPage = lazy(() => import('../pages/admin/ViolationManagementPage.jsx'))
 const CategoryManagementPage = lazy(() => import('../pages/admin/CategoryManagementPage.jsx'))
@@ -66,6 +68,7 @@ const SmartQueueOperationsPage = lazy(() => import('../pages/staff/SmartQueueOpe
 const RefundManagementPage = lazy(() => import('../pages/staff/RefundManagementPage.jsx'))
 const SupportTicketsPage = lazy(() => import('../pages/staff/SupportTicketsPage.jsx'))
 const PartnerReviewsPage = lazy(() => import('../pages/PartnerReviewsPage.jsx'))
+const PartnerQuestionsPage = lazy(() => import('../pages/PartnerQuestionsPage.jsx'))
 const ReviewModerationPage = lazy(() => import('../pages/admin/ReviewModerationPage.jsx'))
 const StaticPage = lazy(() => import('../pages/StaticPage.jsx'))
 const NotFoundPage = lazy(() => import('../pages/NotFoundPage.jsx'))
@@ -216,6 +219,14 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/partner/kyc-change-request"
+        element={
+          <ProtectedRoute allowedRoles={['PARTNER']}>
+            <PartnerKycChangeRequestPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -297,6 +308,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <KycApprovalPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/kyc-change-requests"
+        element={
+          <AdminRoute>
+            <KycChangeRequestsPage />
           </AdminRoute>
         }
       />
@@ -407,7 +426,7 @@ function AppRoutes() {
       <Route
         path="/my-tickets"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
             <MyTicketsPage />
           </ProtectedRoute>
         }
@@ -489,7 +508,7 @@ function AppRoutes() {
       <Route
         path="/staff/smart-queue"
         element={
-          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePartnerStaff>
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePartnerStaff requiredStaffAccess="MANAGER">
             <SmartQueueOperationsPage />
           </ProtectedRoute>
         }
@@ -510,12 +529,28 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/staff/reports"
+        element={
+          <ProtectedRoute allowedRoles={['STAFF', 'ADMIN']} requirePlatformStaff requiredStaffAccess="MANAGER">
+            <FinancialReportPage />
+          </ProtectedRoute>
+        }
+      />
       {/* Module 5 - Partner Routes */}
       <Route
         path="/partner/reviews"
         element={
           <ProtectedRoute allowedRoles={['PARTNER']}>
             <PartnerReviewsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/partner/questions"
+        element={
+          <ProtectedRoute allowedRoles={['PARTNER']}>
+            <PartnerQuestionsPage />
           </ProtectedRoute>
         }
       />

@@ -4,6 +4,12 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { recognizedAmountsOf } = require('../services/financialReportService');
 const { writeAuditLog } = require('../utils/auditLog');
+const {
+  convertVndAmount,
+  getExchangeRateEvidence,
+  getVndPerUnit,
+  normalizePayoutCurrency,
+} = require('../utils/payoutCurrency');
 
 const STATUSES = ['DRAFT', 'APPROVED', 'PAID', 'CANCELLED'];
 const BOOKING_INCLUDE = {
@@ -57,8 +63,11 @@ function parseDateOnly(value) {
     : date;
 }
 
-function toMoney(value) {
-  return Math.round(Number(value || 0));
+function toMoney(value, currency = 'VND') {
+  const amount = Number(value || 0);
+  return currency === 'VND'
+    ? Math.round(amount)
+    : Math.round(amount * 100) / 100;
 }
 
 function buildMakerCheckerControl(settlement, actorId = null) {
@@ -119,19 +128,20 @@ function serializeSettlement(settlement, actorId = null) {
   if (!settlement) return null;
   return {
     ...settlement,
-    grossAmount: toMoney(settlement.grossAmount),
-    refundAmount: toMoney(settlement.refundAmount),
-    netAmount: toMoney(settlement.netAmount),
-    commissionAmount: toMoney(settlement.commissionAmount),
-    payableAmount: toMoney(settlement.payableAmount),
+    exchangeRate: Number(settlement.exchangeRate || 1),
+    grossAmount: toMoney(settlement.grossAmount, settlement.currency),
+    refundAmount: toMoney(settlement.refundAmount, settlement.currency),
+    netAmount: toMoney(settlement.netAmount, settlement.currency),
+    commissionAmount: toMoney(settlement.commissionAmount, settlement.currency),
+    payableAmount: toMoney(settlement.payableAmount, settlement.currency),
     control: buildMakerCheckerControl(settlement, actorId),
     items: settlement.items?.map((item) => ({
       ...item,
-      grossAmount: toMoney(item.grossAmount),
-      refundAmount: toMoney(item.refundAmount),
-      netAmount: toMoney(item.netAmount),
-      commissionAmount: toMoney(item.commissionAmount),
-      payableAmount: toMoney(item.payableAmount),
+      grossAmount: toMoney(item.grossAmount, settlement.currency),
+      refundAmount: toMoney(item.refundAmount, settlement.currency),
+      netAmount: toMoney(item.netAmount, settlement.currency),
+      commissionAmount: toMoney(item.commissionAmount, settlement.currency),
+      payableAmount: toMoney(item.payableAmount, settlement.currency),
     })),
   };
 }
@@ -177,7 +187,7 @@ async function listSettlements(req, res, next) {
       }),
       prisma.partnerSettlement.count({ where }),
       prisma.partnerSettlement.groupBy({
-        by: ['status'],
+        by: ['status', 'currency'],
         _count: { _all: true },
         _sum: { payableAmount: true },
       }),
@@ -187,10 +197,15 @@ async function listSettlements(req, res, next) {
       { count: 0, payableAmount: 0 },
     ]));
     for (const group of statusGroups) {
-      stats[group.status] = {
-        count: Number(group._count?._all || 0),
-        payableAmount: toMoney(group._sum?.payableAmount),
+      const current = stats[group.status];
+      current.count += Number(group._count?._all || 0);
+      current.amounts = {
+        ...(current.amounts || {}),
+        [group.currency]: toMoney(group._sum?.payableAmount, group.currency),
       };
+      if (group.currency === 'VND') {
+        current.payableAmount = current.amounts.VND;
+      }
     }
     return res.json({
       success: true,
@@ -314,6 +329,22 @@ async function createSettlement(req, res, next) {
         message: 'Hồ sơ đối tác chưa đủ thông tin ngân hàng để lập đối soát.',
       });
     }
+    const payoutCurrency = normalizePayoutCurrency(partner.payoutCurrency) || 'VND';
+    let exchangeRate;
+    let exchangeRateEvidence;
+    try {
+      exchangeRate = getVndPerUnit(payoutCurrency);
+      exchangeRateEvidence = getExchangeRateEvidence(payoutCurrency);
+    } catch (error) {
+      return res.status(503).json({
+        message: `Cấu hình tỷ giá chi trả không hợp lệ: ${error.message}`,
+      });
+    }
+    if (!exchangeRate) {
+      return res.status(409).json({
+        message: `Chưa cấu hình tỷ giá VND/${payoutCurrency}. Vui lòng cập nhật tỷ giá trước khi lập đối soát.`,
+      });
+    }
 
     const settlement = await prisma.$transaction(async (tx) => {
       const bookings = await tx.booking.findMany({
@@ -354,7 +385,7 @@ async function createSettlement(req, res, next) {
         orderBy: [{ snapshotVisitDate: 'asc' }, { id: 'asc' }],
       });
 
-      const items = bookings
+      const vndItems = bookings
         .map((booking) => {
           const amounts = recognizedAmountsOf(booking);
           return {
@@ -367,11 +398,18 @@ async function createSettlement(req, res, next) {
           };
         })
         .filter((item) => item.payableAmount > 0);
-      if (items.length === 0) {
+      if (vndItems.length === 0) {
         const error = new Error('Không có booking đủ điều kiện và chưa được đối soát trong kỳ này.');
         error.statusCode = 409;
         throw error;
       }
+      const items = vndItems.map((item) => Object.fromEntries(
+        Object.entries(item).map(([key, value]) => (
+          key === 'bookingId'
+            ? [key, value]
+            : [key, Number(convertVndAmount(value, payoutCurrency, exchangeRate))]
+        )),
+      ));
 
       const totals = items.reduce((sum, item) => ({
         grossAmount: sum.grossAmount + item.grossAmount,
@@ -392,7 +430,11 @@ async function createSettlement(req, res, next) {
           partnerId,
           periodStart: period.periodStart,
           periodEnd: period.periodEnd,
-          currency: 'VND',
+          currency: payoutCurrency,
+          baseCurrency: 'VND',
+          exchangeRate,
+          exchangeRateSource: exchangeRateEvidence.source,
+          exchangeRateEffectiveAt: exchangeRateEvidence.effectiveAt,
           ...totals,
           bookingCount: items.length,
           bankNameSnapshot: partner.bankName,
@@ -416,6 +458,11 @@ async function createSettlement(req, res, next) {
           periodEnd: req.body.periodEnd,
           bookingCount: items.length,
           payableAmount: totals.payableAmount,
+          baseCurrency: 'VND',
+          currency: payoutCurrency,
+          exchangeRate,
+          exchangeRateSource: exchangeRateEvidence.source,
+          exchangeRateEffectiveAt: exchangeRateEvidence.effectiveAt.toISOString(),
         },
       });
       return tx.partnerSettlement.findUnique({

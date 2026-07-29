@@ -6,6 +6,8 @@ import {
   getFinancialReport,
   getFinancialTransactions,
 } from '../../services/adminApi'
+import { useAuth } from '../../context/useAuth.js'
+import { hasRole } from '../../utils/userRoles.js'
 import { formatBookingReference } from '../../utils/bookingReference'
 import '../../styles/admin.css'
 
@@ -78,6 +80,9 @@ function EmptyRow({ columns, children }) {
 }
 
 export default function FinancialReportPage() {
+  const { user } = useAuth()
+  const isAdmin = hasRole(user, 'ADMIN')
+  const apiScope = isAdmin ? 'admin' : 'staff'
   const [period, setPeriod] = useState('month')
   const [report, setReport] = useState(null)
   const [reportLoading, setReportLoading] = useState(true)
@@ -93,7 +98,7 @@ export default function FinancialReportPage() {
 
   useEffect(() => {
     let active = true
-    getFinancialReport(period)
+    getFinancialReport(period, apiScope)
       .then((response) => {
         if (!active) return
         setReport(response.data)
@@ -116,7 +121,7 @@ export default function FinancialReportPage() {
     return () => {
       active = false
     }
-  }, [period])
+  }, [apiScope, period])
 
   useEffect(() => {
     let active = true
@@ -126,7 +131,7 @@ export default function FinancialReportPage() {
       status: transactionStatus,
       search,
       limit: 50,
-    })
+    }, apiScope)
       .then((response) => {
         if (active) setTransactions(response.data.transactions || [])
       })
@@ -142,7 +147,7 @@ export default function FinancialReportPage() {
     return () => {
       active = false
     }
-  }, [period, search, transactionStatus, transactionType])
+  }, [apiScope, period, search, transactionStatus, transactionType])
 
   const summary = report?.summary || {}
   const stats = [
@@ -304,37 +309,41 @@ export default function FinancialReportPage() {
                       <td className="admin-table-cell--right">{formatCurrency(partner.platformNetRevenueAmount)}</td>
                       <td className="admin-table-cell--right">{formatCurrency(partner.partnerPayableAmount)}</td>
                       <td className="admin-table-cell--right">
-                        <div className="financial-rate-control">
-                          <input
-                            aria-label={`Tỷ lệ hoa hồng ${partner.businessName}`}
-                            inputMode="numeric"
-                            max="100"
-                            min="0"
-                            onChange={(event) => setRateDrafts((current) => ({
-                              ...current,
-                              [partner.id]: event.target.value,
-                            }))}
-                            step="1"
-                            type="number"
-                            value={rateDrafts[partner.id] ?? ''}
-                          />
-                          <span>%</span>
-                          <button
-                            aria-label={`Lưu tỷ lệ hoa hồng ${partner.businessName}`}
-                            className="financial-icon-button"
-                            disabled={
-                              savingPartnerId === partner.id
-                              || Number(rateDrafts[partner.id]) === partner.commissionRatePercent
-                            }
-                            onClick={() => saveCommission(partner)}
-                            title="Lưu tỷ lệ hoa hồng"
-                            type="button"
-                          >
-                            <span className="material-symbols-outlined">
-                              {savingPartnerId === partner.id ? 'progress_activity' : 'save'}
-                            </span>
-                          </button>
-                        </div>
+                        {isAdmin ? (
+                          <div className="financial-rate-control">
+                            <input
+                              aria-label={`Tỷ lệ hoa hồng ${partner.businessName}`}
+                              inputMode="numeric"
+                              max="100"
+                              min="0"
+                              onChange={(event) => setRateDrafts((current) => ({
+                                ...current,
+                                [partner.id]: event.target.value,
+                              }))}
+                              step="1"
+                              type="number"
+                              value={rateDrafts[partner.id] ?? ''}
+                            />
+                            <span>%</span>
+                            <button
+                              aria-label={`Lưu tỷ lệ hoa hồng ${partner.businessName}`}
+                              className="financial-icon-button"
+                              disabled={
+                                savingPartnerId === partner.id
+                                || Number(rateDrafts[partner.id]) === partner.commissionRatePercent
+                              }
+                              onClick={() => saveCommission(partner)}
+                              title="Lưu tỷ lệ hoa hồng"
+                              type="button"
+                            >
+                              <span className="material-symbols-outlined">
+                                {savingPartnerId === partner.id ? 'progress_activity' : 'save'}
+                              </span>
+                            </button>
+                          </div>
+                        ) : (
+                          <span>{partner.commissionRatePercent}%</span>
+                        )}
                       </td>
                     </tr>
                   ))}

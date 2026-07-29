@@ -10,10 +10,10 @@ const STATUS_META = {
   CANCELLED: { label: 'Đã hủy', className: 'bg-red-100 text-red-700' },
 }
 
-const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
+const formatCurrency = (value, currency = 'VND') => new Intl.NumberFormat('vi-VN', {
   style: 'currency',
-  currency: 'VND',
-  maximumFractionDigits: 0,
+  currency,
+  maximumFractionDigits: currency === 'VND' ? 0 : 2,
 }).format(Number(value || 0))
 
 const formatDate = (value) => value
@@ -107,13 +107,16 @@ export default function PartnerSettlementsPage() {
                       </span>
                     </td>
                     <td className="px-3 py-4 text-right">{settlement.bookingCount}</td>
-                    <td className="px-3 py-4 text-right">{formatCurrency(settlement.netAmount)}</td>
-                    <td className="px-3 py-4 text-right">{formatCurrency(settlement.commissionAmount)}</td>
+                    <td className="px-3 py-4 text-right">{formatCurrency(settlement.netAmount, settlement.currency)}</td>
+                    <td className="px-3 py-4 text-right">{formatCurrency(settlement.commissionAmount, settlement.currency)}</td>
                     <td className="px-3 py-4 text-right font-bold text-[#006068]">
-                      {formatCurrency(settlement.payableAmount)}
+                      {formatCurrency(settlement.payableAmount, settlement.currency)}
                     </td>
                     <td className="px-3 py-4">
                       <div>{settlement.bankNameSnapshot} · ****{settlement.bankAccountLast4Snapshot}</div>
+                      <div className="mt-1 text-xs text-[#5f696b]">
+                        Tỷ giá: 1 {settlement.currency} = {Number(settlement.exchangeRate || 1).toLocaleString('vi-VN')} {settlement.baseCurrency || 'VND'}
+                      </div>
                       <div className="mt-1 text-xs text-[#5f696b]">
                         {settlement.bankReference
                           ? `Mã tham chiếu: ${settlement.bankReference}`

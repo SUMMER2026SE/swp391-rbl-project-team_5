@@ -77,9 +77,12 @@ describe('validateKyc', () => {
   test('rejects a future registration date', () => {
     expect(validateKyc({ ...validKyc, registrationDate: '2999-01-01' })).not.toBe('');
   });
-  test.each(['USD', 'EUR'])('rejects unsupported payout currency %s', (payoutCurrency) => {
-    expect(validateKyc({ ...validKyc, payoutCurrency })).toBe(
-      'Hiện tại hệ thống chỉ hỗ trợ thanh toán đối tác bằng VND.',
+  test.each(['USD', 'EUR', 'SGD', 'THB'])('accepts supported payout currency %s', (payoutCurrency) => {
+    expect(validateKyc({ ...validKyc, payoutCurrency })).toBe('');
+  });
+  test('rejects an unsupported payout currency', () => {
+    expect(validateKyc({ ...validKyc, payoutCurrency: 'GBP' })).toMatch(
+      /VND, USD, EUR, SGD, THB/,
     );
   });
 });

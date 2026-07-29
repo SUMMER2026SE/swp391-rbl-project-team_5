@@ -23,11 +23,18 @@ const FILTERS = [
   { value: 'CANCELLED', label: 'Đã hủy' },
 ]
 
-const formatCurrency = (value) => new Intl.NumberFormat('vi-VN', {
+const formatCurrency = (value, currency = 'VND') => new Intl.NumberFormat('vi-VN', {
   style: 'currency',
-  currency: 'VND',
-  maximumFractionDigits: 0,
+  currency,
+  maximumFractionDigits: currency === 'VND' ? 0 : 2,
 }).format(Number(value || 0))
+
+const formatAmounts = (amounts = {}) => {
+  const entries = Object.entries(amounts)
+  return entries.length > 0
+    ? entries.map(([currency, amount]) => formatCurrency(amount, currency)).join(' · ')
+    : formatCurrency(0)
+}
 
 const formatDate = (value) => value
   ? new Intl.DateTimeFormat('vi-VN', { timeZone: 'UTC' }).format(new Date(value))
@@ -96,10 +103,10 @@ export default function SettlementManagementPage() {
   }, [])
 
   const cards = useMemo(() => [
-    { label: 'Bản nháp', value: stats.DRAFT?.count || 0, amount: stats.DRAFT?.payableAmount || 0 },
-    { label: 'Chờ chuyển khoản', value: stats.APPROVED?.count || 0, amount: stats.APPROVED?.payableAmount || 0 },
-    { label: 'Đã chuyển khoản', value: stats.PAID?.count || 0, amount: stats.PAID?.payableAmount || 0 },
-    { label: 'Đã hủy', value: stats.CANCELLED?.count || 0, amount: stats.CANCELLED?.payableAmount || 0 },
+    { label: 'Bản nháp', value: stats.DRAFT?.count || 0, amounts: stats.DRAFT?.amounts || {} },
+    { label: 'Chờ chuyển khoản', value: stats.APPROVED?.count || 0, amounts: stats.APPROVED?.amounts || {} },
+    { label: 'Đã chuyển khoản', value: stats.PAID?.count || 0, amounts: stats.PAID?.amounts || {} },
+    { label: 'Đã hủy', value: stats.CANCELLED?.count || 0, amounts: stats.CANCELLED?.amounts || {} },
   ], [stats])
 
   const reload = () => {
@@ -126,7 +133,7 @@ export default function SettlementManagementPage() {
   }
 
   async function approve(settlement) {
-    if (!window.confirm(`Duyệt đối soát ${formatCurrency(settlement.payableAmount)} cho ${settlement.partner.businessName}?`)) {
+    if (!window.confirm(`Duyệt đối soát ${formatCurrency(settlement.payableAmount, settlement.currency)} cho ${settlement.partner.businessName}?`)) {
       return
     }
     setSubmitting(true)
@@ -185,7 +192,7 @@ export default function SettlementManagementPage() {
         {cards.map((card) => (
           <article className="admin-stat-card" key={card.label}>
             <p className="admin-stat-card__label">{card.label} ({card.value})</p>
-            <p className="admin-stat-card__value financial-stat-value">{formatCurrency(card.amount)}</p>
+            <p className="admin-stat-card__value financial-stat-value">{formatAmounts(card.amounts)}</p>
           </article>
         ))}
       </div>
@@ -252,9 +259,20 @@ export default function SettlementManagementPage() {
                     </div>
                   </td>
                   <td className="admin-table-cell--right">{settlement.bookingCount}</td>
-                  <td className="admin-table-cell--right">{formatCurrency(settlement.netAmount)}</td>
-                  <td className="admin-table-cell--right">{formatCurrency(settlement.commissionAmount)}</td>
-                  <td className="admin-table-cell--right financial-emphasis">{formatCurrency(settlement.payableAmount)}</td>
+                  <td className="admin-table-cell--right">{formatCurrency(settlement.netAmount, settlement.currency)}</td>
+                  <td className="admin-table-cell--right">{formatCurrency(settlement.commissionAmount, settlement.currency)}</td>
+                  <td className="admin-table-cell--right financial-emphasis">
+                    {formatCurrency(settlement.payableAmount, settlement.currency)}
+                    <div className="financial-secondary-text">
+                      1 {settlement.currency} = {Number(settlement.exchangeRate || 1).toLocaleString('vi-VN')} {settlement.baseCurrency || 'VND'}
+                    </div>
+                    <div className="financial-secondary-text">
+                      Nguồn: {settlement.exchangeRateSource || 'Chưa ghi nhận'} · hiệu lực{' '}
+                      {settlement.exchangeRateEffectiveAt
+                        ? new Date(settlement.exchangeRateEffectiveAt).toLocaleString('vi-VN')
+                        : '—'}
+                    </div>
+                  </td>
                   <td>
                     <div className="financial-primary-text">{settlement.bankNameSnapshot}</div>
                     <div className="financial-secondary-text">
@@ -431,7 +449,7 @@ export default function SettlementManagementPage() {
               </span>
               <div>
                 <h3>{action.type === 'PAID' ? 'Xác nhận đã chuyển khoản' : 'Hủy kỳ đối soát'}</h3>
-                <p>{action.settlement.partner.businessName} · {formatCurrency(action.settlement.payableAmount)}</p>
+                <p>{action.settlement.partner.businessName} · {formatCurrency(action.settlement.payableAmount, action.settlement.currency)}</p>
               </div>
             </div>
             <label className="admin-field">

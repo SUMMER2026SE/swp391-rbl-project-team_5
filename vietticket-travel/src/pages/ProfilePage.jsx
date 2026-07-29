@@ -54,8 +54,8 @@ function ProfilePage() {
 
   const [recentBookings, setRecentBookings] = useState([])
   const [savedAttractions, setSavedAttractions] = useState([])
-  const [loadingBookings, setLoadingBookings] = useState(true)
-  const [loadingFavorites, setLoadingFavorites] = useState(true)
+  const [loadingBookings, setLoadingBookings] = useState(!isOperationalUser)
+  const [loadingFavorites, setLoadingFavorites] = useState(!isOperationalUser)
 
   useEffect(() => {
     document.title = 'Hồ sơ của tôi | VietTicket Travel'
@@ -89,6 +89,7 @@ function ProfilePage() {
   }, [getProfile, navigate])
 
   useEffect(() => {
+    if (isOperationalUser) return undefined
     let active = true
 
     bookingService.getBookings()
@@ -112,7 +113,7 @@ function ProfilePage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [isOperationalUser])
 
   const handleLogout = async () => {
     await logout()

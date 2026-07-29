@@ -48,7 +48,7 @@ function mapPartner(partner) {
     bankAccountNumber: partner.bankAccountNumber || '',
     bankAccountName: partner.bankAccountName || '',
     swiftCode: partner.swiftCode || '',
-    payoutCurrency: 'VND',
+    payoutCurrency: partner.payoutCurrency || 'VND',
     website: partner.website || '',
     description: partner.description || '',
     documentValidationStatus: partner.documentValidationStatus || 'MISSING_OR_UNTRUSTED',
@@ -75,8 +75,11 @@ export default function KycApprovalPage() {
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
   const [selectedPartner, setSelectedPartner] = useState(null);
+  const [rejectionTarget, setRejectionTarget] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [statusTarget, setStatusTarget] = useState(null);
   const [statusReason, setStatusReason] = useState('');
+  const [impactAcknowledged, setImpactAcknowledged] = useState(false);
   const [page, setPage] = useState(1);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
   const [serverStats, setServerStats] = useState(null);
@@ -132,21 +135,32 @@ export default function KycApprovalPage() {
     }
   }
 
-  async function handleReject(id, name) {
-    const reason = window.prompt(`Lý do từ chối hồ sơ của "${name}":`, '');
-    if (reason === null) return;
+  function openRejectAction(id, name) {
+    setRejectionTarget({ id, name });
+    setRejectionReason('');
+  }
 
-    const rejectionReason = reason.trim();
-    if (!rejectionReason) {
+  function closeRejectAction() {
+    if (actionId) return;
+    setRejectionTarget(null);
+    setRejectionReason('');
+  }
+
+  async function handleReject() {
+    if (!rejectionTarget) return;
+    const reason = rejectionReason.trim();
+    if (!reason) {
       toast.error('Vui lòng nhập lý do từ chối.');
       return;
     }
 
-    setActionId(id);
+    setActionId(rejectionTarget.id);
     try {
-      await adminApi.reviewPartner(id, 'REJECTED', rejectionReason);
+      await adminApi.reviewPartner(rejectionTarget.id, 'REJECTED', reason);
       setReloadKey((value) => value + 1);
-      toast.error(`Đã từ chối hồ sơ của: ${name}`);
+      toast.error(`Đã từ chối hồ sơ của: ${rejectionTarget.name}`);
+      setRejectionTarget(null);
+      setRejectionReason('');
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -157,12 +171,14 @@ export default function KycApprovalPage() {
   function openStatusAction(partner) {
     setStatusTarget(partner);
     setStatusReason('');
+    setImpactAcknowledged(false);
   }
 
   function closeStatusAction() {
     if (actionId) return;
     setStatusTarget(null);
     setStatusReason('');
+    setImpactAcknowledged(false);
   }
 
   async function handleOperationalStatus() {
@@ -173,17 +189,28 @@ export default function KycApprovalPage() {
       toast.error('Vui lòng nhập lý do đình chỉ đối tác.');
       return;
     }
+    if (suspending && !impactAcknowledged) {
+      toast.error('Vui lòng xác nhận phương án xử lý các booking bị ảnh hưởng.');
+      return;
+    }
 
     const nextStatus = suspending ? 'SUSPENDED' : 'APPROVED';
     setActionId(statusTarget.id);
     try {
-      await adminApi.changePartnerStatus(statusTarget.id, nextStatus, reason);
+      const response = await adminApi.changePartnerStatus(
+        statusTarget.id,
+        nextStatus,
+        reason,
+        suspending && impactAcknowledged,
+      );
       setReloadKey((value) => value + 1);
+      const remediation = response.data?.customerRemediation;
       toast.success(suspending
-        ? `Đã đình chỉ đối tác: ${statusTarget.name}`
+        ? `Đã đình chỉ ${statusTarget.name}; đã xử lý ${Number(remediation?.cancelled || 0)} booking, ${Number(remediation?.needsAttention || 0)} booking cần Staff kiểm tra.`
         : `Đã khôi phục đối tác: ${statusTarget.name}`);
       setStatusTarget(null);
       setStatusReason('');
+      setImpactAcknowledged(false);
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -384,7 +411,7 @@ export default function KycApprovalPage() {
                         <button
                           className="btn-reject"
                           disabled={actionId === partner.id}
-                          onClick={() => handleReject(partner.id, partner.name)}
+                          onClick={() => openRejectAction(partner.id, partner.name)}
                         >
                           Từ chối
                         </button>
@@ -691,7 +718,7 @@ export default function KycApprovalPage() {
                 <>
                   <button
                     onClick={() => {
-                      handleReject(selectedPartner.id, selectedPartner.name);
+                      openRejectAction(selectedPartner.id, selectedPartner.name);
                       setSelectedPartner(null);
                     }}
                     style={{
@@ -754,6 +781,43 @@ export default function KycApprovalPage() {
         </div>
       )}
 
+      {rejectionTarget && (
+        <div className="admin-modal-overlay" onClick={closeRejectAction}>
+          <div className="admin-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="admin-modal__icon admin-modal__icon--danger">
+              <span className="material-symbols-outlined" style={{ fontSize: 28 }}>person_remove</span>
+            </div>
+            <h3 className="admin-modal__title">Từ chối hồ sơ KYC</h3>
+            <p className="admin-modal__body">
+              Nhập lý do cụ thể để <strong>{rejectionTarget.name}</strong> biết nội dung cần bổ sung hoặc điều chỉnh.
+            </p>
+            <label className="admin-field">
+              <span>Lý do từ chối</span>
+              <textarea
+                autoFocus
+                value={rejectionReason}
+                onChange={(event) => setRejectionReason(event.target.value)}
+                placeholder="Ví dụ: Thông tin chủ tài khoản ngân hàng chưa trùng với giấy phép kinh doanh..."
+                maxLength={1000}
+                disabled={Boolean(actionId)}
+              />
+            </label>
+            <div className="admin-modal__actions">
+              <button className="admin-modal__cancel" disabled={Boolean(actionId)} onClick={closeRejectAction}>
+                Hủy bỏ
+              </button>
+              <button
+                className="admin-modal__confirm"
+                disabled={Boolean(actionId) || !rejectionReason.trim()}
+                onClick={handleReject}
+              >
+                {actionId ? 'Đang xử lý...' : 'Xác nhận từ chối'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {statusTarget && (
         <div className="admin-modal-overlay" onClick={closeStatusAction}>
           <div className="admin-modal" onClick={(event) => event.stopPropagation()}>
@@ -767,21 +831,36 @@ export default function KycApprovalPage() {
             </h3>
             <p className="admin-modal__body">
               {statusTarget.status === 'approved'
-                ? <>Mọi lượt bán mới và quyền quản lý của <strong>{statusTarget.name}</strong> sẽ bị dừng. Vé đã xác nhận vẫn phải được phục vụ.</>
+                ? <>Mọi lượt bán mới và quyền vận hành của <strong>{statusTarget.name}</strong> sẽ bị dừng. Booking tương lai sẽ được hủy an toàn: hệ thống mở VietTicket Rescue nếu có vé thay thế, nếu không sẽ tạo hoàn 100%. Booking đã bắt đầu hoặc đã check-in được chuyển Staff xử lý khẩn.</>
                 : <>Quyền quản lý của <strong>{statusTarget.name}</strong> sẽ được khôi phục. Trạng thái mở bán từng địa điểm không bị thay đổi.</>}
             </p>
 
             {statusTarget.status === 'approved' && (
-              <label className="admin-field">
-                <span>Lý do đình chỉ</span>
-                <textarea
-                  value={statusReason}
-                  onChange={(event) => setStatusReason(event.target.value)}
-                  placeholder="Nhập lý do vi phạm hoặc quyết định vận hành..."
-                  maxLength={1000}
-                  disabled={Boolean(actionId)}
-                />
-              </label>
+              <>
+                <label className="admin-field">
+                  <span>Lý do đình chỉ</span>
+                  <textarea
+                    value={statusReason}
+                    onChange={(event) => setStatusReason(event.target.value)}
+                    placeholder="Nhập lý do vi phạm hoặc quyết định vận hành..."
+                    maxLength={1000}
+                    disabled={Boolean(actionId)}
+                  />
+                </label>
+                <label className="mt-4 flex items-start gap-2 text-sm text-on-surface">
+                  <input
+                    type="checkbox"
+                    checked={impactAcknowledged}
+                    onChange={(event) => setImpactAcknowledged(event.target.checked)}
+                    disabled={Boolean(actionId)}
+                    className="mt-1"
+                  />
+                  <span>
+                    Tôi xác nhận việc đình chỉ sẽ vô hiệu vé chưa sử dụng, giải phóng giữ chỗ
+                    và mở Rescue hoặc hoàn 100% cho booking bị ảnh hưởng.
+                  </span>
+                </label>
+              </>
             )}
 
             <div className="admin-modal__actions">
@@ -790,7 +869,13 @@ export default function KycApprovalPage() {
               </button>
               <button
                 className="admin-modal__confirm"
-                disabled={Boolean(actionId) || (statusTarget.status === 'approved' && !statusReason.trim())}
+                disabled={
+                  Boolean(actionId)
+                  || (
+                    statusTarget.status === 'approved'
+                    && (!statusReason.trim() || !impactAcknowledged)
+                  )
+                }
                 onClick={handleOperationalStatus}
               >
                 {actionId

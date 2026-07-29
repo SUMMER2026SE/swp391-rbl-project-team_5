@@ -10,8 +10,10 @@ const NAV_ITEMS = [
   { to: '/partner/smart-queue', icon: 'queue', label: 'SmartQueue & Autopilot' },
   { to: '/partner/dynamic-pricing', icon: 'trending_up', label: 'Giá động theo dự báo' },
   { to: '/partner/reviews', icon: 'rate_review', label: 'Đánh giá' },
+  { to: '/partner/questions', icon: 'forum', label: 'Hỏi & đáp' },
   { to: '/partner/reports', icon: 'assessment', label: 'Báo cáo' },
   { to: '/partner/settlements', icon: 'account_balance_wallet', label: 'Đối soát & chi trả' },
+  { to: '/partner/kyc-change-request', icon: 'badge', label: 'Thay đổi hồ sơ KYC' },
   { to: '/partner/settings', icon: 'settings', label: 'Cài đặt' },
 ]
 

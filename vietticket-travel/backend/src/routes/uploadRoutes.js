@@ -13,6 +13,7 @@ const {
   enforceDocumentUploadQuota,
   enforcePublicUploadQuota,
   getPrivateDocumentPath,
+  buildUploadUrl,
   validateUploadedFiles,
 } = require('../middleware/uploadMiddleware');
 
@@ -74,6 +75,29 @@ router.post(
     } catch (error) {
       return next(error);
     }
+  },
+);
+
+router.post(
+  '/review-images',
+  protect,
+  restrictTo('CUSTOMER'),
+  attractionImageUploadLimiter,
+  enforcePublicUploadQuota,
+  uploadAttractionImages.array('images', 3),
+  validateUploadedFiles,
+  (req, res) => {
+    const files = req.files || [];
+    if (!files.length) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'Vui lòng chọn ít nhất một ảnh.' },
+      });
+    }
+    return res.json({
+      success: true,
+      data: { urls: files.map((file) => buildUploadUrl(req, file.filename)) },
+    });
   },
 );
 

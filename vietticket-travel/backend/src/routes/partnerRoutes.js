@@ -7,6 +7,7 @@ const {
   requireOwnedAttraction,
 } = require('../middleware/partnerMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
+const { requireCurrentPolicyConsent } = require('../middleware/policyConsentMiddleware');
 const {
   uploadAttractionImages,
   enforcePublicUploadQuota,
@@ -21,6 +22,8 @@ const reviewController = require('../controllers/reviewController');
 const settlementController = require('../controllers/settlementController');
 const smartQueueOperationsController = require('../controllers/smartQueueOperationsController');
 const dynamicPricingController = require('../controllers/dynamicPricingController');
+const questionController = require('../controllers/questionController');
+const kycChangeController = require('../controllers/kycChangeController');
 
 const router = express.Router();
 const staffInviteLimiter = rateLimit({
@@ -67,6 +70,17 @@ router.get('/me', partnerController.getMyPartner);
 router.use(requireApprovedPartner);
 
 // Hồ sơ & tổng quan
+router.get('/kyc-change-requests', kycChangeController.listMyKycChangeRequests);
+router.post(
+  '/kyc-change-requests',
+  requireCurrentPolicyConsent,
+  kycChangeController.createKycChangeRequest,
+);
+router.patch(
+  '/kyc-change-requests/:id/cancel',
+  requireCurrentPolicyConsent,
+  kycChangeController.cancelMyKycChangeRequest,
+);
 router.put('/settings', partnerController.updateSettings);
 router.get('/dashboard', partnerController.getDashboard);
 router.get('/reports', partnerController.getReports);
@@ -123,6 +137,12 @@ router.patch('/bookings/:id/cancel', restrictTo('PARTNER'), partnerController.ca
 // Đánh giá (phản hồi & thống kê phía đối tác)
 router.get('/reviews', restrictTo('PARTNER'), reviewController.listPartnerReviews);
 router.get('/reviews/stats', restrictTo('PARTNER'), reviewController.getPartnerReviewStats);
+router.get('/questions', restrictTo('PARTNER'), questionController.listPartnerQuestions);
+router.post(
+  '/questions/:questionId/answer',
+  restrictTo('PARTNER'),
+  questionController.answerQuestion,
+);
 
 // Nhân viên (mỗi đối tác tự quản lý nhân viên của mình)
 router.get('/staff', restrictTo('PARTNER'), partnerStaffController.listStaff);
@@ -134,6 +154,11 @@ router.post(
   partnerStaffController.resendStaffInvite,
 );
 router.patch('/staff/:staffId/status', restrictTo('PARTNER'), partnerStaffController.changeStaffStatus);
+router.patch(
+  '/staff/:staffId/access-level',
+  restrictTo('PARTNER'),
+  partnerStaffController.changeStaffAccessLevel,
+);
 router.get('/staff/:staffId/assignments', restrictTo('PARTNER'), partnerStaffController.getStaffAssignments);
 router.put('/staff/:staffId/assignments', restrictTo('PARTNER'), partnerStaffController.replaceStaffAssignments);
 router.delete('/staff/:staffId', restrictTo('PARTNER'), partnerStaffController.removeStaff);

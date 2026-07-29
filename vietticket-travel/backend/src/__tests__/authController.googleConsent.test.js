@@ -104,8 +104,8 @@ describe('first-time Google account consent', () => {
     prisma.user.findUnique.mockResolvedValue(null);
     const createdUser = googleUser({
       termsAcceptedAt: new Date(),
-      termsVersion: '2026-07-17-v1',
-      privacyVersion: '2026-07-17-v1',
+      termsVersion: '2026-07-29-v2',
+      privacyVersion: '2026-07-29-v2',
     });
     prisma.user.create.mockResolvedValue(createdUser);
     const { req, res, next } = makeReqRes({
@@ -119,8 +119,8 @@ describe('first-time Google account consent', () => {
       data: expect.objectContaining({
         provider: 'GOOGLE',
         termsAcceptedAt: expect.any(Date),
-        termsVersion: '2026-07-17-v1',
-        privacyVersion: '2026-07-17-v1',
+        termsVersion: '2026-07-29-v2',
+        privacyVersion: '2026-07-29-v2',
         consentIpAddress: '203.0.113.20',
       }),
     }));

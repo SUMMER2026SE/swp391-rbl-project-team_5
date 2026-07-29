@@ -1,5 +1,9 @@
 const { TICKET_TYPES } = require('./partnerMappers');
 const { parseVndInteger } = require('./money');
+const {
+  SUPPORTED_PAYOUT_CURRENCIES,
+  normalizePayoutCurrency,
+} = require('./payoutCurrency');
 
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/; // HH:MM 24h
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
@@ -69,8 +73,8 @@ function validateBankDetails(body = {}) {
   if (body.swiftCode && !SWIFT_CODE_REGEX.test(String(body.swiftCode).trim())) {
     return 'Mã SWIFT/BIC phải gồm từ 8 đến 11 ký tự chữ hoặc số.';
   }
-  if (body.payoutCurrency && String(body.payoutCurrency).trim().toUpperCase() !== 'VND') {
-    return 'Hiện tại hệ thống chỉ hỗ trợ thanh toán đối tác bằng VND.';
+  if (body.payoutCurrency && !normalizePayoutCurrency(body.payoutCurrency, '')) {
+    return `Loại tiền tệ thanh toán phải là một trong: ${SUPPORTED_PAYOUT_CURRENCIES.join(', ')}.`;
   }
   return '';
 }

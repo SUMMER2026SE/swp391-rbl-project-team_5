@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const { Prisma } = require('@prisma/client');
 const { sanitizeUser } = require('./authController');
 const { validateKyc } = require('../utils/partnerValidators');
+const { normalizePayoutCurrency } = require('../utils/payoutCurrency');
 const { isValidPhoneNumber } = require('../utils/validators');
 const { emitBookingStatusUpdated, emitRecoveryCaseEvent } = require('../realtime/events');
 const { queueConfirmedTicketEmail } = require('../services/ticketEmailService');
@@ -40,7 +41,17 @@ const {
 } = require('../services/pendingPartnerCancellationService');
 const { getRequestIp, writeAuditLog } = require('../utils/auditLog');
 const { formatBookingReference } = require('../utils/bookingReference');
+const {
+  CUSTOMER_PAYMENT_WINDOW_OPENED_TOPIC,
+  enqueueBookingNotification,
+} = require('../services/bookingNotificationService');
+const { releaseVoucherRedemption } = require('../services/voucherRedemptionService');
 const { getInventoryUnits } = require('../utils/ticketCapacity');
+const { getApprovedVnpayWindowMs } = require('../config/bookingPolicy');
+const {
+  BANK_TRANSFER_METHOD,
+  getBankTransferHoldMs,
+} = require('../utils/bankTransferPolicy');
 const {
   isDocumentOwnedByUser,
   removeUnreferencedDocumentsForUser,
@@ -163,7 +174,7 @@ function toPartnerResponse(partner, user) {
     bankAccountNumber: partner.bankAccountNumber || '',
     bankAccountName: partner.bankAccountName || '',
     swiftCode: partner.swiftCode || '',
-    payoutCurrency: 'VND',
+    payoutCurrency: normalizePayoutCurrency(partner.payoutCurrency) || 'VND',
     website: partner.website || '',
     description: partner.description || '',
     kycConsentAccepted: Boolean(partner.kycConsentAccepted),
@@ -231,7 +242,7 @@ async function submitKyc(req, res, next) {
       bankAccountNumber: toNullable(req.body.bankAccountNumber) ?? null,
       bankAccountName: toNullable(req.body.bankAccountName) ?? null,
       swiftCode: toNullable(req.body.swiftCode) ?? null,
-      payoutCurrency: 'VND',
+      payoutCurrency: normalizePayoutCurrency(req.body.payoutCurrency) || 'VND',
       kycConsentAccepted: true,
       kycConsentVersion: CURRENT_KYC_CONSENT_VERSION,
       kycConsentAcceptedAt: consentAcceptedAt,
@@ -573,8 +584,10 @@ async function getDashboard(req, res, next) {
         where: {
           reservation: { ticketProduct: { attraction: { partnerId } } },
           isForecastTrainingSample: false,
-          status: { not: 'PENDING_PAYMENT' },
-          payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+          OR: [
+            { payments: { some: { status: 'SUCCESS', isDuplicate: false } } },
+            { partnerApprovalRequestedAt: { not: null } },
+          ],
           createdAt: { gte: startOfMonth },
         },
       });
@@ -639,10 +652,10 @@ async function getDashboard(req, res, next) {
             where: {
               reservationId: { in: reservationIds },
               isForecastTrainingSample: false,
-              status: { not: 'PENDING_PAYMENT' },
-              payments: {
-                some: { status: 'SUCCESS', isDuplicate: false },
-              },
+              OR: [
+                { payments: { some: { status: 'SUCCESS', isDuplicate: false } } },
+                { partnerApprovalRequestedAt: { not: null } },
+              ],
             },
             orderBy: { createdAt: 'desc' },
             take: 5,
@@ -966,35 +979,37 @@ async function getPartnerBookings(req, res, next) {
       no_show: 'NO_SHOW',
     };
 
-    const paidPartnerBookingWhere = {
+    const visiblePartnerBookingWhere = {
       reservationId: { in: reservationIds },
       isForecastTrainingSample: false,
-      payments: {
-        some: { status: 'SUCCESS', isDuplicate: false },
-      },
+      OR: [
+        { payments: { some: { status: 'SUCCESS', isDuplicate: false } } },
+        { partnerApprovalRequestedAt: { not: null } },
+      ],
     };
     const where = {
-      ...paidPartnerBookingWhere,
-      status:
-        statusFilter && statusFilter !== 'all' && STATUS_MAP[statusFilter]
-          ? STATUS_MAP[statusFilter]
-          : { not: 'PENDING_PAYMENT' },
+      ...visiblePartnerBookingWhere,
+      ...(statusFilter && statusFilter !== 'all' && STATUS_MAP[statusFilter]
+        ? { status: STATUS_MAP[statusFilter] }
+        : {}),
     };
 
     // Search đa trường phải nằm trong query DB để count & phân trang khớp với kết quả
     // (trước đây lọc sau phân trang -> total sai và bỏ sót kết quả ở trang khác).
     if (search) {
-      where.OR = [
-        { id: { contains: search, mode: 'insensitive' } },
-        { fullName: { contains: search, mode: 'insensitive' } },
-        {
-          reservation: {
-            ticketProduct: {
-              attraction: { title: { contains: search, mode: 'insensitive' } },
+      where.AND = [{
+        OR: [
+          { id: { contains: search, mode: 'insensitive' } },
+          { fullName: { contains: search, mode: 'insensitive' } },
+          {
+            reservation: {
+              ticketProduct: {
+                attraction: { title: { contains: search, mode: 'insensitive' } },
+              },
             },
           },
-        },
-      ];
+        ],
+      }];
     }
 
     const [total, bookings, statusGroups = [], recognizedBookings = []] = await Promise.all([
@@ -1031,8 +1046,7 @@ async function getPartnerBookings(req, res, next) {
       prisma.booking.groupBy({
         by: ['status'],
         where: {
-          ...paidPartnerBookingWhere,
-          status: { not: 'PENDING_PAYMENT' },
+          ...visiblePartnerBookingWhere,
         },
         _count: { _all: true },
       }),
@@ -1210,13 +1224,17 @@ async function approveBooking(req, res, next) {
       if (current.reservation.ticketProduct.attraction.partnerId !== partnerId) {
         throw bookingConflict('Bạn không có quyền duyệt đơn này.');
       }
-      if (!getCapturedPayment(current)) {
-        throw bookingConflict(
-          'Đơn chờ duyệt không có giao dịch đã thu tiền hợp lệ; không thể phát hành vé.',
-        );
-      }
+      const capturedPayment = getCapturedPayment(current);
       const currentDeadline = getManualApprovalDeadline(current);
-      if (!currentDeadline || new Date() >= currentDeadline) {
+      const approvalClockApplies = Boolean(
+        current.partnerApprovalRequestedAt || capturedPayment,
+      );
+      if (approvalClockApplies && (!currentDeadline || new Date() >= currentDeadline)) {
+        if (!capturedPayment) {
+          throw bookingConflict(
+            'Yêu cầu duyệt đã quá hạn; hệ thống sẽ giải phóng giữ chỗ và khách cần chọn lại vé.',
+          );
+        }
         const cancelled = await cancelPendingPartnerBooking(tx, current, {
           now: new Date(),
           reason: EXPIRY_REASON,
@@ -1244,6 +1262,64 @@ async function approveBooking(req, res, next) {
       const fulfillment = evaluateExistingBookingFulfillment(
         current.reservation.ticketProduct,
       );
+      if (!capturedPayment) {
+        if (!current.partnerApprovalRequestedAt) {
+          throw bookingConflict(
+            'Đơn chờ duyệt không có giao dịch đã thu tiền hợp lệ và cũng không có yêu cầu duyệt-trước-thanh-toán.',
+          );
+        }
+        if (!fulfillment.allowed) {
+          throw bookingConflict(`${fulfillment.reason} Vui lòng từ chối yêu cầu để trả lại tồn vé.`);
+        }
+        if (current.reservation.status !== 'HELD') {
+          throw bookingConflict('Lượt giữ chỗ không còn hiệu lực để chuyển sang thanh toán.');
+        }
+
+        const approvedAt = new Date();
+        const requestedWindowMs = current.paymentMethod === BANK_TRANSFER_METHOD
+          ? getBankTransferHoldMs()
+          : getApprovedVnpayWindowMs();
+        const requestedPaymentDeadline = new Date(approvedAt.getTime() + requestedWindowMs);
+        const { startsAt } = getBookingActivityWindow(current);
+        const paymentDeadline = startsAt && startsAt < requestedPaymentDeadline
+          ? startsAt
+          : requestedPaymentDeadline;
+        if (paymentDeadline <= approvedAt) {
+          throw bookingConflict('Đã quá giờ thanh toán an toàn cho lịch tham quan này.');
+        }
+
+        const claimed = await tx.booking.updateMany({
+          where: { id: bookingId, status: 'PENDING_PARTNER', isForecastTrainingSample: false },
+          data: {
+            status: 'PENDING_PAYMENT',
+            partnerApprovedAt: approvedAt,
+          },
+        });
+        if (claimed.count !== 1) throw bookingConflict();
+        await tx.reservation.update({
+          where: { id: current.reservation.id },
+          data: {
+            expiresAt: paymentDeadline,
+            paymentDeadline,
+            paymentAttemptCount: 0,
+          },
+        });
+        await enqueueBookingNotification(tx, {
+          bookingId,
+          topic: CUSTOMER_PAYMENT_WINDOW_OPENED_TOPIC,
+          paymentDeadline,
+        });
+        await writeAuditLog({
+          client: tx,
+          req,
+          action: 'BOOKING_APPROVED_FOR_PAYMENT',
+          entityType: 'BOOKING',
+          entityId: bookingId,
+          metadata: { paymentDeadline, paymentMethod: current.paymentMethod },
+        });
+        return { status: 'PENDING_PAYMENT', paymentDeadline };
+      }
+
       if (!fulfillment.allowed) {
         const cancelled = await cancelPendingPartnerBooking(tx, current, {
           now: new Date(),
@@ -1306,6 +1382,24 @@ async function approveBooking(req, res, next) {
       });
       return { status: 'CONFIRMED' };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (outcome.status === 'PENDING_PAYMENT') {
+      emitBookingStatusUpdated({
+        customerId: booking.userId,
+        bookingId,
+        status: 'PENDING_PAYMENT',
+        message: `Yêu cầu ${formatBookingReference(bookingId)} đã được đối tác duyệt. Bạn có thể thanh toán ngay để nhận vé.`,
+      });
+      return res.json({
+        success: true,
+        message: 'Đã duyệt yêu cầu. Khách hàng sẽ thanh toán trước hạn mới.',
+        data: {
+          id: bookingId,
+          status: 'pending_payment',
+          paymentDeadline: outcome.paymentDeadline,
+        },
+      });
+    }
 
     if (outcome.status === 'CANCELLED') {
       emitBookingStatusUpdated({
@@ -1528,9 +1622,9 @@ async function rejectBooking(req, res, next) {
 
       // Giải phóng lượt dùng voucher nếu đơn này có áp dụng mã ưu đãi
       if (booking.voucherId) {
-        await tx.voucher.updateMany({
-          where: { id: booking.voucherId, usedCount: { gt: 0 } },
-          data: { usedCount: { decrement: 1 } },
+        await releaseVoucherRedemption(tx, {
+          bookingId: booking.id,
+          voucherId: booking.voucherId,
         });
       }
 
@@ -1702,9 +1796,9 @@ async function cancelConfirmedBooking(req, res, next) {
         data: { status: 'EXPIRED' },
       });
       if (current.voucherId) {
-        await tx.voucher.updateMany({
-          where: { id: current.voucherId, usedCount: { gt: 0 } },
-          data: { usedCount: { decrement: 1 } },
+        await releaseVoucherRedemption(tx, {
+          bookingId: current.id,
+          voucherId: current.voucherId,
         });
       }
       let recoveryCase = null;

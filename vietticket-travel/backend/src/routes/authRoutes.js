@@ -1,6 +1,7 @@
 const express = require('express');
 const { ipKeyGenerator, rateLimit } = require('express-rate-limit');
 const {
+  acceptCurrentPolicies,
   forgotPassword,
   getMe,
   googleLogin,
@@ -38,5 +39,6 @@ router.post('/logout', protect, logout);
 router.post('/forgot-password', authRateLimit, forgotPassword);
 router.post('/reset-password', authRateLimit, resetPassword);
 router.get('/me', protect, getMe);
+router.post('/accept-policies', protect, acceptCurrentPolicies);
 
 module.exports = router;

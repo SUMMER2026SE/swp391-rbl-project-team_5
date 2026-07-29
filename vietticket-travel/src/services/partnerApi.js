@@ -11,6 +11,20 @@ export function getMyPartner() {
   return apiRequest('/partners/me', { method: 'GET' })
 }
 
+export function listKycChangeRequests() {
+  return apiRequest('/partners/kyc-change-requests', { method: 'GET' })
+}
+
+export function createKycChangeRequest(payload) {
+  return apiRequest('/partners/kyc-change-requests', { method: 'POST', body: payload })
+}
+
+export function cancelKycChangeRequest(id) {
+  return apiRequest(`/partners/kyc-change-requests/${encodeURIComponent(id)}/cancel`, {
+    method: 'PATCH',
+  })
+}
+
 export async function uploadKycDocument(file) {
   const formData = new FormData()
   formData.append('document', file)
@@ -248,6 +262,13 @@ export function changeStaffStatus(staffId, status) {
   return apiRequest(`/partners/staff/${staffId}/status`, {
     method: 'PATCH',
     body: { status },
+  })
+}
+
+export function changeStaffAccessLevel(staffId, staffAccessLevel) {
+  return apiRequest(`/partners/staff/${staffId}/access-level`, {
+    method: 'PATCH',
+    body: { staffAccessLevel },
   })
 }
 

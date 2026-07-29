@@ -9,6 +9,7 @@ import ChatbotWidget from './components/ChatbotWidget.jsx'
 import RecoveryAlert from './components/RecoveryAlert.jsx'
 import RouteMetadata from './components/RouteMetadata.jsx'
 import LiveOperationsAlert from './components/LiveOperationsAlert.jsx'
+import PolicyConsentGate from './components/PolicyConsentGate.jsx'
 
 function ChatbotWithRouteCheck() {
   const location = useLocation()
@@ -28,11 +29,13 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <SocketProvider>
-          <AppRoutes />
-          <RecoveryAlert />
-          <LiveOperationsAlert />
-          <ChatbotWithRouteCheck />
-          <RouteMetadata />
+          <PolicyConsentGate>
+            <AppRoutes />
+            <RecoveryAlert />
+            <LiveOperationsAlert />
+            <ChatbotWithRouteCheck />
+            <RouteMetadata />
+          </PolicyConsentGate>
           <ToastContainer
             autoClose={2600}
             closeOnClick

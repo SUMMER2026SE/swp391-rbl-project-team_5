@@ -23,6 +23,15 @@ const popularBanks = [
   'SeABank (Ngân hàng TMCP Đông Nam Á)'
 ]
 
+const PAYOUT_CURRENCIES = [
+  { value: 'VND', label: 'VND — Việt Nam Đồng' },
+  { value: 'USD', label: 'USD — US Dollar' },
+  { value: 'EUR', label: 'EUR — Euro' },
+  { value: 'SGD', label: 'SGD — Singapore Dollar' },
+  { value: 'THB', label: 'THB — Thai Baht' },
+]
+const PAYOUT_CURRENCY_CODES = new Set(PAYOUT_CURRENCIES.map(({ value }) => value))
+
 function PartnerKycPage() {
   const navigate = useNavigate()
   const { user, getProfile, logout } = useAuth()
@@ -107,9 +116,9 @@ function PartnerKycPage() {
             bankAccountNumber: p.bankAccountNumber || '',
             bankAccountName: p.bankAccountName || '',
             swiftCode: p.swiftCode || '',
-            // VietTicket hiện đối soát và chi trả hoàn toàn bằng VND.
-            // Không đưa giá trị tiền tệ cũ/không được hỗ trợ trở lại biểu mẫu.
-            payoutCurrency: 'VND',
+            payoutCurrency: PAYOUT_CURRENCY_CODES.has(p.payoutCurrency)
+              ? p.payoutCurrency
+              : 'VND',
             businessLicenseUrl: p.businessLicenseUrl || '',
           })
           if (p.bankName) {
@@ -170,8 +179,8 @@ function PartnerKycPage() {
       if (formData.swiftCode.trim() && !/^[A-Z0-9]{8,11}$/i.test(formData.swiftCode.trim())) {
         errs.swiftCode = 'Mã SWIFT/BIC phải gồm từ 8 đến 11 ký tự chữ hoặc số.'
       }
-      if (formData.payoutCurrency !== 'VND') {
-        errs.payoutCurrency = 'Phiên bản hiện tại chỉ hỗ trợ đối soát và thanh toán đối tác bằng VND.'
+      if (!PAYOUT_CURRENCY_CODES.has(formData.payoutCurrency)) {
+        errs.payoutCurrency = 'Vui lòng chọn một loại tiền tệ thanh toán được hỗ trợ.'
       }
     }
     
@@ -338,7 +347,7 @@ function PartnerKycPage() {
         bankAccountNumber: formData.bankAccountNumber,
         bankAccountName: formData.bankAccountName,
         swiftCode: formData.swiftCode,
-        payoutCurrency: 'VND',
+        payoutCurrency: formData.payoutCurrency,
         kycConsentAccepted: agreedToTerms,
       })
 
@@ -423,7 +432,13 @@ function PartnerKycPage() {
             <div className="mt-7 flex flex-wrap gap-3">
               <Link to="/partner/dashboard" className="rounded-lg bg-[#006068] px-5 py-2.5 text-sm font-semibold text-white no-underline">Về tổng quan đối tác</Link>
               <Link to="/partner/settings" className="rounded-lg border border-[#9aa5a7] px-5 py-2.5 text-sm font-semibold text-[#00474d] no-underline">Xem cài đặt</Link>
-              <a href="mailto:partners@vietticket.com" className="rounded-lg border border-[#9aa5a7] px-5 py-2.5 text-sm font-semibold text-[#00474d] no-underline">Liên hệ hỗ trợ đối tác</a>
+              {partnerProfile.status === 'APPROVED' ? (
+                <Link to="/partner/kyc-change-request" className="rounded-lg border border-[#9aa5a7] px-5 py-2.5 text-sm font-semibold text-[#00474d] no-underline">
+                  Gửi yêu cầu thay đổi KYC
+                </Link>
+              ) : (
+                <a href="mailto:partners@vietticket.com" className="rounded-lg border border-[#9aa5a7] px-5 py-2.5 text-sm font-semibold text-[#00474d] no-underline">Liên hệ hỗ trợ đối tác</a>
+              )}
             </div>
           </section>
         </div>
@@ -911,25 +926,29 @@ function PartnerKycPage() {
                   )}
                 </div>
 
-                {/* Fixed settlement currency */}
+                {/* Settlement currency */}
                 <div className="col-span-1 md:col-span-2 lg:col-span-1">
                   <label className="block text-sm font-semibold text-[#191c1d] mb-2">
                     Loại tiền tệ thanh toán
                   </label>
-                  <div className="rounded-lg border border-[#bec8ca] bg-[#f2f4f5] flex items-center px-3">
+                  <div className="rounded-lg border border-[#bec8ca] bg-white flex items-center px-3">
                     <span className="material-symbols-outlined text-[#6f797a] mr-2">payments</span>
-                    <input
+                    <select
                       aria-describedby="payout-currency-note"
                       className="w-full py-3 bg-transparent border-none text-[#191c1d] text-sm font-semibold outline-none"
-                      disabled
                       name="payoutCurrency"
-                      type="text"
+                      onBlur={() => handleBlur('payoutCurrency')}
+                      onChange={handleInputChange}
                       value={formData.payoutCurrency}
-                    />
+                    >
+                      {PAYOUT_CURRENCIES.map((currency) => (
+                        <option key={currency.value} value={currency.value}>{currency.label}</option>
+                      ))}
+                    </select>
                   </div>
                   <p id="payout-currency-note" className="mt-2 text-xs leading-5 text-[#526163]">
-                    VietTicket hiện niêm yết, thu tiền và đối soát bằng Việt Nam Đồng.
-                    Hệ thống chưa hỗ trợ quy đổi hoặc chi trả USD/EUR.
+                    Giá vé vẫn được thu bằng VND. Kỳ đối soát sẽ lưu tỷ giá và quy đổi sang
+                    loại tiền đã chọn để số tiền chi trả có thể kiểm toán lại.
                   </p>
                   {errors.payoutCurrency && (
                     <p className="mt-1 text-xs text-red-500">{errors.payoutCurrency}</p>

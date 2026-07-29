@@ -1,4 +1,7 @@
-const { validateProductionEnv } = require('../config/runtimeConfig');
+const {
+  getTrustProxySetting,
+  validateProductionEnv,
+} = require('../config/runtimeConfig');
 
 describe('validateProductionEnv - payment/refund configuration', () => {
   const validProductionEnv = {
@@ -20,6 +23,7 @@ describe('validateProductionEnv - payment/refund configuration', () => {
     MAIL_FROM: 'VietTicket <noreply@vietticket.example>',
     ML_SERVICE_URL: 'https://ml.vietticket.example',
     ML_SERVICE_API_KEY: 'a-strong-ml-service-secret-with-32-characters',
+    TRUST_PROXY: '1',
   };
   let originalEnv;
 
@@ -49,5 +53,23 @@ describe('validateProductionEnv - payment/refund configuration', () => {
   test('fail fast khi production trỏ ML service về localhost', () => {
     process.env.ML_SERVICE_URL = 'http://localhost:8000';
     expect(validateProductionEnv).toThrow(/ML_SERVICE_URL/);
+  });
+
+  test.each([
+    ['false', false],
+    ['true', 1],
+    ['2', 2],
+    ['loopback,10.0.0.0/8', ['loopback', '10.0.0.0/8']],
+  ])('chuẩn hóa TRUST_PROXY an toàn: %s', (value, expected) => {
+    expect(getTrustProxySetting(value)).toEqual(expected);
+  });
+
+  test('từ chối TRUST_PROXY không hợp lệ thay vì tin header giả mạo', () => {
+    expect(() => getTrustProxySetting('*')).toThrow(/TRUST_PROXY/);
+  });
+
+  test('fail fast khi cấu hình tỷ giá payout bị hỏng', () => {
+    process.env.PAYOUT_EXCHANGE_RATES = '{"USD":0}';
+    expect(validateProductionEnv).toThrow(/USD/);
   });
 });

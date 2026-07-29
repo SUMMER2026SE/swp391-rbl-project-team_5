@@ -20,10 +20,27 @@ export function reviewPartner(id, action, rejectionReason) {
   })
 }
 
-export function changePartnerStatus(id, status, reason) {
+export function getKycChangeRequests(status = 'PENDING') {
+  const query = new URLSearchParams({ status })
+  return apiRequest(`/admin/kyc-change-requests?${query.toString()}`, { method: 'GET' })
+}
+
+export function reviewKycChangeRequest(id, action, reviewNote = '') {
+  return apiRequest(`/admin/kyc-change-requests/${encodeURIComponent(id)}/review`, {
+    method: 'PATCH',
+    body: { action, reviewNote },
+  })
+}
+
+export function changePartnerStatus(
+  id,
+  status,
+  reason,
+  acknowledgeCustomerImpact = false,
+) {
   return apiRequest(`/admin/partners/${id}/status`, {
     method: 'PATCH',
-    body: { status, reason },
+    body: { status, reason, acknowledgeCustomerImpact },
   })
 }
 
@@ -59,10 +76,10 @@ export function reviewAttraction(id, action, rejectionReason) {
   })
 }
 
-export function hideAttraction(id, reason) {
+export function hideAttraction(id, reason, acknowledgeCustomerImpact = false) {
   return apiRequest(`/admin/attractions/${id}/hide`, {
     method: 'PUT',
-    body: { reason },
+    body: { reason, acknowledgeCustomerImpact },
   })
 }
 
@@ -74,11 +91,11 @@ export function getDashboard(period = 'month') {
   return apiRequest(`/admin/dashboard?period=${encodeURIComponent(period)}`, { method: 'GET' })
 }
 
-export function getFinancialReport(period = 'month') {
-  return apiRequest(`/admin/financial-report?period=${encodeURIComponent(period)}`, { method: 'GET' })
+export function getFinancialReport(period = 'month', scope = 'admin') {
+  return apiRequest(`/${scope}/financial-report?period=${encodeURIComponent(period)}`, { method: 'GET' })
 }
 
-export function getFinancialTransactions(params = {}) {
+export function getFinancialTransactions(params = {}, scope = 'admin') {
   const query = new URLSearchParams()
   if (params.period) query.set('period', params.period)
   if (params.type && params.type !== 'ALL') query.set('type', params.type)
@@ -86,7 +103,7 @@ export function getFinancialTransactions(params = {}) {
   if (params.search) query.set('search', params.search)
   if (params.limit) query.set('limit', params.limit)
   const qs = query.toString()
-  return apiRequest(`/admin/financial-transactions${qs ? `?${qs}` : ''}`, { method: 'GET' })
+  return apiRequest(`/${scope}/financial-transactions${qs ? `?${qs}` : ''}`, { method: 'GET' })
 }
 
 export function changePartnerCommissionRate(id, commissionRatePercent) {
