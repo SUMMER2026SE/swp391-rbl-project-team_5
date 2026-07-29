@@ -9,9 +9,10 @@ import Header from '../components/Header.jsx'
 import Seo from '../components/Seo.jsx'
 import { useAuth } from '../context/useAuth.js'
 import { footerLinks } from '../data/landingData.js'
-import { getAttractionDetail } from '../services/attractionApi.js'
+import { checkAvailability, getAttractionDetail } from '../services/attractionApi.js'
 import { getFavoriteItems, getFavorites, toggleFavorite } from '../services/favoriteApi.js'
 import reviewService from '../services/reviewService.js'
+import questionService from '../services/questionService.js'
 import { AI_BOOKING_SOURCE, isDateInputValue } from '../utils/aiBookingPrefill.js'
 import { loadItineraryBookingQueue } from '../utils/aiItineraryBookingQueue.js'
 import {
@@ -40,6 +41,7 @@ const tabItems = [
   { id: 'prepare', label: 'Chuẩn bị & check-in' },
   { id: 'amenity', label: 'Tiện ích' },
   { id: 'review', label: 'Đánh giá' },
+  { id: 'question', label: 'Hỏi & đáp' },
 ]
 
 const formatCurrency = (value) => {
@@ -684,6 +686,7 @@ export default function AttractionDetailPage() {
                   {activeTab === 'prepare' && <OperationalTab attraction={attraction} />}
                   {activeTab === 'amenity' && <AmenityTab attraction={attraction} />}
                   {activeTab === 'review' && <ReviewTab attraction={attraction} />}
+                  {activeTab === 'question' && <QuestionTab attraction={attraction} />}
                 </div>
               </section>
             </div>
@@ -796,6 +799,20 @@ export default function AttractionDetailPage() {
                     Mỗi đơn thanh toán một loại vé để tồn kho, QR và chính sách hoàn/hủy không bị trộn.
                     Nếu nhóm có nhiều loại khách, hãy hoàn tất từng loại vé thành các đơn riêng.
                   </div>
+                )}
+
+                {ticketProducts.length > 0 && (
+                  <InlineAvailabilityCalendar
+                    onChooseDate={(date) => {
+                      const ticket = selectedTicketForSummary || ticketProducts[0]
+                      const quantity = getBookingQuantity(ticket)
+                      if (!selectedTicketForSummary) {
+                        setTicketQuantities({ [ticket.id]: quantity })
+                      }
+                      handleOpenBookingModal(ticket, quantity, { date })
+                    }}
+                    ticket={selectedTicketForSummary || ticketProducts[0]}
+                  />
                 )}
 
                 {ticketProducts.length > 0 ? (
@@ -926,6 +943,125 @@ export default function AttractionDetailPage() {
   )
 }
 
+function toLocalDateInput(date) {
+  const timezoneOffset = date.getTimezoneOffset() * 60 * 1000
+  return new Date(date.getTime() - timezoneOffset).toISOString().slice(0, 10)
+}
+
+function InlineAvailabilityCalendar({ onChooseDate, ticket }) {
+  const dates = useMemo(
+    () => Array.from({ length: 7 }, (_, index) => {
+      const date = new Date()
+      date.setHours(12, 0, 0, 0)
+      date.setDate(date.getDate() + index)
+      return toLocalDateInput(date)
+    }),
+    [],
+  )
+  const [availabilityState, setAvailabilityState] = useState({
+    ticketId: '',
+    byDate: {},
+  })
+  const isLoading = availabilityState.ticketId !== String(ticket?.id || '')
+  const availabilityByDate = isLoading ? {} : availabilityState.byDate
+
+  useEffect(() => {
+    if (!ticket?.id) return undefined
+    const controller = new AbortController()
+
+    Promise.all(
+      dates.map(async (date) => {
+        try {
+          const response = await checkAvailability(ticket.id, date, {
+            signal: controller.signal,
+          })
+          const slots = Array.isArray(response.data) ? response.data : []
+          const availableTickets = slots.reduce(
+            (sum, slot) => sum + Math.max(0, Number(slot.availableTickets) || 0),
+            0,
+          )
+          return [date, {
+            availableTickets,
+            closed: Boolean(response.meta?.closed),
+          }]
+        } catch (error) {
+          if (error?.name === 'AbortError') return [date, null]
+          return [date, { error: true }]
+        }
+      }),
+    ).then((entries) => {
+      if (!controller.signal.aborted) {
+        setAvailabilityState({
+          ticketId: String(ticket.id),
+          byDate: Object.fromEntries(entries),
+        })
+      }
+    })
+
+    return () => controller.abort()
+  }, [dates, ticket?.id])
+
+  return (
+    <section
+      aria-label={`Lịch còn chỗ của ${ticket?.name || 'gói vé'}`}
+      className="rounded-xl border border-[#d7e4e5] bg-white p-3"
+    >
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-extrabold text-[#00474d]">Lịch còn chỗ 7 ngày tới</p>
+          <p className="mt-0.5 text-[11px] font-semibold text-[#526163]">
+            {ticket?.name} · chọn ngày để xem khung giờ và giữ vé
+          </p>
+        </div>
+        {isLoading && (
+          <span
+            aria-label="Đang kiểm tra lịch còn chỗ"
+            className="material-symbols-outlined animate-spin text-[18px] text-[#006068]"
+          >
+            progress_activity
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-7 lg:grid-cols-4 xl:grid-cols-7">
+        {dates.map((date) => {
+          const status = availabilityByDate[date]
+          const parsed = new Date(`${date}T12:00:00`)
+          const canBook = Boolean(status && !status.error && !status.closed && status.availableTickets > 0)
+          return (
+            <button
+              className={`rounded-lg border px-1 py-2 text-center transition ${
+                canBook
+                  ? 'border-[#8bcfd3] bg-[#eefcff] hover:border-[#006068] hover:bg-[#d9f6f8]'
+                  : 'cursor-not-allowed border-[#e1e3e4] bg-[#f7f8f9] text-[#7b8587]'
+              }`}
+              disabled={!canBook}
+              key={date}
+              onClick={() => onChooseDate(date)}
+              type="button"
+            >
+              <span className="block text-[10px] font-bold uppercase">
+                {parsed.toLocaleDateString('vi-VN', { weekday: 'short' })}
+              </span>
+              <span className="mt-0.5 block text-sm font-extrabold">
+                {parsed.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
+              </span>
+              <span className={`mt-1 block text-[9px] font-bold ${canBook ? 'text-[#006068]' : ''}`}>
+                {!status || isLoading
+                  ? 'Đang xem'
+                  : status.error
+                    ? 'Thử lại sau'
+                    : canBook
+                      ? `${status.availableTickets} vé`
+                      : 'Hết chỗ'}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function IntroTab({ attraction }) {
   return (
     <div className="space-y-4">
@@ -943,7 +1079,7 @@ function IntroTab({ attraction }) {
         <FeatureBox
           description={
             attraction.requiresManualApproval
-              ? 'Thu tiền trước; đối tác duyệt tối đa 24 giờ và trước giờ hoạt động, nếu quá hạn sẽ hoàn bắt buộc 100%'
+              ? 'Đối tác duyệt trước; bạn chỉ thanh toán sau khi được chấp thuận, trong thời hạn mới hiển thị trên đơn'
               : 'Nhận vé QR sau khi thanh toán thành công'
           }
           icon="verified_user"
@@ -1087,6 +1223,7 @@ function AmenityTab({ attraction }) {
 const REVIEWS_PAGE_SIZE = 6
 
 function ReviewTab({ attraction }) {
+  const { isAuthenticated } = useAuth()
   const [reviews, setReviews] = useState([])
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: REVIEWS_PAGE_SIZE, totalPages: 1 })
   const [breakdown, setBreakdown] = useState({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 })
@@ -1094,6 +1231,9 @@ function ReviewTab({ attraction }) {
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [filterType, setFilterType] = useState('all') // 'all', '5', '4', '3', '2', '1'
+  const [reviewSort, setReviewSort] = useState('helpful')
+  const [travelerType, setTravelerType] = useState('')
+  const [withPhotos, setWithPhotos] = useState(false)
   const [now] = useState(() => Date.now())
 
   // Tải 1 trang review từ server; append=true khi bấm "Xem thêm".
@@ -1104,7 +1244,14 @@ function ReviewTab({ attraction }) {
     setLoadError('')
 
     return reviewService
-      .getReviews(attraction.id, { page, limit: REVIEWS_PAGE_SIZE, rating })
+      .getReviews(attraction.id, {
+        page,
+        limit: REVIEWS_PAGE_SIZE,
+        rating,
+        sort: reviewSort,
+        travelerType,
+        withPhotos,
+      })
       .then((result) => {
         setReviews((current) => (append ? [...current, ...result.data] : result.data))
         setMeta(result.meta)
@@ -1126,7 +1273,28 @@ function ReviewTab({ attraction }) {
     }, 0)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attraction.id, filterType])
+  }, [attraction.id, filterType, reviewSort, travelerType, withPhotos])
+
+  const handleHelpful = async (reviewId) => {
+    if (!isAuthenticated) {
+      toast.info('Vui lòng đăng nhập để đánh dấu đánh giá hữu ích.')
+      return
+    }
+    try {
+      const result = await reviewService.toggleHelpfulVote(reviewId)
+      setReviews((current) => current.map((review) => (
+        review.id === reviewId
+          ? {
+              ...review,
+              helpfulCount: result.helpfulCount,
+              isHelpful: result.helpful,
+            }
+          : review
+      )))
+    } catch (error) {
+      toast.error(error.message || 'Không thể cập nhật đánh giá hữu ích.')
+    }
+  }
 
   const rating = Number(attraction.averageRating || 0)
   const totalReviews = Number(attraction.totalReviews || 0)
@@ -1262,6 +1430,40 @@ function ReviewTab({ attraction }) {
             </button>
           )
         })}
+        <button
+          className={`px-5 py-2 rounded-full text-xs font-semibold transition-all ${
+            withPhotos
+              ? 'bg-[#00474d] text-white shadow-sm'
+              : 'bg-[#f3f3f6] text-[#3f484a] hover:bg-[#bec8ca]/20'
+          }`}
+          onClick={() => setWithPhotos((current) => !current)}
+          type="button"
+        >
+          Có ảnh
+        </button>
+        <select
+          aria-label="Lọc theo nhóm khách"
+          className="rounded-full border border-[#d7e4e5] bg-white px-4 py-2 text-xs font-semibold text-[#3f484a]"
+          onChange={(event) => setTravelerType(event.target.value)}
+          value={travelerType}
+        >
+          <option value="">Mọi nhóm khách</option>
+          <option value="SOLO">Đi một mình</option>
+          <option value="COUPLE">Cặp đôi</option>
+          <option value="FAMILY">Gia đình</option>
+          <option value="FRIENDS">Bạn bè</option>
+          <option value="BUSINESS">Công tác</option>
+          <option value="OTHER">Khác</option>
+        </select>
+        <select
+          aria-label="Sắp xếp đánh giá"
+          className="rounded-full border border-[#d7e4e5] bg-white px-4 py-2 text-xs font-semibold text-[#3f484a]"
+          onChange={(event) => setReviewSort(event.target.value)}
+          value={reviewSort}
+        >
+          <option value="helpful">Hữu ích nhất</option>
+          <option value="newest">Mới nhất</option>
+        </select>
       </div>
 
       {/* Review List */}
@@ -1332,6 +1534,20 @@ function ReviewTab({ attraction }) {
                 {review.comment || 'Khách hàng không để lại bình luận chi tiết.'}
               </p>
 
+              {Array.isArray(review.imageUrls) && review.imageUrls.length > 0 && (
+                <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {review.imageUrls.map((imageUrl) => (
+                    <img
+                      alt="Ảnh trải nghiệm do khách chia sẻ"
+                      className="aspect-[4/3] w-full rounded-xl object-cover"
+                      key={imageUrl}
+                      loading="lazy"
+                      src={imageUrl}
+                    />
+                  ))}
+                </div>
+              )}
+
               {/* Partner Response */}
               {review.replyComment && (
                 <div className="ml-4 md:ml-12 p-5 bg-[#f3f3f6] rounded-lg border-l-4 border-[#00474d]/30">
@@ -1345,6 +1561,32 @@ function ReviewTab({ attraction }) {
                   </p>
                 </div>
               )}
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-[#eef1f2] pt-3">
+                <span className="text-xs font-semibold text-[#526163]">
+                  {review.travelerType
+                    ? {
+                        SOLO: 'Đi một mình',
+                        COUPLE: 'Cặp đôi',
+                        FAMILY: 'Gia đình',
+                        FRIENDS: 'Bạn bè',
+                        BUSINESS: 'Công tác',
+                        OTHER: 'Khác',
+                      }[review.travelerType]
+                    : 'Khách đã xác minh'}
+                </span>
+                <button
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold transition ${
+                    review.isHelpful
+                      ? 'bg-[#e0f4f5] text-[#00474d]'
+                      : 'bg-[#f3f3f6] text-[#526163] hover:bg-[#e0f4f5]'
+                  }`}
+                  onClick={() => void handleHelpful(review.id)}
+                  type="button"
+                >
+                  <span className="material-symbols-outlined text-[17px]">thumb_up</span>
+                  Hữu ích ({review.helpfulCount || 0})
+                </button>
+              </div>
             </div>
           ))
         )}
@@ -1375,6 +1617,154 @@ function ReviewTab({ attraction }) {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function QuestionTab({ attraction }) {
+  const { isAuthenticated } = useAuth()
+  const [questions, setQuestions] = useState([])
+  const [question, setQuestion] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loadError, setLoadError] = useState('')
+
+  const loadQuestions = () => questionService.getQuestions(attraction.id)
+    .then((result) => {
+      setQuestions(Array.isArray(result.data) ? result.data : [])
+      setLoadError('')
+    })
+    .catch((error) => setLoadError(error.message || 'Không thể tải câu hỏi.'))
+    .finally(() => setIsLoading(false))
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadQuestions(), 0)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attraction.id])
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    const normalized = question.trim()
+    if (normalized.length < 10) {
+      toast.warning('Câu hỏi cần ít nhất 10 ký tự.')
+      return
+    }
+    setIsSubmitting(true)
+    try {
+      const created = await questionService.createQuestion(attraction.id, normalized)
+      setQuestions((current) => [created, ...current])
+      setQuestion('')
+      toast.success('Đã gửi câu hỏi cho đối tác.')
+    } catch (error) {
+      toast.error(error.message || 'Không thể gửi câu hỏi.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleReport = async (questionId) => {
+    if (!window.confirm('Báo cáo câu hỏi này vì có nội dung không phù hợp hoặc thông tin cá nhân?')) {
+      return
+    }
+    try {
+      const result = await questionService.reportQuestion(
+        questionId,
+        'Nội dung không phù hợp hoặc chứa thông tin cá nhân.',
+      )
+      toast.success(result.message || 'Đã ghi nhận báo cáo.')
+      if (result.data?.hidden) {
+        setQuestions((current) => current.filter((item) => item.id !== questionId))
+      }
+    } catch (error) {
+      toast.error(error.message || 'Không thể gửi báo cáo.')
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-[#00474d]">Hỏi đối tác trước chuyến đi</h2>
+        <p className="mt-1 text-sm text-[#526163]">
+          Câu trả lời được công khai để những du khách khác cùng tham khảo.
+        </p>
+      </div>
+      {isAuthenticated ? (
+        <form className="rounded-2xl border border-[#d7e4e5] bg-white p-5" onSubmit={handleSubmit}>
+          <label className="text-sm font-bold text-[#1a1c1e]" htmlFor="attraction-question">
+            Bạn muốn biết điều gì?
+          </label>
+          <textarea
+            className="mt-2 w-full rounded-xl border border-[#bec8ca] p-4 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+            id="attraction-question"
+            maxLength={1000}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Ví dụ: Địa điểm có lối đi phù hợp cho xe lăn không?"
+            rows={3}
+            value={question}
+          />
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-xs text-[#6f797a]">{question.length}/1000</span>
+            <button
+              className="rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+              disabled={isSubmitting || question.trim().length < 10}
+              type="submit"
+            >
+              {isSubmitting ? 'Đang gửi...' : 'Gửi câu hỏi'}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="rounded-xl border border-[#d7e4e5] bg-[#f8fafb] p-4 text-sm font-semibold text-[#526163]">
+          <Link className="font-bold text-primary hover:underline" to="/login">Đăng nhập</Link>
+          {' '}để gửi câu hỏi cho đối tác.
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="py-8 text-center text-sm font-semibold text-[#526163]">Đang tải hỏi đáp...</p>
+      ) : loadError ? (
+        <p className="rounded-xl bg-red-50 p-4 text-sm font-semibold text-error">{loadError}</p>
+      ) : questions.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-[#bec8ca] p-8 text-center text-sm text-[#6f797a]">
+          Chưa có câu hỏi nào. Hãy là người đầu tiên hỏi đối tác.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {questions.map((item) => (
+            <article className="rounded-2xl border border-[#d7e4e5] bg-white p-5" key={item.id}>
+              <div className="flex gap-3">
+                <span className="material-symbols-outlined text-primary">help</span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-[#1a1c1e]">{item.question}</p>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-[#6f797a]">
+                      Hỏi bởi {item.user?.fullName || 'Khách hàng'}
+                    </p>
+                    {isAuthenticated && (
+                      <button
+                        className="text-xs font-semibold text-[#6f797a] hover:text-error"
+                        onClick={() => void handleReport(item.id)}
+                        type="button"
+                      >
+                        Báo cáo
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              {item.answer ? (
+                <div className="ml-8 mt-4 rounded-xl border-l-4 border-primary bg-[#eefcff] p-4">
+                  <p className="text-xs font-extrabold uppercase text-primary">Đối tác trả lời</p>
+                  <p className="mt-1 text-sm leading-6 text-[#3f484a]">{item.answer}</p>
+                </div>
+              ) : (
+                <p className="ml-8 mt-3 text-xs font-semibold text-amber-700">Đang chờ đối tác trả lời</p>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

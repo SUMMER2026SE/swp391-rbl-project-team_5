@@ -71,7 +71,15 @@ describe('Review Routes Integration Tests', () => {
 
     test('✅ Tạo review thành công cho booking COMPLETED chưa đánh giá', async () => {
       const token = generateTestToken('user-01', 'CUSTOMER');
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'user-01', role: 'CUSTOMER', status: 'ACTIVE', tokenVersion: 0 });
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-01',
+        role: 'CUSTOMER',
+        status: 'ACTIVE',
+        tokenVersion: 0,
+        termsAcceptedAt: new Date(),
+        termsVersion: '2026-07-29-v2',
+        privacyVersion: '2026-07-29-v2',
+      });
       mockValidSession(mockPrisma, 'user-01');
       mockPrisma.booking.findUnique.mockResolvedValue({
         id: 'booking-01',

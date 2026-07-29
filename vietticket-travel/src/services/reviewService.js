@@ -2,13 +2,19 @@ import { apiRequest } from './api.js'
 
 // Trả về { data, meta, breakdown } — meta phục vụ phân trang "Xem thêm",
 // breakdown là phân bố số sao (histogram) trên toàn bộ review hiển thị.
-export const getReviews = async (attractionId, { page = 1, limit = 6, rating } = {}) => {
+export const getReviews = async (
+  attractionId,
+  { page = 1, limit = 6, rating, sort, travelerType, withPhotos } = {},
+) => {
   const params = new URLSearchParams({
     attractionId,
     page: String(page),
     limit: String(limit),
   })
   if (rating) params.set('rating', String(rating))
+  if (sort) params.set('sort', sort)
+  if (travelerType) params.set('travelerType', travelerType)
+  if (withPhotos) params.set('withPhotos', 'true')
 
   const result = await apiRequest(`/reviews?${params.toString()}`, {
     method: 'GET',
@@ -26,6 +32,29 @@ export const createReview = async (payload) => {
     body: payload,
   })
   return result.data
+}
+
+export const toggleHelpfulVote = async (reviewId) => {
+  const result = await apiRequest(`/reviews/${reviewId}/helpful`, {
+    method: 'POST',
+  })
+  return result.data
+}
+
+export const uploadReviewImages = async (files) => {
+  const formData = new FormData()
+  for (const file of files) formData.append('images', file)
+  const baseUrl = import.meta.env.VITE_API_URL || '/api'
+  const response = await fetch(`${baseUrl}/upload/review-images`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(result.message || result.error?.message || 'Không thể tải ảnh đánh giá.')
+  }
+  return Array.isArray(result.data?.urls) ? result.data.urls : []
 }
 
 export const replyReview = async (reviewId, replyComment) => {
@@ -87,6 +116,8 @@ export const getAdminReviews = async ({ page = 1, limit = 10, search, rating } =
 
 const reviewService = {
   getReviews,
+  toggleHelpfulVote,
+  uploadReviewImages,
   createReview,
   replyReview,
   moderateReview,

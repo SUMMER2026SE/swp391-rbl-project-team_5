@@ -4,6 +4,10 @@ const prisma = require('../config/prisma');
 const { isPlatformStaff } = require('../middleware/roleMiddleware');
 const { isReviewEligible } = require('../utils/reviewEligibility');
 const { writeAuditLog } = require('../utils/auditLog');
+const { isPublicUploadOwnedByUser } = require('../middleware/uploadMiddleware');
+const { maskPublicName } = require('../utils/publicIdentity');
+
+const TRAVELER_TYPES = new Set(['SOLO', 'COUPLE', 'FAMILY', 'FRIENDS', 'BUSINESS', 'OTHER']);
 
 // Helper function to recalculate average rating and total reviews for an attraction
 async function recalculateAttractionRating(tx, attractionId) {
@@ -46,9 +50,23 @@ async function listPublicReviews(req, res, next) {
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 6));
     const ratingFilter = parseInt(req.query.rating, 10);
     const hasRatingFilter = !isNaN(ratingFilter) && ratingFilter >= 1 && ratingFilter <= 5;
+    const sort = String(req.query.sort || 'newest').trim().toLowerCase();
+    const travelerType = String(req.query.travelerType || '').trim().toUpperCase();
+    const withPhotos = String(req.query.withPhotos || '').toLowerCase() === 'true';
+    if (!['newest', 'helpful'].includes(sort)) {
+      return res.status(400).json({ message: 'Kiểu sắp xếp đánh giá không hợp lệ.' });
+    }
+    if (travelerType && !TRAVELER_TYPES.has(travelerType)) {
+      return res.status(400).json({ message: 'Loại khách du lịch không hợp lệ.' });
+    }
 
     const baseWhere = { attractionId, isHidden: false };
-    const where = hasRatingFilter ? { ...baseWhere, rating: ratingFilter } : baseWhere;
+    const where = {
+      ...baseWhere,
+      ...(hasRatingFilter ? { rating: ratingFilter } : {}),
+      ...(travelerType ? { travelerType } : {}),
+      ...(withPhotos ? { imageUrls: { isEmpty: false } } : {}),
+    };
 
     const [total, grouped, reviews] = await Promise.all([
       prisma.review.count({ where }),
@@ -71,10 +89,11 @@ async function listPublicReviews(req, res, next) {
               },
             },
           },
+          _count: { select: { helpfulVotes: true } },
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy: sort === 'helpful'
+          ? [{ helpfulVotes: { _count: 'desc' } }, { createdAt: 'desc' }]
+          : { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -84,6 +103,15 @@ async function listPublicReviews(req, res, next) {
     grouped.forEach((g) => {
       breakdown[g.rating] = g._count.rating;
     });
+    const helpfulByCurrentUser = req.user?.id && reviews.length > 0
+      ? new Set((await prisma.reviewHelpfulVote.findMany({
+        where: {
+          userId: req.user.id,
+          reviewId: { in: reviews.map((review) => review.id) },
+        },
+        select: { reviewId: true },
+      })).map((vote) => vote.reviewId))
+      : new Set();
 
     return res.json({
       success: true,
@@ -100,11 +128,16 @@ async function listPublicReviews(req, res, next) {
         comment: r.comment,
         replyComment: r.replyComment,
         repliedAt: r.repliedAt,
+        imageUrls: r.imageUrls || [],
+        travelerType: r.travelerType || null,
+        helpfulCount: r._count?.helpfulVotes || 0,
+        isHelpful: helpfulByCurrentUser.has(r.id),
         createdAt: r.createdAt,
         user: {
-          fullName: r.user.fullName,
+          fullName: maskPublicName(r.user.fullName),
           profile: {
-            avatarUrl: r.user.profile?.avatarUrl || null,
+            // Avatar is account PII and is not exposed on public review feeds.
+            avatarUrl: null,
           },
         },
       })),
@@ -119,6 +152,10 @@ async function createReview(req, res, next) {
   try {
     const userId = req.user.id;
     const { bookingId, rating, comment } = req.body;
+    const travelerType = String(req.body?.travelerType || '').trim().toUpperCase();
+    const imageUrls = Array.isArray(req.body?.imageUrls)
+      ? [...new Set(req.body.imageUrls.map((url) => String(url).trim()).filter(Boolean))]
+      : [];
 
     if (!bookingId || !rating) {
       return res.status(400).json({ message: 'Mã đặt chỗ (bookingId) và số sao (rating) là bắt buộc.' });
@@ -133,6 +170,15 @@ async function createReview(req, res, next) {
     if (trimmedComment.length > 2000) {
       return res.status(400).json({ message: 'Nhận xét tối đa 2000 ký tự.' });
     }
+    if (travelerType && !TRAVELER_TYPES.has(travelerType)) {
+      return res.status(400).json({ message: 'Loại khách du lịch không hợp lệ.' });
+    }
+    if (imageUrls.length > 3) {
+      return res.status(400).json({ message: 'Mỗi đánh giá được tải tối đa 3 ảnh.' });
+    }
+    if (imageUrls.some((url) => !isPublicUploadOwnedByUser(url, userId, req))) {
+      return res.status(400).json({ message: 'Ảnh đánh giá phải do chính bạn tải lên VietTicket.' });
+    }
 
     // Find booking
     const booking = await prisma.booking.findUnique({
@@ -142,7 +188,17 @@ async function createReview(req, res, next) {
         ticketInstances: { select: { status: true } },
         reservation: {
           include: {
-            ticketProduct: true,
+            ticketProduct: {
+              include: {
+                attraction: {
+                  select: {
+                    id: true,
+                    partnerId: true,
+                    partner: { select: { userId: true } },
+                  },
+                },
+              },
+            },
             timeSlot: { select: { endTime: true } }, // cần để tính giờ kết thúc tham quan
           },
         },
@@ -152,6 +208,18 @@ async function createReview(req, res, next) {
     // Validations
     if (!booking || booking.isForecastTrainingSample || booking.userId !== userId) {
       return res.status(404).json({ message: 'Không tìm thấy đơn đặt vé của bạn.' });
+    }
+    const bookingAttraction = booking.reservation.ticketProduct.attraction;
+    if (
+      (bookingAttraction?.partner?.userId
+        && bookingAttraction.partner.userId === userId)
+      || (req.user?.employerPartnerId
+        && req.user.employerPartnerId === bookingAttraction?.partnerId)
+    ) {
+      return res.status(403).json({
+        message: 'Đối tác và nhân viên không được đánh giá địa điểm mình quản lý.',
+        code: 'SELF_REVIEW_NOT_ALLOWED',
+      });
     }
 
     // SRS quy định chỉ booking COMPLETED mới được đánh giá.
@@ -164,7 +232,8 @@ async function createReview(req, res, next) {
       return res.status(400).json({ message: 'Đơn đặt vé này đã được đánh giá trước đó.' });
     }
 
-    const attractionId = booking.reservation.ticketProduct.attractionId;
+    const attractionId = bookingAttraction?.id
+      || booking.reservation.ticketProduct.attractionId;
 
     // Create review and update rating in a transaction
     const review = await prisma.$transaction(async (tx) => {
@@ -175,6 +244,8 @@ async function createReview(req, res, next) {
           bookingId,
           rating: parsedRating,
           comment: trimmedComment,
+          travelerType: travelerType || null,
+          imageUrls,
           isHidden: false,
         },
       });
@@ -193,6 +264,41 @@ async function createReview(req, res, next) {
     if (error.code === 'P2002') {
       return res.status(409).json({ message: 'Đơn đặt vé này đã được đánh giá trước đó.' });
     }
+    return next(error);
+  }
+}
+
+async function toggleHelpfulVote(req, res, next) {
+  try {
+    const reviewId = String(req.params.reviewId || '').trim();
+    const userId = req.user.id;
+    const review = await prisma.review.findFirst({
+      where: { id: reviewId, isHidden: false },
+      select: { id: true, userId: true },
+    });
+    if (!review) {
+      return res.status(404).json({ message: 'Không tìm thấy đánh giá.' });
+    }
+    if (review.userId === userId) {
+      return res.status(409).json({ message: 'Bạn không thể tự đánh dấu đánh giá của mình là hữu ích.' });
+    }
+
+    const existing = await prisma.reviewHelpfulVote.findUnique({
+      where: { reviewId_userId: { reviewId, userId } },
+    });
+    if (existing) {
+      await prisma.reviewHelpfulVote.delete({
+        where: { reviewId_userId: { reviewId, userId } },
+      });
+    } else {
+      await prisma.reviewHelpfulVote.create({ data: { reviewId, userId } });
+    }
+    const helpfulCount = await prisma.reviewHelpfulVote.count({ where: { reviewId } });
+    return res.json({
+      success: true,
+      data: { reviewId, helpful: !existing, helpfulCount },
+    });
+  } catch (error) {
     return next(error);
   }
 }
@@ -351,6 +457,7 @@ async function listPartnerReviews(req, res, next) {
             },
           },
         },
+        _count: { select: { helpfulVotes: true } },
       },
       orderBy: {
         createdAt: 'desc',
@@ -365,6 +472,9 @@ async function listPartnerReviews(req, res, next) {
         comment: r.comment,
         replyComment: r.replyComment,
         repliedAt: r.repliedAt,
+        imageUrls: r.imageUrls || [],
+        travelerType: r.travelerType || null,
+        helpfulCount: r._count?.helpfulVotes || 0,
         isHidden: r.isHidden,
         createdAt: r.createdAt,
         user: {
@@ -537,4 +647,5 @@ module.exports = {
   listPartnerReviews,
   getPartnerReviewStats,
   listAdminReviews,
+  toggleHelpfulVote,
 };

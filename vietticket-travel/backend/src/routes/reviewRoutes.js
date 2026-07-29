@@ -2,14 +2,16 @@
 
 const express = require('express');
 const protect = require('../middleware/authMiddleware');
+const optionalAuth = require('../middleware/optionalAuthMiddleware');
 const { requirePlatformStaff, restrictTo } = require('../middleware/roleMiddleware');
 const { requirePartner, requireApprovedPartner } = require('../middleware/partnerMiddleware');
+const { requireCurrentPolicyConsent } = require('../middleware/policyConsentMiddleware');
 const reviewController = require('../controllers/reviewController');
 
 const router = express.Router();
 
 // Public routes
-router.get('/', reviewController.listPublicReviews);
+router.get('/', optionalAuth, reviewController.listPublicReviews);
 
 router.get(
   '/moderation',
@@ -20,7 +22,20 @@ router.get(
 );
 
 // Protected customer routes
-router.post('/', protect, restrictTo('CUSTOMER'), reviewController.createReview);
+router.post(
+  '/',
+  protect,
+  restrictTo('CUSTOMER'),
+  requireCurrentPolicyConsent,
+  reviewController.createReview,
+);
+router.post(
+  '/:reviewId/helpful',
+  protect,
+  restrictTo('CUSTOMER'),
+  requireCurrentPolicyConsent,
+  reviewController.toggleHelpfulVote,
+);
 
 // Partner routes — chỉ đối tác ĐÃ ĐƯỢC DUYỆT mới được phản hồi đánh giá.
 router.post(

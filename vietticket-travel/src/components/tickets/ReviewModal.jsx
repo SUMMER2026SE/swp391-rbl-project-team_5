@@ -6,6 +6,8 @@ function ReviewModal({ booking, onClose, onSuccess }) {
   const [rating, setRating] = useState(0)
   const [hoverRating, setHoverRating] = useState(0)
   const [comment, setComment] = useState('')
+  const [travelerType, setTravelerType] = useState('')
+  const [images, setImages] = useState([])
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const handleSubmit = async () => {
@@ -16,10 +18,15 @@ function ReviewModal({ booking, onClose, onSuccess }) {
 
     setIsSubmitting(true)
     try {
+      const imageUrls = images.length > 0
+        ? await reviewService.uploadReviewImages(images)
+        : []
       await reviewService.createReview({
         bookingId: booking.bookingId || booking.id,
         rating,
         comment,
+        travelerType: travelerType || undefined,
+        imageUrls,
       })
       toast.success('Gửi đánh giá thành công! Cảm ơn phản hồi của bạn.')
       onSuccess()
@@ -135,6 +142,52 @@ function ReviewModal({ booking, onClose, onSuccess }) {
             <p className="text-right text-[11px] text-[#6f797a] px-1">
               {comment.length}/{COMMENT_MAX_LENGTH} ký tự
             </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="space-y-2 text-sm font-semibold text-[#3f484a]">
+              <span className="block">Bạn đi cùng ai?</span>
+              <select
+                className="w-full rounded-xl border border-[#bec8ca] bg-white/70 px-3 py-3 text-sm"
+                disabled={isSubmitting}
+                onChange={(event) => setTravelerType(event.target.value)}
+                value={travelerType}
+              >
+                <option value="">Không muốn nêu</option>
+                <option value="SOLO">Đi một mình</option>
+                <option value="COUPLE">Cặp đôi</option>
+                <option value="FAMILY">Gia đình</option>
+                <option value="FRIENDS">Bạn bè</option>
+                <option value="BUSINESS">Công tác</option>
+                <option value="OTHER">Khác</option>
+              </select>
+            </label>
+            <label className="space-y-2 text-sm font-semibold text-[#3f484a]">
+              <span className="block">Ảnh trải nghiệm (tối đa 3)</span>
+              <input
+                accept="image/jpeg,image/png,image/webp"
+                className="block w-full text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-[#e0f4f5] file:px-3 file:py-2 file:font-bold file:text-[#00474d]"
+                disabled={isSubmitting}
+                multiple
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files || []).slice(0, 3)
+                  const tooLarge = selected.find((file) => file.size > 5 * 1024 * 1024)
+                  if (tooLarge) {
+                    toast.warning('Mỗi ảnh đánh giá phải nhỏ hơn 5 MB.')
+                    event.target.value = ''
+                    setImages([])
+                    return
+                  }
+                  setImages(selected)
+                }}
+                type="file"
+              />
+              {images.length > 0 && (
+                <span className="block text-[11px] font-medium text-[#526163]">
+                  Đã chọn {images.length} ảnh
+                </span>
+              )}
+            </label>
           </div>
 
           {/* Submit button */}

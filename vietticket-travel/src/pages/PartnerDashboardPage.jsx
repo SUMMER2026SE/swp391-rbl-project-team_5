@@ -7,6 +7,7 @@ import * as partnerApi from '../services/partnerApi.js'
 import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 import { formatBookingReference, formatTicketReference } from '../utils/bookingReference.js'
 import { getTicketTypeLabel } from '../utils/ticketType.js'
+import reviewService from '../services/reviewService.js'
 
 function formatVND(n) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n)
@@ -25,8 +26,15 @@ function PartnerDashboardPage() {
 
   const loadDashboard = useCallback(async () => {
     try {
-      const data = await partnerApi.getDashboard()
-      setStats(data.stats)
+      const [data, reviewStats] = await Promise.all([
+        partnerApi.getDashboard(),
+        reviewService.getPartnerReviewStats().catch(() => ({
+          averageRating: 0,
+          totalReviews: 0,
+          unrepliedReviews: 0,
+        })),
+      ])
+      setStats({ ...data.stats, ...reviewStats })
       const list = data.recentBookings || []
       setBookings(list)
 
@@ -65,10 +73,15 @@ function PartnerDashboardPage() {
   const handleConfirm = async (id) => {
     setActionLoading(id)
     try {
-      await partnerApi.approveBooking(id)
-      toast.success('Đã xác nhận đơn đặt vé.')
+      const response = await partnerApi.approveBooking(id)
+      const nextStatus = response.data?.status || 'confirmed'
+      toast.success(
+        nextStatus === 'pending_payment'
+          ? 'Đã duyệt yêu cầu. Khách có thể thanh toán trong thời hạn mới.'
+          : 'Đã xác nhận đơn đặt vé.',
+      )
       setSelectedBooking((prev) =>
-        prev && prev.id === id ? { ...prev, status: 'confirmed' } : prev,
+        prev && prev.id === id ? { ...prev, status: nextStatus } : prev,
       )
       loadDashboard()
     } catch (err) {
@@ -88,7 +101,7 @@ function PartnerDashboardPage() {
     setActionLoading(rejectTarget.id)
     try {
       await partnerApi.rejectBooking(rejectTarget.id, reason)
-      toast.success('Đã từ chối đơn. Khách đã thanh toán sẽ được hoàn tiền đầy đủ.')
+      toast.success('Đã từ chối đơn. Nếu đã thu tiền, hệ thống sẽ tạo yêu cầu hoàn tiền đầy đủ.')
       setSelectedBooking((prev) =>
         prev && prev.id === rejectTarget.id ? { ...prev, status: 'cancelled' } : prev,
       )
@@ -142,6 +155,8 @@ function PartnerDashboardPage() {
               { label: 'Vé bán ra (tháng)', value: stats?.ticketsSoldThisMonth ?? 0, icon: 'local_mall', color: 'text-[#8b5cf6]', bg: 'bg-[#f5f3ff]', link: '/partner/bookings' },
               { label: 'Tỷ lệ lấp đầy', value: stats?.occupancyRate !== undefined ? `${(stats.occupancyRate * 100).toFixed(1)}%` : '0.0%', icon: 'percent', color: 'text-[#ec4899]', bg: 'bg-[#fdf2f8]', link: null },
               { label: 'Chờ xử lý', value: stats?.pendingBookings ?? 0, icon: 'pending', color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]', link: '/partner/bookings' },
+              { label: 'Đánh giá', value: stats?.totalReviews ?? 0, icon: 'rate_review', color: 'text-[#7c5800]', bg: 'bg-[#fff3d4]', link: '/partner/reviews' },
+              { label: 'Chưa phản hồi', value: stats?.unrepliedReviews ?? 0, icon: 'question_answer', color: 'text-[#ba1a1a]', bg: 'bg-[#ffdad6]', link: '/partner/reviews' },
                 { label: 'Doanh số thuần (tháng)', value: formatVND(stats?.revenueThisMonth ?? 0), icon: 'payments', color: 'text-[#4a3800]', bg: 'bg-[#ffefc6]', link: '/partner/reports' },
               { label: 'Thực nhận (tháng)', value: formatVND(stats?.netRevenueThisMonth ?? 0), icon: 'account_balance_wallet', color: 'text-[#137333]', bg: 'bg-[#E6F4EA]', link: '/partner/reports' },
             ].map((s) => (
@@ -150,10 +165,11 @@ function PartnerDashboardPage() {
           </div>
 
           {/* Quick actions */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
             {[
               { to: '/partner/attractions', icon: 'local_activity', label: 'Quản lý điểm tham quan', desc: 'Thêm mới, chỉnh sửa thông tin điểm' },
               { to: '/partner/bookings', icon: 'confirmation_number', label: 'Quản lý đặt vé', desc: 'Xem và xác nhận các đơn đặt vé' },
+              { to: '/partner/reviews', icon: 'rate_review', label: 'Phản hồi đánh giá', desc: `${stats?.unrepliedReviews ?? 0} đánh giá đang chờ phản hồi` },
               { to: '/partner/reports', icon: 'bar_chart', label: 'Báo cáo doanh thu', desc: 'Thống kê theo ngày, tháng, điểm tham quan' },
             ].map((q) => (
               <Link
@@ -368,7 +384,13 @@ function PartnerDashboardPage() {
                     </div>
                     <div>
                       <span className="text-[#6f797a]">Trạng thái GD:</span>{' '}
-                      <span className="font-semibold text-[#137333] uppercase">{selectedBooking.paymentStatus || 'SUCCESS'}</span>
+                      <span className={`font-semibold uppercase ${
+                        selectedBooking.paymentStatus === 'SUCCESS'
+                          ? 'text-[#137333]'
+                          : 'text-[#7a5b00]'
+                      }`}>
+                        {selectedBooking.paymentStatus || 'CHƯA THANH TOÁN'}
+                      </span>
                     </div>
                     <div>
                       <span className="text-[#6f797a]">Mã giao dịch:</span>{' '}
@@ -422,7 +444,9 @@ function PartnerDashboardPage() {
                   </div>
                 ) : (
                   <p className="text-sm text-[#6f797a] italic text-center py-4 bg-[#f8fafb] rounded-lg">
-                    Vé và mã QR sẽ tự động được cấp sau khi đối tác duyệt xác nhận đơn hàng này.
+                    {selectedBooking.paymentStatus === 'SUCCESS'
+                      ? 'Vé và mã QR sẽ được cấp sau khi đơn hoàn tất xác nhận.'
+                      : 'Sau khi bạn duyệt, khách cần thanh toán trong thời hạn mới; vé và QR chỉ được cấp khi thanh toán thành công.'}
                   </p>
                 )}
               </div>
