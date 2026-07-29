@@ -37,6 +37,19 @@ const MIN_ADJUSTED_UNIT_PRICE = MIN_VNPAY_AMOUNT;
 
 const CONFIDENCE_RANK = { LOW: 0, MEDIUM: 1, HIGH: 2 };
 
+// Tra cứu phải chỉ nhìn vào key của chính object. Dùng CONFIDENCE_RANK[x] trực
+// tiếp thì 'toString'/'constructor' sẽ trả về hàm kế thừa từ Object.prototype
+// và lọt qua mọi phép so sánh (mọi so sánh với NaN đều false).
+function confidenceRank(value, fallback = 0) {
+  return Object.prototype.hasOwnProperty.call(CONFIDENCE_RANK, value)
+    ? CONFIDENCE_RANK[value]
+    : fallback;
+}
+
+function isKnownConfidence(value) {
+  return Object.prototype.hasOwnProperty.call(CONFIDENCE_RANK, value);
+}
+
 const DEFAULT_POLICY = Object.freeze({
   enabled: false,
   mode: 'SUGGEST_ONLY',
@@ -130,9 +143,7 @@ function normalizePolicy(raw) {
     priceCeilingPercent: intInRange(policy.priceCeilingPercent, 120, 100, 300),
     roundingStep: intInRange(policy.roundingStep, 1000, 1, 1_000_000),
     lookaheadDays: intInRange(policy.lookaheadDays, 14, 1, 60),
-    minConfidence: CONFIDENCE_RANK[policy.minConfidence] === undefined
-      ? 'MEDIUM'
-      : policy.minConfidence,
+    minConfidence: isKnownConfidence(policy.minConfidence) ? policy.minConfidence : 'MEDIUM',
     updatedById: policy.updatedById || null,
     updatedAt: policy.updatedAt || null,
   };
@@ -292,7 +303,7 @@ function quotePrice({
   // đứng yên là lựa chọn đúng.
   const effectiveConfidence = hasForecast ? forecastConfidence : 'LOW';
   if (
-    (CONFIDENCE_RANK[effectiveConfidence] ?? 0) < (CONFIDENCE_RANK[policy.minConfidence] ?? 1)
+    confidenceRank(effectiveConfidence, 0) < confidenceRank(policy.minConfidence, 1)
     && lead > 0
   ) {
     return noChange(
@@ -567,7 +578,27 @@ async function savePolicy({ attractionId, payload, actorId, client = prisma }) {
   const current = await client.dynamicPricingPolicy.findUnique({ where: { attractionId } });
   // Field nào không gửi thì giữ nguyên giá trị đang chạy, tránh việc một form
   // thiếu field vô tình reset cả chính sách về mặc định.
-  const merged = normalizePolicy({ ...(current || {}), ...(payload || {}), attractionId });
+  const requested = { ...(current || {}), ...(payload || {}), attractionId };
+  // Kiểm tra trên giá trị ĐÃ TRỘN, không phải trên payload. Gửi mỗi
+  // lowDemandThreshold=0.9 trong khi highDemandThreshold đang lưu là 0.75 cũng
+  // là một chính sách chồng lấn — trước đây normalizePolicy âm thầm ép về 0.70
+  // và đối tác không hề biết con số mình nhập đã bị sửa.
+  const requestedLow = Number(requested.lowDemandThreshold);
+  const requestedHigh = Number(requested.highDemandThreshold);
+  if (
+    Number.isFinite(requestedLow)
+    && Number.isFinite(requestedHigh)
+    && requestedLow >= requestedHigh
+  ) {
+    const error = new Error(
+      `Ngưỡng vắng khách (${requestedLow}) phải nhỏ hơn ngưỡng đông khách (${requestedHigh}).`,
+    );
+    error.statusCode = 400;
+    error.code = 'VALIDATION_ERROR';
+    throw error;
+  }
+
+  const merged = normalizePolicy(requested);
   if (
     merged.enabled
     && merged.mode === 'AUTO_APPLY'
@@ -608,9 +639,18 @@ function addDays(date, days) {
 }
 
 // Nửa đêm giờ VN của ngày tham quan, biểu diễn dưới dạng cột @db.Date.
+// CHỈ dùng để so với cột @db.Date (Prisma lưu chúng ở nửa đêm UTC).
 function vietnamDateOnly(now) {
   const key = new Date(new Date(now).getTime() + VN_OFFSET_MS).toISOString().slice(0, 10);
   return new Date(`${key}T00:00:00.000Z`);
+}
+
+// Thời điểm THẬT mà ngày VN đó bắt đầu, để so với cột timestamp (createdAt).
+// Ngày D giờ VN bắt đầu lúc D-1 17:00 UTC, không phải D 00:00 UTC — dùng nhầm
+// vietnamDateOnly ở đây sẽ cắt mất mọi bản ghi từ 00:00 đến 07:00 giờ VN của
+// ngày đầu kỳ, khiến "N ngày gần nhất" thực chất ngắn hơn N ngày.
+function vietnamDayStartUtc(now) {
+  return new Date(vietnamDateOnly(now).getTime() - VN_OFFSET_MS);
 }
 
 /**
@@ -820,39 +860,85 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
   };
 }
 
+// Dòng DynamicPriceAdjustment được ghi ở bước GIỮ CHỖ, trước khi khách trả
+// tiền. Lượt giữ chỗ hết hạn chỉ bị đánh dấu EXPIRED chứ không bị xoá, nên nếu
+// cộng thẳng mọi dòng thì panel sẽ báo doanh thu chưa bao giờ thu được. Chỉ
+// những lượt đã dẫn tới một booking có tiền vào và chưa bị hoàn mới được tính.
+const REALIZED_ADJUSTMENT_WHERE = Object.freeze({
+  reservation: {
+    is: {
+      booking: {
+        is: {
+          status: { notIn: ['CANCELLED', 'REFUNDED'] },
+          payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+        },
+      },
+    },
+  },
+});
+
+const ADJUSTMENT_DETAIL_SELECT = Object.freeze({
+  id: true,
+  visitDate: true,
+  basePrice: true,
+  finalPrice: true,
+  adjustmentPercent: true,
+  quantity: true,
+  demandLevel: true,
+  demandIndex: true,
+  confidence: true,
+  signalSource: true,
+  leadTimeDays: true,
+  reason: true,
+  createdAt: true,
+  ticketProduct: { select: { name: true } },
+});
+
 /**
  * Tổng hợp tác động thật của giá động: bao nhiêu lượt giữ chỗ bị đổi giá,
  * chênh lệch doanh thu ròng là bao nhiêu, tách theo cao điểm / giờ vắng.
+ *
+ * Phần tổng và phần bảng chi tiết là hai truy vấn tách biệt: bảng có thể cắt
+ * bớt cho vừa màn hình, còn con số tổng thì bắt buộc quét hết kỳ — một tổng bị
+ * cắt âm thầm còn tệ hơn là không có tổng.
  */
-async function getPricingImpact({ attractionId, days = 30, now = new Date(), client = prisma }) {
+async function getPricingImpact({
+  attractionId,
+  days = 30,
+  now = new Date(),
+  client = prisma,
+  detailLimit = 200,
+}) {
   const horizon = intInRange(days, 30, 1, 365);
-  const since = addDays(vietnamDateOnly(now), -(horizon - 1));
+  // So với `createdAt` (timestamp), nên mốc phải là thời điểm ngày VN bắt đầu.
+  const since = addDays(vietnamDayStartUtc(now), -(horizon - 1));
+  const limit = intInRange(detailLimit, 200, 1, 1000);
+  const periodWhere = { attractionId, createdAt: { gte: since } };
+  const realizedWhere = { ...periodWhere, ...REALIZED_ADJUSTMENT_WHERE };
 
-  const rows = await client.dynamicPriceAdjustment.findMany({
-    where: { attractionId, createdAt: { gte: since } },
-    orderBy: { createdAt: 'desc' },
-    take: 500,
-    select: {
-      id: true,
-      visitDate: true,
-      basePrice: true,
-      finalPrice: true,
-      adjustmentPercent: true,
-      quantity: true,
-      demandLevel: true,
-      demandIndex: true,
-      confidence: true,
-      signalSource: true,
-      leadTimeDays: true,
-      reason: true,
-      createdAt: true,
-      ticketProduct: { select: { name: true } },
-    },
-  });
+  const [summaryRows, rows, periodCount] = await Promise.all([
+    // Chỉ 4 cột cần cho phép cộng nên quét hết kỳ vẫn rẻ.
+    client.dynamicPriceAdjustment.findMany({
+      where: realizedWhere,
+      select: {
+        basePrice: true, finalPrice: true, quantity: true, demandLevel: true,
+      },
+    }),
+    client.dynamicPriceAdjustment.findMany({
+      where: realizedWhere,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: ADJUSTMENT_DETAIL_SELECT,
+    }),
+    client.dynamicPriceAdjustment.count({ where: periodWhere }),
+  ]);
 
   const summary = {
     days: horizon,
-    totalAdjustments: rows.length,
+    totalAdjustments: summaryRows.length,
+    // Lượt đã đổi giá nhưng chưa thành tiền (đang giữ chỗ, hết hạn, huỷ, hoàn).
+    // Trưng ra thay vì giấu đi, để đối tác hiểu vì sao hai con số lệch nhau.
+    pendingAdjustments: Math.max(0, Number(periodCount || 0) - summaryRows.length),
     peakCount: 0,
     quietCount: 0,
     surchargeRevenue: 0,
@@ -861,7 +947,7 @@ async function getPricingImpact({ attractionId, days = 30, now = new Date(), cli
     adjustedTickets: 0,
   };
 
-  rows.forEach((row) => {
+  summaryRows.forEach((row) => {
     const delta = (Number(row.finalPrice) - Number(row.basePrice)) * Number(row.quantity || 1);
     summary.netRevenueDelta += delta;
     summary.adjustedTickets += Number(row.quantity || 1);
@@ -881,6 +967,9 @@ async function getPricingImpact({ attractionId, days = 30, now = new Date(), cli
       discountGiven: Math.round(summary.discountGiven),
       netRevenueDelta: Math.round(summary.netRevenueDelta),
     },
+    detailLimit: limit,
+    // Bảng chi tiết bị cắt, nhưng phần tổng ở trên thì không.
+    detailTruncated: summary.totalAdjustments > rows.length,
     adjustments: rows.map((row) => ({
       id: row.id,
       ticketName: row.ticketProduct?.name || '',
