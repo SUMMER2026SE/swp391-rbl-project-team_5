@@ -1,11 +1,13 @@
 const express = require('express');
 const protect = require('../middleware/authMiddleware');
 const { restrictTo } = require('../middleware/roleMiddleware');
+const { requireCurrentPolicyConsent } = require('../middleware/policyConsentMiddleware');
 const {
   createBooking,
   getBooking,
   getItineraryBookingProgress,
   getReservation,
+  listApplicableVouchers,
   listBookings,
   validateAndApplyVoucher,
 } = require('../controllers/bookingController');
@@ -13,8 +15,21 @@ const {
 const router = express.Router();
 
 router.get('/', protect, restrictTo('CUSTOMER'), listBookings);
-router.post('/', protect, restrictTo('CUSTOMER'), createBooking);
-router.post('/apply-voucher', protect, restrictTo('CUSTOMER'), validateAndApplyVoucher);
+router.post(
+  '/',
+  protect,
+  restrictTo('CUSTOMER'),
+  requireCurrentPolicyConsent,
+  createBooking,
+);
+router.post(
+  '/apply-voucher',
+  protect,
+  restrictTo('CUSTOMER'),
+  requireCurrentPolicyConsent,
+  validateAndApplyVoucher,
+);
+router.get('/available-vouchers', protect, restrictTo('CUSTOMER'), listApplicableVouchers);
 router.get(
   '/reservations/:reservationId',
   protect,

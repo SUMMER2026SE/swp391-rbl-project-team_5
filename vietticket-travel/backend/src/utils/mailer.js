@@ -508,6 +508,94 @@ async function sendBookingRejectedEmail({
   });
 }
 
+async function sendPartnerApprovalRequestEmail({
+  to,
+  partnerName,
+  bookingId,
+  customerName,
+  attractionTitle,
+  visitDate,
+  approvalDeadline,
+}) {
+  const frontendUrl = getFrontendUrl();
+  const link = `${frontendUrl}/partner/bookings`;
+  const shortId = formatBookingReference(bookingId);
+  const visitDateText = visitDate
+    ? new Date(visitDate).toLocaleDateString('vi-VN', { timeZone: 'UTC' })
+    : 'chưa xác định';
+  const deadlineText = approvalDeadline
+    ? new Date(approvalDeadline).toLocaleString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    })
+    : 'theo thời hạn hiển thị trên dashboard';
+
+  return sendMail({
+    to,
+    subject: `Yêu cầu đặt vé mới #${shortId} cần duyệt - VietTicket Travel`,
+    text:
+      `Xin chào ${partnerName || 'đối tác'}, yêu cầu #${shortId} của ${customerName || 'khách hàng'} `
+      + `tại ${attractionTitle || 'địa điểm'} ngày ${visitDateText} cần được xử lý trước ${deadlineText}.`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Có yêu cầu đặt vé mới cần duyệt',
+      preview:
+        `Yêu cầu <strong>#${shortId}</strong> của ${escapeHtml(customerName || 'khách hàng')} `
+        + `tại <strong>${escapeHtml(attractionTitle || 'địa điểm')}</strong>, ngày `
+        + `<strong>${escapeHtml(visitDateText)}</strong>, cần được xử lý trước `
+        + `<strong>${escapeHtml(deadlineText)}</strong>. Khách chưa bị thu tiền.`,
+      buttonText: 'Duyệt yêu cầu đặt vé',
+      link,
+    }),
+  });
+}
+
+async function sendBookingApprovedForPaymentEmail({
+  to,
+  fullName,
+  bookingId,
+  reservationId,
+  attractionTitle,
+  paymentDeadline,
+}) {
+  const frontendUrl = getFrontendUrl();
+  const link = `${frontendUrl}/checkout/${encodeURIComponent(reservationId)}`;
+  const shortId = formatBookingReference(bookingId);
+  const deadlineText = paymentDeadline
+    ? new Date(paymentDeadline).toLocaleString('vi-VN', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+      hour: '2-digit',
+      minute: '2-digit',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    })
+    : 'theo thời hạn hiển thị';
+
+  return sendMail({
+    to,
+    subject: `Đơn #${shortId} đã được duyệt - hoàn tất thanh toán`,
+    text:
+      `Xin chào ${fullName || 'bạn'}, đối tác đã duyệt đơn #${shortId} tại `
+      + `${attractionTitle || 'địa điểm'}. Hãy thanh toán trước ${deadlineText}: ${link}`,
+    fallbackLink: link,
+    html: createEmailTemplate({
+      title: 'Đối tác đã duyệt yêu cầu của bạn',
+      preview:
+        `Xin chào ${escapeHtml(fullName || 'bạn')}, yêu cầu <strong>#${shortId}</strong> tại `
+        + `<strong>${escapeHtml(attractionTitle || 'địa điểm')}</strong> đã được duyệt. `
+        + `Vui lòng hoàn tất thanh toán trước <strong>${escapeHtml(deadlineText)}</strong>; `
+        + 'sau thời điểm này hệ thống sẽ tự giải phóng chỗ.',
+      buttonText: 'Thanh toán ngay',
+      link,
+    }),
+  });
+}
+
 async function sendPendingApprovalExpiredEmail({
   to,
   fullName,
@@ -713,6 +801,8 @@ module.exports = {
   sendRefundStatusEmail,
   sendReissueTicketEmail,
   sendBookingRejectedEmail,
+  sendPartnerApprovalRequestEmail,
+  sendBookingApprovedForPaymentEmail,
   sendBookingCancelledByPartnerEmail,
   sendBookingCancelledForSafetyEmail,
   sendRecoveryCaseCreatedEmail,

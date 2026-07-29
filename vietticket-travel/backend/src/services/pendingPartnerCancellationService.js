@@ -8,6 +8,7 @@ const {
   getCapturedPayment,
   queueMandatoryRefund,
 } = require('./mandatoryRefundService');
+const { releaseVoucherRedemption } = require('./voucherRedemptionService');
 
 /**
  * Cancel a paid booking that is still waiting for partner approval.
@@ -72,9 +73,10 @@ async function cancelPendingPartnerBooking(
   }
 
   if (booking.voucherId) {
-    await tx.voucher.updateMany({
-      where: { id: booking.voucherId, usedCount: { gt: 0 } },
-      data: { usedCount: { decrement: 1 } },
+    await releaseVoucherRedemption(tx, {
+      bookingId: booking.id,
+      voucherId: booking.voucherId,
+      now,
     });
   }
 

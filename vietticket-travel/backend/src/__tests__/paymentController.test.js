@@ -108,6 +108,7 @@ function paymentFixture({ requiresManualApproval = false, partnerStatus = 'APPRO
             id: 'attr-1',
             publishedAt: new Date('2026-06-01T00:00:00.000Z'),
             publicationStatus: 'ACTIVE',
+            operationalStatus: 'ACTIVE',
             status: 'APPROVED',
             archivedAt: null,
             requiresManualApproval,
@@ -162,6 +163,7 @@ function setupTx({
               id: 'attr-1',
               publishedAt: new Date('2026-06-01T00:00:00.000Z'),
               publicationStatus: 'ACTIVE',
+              operationalStatus: 'ACTIVE',
               status: 'APPROVED',
               archivedAt: null,
               requiresManualApproval,
@@ -291,6 +293,7 @@ describe('Rescue replacement refund request', () => {
       body: {
         bookingId: replacement.id,
         reason: 'Thay đổi lịch trình cá nhân',
+        acknowledgeCancellation: true,
       },
     };
     const res = makeRes();
@@ -309,6 +312,7 @@ describe('Rescue replacement refund request', () => {
         requestKey: `recovery-customer:${replacement.id}`,
         originalAmount: replacement.totalAmount,
         amount: replacement.totalAmount,
+        mandatory: true,
       }),
     });
     expect(res.status).toHaveBeenCalledWith(201);
@@ -622,7 +626,7 @@ describe('vnpayIpn', () => {
       data: expect.objectContaining({
         status: 'CANCELLED',
         refundRequired: true,
-        cancellationSource: 'SALE_SUSPENDED_AFTER_HOLD',
+        cancellationSource: 'SYSTEM_PARTNER_SUSPENSION',
       }),
     }));
     expect(tx.refundRequest.upsert).toHaveBeenCalled();
@@ -692,6 +696,7 @@ describe('createVNPayUrl', () => {
           attraction: {
             publishedAt: new Date('2026-06-01T00:00:00.000Z'),
             publicationStatus: 'ACTIVE',
+            operationalStatus: 'ACTIVE',
             status: 'APPROVED',
             archivedAt: null,
             partner: { status: 'APPROVED' },

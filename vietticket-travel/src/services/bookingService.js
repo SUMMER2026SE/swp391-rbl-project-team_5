@@ -60,20 +60,26 @@ export const getItineraryBookingProgress = async (itineraryId) => {
 }
 
 export const applyVoucher = async (
-  bookingId,
+  reservationId,
   voucherCode,
-  subtotalAmount,
 ) => {
   const result = await apiRequest('/bookings/apply-voucher', {
     method: 'POST',
     body: {
-      bookingId,
+      reservationId,
       voucherCode,
-      subtotalAmount,
     },
   })
 
   return result
+}
+
+export const getAvailableVouchers = async (reservationId) => {
+  const result = await apiRequest(
+    `/bookings/available-vouchers?reservationId=${encodeURIComponent(reservationId)}`,
+    { method: 'GET' },
+  )
+  return Array.isArray(result.data) ? result.data : []
 }
 
 // Tạo URL thanh toán VNPay thật; trả về paymentUrl để redirect trình duyệt.
@@ -95,11 +101,11 @@ export const getRefundPreview = async (bookingId) => {
   return result.data
 }
 
-// Gửi yêu cầu hoàn tiền -> đơn chuyển sang REFUND_REQUESTED, Staff sẽ duyệt.
+// Xác nhận hủy -> QR mất hiệu lực ngay; staff chỉ thực hiện/đối soát hoàn tiền.
 export const createRefundRequest = async (bookingId, reason) => {
   const result = await apiRequest('/payments/refund-request', {
     method: 'POST',
-    body: { bookingId, reason },
+    body: { bookingId, reason, acknowledgeCancellation: true },
   })
   return result.data
 }
@@ -110,6 +116,7 @@ const bookingService = {
   createRefundRequest,
   createVNPayUrl,
   getBookingDetails,
+  getAvailableVouchers,
   getItineraryBookingProgress,
   getBookings,
   getLastReservationId,

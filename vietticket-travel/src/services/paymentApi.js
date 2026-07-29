@@ -18,9 +18,9 @@ export function listBankTransferQueue() {
   return apiRequest('/admin/bank-transfers', { method: 'GET' })
 }
 
-export function confirmBankTransfer(bookingId, note) {
+export function confirmBankTransfer(bookingId, payload = {}) {
   return apiRequest(
     `/admin/bank-transfers/${encodeURIComponent(bookingId)}/confirm`,
-    { method: 'POST', body: { note } },
+    { method: 'POST', body: payload },
   )
 }

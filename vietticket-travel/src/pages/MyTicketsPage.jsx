@@ -719,8 +719,9 @@ function TicketCard({
                 : `Đối tác cần phản hồi trước ${approvalTiming.deadlineLabel}`}
             </p>
             <p className="mt-1">
-              Bạn đã thanh toán nhưng QR chưa được phát hành. Nếu đối tác từ chối hoặc quá hạn,
-              booking này sẽ bị hủy và yêu cầu hoàn bắt buộc 100% được tạo về phương thức thanh toán gốc.
+              {booking.manualApproval?.paymentCapturedBeforeApproval
+                ? 'Giao dịch cũ đã được thu trước khi duyệt. Nếu đối tác từ chối hoặc quá hạn, hệ thống sẽ tạo yêu cầu hoàn bắt buộc 100%.'
+                : 'Bạn chưa bị thu tiền. Khi đối tác duyệt, trạng thái sẽ chuyển sang Chờ thanh toán và bạn có thể tiếp tục thanh toán tại đây.'}
             </p>
           </div>
         )}
@@ -798,7 +799,7 @@ function TicketCard({
               <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
                 hourglass_top
               </span>
-              Đang chờ duyệt hoàn tiền
+              Booking đã hủy — đang xử lý hoàn tiền
               {booking.refundRequest
                 ? ` — dự kiến nhận ${formatCurrency(booking.refundRequest.amount)}`
                 : ''}

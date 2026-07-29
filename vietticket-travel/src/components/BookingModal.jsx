@@ -176,7 +176,9 @@ export default function BookingModal({
     if (maxQuantity !== null && quantity > maxQuantity) {
       return `Chỉ còn ${maxQuantity}/${quantity} vé theo lịch đã chốt`
     }
-    return 'Tiếp tục thanh toán'
+    return requiresManualApproval
+      ? 'Tiếp tục nhập thông tin'
+      : 'Tiếp tục thanh toán'
   })()
 
   // Chính sách hoàn tiền của loại vé (hiển thị TRƯỚC khi khách thanh toán).
@@ -195,7 +197,7 @@ export default function BookingModal({
   })()
 
   const confirmationPolicyText = requiresManualApproval
-    ? 'Tiền được ghi nhận trước khi đối tác duyệt. Đối tác phải phản hồi trong tối đa 24 giờ và không muộn hơn giờ bắt đầu hoạt động. Nếu từ chối hoặc quá hạn, đúng booking này bị hủy và hệ thống tạo hoàn tiền bắt buộc 100%; QR chỉ phát hành sau khi duyệt.'
+    ? 'Đối tác phải phản hồi trong tối đa 24 giờ và không muộn hơn giờ bắt đầu hoạt động. Bạn chưa bị thu tiền trong lúc chờ; sau khi được duyệt, hãy thanh toán trong thời hạn mới để nhận QR.'
     : 'Vé QR được phát hành tự động sau khi thanh toán thành công.'
 
   const renderCalendarCells = () => {

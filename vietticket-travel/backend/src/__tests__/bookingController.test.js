@@ -57,6 +57,8 @@ describe('manual approval booking view', () => {
 
     expect(view).toEqual({
       required: true,
+      approved: false,
+      partnerApprovedAt: null,
       paymentCapturedBeforeApproval: true,
       approvalDeadline: new Date('2026-07-29T01:00:00.000Z'),
       maximumResponseHours: 24,
@@ -337,7 +339,28 @@ describe('getItineraryBookingProgress', () => {
 });
 
 describe('validateAndApplyVoucher', () => {
+  function mockHeldReservation(subtotalAmount, userId = 'user-1') {
+    mockPrisma.reservation.findFirst.mockResolvedValue({
+      id: 'reservation-preview',
+      userId,
+      quantity: 1,
+      status: 'HELD',
+      expiresAt: new Date(Date.now() + 60000),
+      snapshotUnitPrice: new Decimal(subtotalAmount),
+      ticketProduct: {
+        id: 'ticket-1',
+        attractionId: 'attraction-1',
+        sellingPrice: new Decimal(subtotalAmount),
+        attraction: {
+          id: 'attraction-1',
+          partnerId: 'partner-1',
+        },
+      },
+    });
+  }
+
   test('tính voucher phần trăm và áp dụng maxDiscount', async () => {
+    mockHeldReservation(800000);
     mockPrisma.voucher.findUnique.mockResolvedValue({
       id: 'voucher-1',
       code: 'VIETTICKET10',
@@ -352,7 +375,8 @@ describe('validateAndApplyVoucher', () => {
     });
 
     const req = {
-      body: { voucherCode: 'vietticket10', subtotalAmount: 800000 },
+      user: { id: 'user-1' },
+      body: { voucherCode: 'vietticket10', reservationId: 'reservation-preview' },
     };
     const res = makeResponse();
     const next = jest.fn();
@@ -372,6 +396,7 @@ describe('validateAndApplyVoucher', () => {
   });
 
   test('từ chối voucher khi chưa đạt minSpend', async () => {
+    mockHeldReservation(90000);
     mockPrisma.voucher.findUnique.mockResolvedValue({
       id: 'voucher-2',
       code: 'GIAM20',
@@ -386,7 +411,8 @@ describe('validateAndApplyVoucher', () => {
     });
 
     const req = {
-      body: { voucherCode: 'GIAM20', subtotalAmount: 90000 },
+      user: { id: 'user-1' },
+      body: { voucherCode: 'GIAM20', reservationId: 'reservation-preview' },
     };
     const res = makeResponse();
 
@@ -399,6 +425,7 @@ describe('validateAndApplyVoucher', () => {
   });
 
   test('chặn voucher loyalty của người khác (không phải chủ sở hữu)', async () => {
+    mockHeldReservation(300000, 'attacker-2');
     mockPrisma.voucher.findUnique.mockResolvedValue({
       id: 'voucher-lt',
       code: 'LTABCDEFGH',
@@ -417,7 +444,7 @@ describe('validateAndApplyVoucher', () => {
 
     await validateAndApplyVoucher({
       user: { id: 'attacker-2' },
-      body: { voucherCode: 'LTABCDEFGH', subtotalAmount: 300000 },
+      body: { voucherCode: 'LTABCDEFGH', reservationId: 'reservation-preview' },
     }, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(400);
@@ -427,6 +454,7 @@ describe('validateAndApplyVoucher', () => {
   });
 
   test('cho phép chủ sở hữu dùng voucher loyalty của mình', async () => {
+    mockHeldReservation(300000, 'owner-1');
     mockPrisma.voucher.findUnique.mockResolvedValue({
       id: 'voucher-lt',
       code: 'LTABCDEFGH',
@@ -445,7 +473,7 @@ describe('validateAndApplyVoucher', () => {
 
     await validateAndApplyVoucher({
       user: { id: 'owner-1' },
-      body: { voucherCode: 'LTABCDEFGH', subtotalAmount: 300000 },
+      body: { voucherCode: 'LTABCDEFGH', reservationId: 'reservation-preview' },
     }, res, jest.fn());
 
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
@@ -455,6 +483,7 @@ describe('validateAndApplyVoucher', () => {
   });
 
   test('làm tròn voucher phần trăm về số nguyên VND theo half-up', async () => {
+    mockHeldReservation(99999);
     mockPrisma.voucher.findUnique.mockResolvedValue({
       id: 'voucher-rounding',
       code: 'ROUND125',
@@ -470,7 +499,8 @@ describe('validateAndApplyVoucher', () => {
     const res = makeResponse();
 
     await validateAndApplyVoucher({
-      body: { voucherCode: 'ROUND125', subtotalAmount: 99999 },
+      user: { id: 'user-1' },
+      body: { voucherCode: 'ROUND125', reservationId: 'reservation-preview' },
     }, res, jest.fn());
 
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
@@ -481,16 +511,18 @@ describe('validateAndApplyVoucher', () => {
     }));
   });
 
-  test('từ chối subtotal có phần lẻ VND ngay ở bước preview voucher', async () => {
+  test('từ chối giá reservation có phần lẻ VND ngay ở bước preview voucher', async () => {
+    mockHeldReservation('100000.5');
     const res = makeResponse();
 
     await validateAndApplyVoucher({
-      body: { voucherCode: 'ANY', subtotalAmount: 100000.5 },
+      user: { id: 'user-1' },
+      body: { voucherCode: 'ANY', reservationId: 'reservation-preview' },
     }, res, jest.fn());
 
-    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.status).toHaveBeenCalledWith(409);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringContaining('số nguyên VND'),
+      message: expect.stringContaining('không hợp lệ'),
     }));
     expect(mockPrisma.voucher.findUnique).not.toHaveBeenCalled();
   });
@@ -542,6 +574,7 @@ describe('createBooking', () => {
           whatToBring: ['CCCD'],
           publishedAt: new Date('2026-06-01T00:00:00.000Z'),
           publicationStatus: 'ACTIVE',
+          operationalStatus: 'ACTIVE',
           status: 'APPROVED',
           archivedAt: null,
           requiresManualApproval: false,
@@ -598,6 +631,7 @@ describe('createBooking', () => {
                   id: 'attraction-1',
                   publishedAt: new Date('2026-06-01T00:00:00.000Z'),
                   publicationStatus: 'ACTIVE',
+                  operationalStatus: 'ACTIVE',
                   status: 'APPROVED',
                   archivedAt: null,
                   title: 'Test Attraction',
@@ -630,6 +664,13 @@ describe('createBooking', () => {
         reservationId: 'reservation-1',
         voucherCode: 'GIAM20',
         paymentMethod: 'vnpay',
+        travelerManifest: {
+          confirmedAccurate: true,
+          travelers: [
+            { fullName: 'Nguyễn Văn A', dateOfBirth: '1990-01-01', heightCm: 170 },
+            { fullName: 'Trần Thị B', dateOfBirth: '1992-02-02', heightCm: 165 },
+          ],
+        },
       },
     };
     const res = makeResponse();
@@ -723,6 +764,7 @@ describe('createBooking', () => {
           district: null,
           publishedAt: new Date('2026-06-01T00:00:00.000Z'),
           publicationStatus: 'ACTIVE',
+          operationalStatus: 'ACTIVE',
           status: 'APPROVED',
           archivedAt: null,
           images: [],
@@ -745,6 +787,12 @@ describe('createBooking', () => {
       body: {
         reservationId: reservation.id,
         paymentMethod: 'vnpay',
+        travelerManifest: {
+          confirmedAccurate: true,
+          travelers: [
+            { fullName: 'Nguyễn Văn A', dateOfBirth: '1990-01-01' },
+          ],
+        },
       },
     }, res, jest.fn());
 

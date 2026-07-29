@@ -60,6 +60,7 @@ async function getBookableSchedule(client, ticketProductId, date) {
           partner: {
             select: {
               id: true,
+              userId: true,
               businessName: true,
               status: true,
               commissionRate: true,
@@ -267,6 +268,7 @@ async function getTicketAvailabilityBatch(
           partner: {
             select: {
               id: true,
+              userId: true,
               businessName: true,
               status: true,
               commissionRate: true,

@@ -5,6 +5,7 @@ const { isTicketProductSaleEnabled } = require('../services/catalogVisibilitySer
 const {
   CUSTOMER_BOOKING_CHANGE_POLICY,
   MAX_TICKETS_PER_ORDER,
+  getManualApprovalMinLeadMs,
 } = require('../config/bookingPolicy');
 const { formatLocation } = require('../utils/location');
 const {
@@ -24,11 +25,28 @@ const {
 } = require('../utils/bankTransferPolicy');
 const { getBankTransferConfig } = require('../config/runtimeConfig');
 const { isCapturedPayment } = require('../utils/paymentGateway');
-const { getManualApprovalDeadline } = require('../utils/activityTime');
+const {
+  MANUAL_APPROVAL_TIMEOUT_MS,
+  getBookingActivityWindow,
+  getManualApprovalDeadline,
+} = require('../utils/activityTime');
 const {
   calculateBookingFinancials,
   normalizeVoucherFunding,
 } = require('../services/bookingFinancialService');
+const { queueNewBookingNotification } = require('../realtime/events');
+const {
+  PARTNER_APPROVAL_REQUESTED_TOPIC,
+  enqueueBookingNotification,
+} = require('../services/bookingNotificationService');
+const {
+  claimVoucherRedemption,
+  countActiveVoucherUses,
+} = require('../services/voucherRedemptionService');
+const {
+  normalizeTravelerManifest,
+} = require('../services/travelerManifestService');
+const { normalizeInvoiceDetails } = require('../services/invoiceDetailsService');
 
 // Chỉ mở phương thức chuyển khoản khi nền tảng đã cấu hình tài khoản nhận tiền,
 // tránh việc khách chọn được rồi lại không có mã QR để chuyển.
@@ -84,6 +102,16 @@ const bookingInclude = {
 
 function normalizeVoucherCode(value) {
   return String(value || '').trim().toUpperCase();
+}
+
+function voucherContextOf(reservation) {
+  const product = reservation?.ticketProduct;
+  const attraction = product?.attraction;
+  return {
+    partnerId: attraction?.partnerId || attraction?.partner?.id || null,
+    attractionId: attraction?.id || product?.attractionId || null,
+    ticketProductId: product?.id || reservation?.ticketProductId || null,
+  };
 }
 
 function normalizeItineraryContext(value) {
@@ -462,6 +490,8 @@ function toReservationResponse(reservation) {
       exclusions: operationalList(product.exclusions),
     },
     ticketName: product.name,
+    ticketRestrictions: reservation.snapshotTicketRestrictions
+      || buildTicketRestrictions(product),
     bookingScope: 'SINGLE_TICKET_PRODUCT',
     lineItemCount: 1,
     changePolicy: CUSTOMER_BOOKING_CHANGE_POLICY,
@@ -509,6 +539,10 @@ function toBookingResponse(booking) {
     attractionLocation: snapshot.attractionLocation,
     attractionImage: snapshot.attractionImage,
     ticketName: snapshot.ticketName,
+    ticketRestrictions: booking.snapshotTicketRestrictions
+      || buildTicketRestrictions(product),
+    travelerManifest: booking.travelerManifest || null,
+    invoiceDetails: booking.invoiceDetails || null,
     bookingScope: 'SINGLE_TICKET_PRODUCT',
     lineItemCount: 1,
     changePolicy: CUSTOMER_BOOKING_CHANGE_POLICY,
@@ -580,20 +614,42 @@ function toBookingResponse(booking) {
 }
 
 function buildManualApprovalView(booking) {
-  if (booking?.status !== 'PENDING_PARTNER') return null;
+  const requiresApproval = Boolean(
+    booking?.partnerApprovalRequestedAt
+    || booking?.partnerApprovedAt
+    || booking?.status === 'PENDING_PARTNER',
+  );
+  if (!requiresApproval) return null;
   const approvalDeadline = getManualApprovalDeadline(booking);
+  const paymentCapturedBeforeApproval = (booking.payments || []).some((payment) =>
+    isCapturedPayment(payment, { allowInternalCredit: true }));
   return {
     required: true,
-    paymentCapturedBeforeApproval: true,
+    approved: Boolean(booking.partnerApprovedAt),
+    partnerApprovedAt: booking.partnerApprovedAt || null,
+    paymentCapturedBeforeApproval,
     approvalDeadline,
     maximumResponseHours: 24,
     deadlineRule: 'EARLIER_OF_24_HOURS_OR_ACTIVITY_START',
-    timeoutOutcome: 'CANCEL_AND_MANDATORY_FULL_REFUND',
+    timeoutOutcome: paymentCapturedBeforeApproval
+      ? 'CANCEL_AND_MANDATORY_FULL_REFUND'
+      : 'CANCEL_WITHOUT_CHARGE',
   };
 }
 
-function validateVoucher(voucher, subtotalAmount, now = new Date(), userId = null) {
-  if (!voucher || !voucher.isActive || voucher.expiryDate <= now) {
+function validateVoucher(
+  voucher,
+  subtotalAmount,
+  now = new Date(),
+  userId = null,
+  context = {},
+) {
+  if (
+    !voucher
+    || !voucher.isActive
+    || voucher.startDate > now
+    || voucher.expiryDate <= now
+  ) {
     const error = new Error('Mã ưu đãi không hợp lệ hoặc đã hết hạn.');
     error.statusCode = 400;
     throw error;
@@ -611,6 +667,50 @@ function validateVoucher(voucher, subtotalAmount, now = new Date(), userId = nul
   if (voucher.usageLimit != null && voucher.usedCount >= voucher.usageLimit) {
     const error = new Error('Mã ưu đãi đã hết lượt sử dụng.');
     error.statusCode = 400;
+    throw error;
+  }
+  if (
+    Number(voucher.activeUserUsage || 0)
+    >= Math.max(Number(voucher.maxUsesPerUser || 1), 1)
+  ) {
+    const error = new Error('Bạn đã sử dụng đủ lượt cho mã ưu đãi này.');
+    error.statusCode = 409;
+    error.code = 'VOUCHER_USER_LIMIT_REACHED';
+    throw error;
+  }
+  if (
+    voucher.applicablePartnerId
+    && voucher.applicablePartnerId !== context.partnerId
+  ) {
+    const error = new Error('Mã ưu đãi không áp dụng cho nhà cung cấp này.');
+    error.statusCode = 409;
+    throw error;
+  }
+  if (
+    voucher.applicableAttractionId
+    && voucher.applicableAttractionId !== context.attractionId
+  ) {
+    const error = new Error('Mã ưu đãi không áp dụng cho địa điểm này.');
+    error.statusCode = 409;
+    throw error;
+  }
+  if (
+    voucher.applicableTicketProductId
+    && voucher.applicableTicketProductId !== context.ticketProductId
+  ) {
+    const error = new Error('Mã ưu đãi không áp dụng cho gói vé này.');
+    error.statusCode = 409;
+    throw error;
+  }
+  if (
+    ['PARTNER', 'SHARED'].includes(String(voucher.fundingSource || '').toUpperCase())
+    && (
+      !voucher.fundingPartnerId
+      || voucher.fundingPartnerId !== context.partnerId
+    )
+  ) {
+    const error = new Error('Nguồn tài trợ của mã ưu đãi không khớp nhà cung cấp.');
+    error.statusCode = 409;
     throw error;
   }
 
@@ -684,12 +784,22 @@ function calculateDiscount(voucher, subtotalAmount) {
   return Decimal.min(discountAmount, subtotalAmount);
 }
 
-async function findVoucher(client, voucherCode, subtotalAmount, now, userId = null) {
+async function findVoucher(
+  client,
+  voucherCode,
+  subtotalAmount,
+  now,
+  userId = null,
+  context = {},
+) {
   const code = normalizeVoucherCode(voucherCode);
   if (!code) return { voucher: null, discountAmount: new Decimal(0) };
 
   const voucher = await client.voucher.findUnique({ where: { code } });
-  validateVoucher(voucher, subtotalAmount, now, userId);
+  if (voucher) {
+    voucher.activeUserUsage = await countActiveVoucherUses(client, voucher.id, userId);
+  }
+  validateVoucher(voucher, subtotalAmount, now, userId, context);
 
   return {
     voucher,
@@ -839,19 +949,41 @@ async function getBooking(req, res, next) {
 async function validateAndApplyVoucher(req, res, next) {
   try {
     const voucherCode = normalizeVoucherCode(req.body?.voucherCode);
-    const subtotalRaw = req.body?.subtotalAmount;
+    const reservationId = String(
+      req.body?.reservationId || req.body?.bookingId || '',
+    ).trim();
 
     if (!voucherCode) {
       return res.status(400).json({ message: 'Vui lòng nhập mã ưu đãi.' });
     }
-
-    const parsedSubtotal = parseVndInteger(subtotalRaw);
-    if (parsedSubtotal === null) {
-      return res.status(400).json({
-        message: 'Tạm tính phải là số nguyên VND hợp lệ lớn hơn 0.',
-      });
+    if (!reservationId) {
+      return res.status(400).json({ message: 'reservationId là bắt buộc.' });
     }
-    const subtotalAmount = new Decimal(parsedSubtotal);
+    const reservation = await prisma.reservation.findFirst({
+      where: {
+        id: reservationId,
+        userId: req.user.id,
+        status: 'HELD',
+        expiresAt: { gt: new Date() },
+      },
+      include: {
+        ticketProduct: {
+          include: {
+            attraction: { select: { id: true, partnerId: true } },
+          },
+        },
+      },
+    });
+    if (!reservation) {
+      return res.status(404).json({ message: 'Đơn giữ chỗ không còn hiệu lực.' });
+    }
+    const unitPrice = parseVndInteger(
+      reservation.snapshotUnitPrice ?? reservation.ticketProduct.sellingPrice,
+    );
+    if (unitPrice === null) {
+      return res.status(409).json({ message: 'Giá vé hiện tại không hợp lệ.' });
+    }
+    const subtotalAmount = new Decimal(unitPrice).mul(reservation.quantity);
 
     const { voucher, discountAmount } = await findVoucher(
       prisma,
@@ -859,6 +991,7 @@ async function validateAndApplyVoucher(req, res, next) {
       subtotalAmount,
       new Date(),
       req.user?.id || null,
+      voucherContextOf(reservation),
     );
     const totalAmount = subtotalAmount.minus(discountAmount);
     const parsedTotal = parseVndInteger(totalAmount);
@@ -894,6 +1027,109 @@ async function validateAndApplyVoucher(req, res, next) {
     if (error.statusCode === 400) {
       return res.status(400).json({ message: error.message });
     }
+    return next(error);
+  }
+}
+
+async function listApplicableVouchers(req, res, next) {
+  try {
+    const userId = req.user?.id;
+    const reservationId = String(req.query?.reservationId || '').trim();
+    if (!reservationId) {
+      return res.status(400).json({ message: 'reservationId là bắt buộc.' });
+    }
+
+    const reservation = await prisma.reservation.findFirst({
+      where: {
+        id: reservationId,
+        userId,
+        status: 'HELD',
+      },
+      select: {
+        id: true,
+        quantity: true,
+        snapshotUnitPrice: true,
+        expiresAt: true,
+        ticketProduct: {
+          select: {
+            id: true,
+            attractionId: true,
+            sellingPrice: true,
+            attraction: { select: { id: true, partnerId: true } },
+          },
+        },
+      },
+    });
+    const now = new Date();
+    if (!reservation || reservation.expiresAt <= now) {
+      return res.status(404).json({ message: 'Đơn giữ chỗ không còn hiệu lực.' });
+    }
+
+    const unitPrice = parseVndInteger(
+      reservation.snapshotUnitPrice ?? reservation.ticketProduct.sellingPrice,
+    );
+    if (unitPrice === null) {
+      return res.status(409).json({ message: 'Giá vé hiện tại không hợp lệ.' });
+    }
+    const subtotalAmount = new Decimal(unitPrice).mul(reservation.quantity);
+    const vouchers = await prisma.voucher.findMany({
+      where: {
+        isActive: true,
+        startDate: { lte: now },
+        expiryDate: { gt: now },
+        OR: [{ userId: null }, { userId }],
+      },
+      orderBy: [{ expiryDate: 'asc' }, { createdAt: 'desc' }],
+      take: 50,
+    });
+
+    const applicable = [];
+    for (const voucher of vouchers) {
+      try {
+        voucher.activeUserUsage = await countActiveVoucherUses(
+          prisma,
+          voucher.id,
+          userId,
+        );
+        validateVoucher(
+          voucher,
+          subtotalAmount,
+          now,
+          userId,
+          voucherContextOf(reservation),
+        );
+        const discountAmount = calculateDiscount(voucher, subtotalAmount);
+        const totalAmount = subtotalAmount.minus(discountAmount);
+        if (parseVndInteger(totalAmount) === null || totalAmount.lessThan(MIN_VNPAY_AMOUNT)) {
+          continue;
+        }
+        applicable.push({
+          id: voucher.id,
+          code: voucher.code,
+          source: voucher.source,
+          discountType: voucher.discountType,
+          discountValue: decimalToNumber(voucher.discountValue),
+          maxDiscount: voucher.maxDiscount ? decimalToNumber(voucher.maxDiscount) : null,
+          minSpend: voucher.minSpend ? decimalToNumber(voucher.minSpend) : null,
+          expiryDate: voucher.expiryDate,
+          discountAmount: decimalToNumber(discountAmount),
+          totalAmount: decimalToNumber(totalAmount),
+        });
+      } catch {
+        // Voucher hết lượt hoặc không đạt điều kiện không nên làm hỏng cả danh sách.
+      }
+    }
+    applicable.sort((left, right) => (
+      right.discountAmount - left.discountAmount
+      || new Date(left.expiryDate) - new Date(right.expiryDate)
+    ));
+
+    return res.json({
+      success: true,
+      data: applicable,
+      meta: { subtotalAmount: decimalToNumber(subtotalAmount) },
+    });
+  } catch (error) {
     return next(error);
   }
 }
@@ -946,6 +1182,7 @@ async function createBooking(req, res, next) {
                         businessName: true,
                         commissionRate: true,
                         status: true,
+                        userId: true,
                       },
                     },
                     images: {
@@ -980,6 +1217,20 @@ async function createBooking(req, res, next) {
           throw error;
         }
         if (
+          (reservation.ticketProduct.attraction.partner?.userId
+            && reservation.ticketProduct.attraction.partner.userId === userId)
+          || (req.user?.employerPartnerId
+            && req.user.employerPartnerId
+              === reservation.ticketProduct.attraction.partner?.id)
+        ) {
+          const error = new Error(
+            'Đối tác và nhân viên của đối tác không được tự đặt vé tại địa điểm mình quản lý.',
+          );
+          error.statusCode = 403;
+          error.code = 'SELF_BOOKING_NOT_ALLOWED';
+          throw error;
+        }
+        if (
           !Number.isSafeInteger(reservation.quantity)
           || reservation.quantity < 1
           || reservation.quantity > MAX_TICKETS_PER_ORDER
@@ -990,6 +1241,18 @@ async function createBooking(req, res, next) {
           error.statusCode = 400;
           throw error;
         }
+        const participantCount = reservation.quantity * getSnapshotAdmissionCount(reservation);
+        const restrictions = reservation.snapshotTicketRestrictions
+          || buildTicketRestrictions(reservation.ticketProduct);
+        const travelerManifest = normalizeTravelerManifest(req.body?.travelerManifest, {
+          participantCount,
+          restrictions,
+          visitDate: reservation.date,
+        });
+        const invoiceDetails = normalizeInvoiceDetails(req.body?.invoiceDetails, {
+          fallbackEmail: email,
+          now,
+        });
 
         const existingBooking = await tx.booking.findUnique({
           where: { reservationId },
@@ -1027,6 +1290,7 @@ async function createBooking(req, res, next) {
           subtotalAmount,
           now,
           userId,
+          voucherContextOf(reservation),
         );
         const customerTotalAmount = subtotalAmount.minus(discountAmount);
         const parsedTotal = parseVndInteger(customerTotalAmount);
@@ -1079,6 +1343,32 @@ async function createBooking(req, res, next) {
           }
         }
 
+        const requiresPartnerApproval =
+          reservation.ticketProduct.attraction.requiresManualApproval === true;
+        let partnerApprovalDeadline = null;
+        if (requiresPartnerApproval) {
+          const timeoutDeadline = new Date(now.getTime() + MANUAL_APPROVAL_TIMEOUT_MS);
+          const { startsAt } = getBookingActivityWindow({ reservation });
+          if (
+            startsAt
+            && startsAt.getTime() - now.getTime() < getManualApprovalMinLeadMs()
+          ) {
+            const error = new Error(
+              'Lịch tham quan này đã quá sát giờ để đối tác duyệt và khách hoàn tất thanh toán an toàn.',
+            );
+            error.statusCode = 409;
+            throw error;
+          }
+          partnerApprovalDeadline = startsAt && startsAt < timeoutDeadline
+            ? startsAt
+            : timeoutDeadline;
+          if (partnerApprovalDeadline <= now) {
+            const error = new Error('Đã quá giờ đối tác có thể xác nhận cho lịch tham quan này.');
+            error.statusCode = 409;
+            throw error;
+          }
+        }
+
         const created = await tx.booking.create({
           data: {
             userId,
@@ -1090,12 +1380,16 @@ async function createBooking(req, res, next) {
             subtotalAmount,
             discountAmount,
             totalAmount: financials.totalAmount,
-            status: 'PENDING_PAYMENT',
+            status: requiresPartnerApproval ? 'PENDING_PARTNER' : 'PENDING_PAYMENT',
+            partnerApprovalRequestedAt: requiresPartnerApproval ? now : null,
+            partnerApprovalDeadline,
             paymentMethod,
             fullName,
             email,
             phone: phone || null,
             note: note || null,
+            travelerManifest,
+            invoiceDetails,
             commissionRateSnapshot: commissionRate,
             voucherFundingSourceSnapshot:
               financials.voucherFundingSourceSnapshot,
@@ -1117,10 +1411,38 @@ async function createBooking(req, res, next) {
           },
         });
 
+        if (voucher) {
+          await claimVoucherRedemption(tx, {
+            voucher,
+            userId,
+            bookingId: created.id,
+          });
+        }
+
+        if (requiresPartnerApproval) {
+          await enqueueBookingNotification(tx, {
+            bookingId: created.id,
+            topic: PARTNER_APPROVAL_REQUESTED_TOPIC,
+          });
+        }
+
+        if (requiresPartnerApproval && partnerApprovalDeadline > reservation.expiresAt) {
+          await tx.reservation.update({
+            where: { id: reservationId },
+            data: {
+              expiresAt: partnerApprovalDeadline,
+              paymentDeadline: null,
+            },
+          });
+        }
+
         // Chuyển khoản ngân hàng cần thời gian cho khách chuyển tiền và cho
         // Admin đối chiếu sao kê. Giữ chỗ mặc định 10 phút sẽ khiến worker hủy
         // đơn dù khách đã chuyển tiền -> nới hạn giữ chỗ cho riêng đơn này.
-        if (paymentMethod === BANK_TRANSFER_METHOD) {
+        // Với sản phẩm duyệt thủ công, đối tác phải duyệt trước rồi hệ thống mới
+        // mở một payment window mới. Không được ghi đè hạn duyệt 24 giờ bằng
+        // hạn chuyển khoản ở bước tạo booking.
+        if (paymentMethod === BANK_TRANSFER_METHOD && !requiresPartnerApproval) {
           const bankHoldExpiresAt = new Date(now.getTime() + getBankTransferHoldMs());
           if (bankHoldExpiresAt > reservation.expiresAt) {
             await tx.reservation.update({
@@ -1141,6 +1463,9 @@ async function createBooking(req, res, next) {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
+    if (booking.status === 'PENDING_PARTNER') {
+      queueNewBookingNotification(booking.id);
+    }
     return res.status(201).json({
       success: true,
       message: 'Tạo đơn đặt vé thành công.',
@@ -1296,6 +1621,7 @@ module.exports = {
   getItineraryBookingProgress,
   getBooking,
   getReservation,
+  listApplicableVouchers,
   listBookings,
   validateAndApplyVoucher,
   // Helper dùng chung cho luồng thanh toán VNPay (L2) & duyệt vé đối tác (N2)

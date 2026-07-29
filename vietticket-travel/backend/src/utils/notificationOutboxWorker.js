@@ -9,6 +9,10 @@ const {
   claimOutboxRow,
   deliverClaimedOutboxRow,
 } = require('../services/refundNotificationService');
+const {
+  BOOKING_NOTIFICATION_TOPICS,
+  deliverClaimedBookingOutboxRow,
+} = require('../services/bookingNotificationService');
 const { runWithJobLease } = require('./jobLease');
 
 const DEFAULT_INTERVAL_MS = 30 * 1000;
@@ -18,7 +22,7 @@ async function sweepNotificationOutbox({ limit = 30, now = new Date() } = {}) {
   const staleBefore = new Date(now.getTime() - OUTBOX_CLAIM_TTL_MS);
   const rows = await prisma.notificationOutbox.findMany({
     where: {
-      topic: REFUND_NOTIFICATION_TOPIC,
+      topic: { in: [REFUND_NOTIFICATION_TOPIC, ...BOOKING_NOTIFICATION_TOPICS] },
       OR: [
         { status: OUTBOX_PENDING, nextAttemptAt: { lte: now } },
         { status: OUTBOX_PROCESSING, lockedAt: { lte: staleBefore } },
@@ -33,7 +37,10 @@ async function sweepNotificationOutbox({ limit = 30, now = new Date() } = {}) {
     try {
       const claimed = await claimOutboxRow(candidate.dedupeKey, now);
       if (!claimed || claimed.status !== OUTBOX_PROCESSING) continue;
-      if (await deliverClaimedOutboxRow(claimed, now)) delivered += 1;
+      const wasDelivered = BOOKING_NOTIFICATION_TOPICS.includes(claimed.topic)
+        ? await deliverClaimedBookingOutboxRow(claimed, now)
+        : await deliverClaimedOutboxRow(claimed, now);
+      if (wasDelivered) delivered += 1;
     } catch (error) {
       console.error(
         `[notification-outbox] Không thể giao ${candidate.dedupeKey}:`,

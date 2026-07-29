@@ -32,23 +32,30 @@ const checkoutMilestones = [
   { label: 'Nhận vé QR', icon: 'qr_code_2' },
 ]
 
-const checkoutTrustItems = [
-  {
-    title: 'Thanh toán bảo mật',
-    description: 'Chọn VNPay hoặc VietQR; VietTicket không lưu thông tin thẻ hay tài khoản ngân hàng.',
-    icon: 'lock',
-  },
-  {
-    title: 'Vé điện tử rõ ràng',
-    description: 'Vé QR nằm trong mục Vé của tôi sau khi thanh toán và đơn được xác nhận.',
-    icon: 'confirmation_number',
-  },
-  {
-    title: 'Hỗ trợ sau đặt vé',
-    description: 'Mã đặt chỗ giúp đội hỗ trợ tra cứu nhanh khi lịch trình thay đổi.',
-    icon: 'support_agent',
-  },
-]
+const getCheckoutTrustItems = (paymentMethods) => {
+  const availableMethods = paymentMethods
+    .map((method) => method.label)
+    .filter(Boolean)
+    .join(' hoặc ')
+
+  return [
+    {
+      title: 'Thanh toán bảo mật',
+      description: `Chọn ${availableMethods || 'phương thức thanh toán đang khả dụng'}; VietTicket không lưu thông tin thẻ hay tài khoản ngân hàng.`,
+      icon: 'lock',
+    },
+    {
+      title: 'Vé điện tử rõ ràng',
+      description: 'Vé QR nằm trong mục Vé của tôi sau khi thanh toán và đơn được xác nhận.',
+      icon: 'confirmation_number',
+    },
+    {
+      title: 'Hỗ trợ sau đặt vé',
+      description: 'Mã đặt chỗ giúp đội hỗ trợ tra cứu nhanh khi lịch trình thay đổi.',
+      icon: 'support_agent',
+    },
+  ]
+}
 
 const checkoutChecklistItems = [
   { label: 'Ngày và khung giờ tham quan đã đúng', icon: 'event_available' },
@@ -79,6 +86,77 @@ const formatDate = (value) => {
       })
 }
 
+const emptyTraveler = () => ({
+  fullName: '',
+  dateOfBirth: '',
+  heightCm: '',
+})
+
+const emptyInvoiceDetails = () => ({
+  requestInvoice: false,
+  buyerType: 'PERSONAL',
+  invoiceName: '',
+  taxCode: '',
+  invoiceAddress: '',
+  invoiceEmail: '',
+})
+
+const createTravelerManifest = (participantCount, existing = null) => {
+  if (existing?.travelers?.length) {
+    return {
+      version: 1,
+      travelers: existing.travelers.map((traveler) => ({
+        fullName: traveler.fullName || '',
+        dateOfBirth: traveler.dateOfBirth || '',
+        heightCm: traveler.heightCm ?? '',
+      })),
+      adultCompanion: existing.adultCompanion
+        ? {
+            fullName: existing.adultCompanion.fullName || '',
+            dateOfBirth: existing.adultCompanion.dateOfBirth || '',
+            companionBookingReference:
+              existing.adultCompanion.companionBookingReference || '',
+          }
+        : {
+            fullName: '',
+            dateOfBirth: '',
+            companionBookingReference: '',
+          },
+      confirmedAccurate: existing.confirmedAccurate === true,
+    }
+  }
+
+  return {
+    version: 1,
+    travelers: Array.from(
+      { length: Math.max(1, Number(participantCount) || 1) },
+      emptyTraveler,
+    ),
+    adultCompanion: {
+      fullName: '',
+      dateOfBirth: '',
+      companionBookingReference: '',
+    },
+    confirmedAccurate: false,
+  }
+}
+
+const ageAtVisit = (dateOfBirth, visitDate) => {
+  if (!dateOfBirth || !visitDate) return null
+  const birth = new Date(`${dateOfBirth}T00:00:00Z`)
+  const visit = new Date(`${visitDate}T00:00:00Z`)
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(visit.getTime())) return null
+  let age = visit.getUTCFullYear() - birth.getUTCFullYear()
+  if (
+    visit.getUTCMonth() < birth.getUTCMonth()
+    || (
+      visit.getUTCMonth() === birth.getUTCMonth()
+      && visit.getUTCDate() < birth.getUTCDate()
+    )
+  ) age -= 1
+  return age
+}
+
 function CheckoutPage() {
   const { reservationId } = useParams()
   const [searchParams] = useSearchParams()
@@ -93,6 +171,7 @@ function CheckoutPage() {
     email: '',
     phone: '',
   })
+  const [invoiceDetails, setInvoiceDetails] = useState(emptyInvoiceDetails)
   const [selectedPayment, setSelectedPayment] = useState('vnpay')
   const [paymentMethods, setPaymentMethods] = useState(fallbackPaymentMethods)
   const navigate = useNavigate()
@@ -101,8 +180,12 @@ function CheckoutPage() {
   const [voucherMessage, setVoucherMessage] = useState('')
   const [voucherSuccess, setVoucherSuccess] = useState(false)
   const [note, setNote] = useState('')
+  const [travelerManifest, setTravelerManifest] = useState(() =>
+    createTravelerManifest(1))
   const [isLoading, setIsLoading] = useState(true)
   const [isApplyingVoucher, setIsApplyingVoucher] = useState(false)
+  const [availableVouchers, setAvailableVouchers] = useState([])
+  const [isLoadingVouchers, setIsLoadingVouchers] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [now, setNow] = useState(() => Date.now())
@@ -152,6 +235,12 @@ function CheckoutPage() {
               voucherCode: bookingDetails.voucherCode || '',
               discountAmount: bookingDetails.discountAmount || 0,
               totalAmount: bookingDetails.totalAmount,
+              bookingStatus: bookingDetails.status,
+              manualApproval: bookingDetails.manualApproval,
+              travelerManifest: bookingDetails.travelerManifest,
+              invoiceDetails: bookingDetails.invoiceDetails,
+              ticketRestrictions:
+                bookingDetails.ticketRestrictions || reservation.ticketRestrictions,
             }
             setContact({
               fullName: finalBookingData.fullName || '',
@@ -162,6 +251,16 @@ function CheckoutPage() {
             setSelectedPayment(finalBookingData.paymentMethod || 'vnpay')
             setVoucherCode(finalBookingData.voucherCode || '')
             setAppliedVoucherCode(finalBookingData.voucherCode || '')
+            setInvoiceDetails(finalBookingData.invoiceDetails
+              ? {
+                  requestInvoice: true,
+                  buyerType: finalBookingData.invoiceDetails.buyerType || 'PERSONAL',
+                  invoiceName: finalBookingData.invoiceDetails.invoiceName || '',
+                  taxCode: finalBookingData.invoiceDetails.taxCode || '',
+                  invoiceAddress: finalBookingData.invoiceDetails.invoiceAddress || '',
+                  invoiceEmail: finalBookingData.invoiceDetails.invoiceEmail || '',
+                }
+              : emptyInvoiceDetails())
           } catch (bookingError) {
             console.error('Không thể tải chi tiết đơn hàng cũ:', bookingError)
           }
@@ -173,6 +272,10 @@ function CheckoutPage() {
           })
         }
 
+        setTravelerManifest(createTravelerManifest(
+          finalBookingData.participantCount || finalBookingData.quantity,
+          finalBookingData.travelerManifest,
+        ))
         setBooking(finalBookingData)
       } catch (error) {
         if (active) setErrorMessage(error.message)
@@ -182,6 +285,23 @@ function CheckoutPage() {
     }
 
     loadReservation()
+    return () => {
+      active = false
+    }
+  }, [reservationId])
+
+  useEffect(() => {
+    let active = true
+    bookingService.getAvailableVouchers(reservationId)
+      .then((vouchers) => {
+        if (active) setAvailableVouchers(vouchers)
+      })
+      .catch(() => {
+        if (active) setAvailableVouchers([])
+      })
+      .finally(() => {
+        if (active) setIsLoadingVouchers(false)
+      })
     return () => {
       active = false
     }
@@ -200,6 +320,19 @@ function CheckoutPage() {
     booking && now > 0 && booking.status === 'held' && expiresAtMs <= now,
   )
   const hasVoucherCode = voucherCode.trim().length > 0
+  const hasAdultTraveler = booking
+    ? travelerManifest.travelers.some((traveler) => {
+        const age = ageAtVisit(traveler.dateOfBirth, booking.visitDate)
+        return age != null && age >= 18
+      })
+    : false
+  const needsAdultCompanion = Boolean(
+    booking?.ticketRestrictions?.requiresAdult && !hasAdultTraveler,
+  )
+  const needsTravelerHeight = Boolean(
+    booking?.ticketRestrictions?.minHeightCm != null
+    || booking?.ticketRestrictions?.maxHeightCm != null,
+  )
 
   const handleContactChange = (field) => (event) => {
     setContact((current) => ({ ...current, [field]: event.target.value }))
@@ -226,10 +359,11 @@ function CheckoutPage() {
     }
   }
 
-  const handleApplyVoucher = async (event) => {
+  const handleApplyVoucher = async (event, quickCode = '') => {
     event.preventDefault()
     if (!booking || isApplyingVoucher) return
-    if (!hasVoucherCode) {
+    const codeToApply = String(quickCode || voucherCode).trim()
+    if (!codeToApply) {
       setVoucherMessage('Vui lòng nhập mã ưu đãi.')
       setVoucherSuccess(false)
       return
@@ -240,11 +374,10 @@ function CheckoutPage() {
 
     try {
       const result = await bookingService.applyVoucher(
-        booking.id,
-        voucherCode,
-        booking.subtotalAmount,
+        reservationId,
+        codeToApply,
       )
-      const normalizedCode = result.data?.voucher?.code || voucherCode.trim()
+      const normalizedCode = result.data?.voucher?.code || codeToApply
 
       setBooking((current) =>
         current
@@ -268,12 +401,43 @@ function CheckoutPage() {
     }
   }
 
+  const handleTravelerChange = (index, field) => (event) => {
+    const value = event.target.value
+    setTravelerManifest((current) => ({
+      ...current,
+      confirmedAccurate: false,
+      travelers: current.travelers.map((traveler, travelerIndex) => (
+        travelerIndex === index ? { ...traveler, [field]: value } : traveler
+      )),
+    }))
+  }
+
+  const handleAdultCompanionChange = (field) => (event) => {
+    const value = event.target.value
+    setTravelerManifest((current) => ({
+      ...current,
+      confirmedAccurate: false,
+      adultCompanion: { ...current.adultCompanion, [field]: value },
+    }))
+  }
+
+  const handleQuickApplyVoucher = (code) => {
+    setVoucherCode(code)
+    setVoucherMessage('')
+    setVoucherSuccess(false)
+    void handleApplyVoucher({ preventDefault() {} }, code)
+  }
+
   const handleConfirm = async () => {
     if (!booking || isSubmitting) return
 
     setErrorMessage('')
     if (isExpired) {
       setErrorMessage('Thời gian giữ vé đã hết. Vui lòng tạo đơn đặt vé mới.')
+      return
+    }
+    if (booking.bookingId && booking.bookingStatus === 'pending_partner') {
+      navigate('/my-tickets')
       return
     }
     if (!contact.fullName.trim() || !contact.email.trim()) {
@@ -291,6 +455,57 @@ function CheckoutPage() {
       setErrorMessage(phoneError)
       return
     }
+    if (!booking.bookingId) {
+      if (travelerManifest.travelers.some(
+        (traveler) => !traveler.fullName.trim() || !traveler.dateOfBirth,
+      )) {
+        setErrorMessage('Vui lòng nhập họ tên và ngày sinh của tất cả hành khách.')
+        return
+      }
+      if (
+        needsTravelerHeight
+        && travelerManifest.travelers.some((traveler) => !String(traveler.heightCm).trim())
+      ) {
+        setErrorMessage('Loại vé này yêu cầu chiều cao của tất cả hành khách.')
+        return
+      }
+      if (
+        needsAdultCompanion
+        && (
+          !travelerManifest.adultCompanion.fullName.trim()
+          || !travelerManifest.adultCompanion.dateOfBirth
+        )
+      ) {
+        setErrorMessage('Vé này yêu cầu khai báo một người lớn đi cùng.')
+        return
+      }
+      if (!travelerManifest.confirmedAccurate) {
+        setErrorMessage('Vui lòng xác nhận thông tin hành khách trước khi tiếp tục.')
+        return
+      }
+      if (invoiceDetails.requestInvoice) {
+        if (
+          !invoiceDetails.invoiceName.trim()
+          || !invoiceDetails.invoiceAddress.trim()
+          || !invoiceDetails.invoiceEmail.trim()
+        ) {
+          setErrorMessage('Vui lòng nhập đầy đủ tên, địa chỉ và email nhận hóa đơn.')
+          return
+        }
+        const invoiceEmailError = validateEmail(invoiceDetails.invoiceEmail)
+        if (invoiceEmailError) {
+          setErrorMessage(invoiceEmailError)
+          return
+        }
+        if (
+          invoiceDetails.buyerType === 'BUSINESS'
+          && !/^\d{10}(?:-\d{3})?$/.test(invoiceDetails.taxCode.trim())
+        ) {
+          setErrorMessage('Mã số thuế doanh nghiệp phải gồm 10 chữ số hoặc dạng 10 chữ số-3 chữ số.')
+          return
+        }
+      }
+    }
 
     setIsSubmitting(true)
     try {
@@ -302,6 +517,15 @@ function CheckoutPage() {
           email: contact.email.trim(),
           phone: contact.phone.trim(),
           note: note.trim(),
+          travelerManifest: {
+            ...travelerManifest,
+            adultCompanion: needsAdultCompanion
+              ? travelerManifest.adultCompanion
+              : null,
+          },
+          invoiceDetails: invoiceDetails.requestInvoice
+            ? invoiceDetails
+            : null,
           voucherCode: appliedVoucherCode || undefined,
           paymentMethod: selectedPayment,
           ...(isAiItineraryCheckout && itineraryId && Number.isSafeInteger(itineraryVersion)
@@ -315,6 +539,15 @@ function CheckoutPage() {
             : {}),
         })
         bookingId = createdBooking.id
+        if (createdBooking.status === 'pending_partner') {
+          navigate('/my-tickets', {
+            replace: true,
+            state: {
+              message: 'Đã gửi yêu cầu cho đối tác. Bạn chỉ thanh toán sau khi yêu cầu được duyệt.',
+            },
+          })
+          return
+        }
       }
 
       if (isAiItineraryCheckout) {
@@ -423,10 +656,9 @@ function CheckoutPage() {
 
             {booking.requiresManualApproval && (
               <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-                <strong>Thanh toán trước, xác nhận sau:</strong> số tiền sẽ được ghi nhận trước khi đối tác duyệt.
-                Đối tác có tối đa 24 giờ nhưng không được phản hồi muộn hơn giờ bắt đầu hoạt động.
-                Nếu đối tác từ chối hoặc quá hạn, booking bị hủy và hệ thống tạo yêu cầu hoàn bắt buộc 100%
-                về phương thức thanh toán gốc; mã QR chỉ xuất hiện sau khi duyệt.
+                <strong>Xác nhận trước, thanh toán sau:</strong> VietTicket sẽ gửi yêu cầu giữ chỗ cho đối tác
+                và chưa chuyển bạn sang cổng thanh toán. Khi đối tác duyệt, bạn có một thời hạn thanh toán mới;
+                mã QR chỉ được phát hành sau khi thanh toán thành công.
               </div>
             )}
 
@@ -483,6 +715,260 @@ function CheckoutPage() {
             </section>
 
             <section className="rounded-2xl border border-outline-variant/20 bg-white p-6 shadow-sm md:p-8">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={invoiceDetails.requestInvoice}
+                  disabled={Boolean(booking.bookingId)}
+                  onChange={(event) => setInvoiceDetails((current) => ({
+                    ...current,
+                    requestInvoice: event.target.checked,
+                    invoiceEmail: current.invoiceEmail || contact.email,
+                    invoiceName: current.invoiceName || contact.fullName,
+                  }))}
+                  className="mt-1 h-4 w-4 accent-primary"
+                />
+                <span>
+                  <strong className="block text-on-surface">Yêu cầu hóa đơn điện tử</strong>
+                  <span className="mt-1 block text-sm leading-6 text-on-surface-variant">
+                    Thông tin hóa đơn được chốt cùng booking và không thể tự sửa sau thanh toán.
+                  </span>
+                </span>
+              </label>
+
+              {invoiceDetails.requestInvoice && (
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  <label className="text-sm font-semibold text-on-surface">
+                    Đối tượng nhận hóa đơn *
+                    <select
+                      value={invoiceDetails.buyerType}
+                      disabled={Boolean(booking.bookingId)}
+                      onChange={(event) => setInvoiceDetails((current) => ({
+                        ...current,
+                        buyerType: event.target.value,
+                      }))}
+                      className="mt-1 block w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary"
+                    >
+                      <option value="PERSONAL">Cá nhân</option>
+                      <option value="BUSINESS">Doanh nghiệp</option>
+                    </select>
+                  </label>
+                  <label className="text-sm font-semibold text-on-surface">
+                    {invoiceDetails.buyerType === 'BUSINESS'
+                      ? 'Tên doanh nghiệp *'
+                      : 'Tên người mua *'}
+                    <input
+                      value={invoiceDetails.invoiceName}
+                      disabled={Boolean(booking.bookingId)}
+                      maxLength={200}
+                      onChange={(event) => setInvoiceDetails((current) => ({
+                        ...current,
+                        invoiceName: event.target.value,
+                      }))}
+                      className="mt-1 block w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary"
+                    />
+                  </label>
+                  <label className="text-sm font-semibold text-on-surface">
+                    Mã số thuế {invoiceDetails.buyerType === 'BUSINESS' ? '*' : '(nếu có)'}
+                    <input
+                      value={invoiceDetails.taxCode}
+                      disabled={Boolean(booking.bookingId)}
+                      maxLength={14}
+                      placeholder="0123456789"
+                      onChange={(event) => setInvoiceDetails((current) => ({
+                        ...current,
+                        taxCode: event.target.value.replace(/[^\d-]/g, ''),
+                      }))}
+                      className="mt-1 block w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 font-mono outline-none focus:border-primary"
+                    />
+                  </label>
+                  <label className="text-sm font-semibold text-on-surface">
+                    Email nhận hóa đơn *
+                    <input
+                      type="email"
+                      value={invoiceDetails.invoiceEmail}
+                      disabled={Boolean(booking.bookingId)}
+                      maxLength={254}
+                      onChange={(event) => setInvoiceDetails((current) => ({
+                        ...current,
+                        invoiceEmail: event.target.value,
+                      }))}
+                      className="mt-1 block w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary"
+                    />
+                  </label>
+                  <label className="text-sm font-semibold text-on-surface sm:col-span-2">
+                    Địa chỉ trên hóa đơn *
+                    <textarea
+                      value={invoiceDetails.invoiceAddress}
+                      disabled={Boolean(booking.bookingId)}
+                      maxLength={500}
+                      rows={2}
+                      onChange={(event) => setInvoiceDetails((current) => ({
+                        ...current,
+                        invoiceAddress: event.target.value,
+                      }))}
+                      className="mt-1 block w-full resize-none rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary"
+                    />
+                  </label>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-outline-variant/20 bg-white p-6 shadow-sm md:p-8">
+              <h2 className="text-lg font-bold text-on-surface">
+                Thông tin hành khách
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-on-surface-variant">
+                Khai báo đúng người sử dụng vé. Ngày sinh và chiều cao chỉ được dùng để
+                kiểm tra điều kiện vé và phục vụ tại điểm tham quan.
+              </p>
+              {(booking.ticketRestrictions?.minAgeYears != null
+                || booking.ticketRestrictions?.maxAgeYears != null
+                || booking.ticketRestrictions?.minHeightCm != null
+                || booking.ticketRestrictions?.maxHeightCm != null
+                || booking.ticketRestrictions?.requiresAdult) && (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-950">
+                  Điều kiện vé:
+                  {booking.ticketRestrictions.minAgeYears != null
+                    ? ` từ ${booking.ticketRestrictions.minAgeYears} tuổi`
+                    : ''}
+                  {booking.ticketRestrictions.maxAgeYears != null
+                    ? ` đến ${booking.ticketRestrictions.maxAgeYears} tuổi`
+                    : ''}
+                  {booking.ticketRestrictions.minHeightCm != null
+                    ? `; cao từ ${booking.ticketRestrictions.minHeightCm} cm`
+                    : ''}
+                  {booking.ticketRestrictions.maxHeightCm != null
+                    ? ` đến ${booking.ticketRestrictions.maxHeightCm} cm`
+                    : ''}
+                  {booking.ticketRestrictions.requiresAdult
+                    ? '; khách chưa đủ 18 tuổi phải có người lớn đi cùng'
+                    : ''}.
+                </div>
+              )}
+
+              <div className="mt-5 grid gap-4">
+                {travelerManifest.travelers.map((traveler, index) => (
+                  <fieldset
+                    className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-4"
+                    key={`traveler-${index + 1}`}
+                  >
+                    <legend className="px-2 text-sm font-extrabold text-primary">
+                      Hành khách {index + 1}
+                    </legend>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="text-sm font-semibold text-on-surface">
+                        Họ tên
+                        <input
+                          autoComplete="off"
+                          className="mt-1 block w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary disabled:opacity-60"
+                          disabled={Boolean(booking.bookingId)}
+                          maxLength={100}
+                          onChange={handleTravelerChange(index, 'fullName')}
+                          required
+                          value={traveler.fullName}
+                        />
+                      </label>
+                      <label className="text-sm font-semibold text-on-surface">
+                        Ngày sinh
+                        <input
+                          className="mt-1 block w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary disabled:opacity-60"
+                          disabled={Boolean(booking.bookingId)}
+                          max={booking.visitDate}
+                          onChange={handleTravelerChange(index, 'dateOfBirth')}
+                          required
+                          type="date"
+                          value={traveler.dateOfBirth}
+                        />
+                      </label>
+                      {needsTravelerHeight && (
+                        <label className="text-sm font-semibold text-on-surface">
+                          Chiều cao (cm)
+                          <input
+                            className="mt-1 block w-full rounded-xl border border-outline-variant bg-white px-3 py-2.5 outline-none focus:border-primary disabled:opacity-60"
+                            disabled={Boolean(booking.bookingId)}
+                            max="250"
+                            min="30"
+                            onChange={handleTravelerChange(index, 'heightCm')}
+                            required
+                            step="1"
+                            type="number"
+                            value={traveler.heightCm}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </fieldset>
+                ))}
+              </div>
+
+              {needsAdultCompanion && (
+                <fieldset className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                  <legend className="px-2 text-sm font-extrabold text-blue-950">
+                    Người lớn đi cùng
+                  </legend>
+                  <p className="mb-3 text-xs font-semibold leading-5 text-blue-900">
+                    Người này phải đủ 18 tuổi vào ngày tham quan. Nếu đã có vé trong đơn
+                    khác, có thể nhập mã đặt chỗ để nhân viên cổng đối chiếu.
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="text-sm font-semibold text-on-surface">
+                      Họ tên người đi cùng
+                      <input
+                        className="mt-1 block w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 outline-none focus:border-primary"
+                        disabled={Boolean(booking.bookingId)}
+                        maxLength={100}
+                        onChange={handleAdultCompanionChange('fullName')}
+                        required
+                        value={travelerManifest.adultCompanion.fullName}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-on-surface">
+                      Ngày sinh
+                      <input
+                        className="mt-1 block w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 outline-none focus:border-primary"
+                        disabled={Boolean(booking.bookingId)}
+                        max={booking.visitDate}
+                        onChange={handleAdultCompanionChange('dateOfBirth')}
+                        required
+                        type="date"
+                        value={travelerManifest.adultCompanion.dateOfBirth}
+                      />
+                    </label>
+                    <label className="text-sm font-semibold text-on-surface sm:col-span-2">
+                      Mã đặt chỗ của người đi cùng (nếu có)
+                      <input
+                        className="mt-1 block w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 font-mono uppercase outline-none focus:border-primary"
+                        disabled={Boolean(booking.bookingId)}
+                        onChange={handleAdultCompanionChange('companionBookingReference')}
+                        placeholder="VT-XXXXXXXXXXXX"
+                        value={travelerManifest.adultCompanion.companionBookingReference}
+                      />
+                    </label>
+                  </div>
+                </fieldset>
+              )}
+
+              <label className="mt-5 flex items-start gap-3 rounded-xl border border-outline-variant/30 p-4 text-sm font-semibold leading-6 text-on-surface">
+                <input
+                  checked={travelerManifest.confirmedAccurate}
+                  className="mt-1 h-4 w-4 accent-primary"
+                  disabled={Boolean(booking.bookingId)}
+                  onChange={(event) => setTravelerManifest((current) => ({
+                    ...current,
+                    confirmedAccurate: event.target.checked,
+                  }))}
+                  type="checkbox"
+                />
+                <span>
+                  Tôi xác nhận thông tin trên là chính xác và đồng ý để VietTicket chia sẻ
+                  phần thông tin cần thiết với nhà cung cấp nhằm kiểm tra điều kiện vé,
+                  check-in và hỗ trợ chuyến đi.
+                </span>
+              </label>
+            </section>
+
+            <section className="rounded-2xl border border-outline-variant/20 bg-white p-6 shadow-sm md:p-8">
               <h2 className="mb-4 text-lg font-bold text-on-surface">Ghi chú</h2>
               <textarea
                 className="w-full resize-none rounded-xl border border-outline-variant/50 bg-surface-container-low p-4 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:opacity-60 disabled:cursor-not-allowed"
@@ -497,7 +983,7 @@ function CheckoutPage() {
 
           <aside className="lg:sticky lg:top-28 lg:col-span-5">
             <div className="flex flex-col gap-6 rounded-2xl border border-outline-variant/20 bg-white p-6 shadow-sm md:p-8">
-              <CheckoutTrustPanel />
+              <CheckoutTrustPanel paymentMethods={paymentMethods} />
 
               <section>
                 <h2 className="mb-4 text-lg font-bold text-on-surface">
@@ -565,6 +1051,50 @@ function CheckoutPage() {
                     {voucherMessage}
                   </p>
                 )}
+                {!booking.bookingId && (isLoadingVouchers || availableVouchers.length > 0) && (
+                  <div className="mt-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-[#526163]">
+                        Ưu đãi dùng được
+                      </p>
+                      {isLoadingVouchers && (
+                        <span className="material-symbols-outlined animate-spin text-[17px] text-primary" aria-label="Đang tải ưu đãi">
+                          progress_activity
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid gap-2">
+                      {availableVouchers.slice(0, 4).map((voucher) => {
+                        const isApplied = appliedVoucherCode === voucher.code
+                        return (
+                          <button
+                            className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                              isApplied
+                                ? 'border-green-500 bg-green-50'
+                                : 'border-[#d7e4e5] bg-[#f8fafb] hover:border-primary'
+                            }`}
+                            disabled={isApplyingVoucher || isApplied}
+                            key={voucher.id}
+                            onClick={() => handleQuickApplyVoucher(voucher.code)}
+                            type="button"
+                          >
+                            <span className="min-w-0">
+                              <span className="block font-mono text-xs font-extrabold text-primary">
+                                {voucher.code}
+                              </span>
+                              <span className="mt-0.5 block text-[11px] font-semibold text-[#526163]">
+                                Giảm {formatCurrency(voucher.discountAmount)}
+                              </span>
+                            </span>
+                            <span className="shrink-0 text-xs font-extrabold text-primary">
+                              {isApplied ? 'Đã áp dụng' : 'Áp dụng'}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
                 {!booking.bookingId && (
                   <p className="mt-2 text-xs text-on-surface-variant">
                     Nhập mã ưu đãi nếu bạn có.
@@ -605,9 +1135,18 @@ function CheckoutPage() {
                 </div>
               )}
               {isExpired && (
-                <div className="flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-error">
-                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">timer_off</span>
-                  Thời gian giữ chỗ đã hết. Vui lòng đặt vé lại.
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-error">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">timer_off</span>
+                    Thời gian giữ chỗ đã hết. Tồn vé sẽ được kiểm tra lại khi bạn chọn lại.
+                  </div>
+                  <Link
+                    className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 font-bold text-white hover:bg-[#003d42]"
+                    to={booking.attractionId ? `/attractions/${booking.attractionId}` : '/attractions'}
+                  >
+                    <span className="material-symbols-outlined text-[18px]" aria-hidden="true">replay</span>
+                    Chọn lại vé
+                  </Link>
                 </div>
               )}
 
@@ -630,7 +1169,13 @@ function CheckoutPage() {
                 onClick={handleConfirm}
                 type="button"
               >
-                {isSubmitting ? 'Đang xử lý...' : booking.bookingId ? 'Thanh toán ngay' : 'Xác nhận & Thanh toán'}
+                {isSubmitting
+                  ? 'Đang xử lý...'
+                  : booking.bookingId
+                    ? 'Thanh toán ngay'
+                    : booking.requiresManualApproval
+                      ? 'Gửi yêu cầu xác nhận'
+                      : 'Xác nhận & Thanh toán'}
                 <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
                   arrow_forward
                 </span>
@@ -683,7 +1228,9 @@ function CheckoutMilestones({ hasCreatedBooking }) {
   )
 }
 
-function CheckoutTrustPanel() {
+function CheckoutTrustPanel({ paymentMethods }) {
+  const checkoutTrustItems = getCheckoutTrustItems(paymentMethods)
+
   return (
     <section className="rounded-2xl bg-[#eefcff] p-5">
       <h2 className="text-base font-extrabold text-[#00474d]">
