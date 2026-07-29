@@ -23,59 +23,91 @@ enum UserStatus {
   LOCKED
 }
 
+enum StaffAccessLevel {
+  SCANNER
+  MANAGER
+}
+
+enum QuestionStatus {
+  PUBLISHED
+  HIDDEN
+}
+
+enum BankTransferReconciliationStatus {
+  MATCHED
+  APPROVED
+}
+
+enum PartnerKycChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
 model User {
-  id                String       @id @default(uuid())
-  email             String       @unique
+  id                String            @id @default(uuid())
+  email             String            @unique
   passwordHash      String?
   fullName          String
-  role              UserRole     @default(CUSTOMER)
-  provider          AuthProvider @default(LOCAL)
-  isEmailVerified   Boolean      @default(false)
-  status            UserStatus   @default(ACTIVE)
-  tokenVersion      Int          @default(0)
+  role              UserRole          @default(CUSTOMER)
+  provider          AuthProvider      @default(LOCAL)
+  isEmailVerified   Boolean           @default(false)
+  status            UserStatus        @default(ACTIVE)
+  tokenVersion      Int               @default(0)
   // Số dư điểm thưởng (cache). Nguồn chân lý là tổng LoyaltyTransaction.points;
   // cột này được cập nhật nguyên tử cùng mỗi giao dịch điểm để đọc nhanh.
-  loyaltyPoints     Int          @default(0)
+  loyaltyPoints     Int               @default(0)
   termsAcceptedAt   DateTime?
   termsVersion      String?
   privacyVersion    String?
   consentIpAddress  String?
   // Đối tác chủ quản của nhân viên này. Chỉ set khi role = STAFF.
   employerPartnerId String?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
+  staffAccessLevel  StaffAccessLevel?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
-  profile                 UserProfile?
-  emailVerificationTokens EmailVerificationToken[]
-  passwordResetTokens     PasswordResetToken[]
-  oauthAccounts           OAuthAccount[]
-  authSessions            AuthSession[]
-  roleMemberships         UserRoleMembership[]
-  partnerProfile          PartnerProfile?
-  employer                PartnerProfile?             @relation("PartnerStaff", fields: [employerPartnerId], references: [id], onDelete: Cascade)
-  favoriteAttractions     FavoriteAttraction[]
-  reviews                 Review[]
-  reservations            Reservation[]
-  bookings                Booking[]
-  supportTickets          SupportTicket[]
-  assignedSupportTickets  SupportTicket[]             @relation("SupportAssignedStaff")
-  staffAssignments        StaffAttractionAssignment[] @relation("StaffAssignments")
-  createdStaffAssignments StaffAttractionAssignment[] @relation("StaffAssignmentsCreatedBy")
-  checkedInTickets        TicketInstance[]            @relation("TicketCheckedInBy")
-  auditLogs               AuditLog[]
-  savedItineraries        SavedItinerary[]
-  loyaltyTransactions     LoyaltyTransaction[]
-  loyaltyVouchers         Voucher[]                   @relation("VoucherOwner")
-  liveTrips               LiveTrip[]
-  smartQueueEntries       SmartQueueEntry[]
-  liveTripEvents          LiveTripEvent[]
-  smartQueuePolicies      SmartQueuePolicy[]          @relation("SmartQueuePolicyUpdatedBy")
-  calledQueueEntries      SmartQueueEntry[]           @relation("SmartQueueCalledBy")
-  pausedQueuePolicies     SmartQueuePolicy[]          @relation("SmartQueuePolicyPausedBy")
-  pricingPolicies         DynamicPricingPolicy[]      @relation("DynamicPricingPolicyUpdatedBy")
-  recoveryCases           RecoveryCase[]
-  partyRoomsHosted        PartyRoom[]                 @relation("PartyRoomHost")
-  partyMemberships        PartyMember[]               @relation("PartyMemberUser")
+  profile                     UserProfile?
+  emailVerificationTokens     EmailVerificationToken[]
+  passwordResetTokens         PasswordResetToken[]
+  oauthAccounts               OAuthAccount[]
+  authSessions                AuthSession[]
+  roleMemberships             UserRoleMembership[]
+  partnerProfile              PartnerProfile?
+  employer                    PartnerProfile?              @relation("PartnerStaff", fields: [employerPartnerId], references: [id], onDelete: Cascade)
+  favoriteAttractions         FavoriteAttraction[]
+  reviews                     Review[]
+  reviewHelpfulVotes          ReviewHelpfulVote[]
+  askedAttractionQuestions    AttractionQuestion[]         @relation("QuestionAuthor")
+  answeredAttractionQuestions AttractionQuestion[]         @relation("QuestionAnswerer")
+  attractionQuestionReports   AttractionQuestionReport[]
+  bankTransfersMatched        BankTransferReconciliation[] @relation("BankTransferMatchedBy")
+  bankTransfersApproved       BankTransferReconciliation[] @relation("BankTransferApprovedBy")
+  reservations                Reservation[]
+  bookings                    Booking[]
+  supportTickets              SupportTicket[]
+  assignedSupportTickets      SupportTicket[]              @relation("SupportAssignedStaff")
+  staffAssignments            StaffAttractionAssignment[]  @relation("StaffAssignments")
+  createdStaffAssignments     StaffAttractionAssignment[]  @relation("StaffAssignmentsCreatedBy")
+  checkedInTickets            TicketInstance[]             @relation("TicketCheckedInBy")
+  auditLogs                   AuditLog[]
+  savedItineraries            SavedItinerary[]
+  loyaltyTransactions         LoyaltyTransaction[]
+  loyaltyVouchers             Voucher[]                    @relation("VoucherOwner")
+  voucherRedemptions          VoucherRedemption[]
+  liveTrips                   LiveTrip[]
+  smartQueueEntries           SmartQueueEntry[]
+  liveTripEvents              LiveTripEvent[]
+  smartQueuePolicies          SmartQueuePolicy[]           @relation("SmartQueuePolicyUpdatedBy")
+  calledQueueEntries          SmartQueueEntry[]            @relation("SmartQueueCalledBy")
+  pausedQueuePolicies         SmartQueuePolicy[]           @relation("SmartQueuePolicyPausedBy")
+  pricingPolicies             DynamicPricingPolicy[]       @relation("DynamicPricingPolicyUpdatedBy")
+  recoveryCases               RecoveryCase[]
+  partyRoomsHosted            PartyRoom[]                  @relation("PartyRoomHost")
+  partyMemberships            PartyMember[]                @relation("PartyMemberUser")
+  partnerKycChangesRequested  PartnerKycChangeRequest[]    @relation("PartnerKycChangeRequestedBy")
+  partnerKycChangesReviewed   PartnerKycChangeRequest[]    @relation("PartnerKycChangeReviewedBy")
 
   @@index([employerPartnerId])
 }
@@ -263,24 +295,24 @@ enum VoucherFundingSource {
 }
 
 model Reservation {
-  id                        String            @id @default(uuid())
-  userId                    String
-  ticketProductId           String
-  timeSlotId                String?
-  date                      DateTime          @db.Date
-  quantity                  Int
-  snapshotAdmissionCount    Int               @default(1)
-  status                    ReservationStatus @default(HELD)
-  expiresAt                 DateTime
-  paymentDeadline           DateTime?
-  paymentAttemptCount       Int               @default(0)
-  snapshotUnitPrice         Decimal?          @db.Decimal(12, 2)
-  snapshotRefundPolicy      RefundPolicyType?
-  snapshotRefundFeeRate     Decimal?          @db.Decimal(5, 2)
-  snapshotRefundCutoffHours Int?
+  id                         String            @id @default(uuid())
+  userId                     String
+  ticketProductId            String
+  timeSlotId                 String?
+  date                       DateTime          @db.Date
+  quantity                   Int
+  snapshotAdmissionCount     Int               @default(1)
+  status                     ReservationStatus @default(HELD)
+  expiresAt                  DateTime
+  paymentDeadline            DateTime?
+  paymentAttemptCount        Int               @default(0)
+  snapshotUnitPrice          Decimal?          @db.Decimal(12, 2)
+  snapshotRefundPolicy       RefundPolicyType?
+  snapshotRefundFeeRate      Decimal?          @db.Decimal(5, 2)
+  snapshotRefundCutoffHours  Int?
   snapshotTicketRestrictions Json?
-  snapshotCommissionRate    Decimal?          @db.Decimal(5, 2)
-  createdAt                 DateTime          @default(now())
+  snapshotCommissionRate     Decimal?          @db.Decimal(5, 2)
+  createdAt                  DateTime          @default(now())
 
   user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticketProduct   TicketProduct           @relation(fields: [ticketProductId], references: [id], onDelete: Cascade)
@@ -325,10 +357,36 @@ model PartnerProfile {
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
-  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  attractions  Attraction[]
-  staffMembers User[]              @relation("PartnerStaff")
-  settlements  PartnerSettlement[]
+  user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attractions        Attraction[]
+  staffMembers       User[]                    @relation("PartnerStaff")
+  settlements        PartnerSettlement[]
+  fundedVouchers     Voucher[]                 @relation("VoucherFundingPartner")
+  applicableVouchers Voucher[]                 @relation("VoucherApplicablePartner")
+  kycChangeRequests  PartnerKycChangeRequest[]
+}
+
+model PartnerKycChangeRequest {
+  id            String                        @id @default(uuid())
+  partnerId     String
+  requestedById String
+  proposedData  Json
+  reason        String                        @db.Text
+  status        PartnerKycChangeRequestStatus @default(PENDING)
+  reviewedById  String?
+  reviewNote    String?                       @db.Text
+  reviewedAt    DateTime?
+  createdAt     DateTime                      @default(now())
+  updatedAt     DateTime                      @updatedAt
+
+  partner     PartnerProfile @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  requestedBy User           @relation("PartnerKycChangeRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedBy  User?          @relation("PartnerKycChangeReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([partnerId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([requestedById])
+  @@index([reviewedById])
 }
 
 model StaffAttractionAssignment {
@@ -393,14 +451,16 @@ model Attraction {
   updatedAt               DateTime                    @updatedAt
   archivedAt              DateTime?
 
-  partner        PartnerProfile       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  images         AttractionImage[]
-  categories     AttractionCategory[]
-  ticketProducts TicketProduct[]
-  favoritedBy    FavoriteAttraction[]
-  reviews        Review[]
-  timeSlots      TimeSlot[] // Khung giờ cấp điểm tham quan (Module 2)
-  specialDates   SpecialDate[] // Lịch đặc biệt (đóng cửa / đổi sức chứa)
+  partner            PartnerProfile       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  images             AttractionImage[]
+  categories         AttractionCategory[]
+  ticketProducts     TicketProduct[]
+  favoritedBy        FavoriteAttraction[]
+  reviews            Review[]
+  questions          AttractionQuestion[]
+  applicableVouchers Voucher[]
+  timeSlots          TimeSlot[] // Khung giờ cấp điểm tham quan (Module 2)
+  specialDates       SpecialDate[] // Lịch đặc biệt (đóng cửa / đổi sức chứa)
 
   dailyStocks         AttractionDailyStock[]
   staffAssignments    StaffAttractionAssignment[]
@@ -492,12 +552,13 @@ model TicketProduct {
   updatedAt         DateTime         @updatedAt
   archivedAt        DateTime?
 
-  attraction       Attraction               @relation(fields: [attractionId], references: [id], onDelete: Cascade)
-  timeSlots        TimeSlot[]
-  dailyStocks      DailyStock[]
-  reservations     Reservation[]
-  ticketInstances  TicketInstance[]
-  priceAdjustments DynamicPriceAdjustment[]
+  attraction         Attraction               @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  timeSlots          TimeSlot[]
+  dailyStocks        DailyStock[]
+  reservations       Reservation[]
+  ticketInstances    TicketInstance[]
+  priceAdjustments   DynamicPriceAdjustment[]
+  applicableVouchers Voucher[]
 
   @@index([archivedAt])
 }
@@ -598,113 +659,173 @@ model Review {
   moderatedById    String?
   replyComment     String?   @db.Text
   repliedAt        DateTime?
+  imageUrls        String[]  @default([])
+  travelerType     String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  attraction Attraction @relation(fields: [attractionId], references: [id], onDelete: Cascade)
-  booking    Booking?   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attraction   Attraction          @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  booking      Booking?            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  helpfulVotes ReviewHelpfulVote[]
 
   @@index([userId])
   @@index([attractionId, isHidden, createdAt])
 }
 
+model ReviewHelpfulVote {
+  reviewId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([reviewId, userId])
+  @@index([userId])
+}
+
+model AttractionQuestion {
+  id               String         @id @default(uuid())
+  attractionId     String
+  userId           String
+  question         String         @db.Text
+  answer           String?        @db.Text
+  answeredById     String?
+  answeredAt       DateTime?
+  status           QuestionStatus @default(PUBLISHED)
+  reportCount      Int            @default(0)
+  moderationReason String?        @db.Text
+  moderatedAt      DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  attraction Attraction                 @relation(fields: [attractionId], references: [id], onDelete: Cascade)
+  user       User                       @relation("QuestionAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  answeredBy User?                      @relation("QuestionAnswerer", fields: [answeredById], references: [id], onDelete: SetNull)
+  reports    AttractionQuestionReport[]
+
+  @@index([attractionId, status, createdAt])
+  @@index([answeredById])
+}
+
+model AttractionQuestionReport {
+  questionId String
+  userId     String
+  reason     String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  question AttractionQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([questionId, userId])
+  @@index([userId])
+}
+
 model Booking {
-  id                         String           @id @default(uuid())
-  userId                     String
-  reservationId              String           @unique
-  voucherId                  String?
-  itineraryId                String?
-  itineraryVersion           Int?
-  itineraryItemId            String?
-  subtotalAmount             Decimal          @db.Decimal(12, 2)
-  discountAmount             Decimal          @default(0.0) @db.Decimal(12, 2)
-  totalAmount                Decimal          @db.Decimal(12, 2)
-  voucherFundingSourceSnapshot VoucherFundingSource?
+  id                                    String                @id @default(uuid())
+  userId                                String
+  reservationId                         String                @unique
+  voucherId                             String?
+  itineraryId                           String?
+  itineraryVersion                      Int?
+  itineraryItemId                       String?
+  subtotalAmount                        Decimal               @db.Decimal(12, 2)
+  discountAmount                        Decimal               @default(0.0) @db.Decimal(12, 2)
+  totalAmount                           Decimal               @db.Decimal(12, 2)
+  voucherFundingSourceSnapshot          VoucherFundingSource?
   voucherPlatformFundingPercentSnapshot Int?
-  platformDiscountAmountSnapshot Decimal       @default(0.0) @db.Decimal(12, 2)
-  partnerDiscountAmountSnapshot  Decimal       @default(0.0) @db.Decimal(12, 2)
-  commissionBaseAmountSnapshot   Decimal       @default(0.0) @db.Decimal(12, 2)
-  platformNetRevenueSnapshot     Decimal       @default(0.0) @db.Decimal(12, 2)
-  status                     BookingStatus    @default(PENDING_PAYMENT)
-  refundRequired             Boolean          @default(false) // Đã thu tiền nhưng đơn bị hủy/không giữ được vé → cần hoàn tiền thủ công
-  paymentMethod              String           @default("vnpay")
-  fullName                   String
-  email                      String
-  phone                      String?
-  note                       String?          @db.Text
-  snapshotAt                 DateTime         @default(now())
-  snapshotAttractionId       String?
-  snapshotAttractionTitle    String           @default("")
-  snapshotAttractionAddress  String           @default("")
-  snapshotAttractionCity     String           @default("")
-  snapshotAttractionDistrict String?
-  snapshotAttractionImage    String?
-  snapshotAttractionLatitude Decimal?         @db.Decimal(10, 7)
-  snapshotAttractionLongitude Decimal?        @db.Decimal(10, 7)
-  snapshotAttractionEnvironment String?
-  snapshotMeetingPoint       String?          @db.Text
-  snapshotCheckInInstructions String?          @db.Text
-  snapshotAccessibilityInfo  String?          @db.Text
-  snapshotWhatToBring        Json?
+  platformDiscountAmountSnapshot        Decimal               @default(0.0) @db.Decimal(12, 2)
+  partnerDiscountAmountSnapshot         Decimal               @default(0.0) @db.Decimal(12, 2)
+  commissionBaseAmountSnapshot          Decimal               @default(0.0) @db.Decimal(12, 2)
+  platformNetRevenueSnapshot            Decimal               @default(0.0) @db.Decimal(12, 2)
+  status                                BookingStatus         @default(PENDING_PAYMENT)
+  partnerApprovalRequestedAt            DateTime?
+  partnerApprovalDeadline               DateTime?
+  partnerApprovedAt                     DateTime?
+  refundRequired                        Boolean               @default(false) // Đã thu tiền nhưng đơn bị hủy/không giữ được vé → cần hoàn tiền thủ công
+  paymentMethod                         String                @default("vnpay")
+  fullName                              String
+  email                                 String
+  phone                                 String?
+  note                                  String?               @db.Text
+  travelerManifest                      Json?
+  invoiceDetails                        Json?
+  snapshotAt                            DateTime              @default(now())
+  snapshotAttractionId                  String?
+  snapshotAttractionTitle               String                @default("")
+  snapshotAttractionAddress             String                @default("")
+  snapshotAttractionCity                String                @default("")
+  snapshotAttractionDistrict            String?
+  snapshotAttractionImage               String?
+  snapshotAttractionLatitude            Decimal?              @db.Decimal(10, 7)
+  snapshotAttractionLongitude           Decimal?              @db.Decimal(10, 7)
+  snapshotAttractionEnvironment         String?
+  snapshotMeetingPoint                  String?               @db.Text
+  snapshotCheckInInstructions           String?               @db.Text
+  snapshotAccessibilityInfo             String?               @db.Text
+  snapshotWhatToBring                   Json?
   // Immutable payout owner captured at checkout. Attraction ownership may
   // change later, but historical revenue/refunds must remain with the owner
   // who sold the ticket.
-  snapshotPartnerId          String?
-  snapshotPartnerName        String?
-  snapshotTicketName         String           @default("")
-  snapshotTicketType         TicketType       @default(ADULT)
-  snapshotAdmissionCount     Int              @default(1)
-  snapshotTicketDescription  String?          @db.Text
-  snapshotTicketRestrictions Json?
-  snapshotInclusions         Json?
-  snapshotExclusions         Json?
-  snapshotUnitPrice          Decimal          @default(0.0) @db.Decimal(12, 2)
-  snapshotRefundPolicy       RefundPolicyType @default(NON_REFUNDABLE)
-  snapshotRefundFeeRate      Decimal          @default(0.0) @db.Decimal(5, 2)
-  snapshotRefundCutoffHours  Int              @default(24)
-  snapshotVisitDate          DateTime?        @db.Date
-  snapshotTimeSlotLabel      String?
+  snapshotPartnerId                     String?
+  snapshotPartnerName                   String?
+  snapshotTicketName                    String                @default("")
+  snapshotTicketType                    TicketType            @default(ADULT)
+  snapshotAdmissionCount                Int                   @default(1)
+  snapshotTicketDescription             String?               @db.Text
+  snapshotTicketRestrictions            Json?
+  snapshotInclusions                    Json?
+  snapshotExclusions                    Json?
+  snapshotUnitPrice                     Decimal               @default(0.0) @db.Decimal(12, 2)
+  snapshotRefundPolicy                  RefundPolicyType      @default(NON_REFUNDABLE)
+  snapshotRefundFeeRate                 Decimal               @default(0.0) @db.Decimal(5, 2)
+  snapshotRefundCutoffHours             Int                   @default(24)
+  snapshotVisitDate                     DateTime?             @db.Date
+  snapshotTimeSlotLabel                 String?
   // Immutable activity window captured at checkout. This is intentionally
   // separate from the human-readable slot label so all-day tickets keep the
   // original opening hours even if the attraction later changes its schedule.
-  snapshotActivityStartTime  String?
-  snapshotActivityEndTime    String?
-  commissionRateSnapshot     Decimal          @default(0.10) @db.Decimal(5, 2)
-  commissionAmountSnapshot   Decimal          @default(0.0) @db.Decimal(12, 2)
-  partnerNetAmountSnapshot   Decimal          @default(0.0) @db.Decimal(12, 2)
-  cancelledAt                DateTime?
-  cancellationReason         String?          @db.Text
-  cancellationSource         String?
+  snapshotActivityStartTime             String?
+  snapshotActivityEndTime               String?
+  commissionRateSnapshot                Decimal               @default(0.10) @db.Decimal(5, 2)
+  commissionAmountSnapshot              Decimal               @default(0.0) @db.Decimal(12, 2)
+  partnerNetAmountSnapshot              Decimal               @default(0.0) @db.Decimal(12, 2)
+  cancelledAt                           DateTime?
+  cancellationReason                    String?               @db.Text
+  cancellationSource                    String?
   // Dữ liệu lịch sử có kiểm soát chỉ phục vụ mô hình dự báo. Không được xuất hiện
   // trong booking, KPI, báo cáo tài chính, đối soát hay trợ lý khách hàng.
-  isForecastTrainingSample   Boolean          @default(false)
-  createdAt                  DateTime         @default(now())
-  updatedAt                  DateTime         @updatedAt
+  isForecastTrainingSample              Boolean               @default(false)
+  createdAt                             DateTime              @default(now())
+  updatedAt                             DateTime              @updatedAt
 
-  user                      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reservation               Reservation             @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  voucher                   Voucher?                @relation(fields: [voucherId], references: [id])
-  itinerary                 SavedItinerary?         @relation("ItineraryBookings", fields: [itineraryId], references: [id], onDelete: SetNull)
-  payments                  Payment[]
-  ticketInstances           TicketInstance[]
-  refundRequests            RefundRequest[]
-  refundRequestsTargeting   RefundRequest[]         @relation("RefundTargetBooking")
-  refundTransactions        RefundTransaction[]
-  review                    Review?
-  settlementItems           PartnerSettlementItem[]
-  liveTripItems             LiveTripItem[]
-  smartQueueEntries         SmartQueueEntry[]
-  loyaltyTransactions       LoyaltyTransaction[]
-  recoveryCaseAsOriginal    RecoveryCase?           @relation("RecoveryOriginalBooking")
-  recoveryCaseAsReplacement RecoveryCase?           @relation("RecoveryReplacementBooking")
-  recoveryCasesAsFunding    RecoveryCase[]          @relation("RecoveryFundingBooking")
+  user                       User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reservation                Reservation                 @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  voucher                    Voucher?                    @relation(fields: [voucherId], references: [id])
+  itinerary                  SavedItinerary?             @relation("ItineraryBookings", fields: [itineraryId], references: [id], onDelete: SetNull)
+  payments                   Payment[]
+  ticketInstances            TicketInstance[]
+  refundRequests             RefundRequest[]
+  refundRequestsTargeting    RefundRequest[]             @relation("RefundTargetBooking")
+  refundTransactions         RefundTransaction[]
+  review                     Review?
+  settlementItems            PartnerSettlementItem[]
+  liveTripItems              LiveTripItem[]
+  smartQueueEntries          SmartQueueEntry[]
+  loyaltyTransactions        LoyaltyTransaction[]
+  recoveryCaseAsOriginal     RecoveryCase?               @relation("RecoveryOriginalBooking")
+  recoveryCaseAsReplacement  RecoveryCase?               @relation("RecoveryReplacementBooking")
+  recoveryCasesAsFunding     RecoveryCase[]              @relation("RecoveryFundingBooking")
+  voucherRedemption          VoucherRedemption?
+  bankTransferReconciliation BankTransferReconciliation?
 
   @@index([userId])
   @@index([voucherId])
   @@index([itineraryId, itineraryVersion])
   @@index([itineraryItemId])
   @@index([status])
+  @@index([status, partnerApprovalDeadline])
   @@index([snapshotAttractionId])
   @@index([snapshotVisitDate])
   @@index([isForecastTrainingSample])
@@ -753,6 +874,10 @@ model PartnerSettlement {
   periodEnd                DateTime         @db.Date
   status                   SettlementStatus @default(DRAFT)
   currency                 String           @default("VND")
+  baseCurrency             String           @default("VND")
+  exchangeRate             Decimal          @default(1.0) @db.Decimal(18, 6)
+  exchangeRateSource       String           @default("PLATFORM_CONFIG")
+  exchangeRateEffectiveAt  DateTime         @default(now())
   grossAmount              Decimal          @db.Decimal(14, 2)
   refundAmount             Decimal          @default(0.0) @db.Decimal(14, 2)
   netAmount                Decimal          @db.Decimal(14, 2)
@@ -829,6 +954,31 @@ model Payment {
   @@index([isDuplicate])
 }
 
+model BankTransferReconciliation {
+  id                String                           @id @default(uuid())
+  bookingId         String                           @unique
+  externalReference String                           @unique
+  receivedAmount    Decimal                          @db.Decimal(12, 2)
+  receivedAt        DateTime
+  payerName         String?
+  evidenceNote      String?                          @db.Text
+  status            BankTransferReconciliationStatus @default(MATCHED)
+  matchedById       String
+  matchedAt         DateTime                         @default(now())
+  approvedById      String?
+  approvedAt        DateTime?
+  createdAt         DateTime                         @default(now())
+  updatedAt         DateTime                         @updatedAt
+
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  matchedBy  User    @relation("BankTransferMatchedBy", fields: [matchedById], references: [id], onDelete: Restrict)
+  approvedBy User?   @relation("BankTransferApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([status, matchedAt])
+  @@index([matchedById])
+  @@index([approvedById])
+}
+
 model TicketInstance {
   id              String               @id @default(uuid())
   bookingId       String
@@ -857,31 +1007,69 @@ enum VoucherSource {
 }
 
 model Voucher {
-  id            String              @id @default(uuid())
-  code          String              @unique
-  discountType  VoucherDiscountType
-  discountValue Decimal             @db.Decimal(12, 2)
-  maxDiscount   Decimal?            @db.Decimal(12, 2)
-  minSpend      Decimal?            @db.Decimal(12, 2)
-  expiryDate    DateTime
-  isActive      Boolean             @default(true)
-  usageLimit    Int?
-  usedCount     Int                 @default(0)
+  id                        String               @id @default(uuid())
+  code                      String               @unique
+  discountType              VoucherDiscountType
+  discountValue             Decimal              @db.Decimal(12, 2)
+  maxDiscount               Decimal?             @db.Decimal(12, 2)
+  minSpend                  Decimal?             @db.Decimal(12, 2)
+  startDate                 DateTime             @default(now())
+  expiryDate                DateTime
+  isActive                  Boolean              @default(true)
+  usageLimit                Int?
+  usedCount                 Int                  @default(0)
+  maxUsesPerUser            Int                  @default(1)
   // Chủ sở hữu voucher. NULL = mã công khai; có giá trị = voucher cá nhân
   // (đổi điểm) và CHỈ tài khoản này được dùng.
-  userId        String?
-  source        VoucherSource       @default(PROMOTION)
-  fundingSource VoucherFundingSource @default(PARTNER)
-  platformFundingPercent Int         @default(0)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  userId                    String?
+  source                    VoucherSource        @default(PROMOTION)
+  fundingSource             VoucherFundingSource @default(PARTNER)
+  platformFundingPercent    Int                  @default(0)
+  fundingPartnerId          String?
+  applicablePartnerId       String?
+  applicableAttractionId    String?
+  applicableTicketProductId String?
+  createdAt                 DateTime             @default(now())
+  updatedAt                 DateTime             @updatedAt
 
-  bookings            Booking[]
-  owner               User?                @relation("VoucherOwner", fields: [userId], references: [id], onDelete: Cascade)
-  loyaltyTransactions LoyaltyTransaction[]
+  bookings                Booking[]
+  owner                   User?                @relation("VoucherOwner", fields: [userId], references: [id], onDelete: Cascade)
+  fundingPartner          PartnerProfile?      @relation("VoucherFundingPartner", fields: [fundingPartnerId], references: [id], onDelete: Restrict)
+  applicablePartner       PartnerProfile?      @relation("VoucherApplicablePartner", fields: [applicablePartnerId], references: [id], onDelete: Restrict)
+  applicableAttraction    Attraction?          @relation(fields: [applicableAttractionId], references: [id], onDelete: Restrict)
+  applicableTicketProduct TicketProduct?       @relation(fields: [applicableTicketProductId], references: [id], onDelete: Restrict)
+  redemptions             VoucherRedemption[]
+  loyaltyTransactions     LoyaltyTransaction[]
 
   @@index([isActive, expiryDate])
   @@index([userId])
+  @@index([fundingPartnerId])
+  @@index([applicablePartnerId])
+  @@index([applicableAttractionId])
+  @@index([applicableTicketProductId])
+}
+
+enum VoucherRedemptionStatus {
+  ACTIVE
+  RELEASED
+}
+
+model VoucherRedemption {
+  id         String                  @id @default(uuid())
+  voucherId  String
+  userId     String
+  bookingId  String                  @unique
+  status     VoucherRedemptionStatus @default(ACTIVE)
+  releasedAt DateTime?
+  createdAt  DateTime                @default(now())
+  updatedAt  DateTime                @updatedAt
+
+  voucher Voucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([voucherId, userId, status])
+  @@index([userId, status])
 }
 
 enum LoyaltyTransactionType {
@@ -1026,13 +1214,13 @@ model RefundTransaction {
   payment       Payment?       @relation(fields: [paymentId], references: [id], onDelete: SetNull)
   refundRequest RefundRequest? @relation(fields: [refundRequestId], references: [id], onDelete: SetNull)
 
+  // A gateway refund number is immutable evidence. It must never be attached
+  // to two different refund rows, even when a retry/query response is replayed.
+  @@unique([gateway, gatewayTransactionId], map: "RefundTransaction_gateway_gatewayTransactionId_key")
   @@index([bookingId])
   @@index([paymentId])
   @@index([refundRequestId])
   @@index([status])
-  // A gateway refund number is immutable evidence. It must never be attached
-  // to two different refund rows, even when a retry/query response is replayed.
-  @@unique([gateway, gatewayTransactionId], map: "RefundTransaction_gateway_gatewayTransactionId_key")
 }
 
 model ScheduledJobLock {
