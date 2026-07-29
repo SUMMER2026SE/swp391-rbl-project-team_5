@@ -24,15 +24,19 @@ function RecoveryAlert() {
       setDismissedIds(new Set())
       return
     }
+    // Đánh số cho CHÍNH lần gọi này, không chỉ đọc số hiện tại. Focus và
+    // visibilitychange cùng bắn khi khách quay lại tab nên hai request luôn
+    // chạy song song; nếu chỉ đọc số, cả hai đều qua được cửa và response nào
+    // về sau sẽ ghi đè — kể cả khi nó là response cũ hơn.
+    refreshVersion.current += 1
     const requestVersion = refreshVersion.current
     try {
       const cases = await listRecoveryCases('OPEN')
       const orderedCases = sortRecoveryCases(
         cases.filter((recoveryCase) => recoveryCase.status === 'OPEN'),
       )
-      // If a socket event arrived while this request was in flight, its
-      // response may be an older read replica. Ignore that response; the
-      // scheduled retry below will fetch the authoritative list.
+      // Đã có request mới hơn (hoặc một sự kiện socket) sau khi request này
+      // rời đi: kết quả này đã cũ, bỏ qua. Lần gọi mới nhất mới được ghi.
       if (requestVersion !== refreshVersion.current) return
 
       const now = Date.now()
