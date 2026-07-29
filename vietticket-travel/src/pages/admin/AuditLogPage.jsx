@@ -21,6 +21,7 @@ const ENTITY_TYPES = [
   'CATEGORY',
   'VOUCHER',
   'SETTLEMENT',
+  'RESERVATION',
 ]
 
 const ENTITY_TYPE_LABELS = {
@@ -38,6 +39,7 @@ const ENTITY_TYPE_LABELS = {
   CATEGORY: 'Danh mục',
   VOUCHER: 'Voucher',
   SETTLEMENT: 'Phiên đối soát',
+  RESERVATION: 'Lượt giữ chỗ',
 }
 
 const ACTION_LABELS = {
@@ -66,6 +68,8 @@ const ACTION_LABELS = {
   PARTNER_STAFF_ASSIGNMENTS_REPLACED: 'Cập nhật phân công nhân viên',
   USER_ACCOUNT_LOCKED: 'Khóa tài khoản',
   USER_ACCOUNT_UNLOCKED: 'Mở khóa tài khoản',
+  BANK_TRANSFER_HOLD_EXPIRED: 'Hết hạn giữ chỗ chuyển khoản',
+  HOLD_EXPIRY_STOCK_DRIFT: 'Lệch kho khi dọn giữ chỗ — cần xử lý tay',
 }
 
 function entityTypeLabel(value) {

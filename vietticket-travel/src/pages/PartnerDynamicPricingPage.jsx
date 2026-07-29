@@ -345,10 +345,13 @@ function ImpactPanel({ impact }) {
       <h2 className="text-sm font-black uppercase tracking-wide text-slate-500">
         Tác động thực tế ({summary.days} ngày gần nhất)
       </h2>
+      <p className="mt-1 text-xs text-slate-500">
+        Chỉ tính các lượt đặt đã thanh toán thành công và chưa bị hủy hoặc hoàn tiền.
+      </p>
       {summary.totalAdjustments === 0 ? (
         <p className="mt-3 text-sm text-slate-500">
-          Chưa có lượt đặt vé nào bị điều chỉnh giá. Số liệu sẽ xuất hiện sau khi bật chế độ áp dụng
-          tự động và có khách đặt vé.
+          Chưa có lượt đặt vé nào đã thanh toán bị điều chỉnh giá. Số liệu sẽ xuất hiện sau khi bật
+          chế độ áp dụng tự động và có khách đặt vé thành công.
         </p>
       ) : (
         <>
@@ -375,6 +378,18 @@ function ImpactPanel({ impact }) {
               ({summary.peakCount} lượt cao điểm / {summary.quietCount} lượt giờ vắng)
             </span>
           </p>
+          {summary.pendingAdjustments > 0 && (
+            <p className="mt-2 text-xs text-slate-500">
+              Ngoài ra có {summary.pendingAdjustments} lượt đã đổi giá nhưng chưa thành tiền (đang
+              giữ chỗ, hết hạn, hủy hoặc đã hoàn) — không được cộng vào các con số trên.
+            </p>
+          )}
+          {impact.detailTruncated && (
+            <p className="mt-2 text-xs text-slate-500">
+              Bảng chi tiết bên dưới chỉ hiển thị {impact.detailLimit} lượt gần nhất. Các con số
+              tổng ở trên đã tính trọn kỳ.
+            </p>
+          )}
         </>
       )}
     </section>

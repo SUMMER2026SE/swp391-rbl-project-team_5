@@ -3,6 +3,7 @@ jest.mock('../config/prisma', () => require('./helpers/mockPrisma'));
 const prisma = require('./helpers/mockPrisma');
 const {
   buildFinancialTimeline,
+  buildPartnerBreakdown,
   getPlatformFinancialReport,
   listPlatformFinancialTransactions,
   recognizedAmountsOf,
@@ -614,5 +615,72 @@ describe('financial report calculations', () => {
         refundType: 'PARTNER_CANCELLATION',
       }),
     ]);
+  });
+});
+
+describe('buildPartnerBreakdown', () => {
+  const partner = (id, businessName, status = 'APPROVED') => ({
+    id,
+    businessName,
+    status,
+    commissionRate: 0.1,
+  });
+  const payment = (partnerId, amount) => ({
+    amount,
+    isDuplicate: false,
+    paymentGateway: 'VNPAY',
+    booking: {
+      snapshotPartnerId: partnerId,
+      snapshotPartnerName: 'X',
+      status: 'COMPLETED',
+    },
+  });
+
+  test('không độn báo cáo bằng hồ sơ đối tác chưa phát sinh giao dịch', () => {
+    const rows = buildPartnerBreakdown(
+      [
+        partner('active-1', 'Đối tác đang bán'),
+        partner('pending-1', 'Hồ sơ chờ duyệt', 'PENDING'),
+        partner('rejected-1', 'Hồ sơ bị từ chối', 'REJECTED'),
+      ],
+      [payment('active-1', 500000)],
+      [],
+      [],
+    );
+
+    expect(rows.map((row) => row.id)).toEqual(['active-1']);
+  });
+
+  test('vẫn giữ đối tác đã bị đình chỉ nếu kỳ này có dòng tiền của họ', () => {
+    const rows = buildPartnerBreakdown(
+      [partner('suspended-1', 'Đối tác bị đình chỉ', 'SUSPENDED')],
+      [payment('suspended-1', 300000)],
+      [],
+      [],
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      id: 'suspended-1',
+      status: 'SUSPENDED',
+      capturedAmount: 300000,
+      netCashAmount: 300000,
+    }));
+  });
+
+  test('đối tác chỉ có giao dịch hoàn tiền trong kỳ vẫn phải xuất hiện', () => {
+    const rows = buildPartnerBreakdown(
+      [partner('refund-only', 'Chỉ có hoàn tiền')],
+      [],
+      [{
+        amount: 120000,
+        booking: { snapshotPartnerId: 'refund-only', snapshotPartnerName: 'Y' },
+      }],
+      [],
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].refundedAmount).toBe(120000);
+    expect(rows[0].netCashAmount).toBe(-120000);
   });
 });

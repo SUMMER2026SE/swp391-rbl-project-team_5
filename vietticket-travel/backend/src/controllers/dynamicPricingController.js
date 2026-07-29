@@ -83,18 +83,9 @@ async function updatePricingPolicy(req, res, next) {
       throw httpError(400, 'VALIDATION_ERROR', 'Không có trường hợp lệ nào để cập nhật.');
     }
 
-    if (
-      payload.lowDemandThreshold != null
-      && payload.highDemandThreshold != null
-      && Number(payload.lowDemandThreshold) >= Number(payload.highDemandThreshold)
-    ) {
-      throw httpError(
-        400,
-        'VALIDATION_ERROR',
-        'Ngưỡng vắng khách phải nhỏ hơn ngưỡng đông khách.',
-      );
-    }
-
+    // Ngưỡng vắng/đông được savePolicy kiểm tra trên giá trị đã trộn với chính
+    // sách đang lưu, nên cập nhật một phần cũng bị chặn. Không kiểm tra lại ở
+    // đây để tránh hai nơi cùng định nghĩa thế nào là hợp lệ.
     const policy = await savePolicy({ attractionId, payload, actorId: req.user.id });
     await writeAuditLog({
       req,

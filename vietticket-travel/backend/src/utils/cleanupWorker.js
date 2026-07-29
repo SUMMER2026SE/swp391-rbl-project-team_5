@@ -6,11 +6,14 @@ const prisma = require('../config/prisma');
 const { sendHoldExpiredEmail } = require('./mailer');
 const { BANK_TRANSFER_METHOD } = require('./bankTransferPolicy');
 const { writeAuditLog } = require('./auditLog');
-const { releaseHeldInventory } = require('./refundService');
+const { HELD_STOCK_DRIFT, releaseHeldInventory } = require('./refundService');
 const { releaseVoucherRedemption } = require('../services/voucherRedemptionService');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000; // chạy mỗi 1 phút
 const DEFAULT_GRACE_MS = 3 * 60 * 1000; // chừa 3 phút cho IPN trả trễ
+// Số lượt giữ chỗ tối đa xử lý trong một vòng. 500/phút = 30.000/giờ, thừa sức
+// theo kịp lưu lượng thật mà vẫn chặn được một vòng quét khổng lồ sau downtime.
+const DEFAULT_BATCH_SIZE = 500;
 const JOB_NAME = 'cleanup_expired_reservations';
 // TTL = thời gian tối đa worker được giữ lock (gấp đôi interval để an toàn).
 // Nếu process crash trong khi đang chạy, lock sẽ tự hết hạn sau TTL.
@@ -79,15 +82,85 @@ async function releaseJobLock(jobName) {
   }
 }
 
+// Dấu cách ly cho lượt giữ chỗ có bộ đếm kho đã lệch. Dùng chính AuditLog làm
+// nơi lưu: đây đã là kênh "Admin cần xem việc này" của hệ thống, nên không cần
+// thêm cột/bảng mới chỉ để đánh dấu một tình huống hiếm.
+const STOCK_DRIFT_ACTION = 'HOLD_EXPIRY_STOCK_DRIFT';
+
+// Ghi dấu cách ly NGOÀI transaction vừa rollback — nếu ghi bên trong, bản ghi
+// sẽ bị cuốn theo và lần quét sau lại không biết gì.
+async function quarantineDriftedReservation(reservationId, error) {
+  try {
+    await writeAuditLog({
+      actorId: null,
+      action: STOCK_DRIFT_ACTION,
+      entityType: 'Reservation',
+      entityId: reservationId,
+      metadata: {
+        reason: error.message,
+        detectedAt: new Date().toISOString(),
+        // Kho đã lệch nên worker cố ý KHÔNG tự hủy đơn hay tự trả kho. Nếu đơn
+        // gắn với lượt giữ chỗ này đã thu tiền, tiền của khách đang không nằm
+        // trong hàng đợi hoàn nào — phải có người đối chiếu rồi xử lý tay.
+        needsManualReview: true,
+      },
+    });
+    return true;
+  } catch (auditError) {
+    // Không ghi được dấu thì vòng sau vẫn thử lại — thà lặp còn hơn im lặng.
+    console.error(
+      `[cleanup] Không ghi được dấu lệch kho cho reservation ${reservationId}:`,
+      auditError.message,
+    );
+    return false;
+  }
+}
+
 // Quét và giải phóng các Reservation HELD đã quá hạn (qua grace).
 // Tách riêng khỏi timer để test được. Trả về số reservation đã dọn.
-async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
+async function sweepExpiredReservations({
+  graceMs = DEFAULT_GRACE_MS,
+  batchSize = DEFAULT_BATCH_SIZE,
+} = {}) {
   const cutoff = new Date(Date.now() - graceMs);
 
-  const expired = await prisma.reservation.findMany({
+  // Giới hạn mỗi vòng. Sau một đợt downtime, số lượt hết hạn tồn đọng có thể
+  // rất lớn; không chặn thì một vòng quét sẽ ôm cả tồn đọng đó vào bộ nhớ và
+  // đẩy một mệnh đề IN khổng lồ xuống Postgres. Worker chạy mỗi phút nên tồn
+  // đọng vẫn được tiêu hoá dần, chỉ là chia thành nhiều lô.
+  const candidates = await prisma.reservation.findMany({
     where: { status: 'HELD', expiresAt: { lt: cutoff } },
     select: { id: true },
+    orderBy: { expiresAt: 'asc' }, // hết hạn lâu nhất được dọn trước
+    take: Math.max(1, Number(batchSize) || DEFAULT_BATCH_SIZE),
   });
+
+  // Bỏ qua những lượt đã được đánh dấu cách ly. Một truy vấn cho cả vòng quét,
+  // không phải một truy vấn cho mỗi lượt. Lỗi ở đây không được làm hỏng cả
+  // vòng quét — cùng lắm là xử lý lại lượt đã cách ly và thất bại y như cũ.
+  let quarantined = new Set();
+  if (candidates.length > 0) {
+    try {
+      const marks = await prisma.auditLog.findMany({
+        where: {
+          action: STOCK_DRIFT_ACTION,
+          entityType: 'Reservation',
+          entityId: { in: candidates.map((row) => row.id) },
+        },
+        select: { entityId: true },
+      });
+      quarantined = new Set(marks.map((row) => row.entityId));
+    } catch (error) {
+      console.error('[cleanup] Không đọc được danh sách cách ly:', error.message);
+    }
+  }
+
+  const expired = candidates.filter((row) => !quarantined.has(row.id));
+  if (quarantined.size > 0) {
+    console.warn(
+      `[cleanup] Bỏ qua ${quarantined.size} lượt giữ chỗ đang chờ xử lý tay do lệch kho.`,
+    );
+  }
 
   let cleaned = 0;
   const cancelledBookings = []; // gom lại để gửi email SAU transaction
@@ -204,6 +277,13 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
     } catch (error) {
       // Serialization failure / lỗi 1 reservation -> bỏ qua, vòng sau quét lại.
       console.error(`[cleanup] Lỗi khi dọn reservation ${id}:`, error.message);
+      if (error.code === HELD_STOCK_DRIFT) {
+        // Lỗi này KHÔNG tự lành: vòng quét sau sẽ gặp đúng bộ đếm lệch đó và
+        // thất bại y hệt. Ghi dấu để (a) Admin có việc cụ thể để xử lý và
+        // (b) các vòng sau bỏ qua, thay vì đốt một transaction mỗi phút và
+        // in lỗi mãi mãi mà không ai được báo.
+        await quarantineDriftedReservation(id, error);
+      }
     }
   }
 
