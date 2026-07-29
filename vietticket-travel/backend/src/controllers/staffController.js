@@ -1742,6 +1742,7 @@ function toCheckinTicket(instance) {
 // Lý do KHÔNG được check-in (null = hợp lệ). Thứ tự ưu tiên để thông báo chính xác.
 function getCheckinBlockReason(instance, now = new Date()) {
   const booking = instance.booking;
+  const attraction = booking?.reservation?.ticketProduct?.attraction;
   const visitDay = new Date(
     booking.snapshotVisitDate || booking.reservation.date,
   ).toISOString().slice(0, 10);
@@ -1758,6 +1759,12 @@ function getCheckinBlockReason(instance, now = new Date()) {
   }
   if (booking.status !== 'CONFIRMED') {
     return `Đơn đặt vé không ở trạng thái đã xác nhận (hiện tại: ${booking.status}).`;
+  }
+  if (attraction?.partner?.status === 'SUSPENDED') {
+    return 'Nhà cung cấp đang bị đình chỉ khẩn cấp. Không được tiếp nhận khách; vui lòng chuyển ca này cho bộ phận hỗ trợ.';
+  }
+  if (attraction?.operationalStatus === 'SUSPENDED') {
+    return 'Địa điểm đang bị đình chỉ khẩn cấp. Không được tiếp nhận khách; vui lòng chuyển ca này cho bộ phận hỗ trợ.';
   }
   if (visitDay !== today) {
     return visitDay > today
@@ -1786,7 +1793,14 @@ async function lookupTicketByQr(req, res, next) {
               ticketProduct: {
                 include: {
                   attraction: {
-                    select: { id: true, title: true, openTime: true, closeTime: true },
+                    select: {
+                      id: true,
+                      title: true,
+                      openTime: true,
+                      closeTime: true,
+                      operationalStatus: true,
+                      partner: { select: { status: true } },
+                    },
                   },
                 },
               },
@@ -1840,7 +1854,14 @@ const CHECKIN_TICKET_INCLUDE = {
           ticketProduct: {
             include: {
               attraction: {
-                select: { id: true, title: true, openTime: true, closeTime: true },
+                select: {
+                  id: true,
+                  title: true,
+                  openTime: true,
+                  closeTime: true,
+                  operationalStatus: true,
+                  partner: { select: { status: true } },
+                },
               },
             },
           },
@@ -1857,7 +1878,14 @@ const CHECKIN_BOOKING_INCLUDE = {
       ticketProduct: {
         include: {
           attraction: {
-            select: { id: true, title: true, openTime: true, closeTime: true },
+            select: {
+              id: true,
+              title: true,
+              openTime: true,
+              closeTime: true,
+              operationalStatus: true,
+              partner: { select: { status: true } },
+            },
           },
         },
       },
@@ -2034,7 +2062,14 @@ async function checkInTicket(req, res, next) {
                   ticketProduct: {
                     include: {
                       attraction: {
-                        select: { id: true, title: true, openTime: true, closeTime: true },
+                        select: {
+                          id: true,
+                          title: true,
+                          openTime: true,
+                          closeTime: true,
+                          operationalStatus: true,
+                          partner: { select: { status: true } },
+                        },
                       },
                     },
                   },

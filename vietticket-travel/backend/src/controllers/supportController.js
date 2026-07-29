@@ -185,7 +185,7 @@ async function listAllTickets(req, res, next) {
     const where = {};
     if (status) where.status = status;
     if (priority) where.priority = priority;
-    if (assignment === 'me') where.assignedToId = req.user.id;
+    if (['me', 'mine'].includes(assignment)) where.assignedToId = req.user.id;
     if (assignment === 'unassigned') where.assignedToId = null;
     if (search) {
       where.OR = [

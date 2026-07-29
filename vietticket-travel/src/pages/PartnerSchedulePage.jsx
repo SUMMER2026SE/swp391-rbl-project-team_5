@@ -46,8 +46,16 @@ function getCapacityLimitError(dayCapacity, timeSlots, specialDates = {}) {
   const activeSlotCapacityTotal = getActiveSlotCapacityTotal(timeSlots)
   const defaultCapacityValue = Number(dayCapacity)
 
-  if (!Number.isFinite(defaultCapacityValue) || defaultCapacityValue < 0) {
-    return 'Sức chứa mặc định không hợp lệ.'
+  if (!Number.isInteger(defaultCapacityValue) || defaultCapacityValue < 1) {
+    return 'Sức chứa mặc định phải là số nguyên lớn hơn 0.'
+  }
+
+  for (const slot of timeSlots) {
+    if (slot.isActive === false) continue
+    const slotCapacity = Number(slot.capacity)
+    if (!Number.isInteger(slotCapacity) || slotCapacity < 1) {
+      return `Sức chứa khung giờ ${slot.start || 'chưa xác định'}–${slot.end || 'chưa xác định'} phải là số nguyên lớn hơn 0.`
+    }
   }
 
   if (activeSlotCapacityTotal > defaultCapacityValue) {
@@ -59,7 +67,10 @@ function getCapacityLimitError(dayCapacity, timeSlots, specialDates = {}) {
     if (value.capacity === undefined || value.capacity === null || value.capacity === '') continue
 
     const specialCapacity = Number(value.capacity)
-    if (Number.isFinite(specialCapacity) && activeSlotCapacityTotal > specialCapacity) {
+    if (!Number.isInteger(specialCapacity) || specialCapacity < 1) {
+      return `Sức chứa ngày đặc biệt ${dateKey} phải là số nguyên lớn hơn 0.`
+    }
+    if (activeSlotCapacityTotal > specialCapacity) {
       return `Tổng sức chứa các khung giờ đang hoạt động (${activeSlotCapacityTotal}) không được lớn hơn sức chứa ngày đặc biệt ${dateKey} (${specialCapacity}).`
     }
   }

@@ -386,7 +386,11 @@ describe('changePartnerOperationalStatus', () => {
     const req = {
       user: { id: 'admin-1' },
       params: { id: 'p-001' },
-      body: { status: 'SUSPENDED', reason: 'Vi phạm điều khoản vận hành' },
+      body: {
+        status: 'SUSPENDED',
+        reason: 'Vi phạm điều khoản vận hành',
+        acknowledgeCustomerImpact: true,
+      },
       headers: {},
     };
     const res = createRes();
@@ -445,7 +449,11 @@ describe('changePartnerOperationalStatus', () => {
 
     await changePartnerOperationalStatus({
       params: { id: 'p-001' },
-      body: { status: 'SUSPENDED', reason: 'x' },
+      body: {
+        status: 'SUSPENDED',
+        reason: 'x',
+        acknowledgeCustomerImpact: true,
+      },
     }, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(409);
@@ -694,7 +702,10 @@ describe('hideAttraction', () => {
       auditLog: { create: jest.fn().mockResolvedValue({}) },
     };
     mockPrisma.$transaction.mockImplementation((callback) => callback(tx));
-    const req = { params: { id: 'attr-001' }, body: { reason: 'Vé lậu trái phép' } };
+    const req = {
+      params: { id: 'attr-001' },
+      body: { reason: 'Vé lậu trái phép', acknowledgeCustomerImpact: true },
+    };
     const res = createRes();
     await hideAttraction(req, res, jest.fn());
 
@@ -720,7 +731,10 @@ describe('hideAttraction', () => {
 
   test('❌ Trả 404 khi không tìm thấy địa điểm', async () => {
     mockPrisma.attraction.findUnique.mockResolvedValue(null);
-    const req = { params: { id: 'attr-x' }, body: { reason: 'x' } };
+    const req = {
+      params: { id: 'attr-x' },
+      body: { reason: 'x', acknowledgeCustomerImpact: true },
+    };
     const res = createRes();
     await hideAttraction(req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(404);

@@ -73,7 +73,19 @@ function validateSlotCapacityLimit({ attraction, timeSlots, hasTimeSlots, defaul
   const activeSlotCapacityTotal = getActiveSlotCapacityTotal(effectiveSlots);
   const effectiveDefaultCapacity = getDefaultCapacityForValidation(attraction, defaultCapacity, hasPublished);
 
-  if (Number.isFinite(effectiveDefaultCapacity) && activeSlotCapacityTotal > effectiveDefaultCapacity) {
+  if (!Number.isInteger(effectiveDefaultCapacity) || effectiveDefaultCapacity < 1) {
+    return 'Sức chứa mặc định phải là số nguyên lớn hơn 0.';
+  }
+
+  for (const slot of effectiveSlots) {
+    if (slot?.isActive === false) continue;
+    const slotCapacity = getSlotCapacity(slot);
+    if (!Number.isInteger(slotCapacity) || slotCapacity < 1) {
+      return 'Sức chứa khung giờ đang hoạt động phải là số nguyên lớn hơn 0.';
+    }
+  }
+
+  if (activeSlotCapacityTotal > effectiveDefaultCapacity) {
     return `Tổng sức chứa các khung giờ đang hoạt động (${activeSlotCapacityTotal}) không được lớn hơn sức chứa mặc định mỗi ngày (${effectiveDefaultCapacity}).`;
   }
 
@@ -88,7 +100,10 @@ function validateSlotCapacityLimit({ attraction, timeSlots, hasTimeSlots, defaul
     if (value.capacity === undefined || value.capacity === null || value.capacity === '') continue;
 
     const specialCapacity = Number(value.capacity);
-    if (Number.isFinite(specialCapacity) && activeSlotCapacityTotal > specialCapacity) {
+    if (!Number.isInteger(specialCapacity) || specialCapacity < 1) {
+      return `Sức chứa ngày đặc biệt ${dateKey} phải là số nguyên lớn hơn 0.`;
+    }
+    if (activeSlotCapacityTotal > specialCapacity) {
       return `Tổng sức chứa các khung giờ đang hoạt động (${activeSlotCapacityTotal}) không được lớn hơn sức chứa ngày đặc biệt ${dateKey} (${specialCapacity}).`;
     }
   }
@@ -186,7 +201,8 @@ async function saveSchedule(req, res, next) {
         return res.status(400).json({ message: `Khung giờ ${slot.start}–${slot.end} không hợp lệ (giờ bắt đầu phải trước giờ kết thúc).` });
       }
       const cap = Number(slot.capacity);
-      if (!Number.isFinite(cap) || cap < 0) {
+      const minimumCapacity = slot.isActive === false ? 0 : 1;
+      if (!Number.isInteger(cap) || cap < minimumCapacity) {
         return res.status(400).json({ message: 'Sức chứa khung giờ không hợp lệ.' });
       }
     }
@@ -216,7 +232,8 @@ async function saveSchedule(req, res, next) {
 
       if (value.capacity !== undefined && value.capacity !== null && value.capacity !== '') {
         const capacity = Number(value.capacity);
-        if (!Number.isFinite(capacity) || capacity < 0) {
+        const minimumCapacity = value.closed ? 0 : 1;
+        if (!Number.isInteger(capacity) || capacity < minimumCapacity) {
           return res.status(400).json({
             message: `Sức chứa cho ngày ${dateKey} không hợp lệ.`,
           });
@@ -226,7 +243,7 @@ async function saveSchedule(req, res, next) {
 
     if (defaultCapacity !== undefined) {
       const cap = Number(defaultCapacity);
-      if (!Number.isFinite(cap) || cap < 0) {
+      if (!Number.isInteger(cap) || cap < 1) {
         return res.status(400).json({ message: 'Sức chứa mặc định không hợp lệ.' });
       }
     }
@@ -253,7 +270,7 @@ async function saveSchedule(req, res, next) {
       }
       if (defaultCapacity !== undefined) {
         const cap = Number(defaultCapacity);
-        if (!Number.isFinite(cap) || cap < 0) {
+        if (!Number.isInteger(cap) || cap < 1) {
           return res.status(400).json({ message: 'Sức chứa mặc định không hợp lệ.' });
         }
         draft.schedule.defaultCapacity = cap;
@@ -302,7 +319,7 @@ async function saveSchedule(req, res, next) {
       if (openDays !== undefined) attractionData.openDays = serializeOpenDays(openDays);
       if (defaultCapacity !== undefined) {
         const cap = Number(defaultCapacity);
-        if (!Number.isFinite(cap) || cap < 0) {
+        if (!Number.isInteger(cap) || cap < 1) {
           return res.status(400).json({ message: 'Sức chứa mặc định không hợp lệ.' });
         }
         attractionData.defaultCapacity = cap;

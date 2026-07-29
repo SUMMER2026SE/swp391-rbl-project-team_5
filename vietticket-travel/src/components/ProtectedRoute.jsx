@@ -3,7 +3,11 @@ import { useAuth } from '../context/useAuth.js'
 import { hasAnyRole, hasRole } from '../utils/userRoles.js'
 
 function isPlatformStaff(user) {
-  return hasRole(user, 'ADMIN') || (hasRole(user, 'STAFF') && !user?.employerPartnerId)
+  return hasRole(user, 'ADMIN') || (
+    hasRole(user, 'STAFF')
+    && !user?.employerPartnerId
+    && (user.staffAccessLevel || 'MANAGER') === 'MANAGER'
+  )
 }
 
 function RouteLoading() {
@@ -24,6 +28,7 @@ function ProtectedRoute({
   allowedRoles,
   requirePlatformStaff = false,
   requirePartnerStaff = false,
+  requiredStaffAccess,
 }) {
   const location = useLocation()
   const { isAuthenticated, isAuthLoading, user } = useAuth()
@@ -46,6 +51,15 @@ function ProtectedRoute({
 
   if (requirePartnerStaff && hasRole(user, 'STAFF') && !user?.employerPartnerId) {
     return <Navigate to="/staff/tickets" replace />
+  }
+
+  if (
+    requiredStaffAccess
+    && hasRole(user, 'STAFF')
+    && (user.staffAccessLevel || (user.employerPartnerId ? 'SCANNER' : 'MANAGER'))
+      !== requiredStaffAccess
+  ) {
+    return <Navigate to="/staff/checkin" replace />
   }
 
   return children

@@ -18,6 +18,7 @@ function RefundModal({ booking, onClose, onSuccess }) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [acknowledged, setAcknowledged] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -43,11 +44,15 @@ function RefundModal({ booking, onClose, onSuccess }) {
       toast.warning('Vui lòng nhập lý do hoàn tiền (tối thiểu 5 ký tự).')
       return
     }
+    if (!acknowledged) {
+      toast.warning('Vui lòng xác nhận việc hủy toàn bộ booking và vô hiệu hóa mã QR.')
+      return
+    }
 
     setIsSubmitting(true)
     try {
       await bookingService.createRefundRequest(booking.id, trimmed)
-      toast.success('Đã gửi yêu cầu hoàn tiền. Nhân viên sẽ xử lý sớm.')
+      toast.success('Booking đã được hủy. Khoản hoàn đang được xử lý.')
       onSuccess?.()
       onClose()
     } catch (error) {
@@ -76,7 +81,7 @@ function RefundModal({ booking, onClose, onSuccess }) {
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h3 id="refund-modal-title" className="text-xl font-semibold text-on-surface">
-              Yêu cầu hoàn tiền
+              Hủy booking & hoàn tiền
             </h3>
             <p className="mt-1 text-sm text-on-surface-variant">
               {booking.attractionTitle}
@@ -102,8 +107,8 @@ function RefundModal({ booking, onClose, onSuccess }) {
         ) : (
           <>
             <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-semibold leading-5 text-amber-950">
-              Yêu cầu này hủy toàn bộ booking và toàn bộ {preview.bookingQuantity || booking.quantity || 1} mã QR.
-              Bản demo không hỗ trợ hủy bớt số vé hoặc đổi ngày/khung giờ. “Hoàn sau khi trừ phí”
+              Thao tác này hủy ngay toàn bộ booking và vô hiệu hóa toàn bộ {preview.bookingQuantity || booking.quantity || 1} mã QR.
+              Không hỗ trợ hủy bớt số vé hoặc đổi ngày/khung giờ. “Hoàn sau khi trừ phí”
               chỉ nói về số tiền nhận lại, không phải số lượng vé bị hủy.
             </div>
             <div className="space-y-3 rounded-xl border border-outline-variant/30 bg-surface-container-low p-4">
@@ -173,6 +178,19 @@ function RefundModal({ booking, onClose, onSuccess }) {
                 <p className="mt-1 text-right text-xs text-on-surface-variant">
                   {reason.length}/1000
                 </p>
+                <label className="mt-4 flex items-start gap-3 rounded-xl border border-error/30 bg-red-50 p-3 text-sm font-semibold leading-5 text-error">
+                  <input
+                    checked={acknowledged}
+                    className="mt-0.5 h-4 w-4 accent-red-700"
+                    disabled={isSubmitting}
+                    onChange={(event) => setAcknowledged(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>
+                    Tôi hiểu booking và toàn bộ mã QR sẽ mất hiệu lực ngay; thao tác hủy
+                    không thể hoàn tác dù tiền hoàn có thể cần thời gian đối soát.
+                  </span>
+                </label>
               </>
             )}
 
@@ -190,9 +208,9 @@ function RefundModal({ booking, onClose, onSuccess }) {
                   type="button"
                   className="rounded-lg border-0 bg-error px-4 py-2 text-sm font-semibold text-on-error disabled:cursor-not-allowed disabled:opacity-50"
                   onClick={() => void handleSubmit()}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !acknowledged}
                 >
-                  {isSubmitting ? 'Đang gửi...' : 'Xác nhận gửi yêu cầu'}
+                  {isSubmitting ? 'Đang hủy...' : 'Xác nhận hủy booking'}
                 </button>
               )}
             </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import QrCameraScanner from '../../components/staff/QrCameraScanner.jsx'
+import { useAuth } from '../../context/useAuth.js'
 import {
   checkInTicket,
   listOperationalBookings,
@@ -13,6 +14,7 @@ import {
   formatBookingReference,
   formatTicketReference,
 } from '../../utils/bookingReference.js'
+import { hasRole } from '../../utils/userRoles.js'
 
 const REISSUE_REASON_OPTIONS = [
   { value: 'LOST_BY_CUSTOMER', label: 'Khách làm mất vé' },
@@ -167,6 +169,9 @@ function InfoRow({ label, value, mono = false }) {
 }
 
 export default function CheckinPage() {
+  const { user } = useAuth()
+  const canReissue = hasRole(user, 'ADMIN')
+    || (hasRole(user, 'STAFF') && user?.staffAccessLevel === 'MANAGER')
   const [tokenInput, setTokenInput] = useState('')
   const [lookupResult, setLookupResult] = useState(null)
   const [lastCheckin, setLastCheckin] = useState(null)
@@ -219,9 +224,10 @@ export default function CheckinPage() {
   }, [fetchToday])
 
   useEffect(() => {
+    if (!canReissue) return undefined
     const timer = window.setTimeout(() => void fetchOperational(), 0)
     return () => window.clearTimeout(timer)
-  }, [fetchOperational])
+  }, [canReissue, fetchOperational])
 
   // Tra cứu bằng mã QR, mã vé hoặc mã đặt chỗ VT-XXXX (backend tự nhận dạng).
   const runLookup = useCallback(async (rawValue, { silent = false } = {}) => {
@@ -277,7 +283,7 @@ export default function CheckinPage() {
       // Luôn tra cứu lại: kể cả khi lỗi (ví dụ vé vừa bị quét ở cổng khác).
       await refreshLookup()
       void fetchToday()
-      void fetchOperational(operationalSearch)
+      if (canReissue) void fetchOperational(operationalSearch)
     }
   }
 
@@ -304,7 +310,7 @@ export default function CheckinPage() {
       setIsCheckingAll(false)
       await refreshLookup()
       void fetchToday()
-      void fetchOperational(operationalSearch)
+      if (canReissue) void fetchOperational(operationalSearch)
     }
 
     if (succeeded > 0) toast.success(`Đã check-in ${succeeded} vé.`)
@@ -312,7 +318,7 @@ export default function CheckinPage() {
   }
 
   async function handleReissue() {
-    if (!reissueTarget) return
+    if (!canReissue || !reissueTarget) return
     const reason = reissueReason.trim()
     if (reason.length < 5) {
       toast.warning('Vui lòng mô tả lý do cấp lại vé, tối thiểu 5 ký tự.')
@@ -448,6 +454,14 @@ export default function CheckinPage() {
           </div>
         )}
 
+        {!canReissue && (
+          <div className="mb-6 rounded-xl border border-outline-variant bg-surface-container-low p-4 text-sm text-on-surface-variant">
+            Tài khoản Scanner chỉ được tra cứu, quét QR và check-in tại các địa điểm được phân công.
+            Cấp lại vé phải do Staff Partner cấp Manager thực hiện.
+          </div>
+        )}
+
+        {canReissue && (
         <section className="mb-6 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
           <div className="border-b border-outline-variant bg-surface-container-low px-5 py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -520,6 +534,7 @@ export default function CheckinPage() {
             )}
           </div>
         </section>
+        )}
 
         {/* Danh sách đơn hôm nay */}
         <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
@@ -621,18 +636,20 @@ export default function CheckinPage() {
                               <span className="material-symbols-outlined text-[15px]" aria-hidden="true">how_to_reg</span>
                               Check-in
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setReissueTarget(b)
-                                setReissueReason('')
-                                setReissueReasonCode('LOST_BY_CUSTOMER')
-                              }}
-                              className="flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/5"
-                            >
-                              <span className="material-symbols-outlined text-[15px]" aria-hidden="true">autorenew</span>
-                              Cấp lại vé
-                            </button>
+                            {canReissue && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReissueTarget(b)
+                                  setReissueReason('')
+                                  setReissueReasonCode('LOST_BY_CUSTOMER')
+                                }}
+                                className="flex items-center gap-1 rounded-lg border border-primary px-2.5 py-1 text-xs font-bold text-primary hover:bg-primary/5"
+                              >
+                                <span className="material-symbols-outlined text-[15px]" aria-hidden="true">autorenew</span>
+                                Cấp lại vé
+                              </button>
+                            )}
                           </div>
                         )}
                       </td>
@@ -651,7 +668,7 @@ export default function CheckinPage() {
           />
         )}
 
-        {reissueTarget && (
+        {canReissue && reissueTarget && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
             onClick={isReissuing ? undefined : () => setReissueTarget(null)}

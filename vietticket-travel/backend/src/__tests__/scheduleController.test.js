@@ -42,7 +42,7 @@ describe('getSchedule', () => {
 });
 
 describe('saveSchedule capacity limits', () => {
-  test('tra 400 khi tong suc chua slot vuot suc chua mac dinh', async () => {
+  function setupOwned() {
     mockPrisma.attraction.findUnique.mockResolvedValue({
       id: 'attr-001',
       partnerId: 'partner-001',
@@ -50,6 +50,10 @@ describe('saveSchedule capacity limits', () => {
       timeSlots: [],
       specialDates: [],
     });
+  }
+
+  test('tra 400 khi tong suc chua slot vuot suc chua mac dinh', async () => {
+    setupOwned();
 
     const req = {
       partner: PARTNER,
@@ -67,11 +71,74 @@ describe('saveSchedule capacity limits', () => {
       message: expect.stringContaining('Tổng sức chứa'),
     }));
   });
+
+  test('trả 400 khi sức chứa mặc định bằng 0', async () => {
+    setupOwned();
+    const req = {
+      partner: PARTNER,
+      params: { id: 'attr-001' },
+      body: { defaultCapacity: 0 },
+    };
+    const res = createRes();
+
+    await saveSchedule(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('Sức chứa mặc định'),
+    }));
+  });
+
+  test('trả 400 khi khung giờ đang hoạt động có sức chứa bằng 0', async () => {
+    setupOwned();
+    const req = {
+      partner: PARTNER,
+      params: { id: 'attr-001' },
+      body: {
+        defaultCapacity: 100,
+        timeSlots: [{ start: '09:00', end: '10:00', capacity: 0, isActive: true }],
+      },
+    };
+    const res = createRes();
+
+    await saveSchedule(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('Sức chứa khung giờ'),
+    }));
+  });
+
+  test('trả 400 khi ngày đặc biệt đang mở có sức chứa bằng 0', async () => {
+    setupOwned();
+    const req = {
+      partner: PARTNER,
+      params: { id: 'attr-001' },
+      body: {
+        defaultCapacity: 100,
+        specialDates: { '2026-12-25': { closed: false, capacity: 0 } },
+      },
+    };
+    const res = createRes();
+
+    await saveSchedule(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('Sức chứa cho ngày'),
+    }));
+  });
 });
 
 describe('saveSchedule', () => {
   function setupOwned() {
-    mockPrisma.attraction.findUnique.mockResolvedValue({ id: 'attr-001', partnerId: 'partner-001' });
+    mockPrisma.attraction.findUnique.mockResolvedValue({
+      id: 'attr-001',
+      partnerId: 'partner-001',
+      defaultCapacity: 100,
+      timeSlots: [],
+      specialDates: [],
+    });
   }
 
   test('✅ Lưu thành công openDays + timeSlots + specialDates', async () => {

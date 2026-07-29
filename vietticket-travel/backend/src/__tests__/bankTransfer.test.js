@@ -72,6 +72,7 @@ function bookingFixture(overrides = {}) {
     id: BOOKING_ID,
     userId: 'user-1',
     status: 'PENDING_PAYMENT',
+    partnerApprovedAt: null,
     paymentMethod: 'bank_transfer',
     payments: [],
     totalAmount: 250000,
@@ -92,6 +93,7 @@ function bookingFixture(overrides = {}) {
           requiresManualApproval: false,
           publishedAt: new Date('2026-01-01'),
           publicationStatus: 'ACTIVE',
+          operationalStatus: 'ACTIVE',
           status: 'APPROVED',
           archivedAt: null,
           partner: { status: 'APPROVED' },
@@ -189,8 +191,23 @@ describe('confirmBankTransfer', () => {
     );
   });
 
-  test('địa điểm cần duyệt tay -> PENDING_PARTNER, chưa phát vé', async () => {
+  test('địa điểm đã duyệt tay -> xác nhận chuyển khoản và phát vé', async () => {
     const booking = bookingFixture();
+    booking.reservation.ticketProduct.attraction.requiresManualApproval = true;
+    booking.partnerApprovedAt = new Date();
+    const tx = makeTx();
+    tx.booking.findUnique.mockResolvedValue(booking);
+    wire(tx);
+
+    const result = await confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' });
+
+    expect(result.bookingStatus).toBe('CONFIRMED');
+    expect(createTicketInstances).toHaveBeenCalled();
+    expect(awardPointsForBooking).toHaveBeenCalled();
+  });
+
+  test('không nhận thanh toán trước khi partner duyệt; ghi nhận để hoàn 100%', async () => {
+    const booking = bookingFixture({ status: 'PENDING_PARTNER' });
     booking.reservation.ticketProduct.attraction.requiresManualApproval = true;
     const tx = makeTx();
     tx.booking.findUnique.mockResolvedValue(booking);
@@ -198,9 +215,12 @@ describe('confirmBankTransfer', () => {
 
     const result = await confirmBankTransfer({ bookingId: BOOKING_ID, actorId: 'admin-1' });
 
-    expect(result.bookingStatus).toBe('PENDING_PARTNER');
+    expect(result).toEqual(expect.objectContaining({
+      bookingStatus: 'CANCELLED',
+      latePayment: true,
+    }));
     expect(createTicketInstances).not.toHaveBeenCalled();
-    expect(awardPointsForBooking).not.toHaveBeenCalled();
+    expect(queueMandatoryRefund).toHaveBeenCalled();
   });
 
   test('idempotent: đơn đã xác nhận thì không xử lý lại', async () => {
@@ -333,11 +353,11 @@ describe('confirmBankTransfer', () => {
 
 // ============================================================
 describe('chính sách giữ chỗ cho chuyển khoản', () => {
-  test('mặc định 60 phút, kẹp trong [15, 720]', () => {
+  test('mặc định 240 phút, kẹp trong [15, 720]', () => {
     jest.resetModules();
     const policy = require('../utils/bankTransferPolicy');
     delete process.env.BANK_TRANSFER_HOLD_MINUTES;
-    expect(policy.getBankTransferHoldMinutes()).toBe(60);
+    expect(policy.getBankTransferHoldMinutes()).toBe(240);
 
     process.env.BANK_TRANSFER_HOLD_MINUTES = '5';
     expect(policy.getBankTransferHoldMinutes()).toBe(15);

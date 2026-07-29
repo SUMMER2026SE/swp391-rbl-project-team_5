@@ -40,6 +40,9 @@ const {
   isValidPhoneNumber,
   validateFullName,
 } = require('../utils/validators');
+const {
+  remediateSuspendedBookings,
+} = require('../services/operationalSuspensionService');
 
 const ALLOWED_ROLES = ['CUSTOMER', 'PARTNER', 'ADMIN', 'STAFF'];
 const ALLOWED_STATUSES = ['ACTIVE', 'LOCKED'];
@@ -337,6 +340,7 @@ async function createPlatformStaff(req, res, next) {
           isEmailVerified: true,
           passwordHash: null,
           employerPartnerId: null,
+          staffAccessLevel: 'MANAGER',
           profile: { create: { phoneNumber } },
           roleMemberships: { create: { role: 'STAFF' } },
         },
@@ -574,7 +578,7 @@ async function getPartners(req, res, next) {
       );
       return {
         ...partner,
-        payoutCurrency: 'VND',
+        payoutCurrency: partner.payoutCurrency || 'VND',
         businessLicenseUrl: documentIsValid ? partner.businessLicenseUrl : '',
         documentValidationStatus: documentIsValid ? 'VALID' : 'MISSING_OR_UNTRUSTED',
       };
@@ -1043,6 +1047,15 @@ async function changePartnerOperationalStatus(req, res, next) {
         error: { code: 'VALIDATION_ERROR', message: 'reason is required when suspending' },
       });
     }
+    if (status === 'SUSPENDED' && req.body?.acknowledgeCustomerImpact !== true) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'CUSTOMER_IMPACT_ACKNOWLEDGEMENT_REQUIRED',
+          message: 'Phải xác nhận xử lý toàn bộ booking bị ảnh hưởng trước khi đình chỉ đối tác.',
+        },
+      });
+    }
     if (reason.length > 1000) {
       return res.status(400).json({
         success: false,
@@ -1100,7 +1113,32 @@ async function changePartnerOperationalStatus(req, res, next) {
       });
     });
 
-    if (status === 'SUSPENDED') disconnectPartnerSockets(id);
+    let customerRemediation = null;
+    if (status === 'SUSPENDED') {
+      disconnectPartnerSockets(id);
+      try {
+        customerRemediation = await remediateSuspendedBookings({
+          partnerId: id,
+          reason,
+          actorId: req.user?.id || null,
+          req,
+          source: 'PARTNER_SUSPENSION',
+        });
+      } catch (remediationError) {
+        customerRemediation = {
+          scanFailed: true,
+          needsAttention: true,
+          message: 'Đối tác đã bị đình chỉ nhưng cần Staff kiểm tra thủ công các booking bị ảnh hưởng.',
+        };
+        await writeAuditLog({
+          req,
+          action: 'PARTNER_SUSPENSION_REMEDIATION_FAILED',
+          entityType: 'PARTNER',
+          entityId: id,
+          metadata: { error: String(remediationError.message || remediationError).slice(0, 2000) },
+        }).catch(() => {});
+      }
+    }
 
     if (partner.user?.email) {
       sendPartnerOperationalStatusEmail({
@@ -1123,6 +1161,7 @@ async function changePartnerOperationalStatus(req, res, next) {
         user: partner.user,
         status,
         rejectionReason: status === 'SUSPENDED' ? reason : null,
+        customerRemediation,
       },
     });
   } catch (error) {
@@ -1289,6 +1328,15 @@ async function hideAttraction(req, res, next) {
     const id = req.params.id;
     const { reason } = req.body || {};
     if (!reason || String(reason).trim() === '') return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'reason is required' } });
+    if (req.body?.acknowledgeCustomerImpact !== true) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'CUSTOMER_IMPACT_ACKNOWLEDGEMENT_REQUIRED',
+          message: 'Phải xác nhận xử lý booking bị ảnh hưởng trước khi đình chỉ địa điểm.',
+        },
+      });
+    }
 
     const attraction = await prisma.attraction.findUnique({
       where: { id },
@@ -1342,12 +1390,40 @@ async function hideAttraction(req, res, next) {
       });
     });
 
+    let customerRemediation;
+    try {
+      customerRemediation = await remediateSuspendedBookings({
+        attractionIds: [id],
+        reason: suspensionReason,
+        actorId: req.user?.id || null,
+        req,
+        source: 'ATTRACTION_SUSPENSION',
+      });
+    } catch (remediationError) {
+      customerRemediation = {
+        scanFailed: true,
+        needsAttention: true,
+        message: 'Địa điểm đã bị đình chỉ nhưng cần Staff kiểm tra thủ công các booking bị ảnh hưởng.',
+      };
+      await writeAuditLog({
+        req,
+        action: 'ATTRACTION_SUSPENSION_REMEDIATION_FAILED',
+        entityType: 'ATTRACTION',
+        entityId: id,
+        metadata: { error: String(remediationError.message || remediationError).slice(0, 2000) },
+      }).catch(() => {});
+    }
+
     // send email but don't block
     if (attraction.partner && attraction.partner.user && attraction.partner.user.email) {
       sendAttractionViolationEmail({ to: attraction.partner.user.email, partnerName: attraction.partner.businessName, attractionTitle: attraction.title, reason: suspensionReason }).catch((err) => console.error('[Admin] Lỗi gửi email vi phạm:', err));
     }
 
-    return res.status(200).json({ success: true, message: 'Địa điểm đã bị ẩn thành công và email cảnh báo đã gửi tới đối tác.' });
+    return res.status(200).json({
+      success: true,
+      message: 'Đã đình chỉ địa điểm, dừng bán mới và xử lý các booking bị ảnh hưởng.',
+      data: { customerRemediation },
+    });
   } catch (error) {
     return next(error);
   }
@@ -2012,6 +2088,7 @@ async function deleteCategory(req, res, next) {
 }
 
 function serializeVoucher(voucher, now = new Date()) {
+  const notStarted = voucher.startDate > now;
   const expired = voucher.expiryDate <= now;
   const exhausted = voucher.usageLimit != null && voucher.usedCount >= voucher.usageLimit;
 
@@ -2022,7 +2099,9 @@ function serializeVoucher(voucher, now = new Date()) {
     minSpend: voucher.minSpend == null ? null : Number(voucher.minSpend),
     operationalStatus: !voucher.isActive
       ? 'INACTIVE'
-      : expired
+      : notStarted
+        ? 'SCHEDULED'
+        : expired
         ? 'EXPIRED'
         : exhausted
           ? 'EXHAUSTED'
@@ -2161,6 +2240,20 @@ function voucherPayload(body, { partial = false, currentVoucher = null } = {}) {
     data.expiryDate = expiryDate;
   }
 
+  if (!partial || body.startDate !== undefined) {
+    const startDate = body.startDate ? new Date(body.startDate) : new Date();
+    if (Number.isNaN(startDate.getTime())) {
+      return { error: 'Thời điểm bắt đầu voucher không hợp lệ.' };
+    }
+    data.startDate = startDate;
+  }
+
+  const effectiveStartDate = data.startDate || currentVoucher?.startDate || new Date();
+  const effectiveExpiryDate = data.expiryDate || currentVoucher?.expiryDate;
+  if (effectiveExpiryDate && effectiveStartDate >= effectiveExpiryDate) {
+    return { error: 'Thời điểm bắt đầu phải trước thời điểm hết hạn voucher.' };
+  }
+
   if (!partial || body.usageLimit !== undefined) {
     const parsed = parseVoucherUsageLimit(body.usageLimit);
     if (parsed.error) return parsed;
@@ -2170,9 +2263,102 @@ function voucherPayload(body, { partial = false, currentVoucher = null } = {}) {
     data.usageLimit = parsed.value;
   }
 
+  if (!partial || body.maxUsesPerUser !== undefined) {
+    const parsed = Number(body.maxUsesPerUser ?? 1);
+    if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {
+      return { error: 'Giới hạn mỗi khách phải là số nguyên từ 1 đến 100.' };
+    }
+    data.maxUsesPerUser = parsed;
+  }
+
+  for (const field of [
+    'fundingPartnerId',
+    'applicablePartnerId',
+    'applicableAttractionId',
+    'applicableTicketProductId',
+  ]) {
+    if (!partial || body[field] !== undefined) {
+      data[field] = String(body[field] || '').trim() || null;
+    }
+  }
+
+  const effectiveFundingSource = data.fundingSource || currentVoucher?.fundingSource;
+  const effectiveFundingPartnerId =
+    data.fundingPartnerId !== undefined
+      ? data.fundingPartnerId
+      : currentVoucher?.fundingPartnerId;
+  const effectiveApplicablePartnerId =
+    data.applicablePartnerId !== undefined
+      ? data.applicablePartnerId
+      : currentVoucher?.applicablePartnerId;
+  if (['PARTNER', 'SHARED'].includes(effectiveFundingSource)) {
+    if (!effectiveFundingPartnerId) {
+      return { error: 'Voucher do đối tác tài trợ phải chỉ rõ đối tác tài trợ.' };
+    }
+    if (
+      effectiveApplicablePartnerId
+      && effectiveApplicablePartnerId !== effectiveFundingPartnerId
+    ) {
+      return {
+        error: 'Voucher do đối tác tài trợ chỉ được áp dụng cho chính đối tác đó.',
+      };
+    }
+    data.applicablePartnerId = effectiveFundingPartnerId;
+  } else if (data.fundingPartnerId !== undefined) {
+    data.fundingPartnerId = null;
+  }
+
   if (body.isActive !== undefined) data.isActive = parseBoolean(body.isActive);
 
   return { data };
+}
+
+async function validateVoucherScopeReferences(client, data, currentVoucher = null) {
+  const valueOf = (field) => (
+    data[field] !== undefined ? data[field] : currentVoucher?.[field] || null
+  );
+  const fundingPartnerId = valueOf('fundingPartnerId');
+  const applicablePartnerId = valueOf('applicablePartnerId');
+  const applicableAttractionId = valueOf('applicableAttractionId');
+  const applicableTicketProductId = valueOf('applicableTicketProductId');
+
+  const partnerIds = [...new Set(
+    [fundingPartnerId, applicablePartnerId].filter(Boolean),
+  )];
+  if (partnerIds.length > 0) {
+    const count = await client.partnerProfile.count({
+      where: { id: { in: partnerIds }, status: 'APPROVED' },
+    });
+    if (count !== partnerIds.length) {
+      return 'Đối tác tài trợ/áp dụng không tồn tại hoặc chưa được phê duyệt.';
+    }
+  }
+
+  if (applicableAttractionId) {
+    const attraction = await client.attraction.findFirst({
+      where: { id: applicableAttractionId, archivedAt: null },
+      select: { id: true, partnerId: true },
+    });
+    if (!attraction) return 'Địa điểm áp dụng không tồn tại.';
+    if (applicablePartnerId && attraction.partnerId !== applicablePartnerId) {
+      return 'Địa điểm áp dụng không thuộc đối tác đã chọn.';
+    }
+  }
+
+  if (applicableTicketProductId) {
+    const product = await client.ticketProduct.findFirst({
+      where: { id: applicableTicketProductId, archivedAt: null },
+      select: { id: true, attractionId: true, attraction: { select: { partnerId: true } } },
+    });
+    if (!product) return 'Gói vé áp dụng không tồn tại.';
+    if (applicableAttractionId && product.attractionId !== applicableAttractionId) {
+      return 'Gói vé áp dụng không thuộc địa điểm đã chọn.';
+    }
+    if (applicablePartnerId && product.attraction.partnerId !== applicablePartnerId) {
+      return 'Gói vé áp dụng không thuộc đối tác đã chọn.';
+    }
+  }
+  return null;
 }
 
 async function listVouchers(req, res, next) {
@@ -2195,6 +2381,10 @@ async function listVouchers(req, res, next) {
     const [vouchers, total] = await prisma.$transaction([
       prisma.voucher.findMany({
         where,
+        include: {
+          fundingPartner: { select: { id: true, businessName: true } },
+          applicablePartner: { select: { id: true, businessName: true } },
+        },
         orderBy: [{ createdAt: 'desc' }, { code: 'asc' }],
         skip,
         take: limit,
@@ -2221,6 +2411,8 @@ async function createVoucher(req, res, next) {
   try {
     const payload = voucherPayload(req.body);
     if (payload.error) return res.status(400).json({ message: payload.error });
+    const scopeError = await validateVoucherScopeReferences(prisma, payload.data);
+    if (scopeError) return res.status(400).json({ message: scopeError });
 
     const voucher = await prisma.$transaction(async (tx) => {
       const created = await tx.voucher.create({ data: payload.data });
@@ -2256,12 +2448,6 @@ async function updateVoucher(req, res, next) {
       return res.status(404).json({ message: 'Không tìm thấy voucher.' });
     }
 
-    const payload = voucherPayload(req.body, { partial: true, currentVoucher });
-    if (payload.error) return res.status(400).json({ message: payload.error });
-    if (Object.keys(payload.data).length === 0) {
-      return res.status(400).json({ message: 'Không có dữ liệu cần cập nhật.' });
-    }
-
     const protectedFields = [
       'code',
       'discountType',
@@ -2270,7 +2456,34 @@ async function updateVoucher(req, res, next) {
       'minSpend',
       'fundingSource',
       'platformFundingPercent',
+      'fundingPartnerId',
+      'applicablePartnerId',
+      'applicableAttractionId',
+      'applicableTicketProductId',
+      'maxUsesPerUser',
+      'startDate',
     ];
+    const requestsFinancialTermChange = protectedFields.some(
+      (field) => Object.prototype.hasOwnProperty.call(req.body || {}, field),
+    );
+    if (currentVoucher.usedCount > 0 && requestsFinancialTermChange) {
+      return res.status(409).json({
+        message: 'Voucher đã được sử dụng nên không thể thay đổi điều kiện tài chính hoặc phạm vi áp dụng.',
+      });
+    }
+
+    const payload = voucherPayload(req.body, { partial: true, currentVoucher });
+    if (payload.error) return res.status(400).json({ message: payload.error });
+    const scopeError = await validateVoucherScopeReferences(
+      prisma,
+      payload.data,
+      currentVoucher,
+    );
+    if (scopeError) return res.status(400).json({ message: scopeError });
+    if (Object.keys(payload.data).length === 0) {
+      return res.status(400).json({ message: 'Không có dữ liệu cần cập nhật.' });
+    }
+
     const changesFinancialTerms = protectedFields.some(
       (field) => Object.prototype.hasOwnProperty.call(payload.data, field),
     );

@@ -280,7 +280,7 @@ export default function SupportTicketsPage() {
                 aria-label="Lọc theo người phụ trách"
               >
                 <option value="">Mọi phân công</option>
-                <option value="MINE">Của tôi</option>
+                <option value="ME">Của tôi</option>
                 <option value="UNASSIGNED">Chưa nhận</option>
               </select>
             </div>

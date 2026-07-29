@@ -36,6 +36,7 @@ function toStaffResponse(staff) {
     email: staff.email,
     fullName: staff.fullName,
     status: staff.status,
+    staffAccessLevel: staff.staffAccessLevel || 'SCANNER',
     // Nhân viên chưa đặt mật khẩu (chưa kích hoạt) -> passwordHash null.
     activated: Boolean(staff.passwordHash),
     phoneNumber: staff.profile?.phoneNumber || null,
@@ -109,6 +110,13 @@ async function createStaff(req, res, next) {
     const fullName = String(req.body.fullName || '').trim().replace(/\s+/g, ' ');
     const email = normalizeEmail(req.body.email);
     const phoneNumber = req.body.phoneNumber ? String(req.body.phoneNumber).trim() : null;
+    const staffAccessLevel = String(req.body.staffAccessLevel || 'SCANNER').trim().toUpperCase();
+    if (!['SCANNER', 'MANAGER'].includes(staffAccessLevel)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Cấp quyền nhân viên phải là SCANNER hoặc MANAGER.' },
+      });
+    }
 
     const fullNameError = validateFullName(fullName);
     if (fullNameError) {
@@ -158,6 +166,7 @@ async function createStaff(req, res, next) {
           isEmailVerified: true,
           passwordHash: null,
           employerPartnerId: req.partner.id,
+          staffAccessLevel,
           profile: { create: { phoneNumber } },
           roleMemberships: { create: { role: 'STAFF' } },
         },
@@ -381,6 +390,53 @@ async function replaceStaffAssignments(req, res, next) {
   }
 }
 
+async function changeStaffAccessLevel(req, res, next) {
+  try {
+    const staffAccessLevel = String(req.body?.staffAccessLevel || '').trim().toUpperCase();
+    if (!['SCANNER', 'MANAGER'].includes(staffAccessLevel)) {
+      return res.status(400).json({
+        success: false,
+        error: { message: 'Cấp quyền nhân viên phải là SCANNER hoặc MANAGER.' },
+      });
+    }
+    const staff = await findOwnedStaff(
+      prisma,
+      req.partner.id,
+      req.params.staffId,
+      { staffAssignments: false },
+    );
+    if (!staff) {
+      return res.status(404).json({
+        success: false,
+        error: { message: 'Không tìm thấy nhân viên.' },
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: staff.id },
+        data: { staffAccessLevel, tokenVersion: { increment: 1 } },
+      });
+      await tx.authSession.updateMany({
+        where: { userId: staff.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await writeAuditLog({
+        client: tx,
+        req,
+        action: 'PARTNER_STAFF_ACCESS_LEVEL_CHANGED',
+        entityType: 'User',
+        entityId: staff.id,
+        metadata: { partnerId: req.partner.id, staffAccessLevel },
+      });
+    });
+    disconnectUserSockets(staff.id);
+    return res.json({ success: true, data: { staffId: staff.id, staffAccessLevel } });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 // DELETE /api/partners/staff/:staffId — gỡ nhân viên khỏi công ty (khóa + thu hồi mọi phân công).
 // Không xóa cứng để giữ lịch sử check-in.
 async function removeStaff(req, res, next) {
@@ -400,6 +456,7 @@ async function removeStaff(req, res, next) {
         data: {
           role: 'CUSTOMER',
           employerPartnerId: null,
+          staffAccessLevel: null,
           // Partner-provisioned staff did not accept the customer terms. Keep
           // that converted identity locked until an explicit account recovery
           // or consent flow is completed; never silently unlock a prior lock.
@@ -438,6 +495,7 @@ async function removeStaff(req, res, next) {
 }
 
 module.exports = {
+  changeStaffAccessLevel,
   listStaff,
   createStaff,
   resendStaffInvite,

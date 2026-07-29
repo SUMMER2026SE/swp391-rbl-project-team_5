@@ -431,7 +431,7 @@ async function deleteAttraction(req, res, next) {
         snapshotAttractionId: existing.id,
         isForecastTrainingSample: false,
         snapshotVisitDate: { gte: today },
-        status: { in: ['CONFIRMED', 'PENDING_PARTNER'] },
+        status: { in: ['CONFIRMED', 'PENDING_PARTNER', 'PENDING_PAYMENT'] },
       },
     });
 

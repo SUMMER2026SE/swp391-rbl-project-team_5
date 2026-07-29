@@ -139,7 +139,7 @@ describe('partner middleware', () => {
   });
 
   describe('requireCheckInEmployer', () => {
-    test('cho phép staff phục vụ vé đã xác nhận khi đối tác bị SUSPENDED', async () => {
+    test('chặn staff tại cổng khi đối tác bị đình chỉ khẩn cấp', async () => {
       mockPrisma.partnerProfile.findUnique.mockResolvedValue({ status: 'SUSPENDED' });
       const req = { user: { id: 'staff-001', role: 'STAFF', employerPartnerId: 'partner-001' } };
       const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
@@ -147,8 +147,12 @@ describe('partner middleware', () => {
 
       await requireCheckInEmployer(req, res, next);
 
-      expect(next).toHaveBeenCalled();
-      expect(res.status).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(403);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        code: 'EMPLOYER_CHECKIN_UNAVAILABLE',
+        employerStatus: 'SUSPENDED',
+      }));
+      expect(next).not.toHaveBeenCalled();
     });
 
     test('chặn check-in khi hồ sơ chủ quản chưa từng được duyệt', async () => {

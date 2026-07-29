@@ -16,7 +16,7 @@ import { hasRole } from '../../utils/userRoles.js'
 
 const STATUS_META = {
   PENDING: {
-    label: 'Chờ duyệt',
+    label: 'Chờ xử lý',
     badge: 'bg-secondary-fixed text-on-secondary-fixed',
   },
   PROCESSING: {
@@ -281,7 +281,7 @@ function RefundDrawer({
                 disabled={isProcessing || !canApprove}
               >
                 <span className="material-symbols-outlined text-[20px]">check_circle</span>
-                Duyệt hoàn tiền
+                Thực hiện hoàn tiền
               </button>
               {!selected.mandatory && (
                 <button
@@ -301,7 +301,7 @@ function RefundDrawer({
                 : selected.type === 'DUPLICATE_PAYMENT'
                 ? 'Khoản hoàn này chỉ xử lý giao dịch thu trùng, không hủy booking hoặc vé hợp lệ.'
                 : selected.type === 'CUSTOMER_CANCELLATION'
-                  ? 'Booking và mã QR chỉ bị hủy sau khi VNPay xác nhận hoàn tiền thành công.'
+                  ? 'Booking và mã QR đã mất hiệu lực khi khách xác nhận hủy; bước này chỉ thực hiện hoặc đối soát khoản hoàn.'
                   : 'Booking đã được hủy theo nghiệp vụ; hệ thống đang hoàn lại toàn bộ khoản đã thu.'}
             </p>
           </>
@@ -592,7 +592,7 @@ export default function RefundManagementPage() {
                 Quản lý Hoàn tiền
               </h2>
               <p className="text-sm text-on-surface-variant">
-                Duyệt và xử lý yêu cầu hoàn trả vé từ khách hàng
+                Thực hiện và đối soát các khoản hoàn của booking đã hủy
               </p>
             </div>
 
@@ -671,7 +671,7 @@ export default function RefundManagementPage() {
                     aria-label="Lọc theo trạng thái"
                   >
                     <option value="">Tất cả trạng thái</option>
-                    <option value="PENDING">Chờ duyệt</option>
+                    <option value="PENDING">Chờ xử lý</option>
                     <option value="PROCESSING">Đang xử lý</option>
                     <option value="APPROVED">Đã hoàn</option>
                     <option value="REJECTED">Đã từ chối</option>

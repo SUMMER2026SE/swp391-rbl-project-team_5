@@ -1108,6 +1108,19 @@ async function reserveTickets(req, res, next) {
       }
 
       const schedule = await getBookableSchedule(tx, ticketProductId, date);
+      if (
+        (schedule.attraction.partner?.userId
+          && schedule.attraction.partner.userId === userId)
+        || (req.user?.employerPartnerId
+          && req.user.employerPartnerId === schedule.attraction.partner?.id)
+      ) {
+        const err = new Error(
+          'Đối tác và nhân viên của đối tác không được tự giữ chỗ tại địa điểm mình quản lý.',
+        );
+        err.statusCode = 403;
+        err.code = 'SELF_BOOKING_NOT_ALLOWED';
+        throw err;
+      }
       if (schedule.isClosed) {
         const err = new Error('Địa điểm đóng cửa trong ngày đã chọn.');
         err.statusCode = 409;

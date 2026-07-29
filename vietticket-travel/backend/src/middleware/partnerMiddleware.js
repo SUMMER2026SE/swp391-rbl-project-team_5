@@ -139,8 +139,10 @@ async function requireActiveEmployer(req, res, next) {
   }
 }
 
-// A suspended partner must stop selling and managing its catalogue, but its on-site
-// staff still need to honour tickets that the platform already confirmed.
+// PartnerProfile.SUSPENDED is an emergency/compliance suspension, so partner
+// staff must stop every operational action, including gate check-in. A normal
+// commercial sales pause is represented by Attraction.publicationStatus=PAUSED
+// and deliberately does not block check-in for tickets already sold.
 async function requireCheckInEmployer(req, res, next) {
   try {
     if (hasRole(req.user, 'ADMIN')) return next();
@@ -162,7 +164,7 @@ async function requireCheckInEmployer(req, res, next) {
       select: { status: true },
     });
 
-    if (!employer || !['APPROVED', 'SUSPENDED'].includes(employer.status)) {
+    if (!employer || employer.status !== 'APPROVED') {
       return res.status(403).json({
         message: 'Đối tác chủ quản không đủ điều kiện thực hiện check-in.',
         code: 'EMPLOYER_CHECKIN_UNAVAILABLE',

@@ -85,6 +85,11 @@ function getManualApprovalDeadline(
   booking,
   timeoutMs = MANUAL_APPROVAL_TIMEOUT_MS,
 ) {
+  if (booking?.partnerApprovalDeadline) {
+    const storedDeadline = new Date(booking.partnerApprovalDeadline);
+    if (!Number.isNaN(storedDeadline.getTime())) return storedDeadline;
+  }
+
   const successfulPayments = Array.isArray(booking?.payments)
     ? booking.payments.filter((payment) => payment.status === 'SUCCESS' && !payment.isDuplicate)
     : [];

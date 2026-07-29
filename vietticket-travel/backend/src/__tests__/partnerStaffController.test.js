@@ -289,6 +289,7 @@ describe('removeStaff', () => {
       data: {
         role: 'CUSTOMER',
         employerPartnerId: null,
+        staffAccessLevel: null,
         status: 'LOCKED',
         tokenVersion: { increment: 1 },
       },

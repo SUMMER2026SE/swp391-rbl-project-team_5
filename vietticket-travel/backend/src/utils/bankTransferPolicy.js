@@ -7,7 +7,7 @@
 const { formatBookingReference } = require('./bookingReference');
 
 const BANK_TRANSFER_METHOD = 'bank_transfer';
-const DEFAULT_HOLD_MINUTES = 60;
+const DEFAULT_HOLD_MINUTES = 240;
 const MIN_HOLD_MINUTES = 15;
 const MAX_HOLD_MINUTES = 720;
 

@@ -1,6 +1,10 @@
 'use strict';
 
-const { isPlatformStaff, restrictTo } = require('../middleware/roleMiddleware');
+const {
+  isPlatformStaff,
+  requireStaffAccess,
+  restrictTo,
+} = require('../middleware/roleMiddleware');
 
 function createResponse() {
   return {
@@ -43,5 +47,45 @@ describe('roleMiddleware', () => {
     expect(isPlatformStaff({ role: 'STAFF', employerPartnerId: null })).toBe(true);
     expect(isPlatformStaff({ role: 'STAFF', employerPartnerId: 'partner-1' })).toBe(false);
     expect(isPlatformStaff({ role: 'ADMIN' })).toBe(true);
+  });
+
+  test('blocks partner scanner from manager-only ticket reissue operations', () => {
+    const middleware = requireStaffAccess('MANAGER');
+    const req = {
+      user: {
+        role: 'STAFF',
+        employerPartnerId: 'partner-1',
+        staffAccessLevel: 'SCANNER',
+      },
+    };
+    const res = createResponse();
+    const next = jest.fn();
+
+    middleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'STAFF_ACCESS_LEVEL_REQUIRED',
+      requiredLevels: ['MANAGER'],
+    }));
+  });
+
+  test('allows partner manager to perform manager-only assigned-attraction operations', () => {
+    const middleware = requireStaffAccess('MANAGER');
+    const req = {
+      user: {
+        role: 'STAFF',
+        employerPartnerId: 'partner-1',
+        staffAccessLevel: 'MANAGER',
+      },
+    };
+    const res = createResponse();
+    const next = jest.fn();
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
   });
 });

@@ -106,6 +106,24 @@ describe('listAllTickets', () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(prisma.supportTicket.findMany).not.toHaveBeenCalled();
   });
+
+  test.each(['ME', 'MINE'])('filters %s tickets by the current staff assignee', async (assignment) => {
+    prisma.supportTicket.findMany.mockResolvedValue([]);
+    prisma.supportTicket.count.mockResolvedValue(0);
+    prisma.supportTicket.groupBy.mockResolvedValue([]);
+    const { req, res, next } = makeReqRes({
+      user: { id: 'staff-1', role: 'STAFF' },
+      query: { assignment },
+    });
+
+    await listAllTickets(req, res, next);
+
+    expect(prisma.supportTicket.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { assignedToId: 'staff-1' },
+    }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 describe('sendMessage', () => {

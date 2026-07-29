@@ -16,7 +16,7 @@ function isAttractionSaleEnabled(attraction) {
     attraction
     && attraction.publishedAt
     && attraction.publicationStatus === 'ACTIVE'
-    && attraction.operationalStatus !== 'SUSPENDED'
+    && attraction.operationalStatus === 'ACTIVE'
     && !attraction.archivedAt
     && attraction.partner?.status === 'APPROVED',
   );

@@ -26,10 +26,13 @@ const {
   getBankTransferHoldMinutes,
   getBankTransferHoldMs,
 } = require('../utils/bankTransferPolicy');
-const { isTicketProductSaleEnabled } = require('../services/catalogVisibilityService');
+const {
+  evaluateExistingBookingFulfillment,
+} = require('./existingBookingFulfillmentPolicy');
 const { awardPointsForBooking } = require('../services/loyaltyService');
 const { queueMandatoryRefund } = require('../services/mandatoryRefundService');
 const { writeAuditLog } = require('../utils/auditLog');
+const { releaseVoucherRedemption } = require('./voucherRedemptionService');
 const {
   releaseHeldInventory,
   releaseInventory,
@@ -117,7 +120,13 @@ const CONFIRM_INCLUDE = {
  * Lặp lại đúng các bước của luồng VNPay: chốt kho -> chuyển trạng thái ->
  * phát vé QR -> cộng điểm thưởng, tất cả trong một transaction Serializable.
  */
-async function confirmBankTransfer({ bookingId, actorId, req = null, note = null }) {
+async function confirmBankTransfer({
+  bookingId,
+  actorId,
+  req = null,
+  note = null,
+  evidence = null,
+}) {
   const result = await prisma.$transaction(
     async (tx) => {
       const booking = await tx.booking.findUnique({
@@ -132,8 +141,19 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
         throw httpError(400, 'Đơn này không thanh toán bằng chuyển khoản ngân hàng.');
       }
 
-      // Idempotent: đơn đã được xác nhận trước đó thì báo lại, không xử lý tiếp.
-      if (['CONFIRMED', 'PENDING_PARTNER', 'COMPLETED'].includes(booking.status)) {
+      const capturedBankPayment = (booking.payments || []).find((payment) => (
+        isCapturedPayment(payment) && isBankTransferPayment(payment)
+      ));
+      const manualApprovalMissing =
+        booking.reservation?.ticketProduct?.attraction?.requiresManualApproval === true
+        && !booking.partnerApprovedAt;
+
+      // Idempotent: chỉ coi PENDING_PARTNER là đã ghi nhận nếu thực sự có khoản
+      // chuyển khoản cũ. Yêu cầu duyệt chưa thu tiền không phải là payment success.
+      if (
+        ['CONFIRMED', 'COMPLETED'].includes(booking.status)
+        || (booking.status === 'PENDING_PARTNER' && capturedBankPayment)
+      ) {
         return { alreadyConfirmed: true, bookingStatus: booking.status, booking };
       }
       if (
@@ -150,12 +170,17 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
         };
       }
       const now = new Date();
+      const fulfillmentDecision = evaluateExistingBookingFulfillment(
+        booking.reservation?.ticketProduct,
+      );
       const cannotFulfill = (
         booking.status === 'CANCELLED'
+        || booking.status !== 'PENDING_PAYMENT'
+        || manualApprovalMissing
         || !booking.reservation
         || booking.reservation.status !== 'HELD'
         || booking.reservation.expiresAt <= now
-        || !isTicketProductSaleEnabled(booking.reservation.ticketProduct)
+        || !fulfillmentDecision.allowed
       );
       if (cannotFulfill) {
         const payment = await tx.payment.upsert({
@@ -173,27 +198,34 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
               confirmedBy: actorId || null,
               note: note || null,
               transferContent: buildTransferContent(booking.id),
+              externalReference: evidence?.externalReference || null,
+              receivedAmount: evidence?.receivedAmount ?? Number(booking.totalAmount),
+              receivedAt: evidence?.receivedAt || now.toISOString(),
+              payerName: evidence?.payerName || null,
               receivedAfterFulfillmentWindow: true,
             },
           },
         });
         let inventoryReleased = false;
-        if (booking.status === 'PENDING_PAYMENT' && booking.reservation?.status === 'HELD') {
+        if (
+          ['PENDING_PAYMENT', 'PENDING_PARTNER'].includes(booking.status)
+          && booking.reservation?.status === 'HELD'
+        ) {
           inventoryReleased = await releaseHeldInventory(tx, booking.reservation);
           if (!inventoryReleased) {
             throw httpError(409, 'Không thể giải phóng lượt giữ chỗ của đơn chuyển khoản.');
           }
         } else if (
-          booking.status === 'PENDING_PAYMENT'
+          ['PENDING_PAYMENT', 'PENDING_PARTNER'].includes(booking.status)
           && booking.reservation?.status === 'CONFIRMED'
         ) {
           await releaseInventory(tx, booking);
           inventoryReleased = true;
         }
         if (inventoryReleased && booking.voucherId) {
-          await tx.voucher.updateMany({
-            where: { id: booking.voucherId, usedCount: { gt: 0 } },
-            data: { usedCount: { decrement: 1 } },
+          await releaseVoucherRedemption(tx, {
+            bookingId: booking.id,
+            voucherId: booking.voucherId,
           });
         }
         await tx.booking.update({
@@ -252,35 +284,23 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
       // Chốt kho giữ chỗ -> kho đã bán (dùng chung helper với luồng VNPay).
       await confirmReservationAndStock(tx, reservation);
 
-      const needsApproval =
-        reservation.ticketProduct?.attraction?.requiresManualApproval === true;
-      let bookingStatus;
-
-      if (needsApproval) {
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: { status: 'PENDING_PARTNER' },
-        });
-        bookingStatus = 'PENDING_PARTNER';
-      } else {
-        await tx.booking.update({
-          where: { id: booking.id },
-          data: { status: 'CONFIRMED' },
-        });
-        await createTicketInstances(
-          tx,
-          booking.id,
-          reservation.ticketProductId,
-          reservation.quantity,
-        );
-        await awardPointsForBooking(tx, {
-          id: booking.id,
-          userId: booking.userId,
-          totalAmount: booking.totalAmount,
-          isForecastTrainingSample: booking.isForecastTrainingSample,
-        });
-        bookingStatus = 'CONFIRMED';
-      }
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: { status: 'CONFIRMED' },
+      });
+      await createTicketInstances(
+        tx,
+        booking.id,
+        reservation.ticketProductId,
+        reservation.quantity,
+      );
+      await awardPointsForBooking(tx, {
+        id: booking.id,
+        userId: booking.userId,
+        totalAmount: booking.totalAmount,
+        isForecastTrainingSample: booking.isForecastTrainingSample,
+      });
+      const bookingStatus = 'CONFIRMED';
 
       // Ghi nhận khoản thu. transactionId unique -> chống ghi nhận trùng.
       await tx.payment.upsert({
@@ -298,6 +318,10 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
             confirmedBy: actorId || null,
             note: note || null,
             transferContent: buildTransferContent(booking.id),
+            externalReference: evidence?.externalReference || null,
+            receivedAmount: evidence?.receivedAmount ?? Number(booking.totalAmount),
+            receivedAt: evidence?.receivedAt || now.toISOString(),
+            payerName: evidence?.payerName || null,
           },
         },
       });
@@ -315,6 +339,8 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
           transferContent: buildTransferContent(booking.id),
           resultingStatus: bookingStatus,
           note: note || null,
+          externalReference: evidence?.externalReference || null,
+          receivedAt: evidence?.receivedAt || null,
         },
       });
 
@@ -329,17 +355,51 @@ async function confirmBankTransfer({ bookingId, actorId, req = null, note = null
 // Danh sách đơn chuyển khoản đang chờ Admin đối chiếu sao kê.
 async function listPendingBankTransfers({ limit = 50 } = {}) {
   const take = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const latePaymentLookback = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const bookings = await prisma.booking.findMany({
     where: {
       paymentMethod: BANK_TRANSFER_METHOD,
-      status: 'PENDING_PAYMENT',
       isForecastTrainingSample: false,
+      OR: [
+        { status: 'PENDING_PAYMENT' },
+        {
+          status: 'CANCELLED',
+          createdAt: { gte: latePaymentLookback },
+          payments: {
+            none: {
+              status: 'SUCCESS',
+              isDuplicate: false,
+              paymentGateway: 'BANK_TRANSFER',
+            },
+          },
+        },
+        {
+          bankTransferReconciliation: {
+            is: { status: 'MATCHED' },
+          },
+        },
+      ],
     },
     orderBy: { createdAt: 'asc' },
     take,
     include: {
       reservation: {
         select: { expiresAt: true, status: true, date: true, quantity: true },
+      },
+      bankTransferReconciliation: {
+        select: {
+          id: true,
+          status: true,
+          externalReference: true,
+          receivedAmount: true,
+          receivedAt: true,
+          payerName: true,
+          evidenceNote: true,
+          matchedById: true,
+          matchedAt: true,
+          approvedById: true,
+          approvedAt: true,
+        },
       },
     },
   });
@@ -359,6 +419,12 @@ async function listPendingBankTransfers({ limit = 50 } = {}) {
     visitDate: booking.reservation?.date || booking.snapshotVisitDate,
     createdAt: booking.createdAt,
     holdExpiresAt: booking.reservation?.expiresAt || null,
+    reconciliation: booking.bankTransferReconciliation
+      ? {
+          ...booking.bankTransferReconciliation,
+          receivedAmount: Number(booking.bankTransferReconciliation.receivedAmount),
+        }
+      : null,
     // Hết hạn giữ chỗ -> không xác nhận được nữa, phải hoàn tiền thủ công.
     holdExpired: booking.reservation
       ? booking.reservation.status !== 'HELD' || booking.reservation.expiresAt <= now

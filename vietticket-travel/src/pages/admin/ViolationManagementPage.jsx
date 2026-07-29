@@ -42,8 +42,10 @@ function ConfirmModal({
   target,
   reason,
   loading,
+  impactAcknowledged,
   onClose,
   onConfirm,
+  onImpactAcknowledgedChange,
   onReasonChange,
 }) {
   if (!target) return null;
@@ -56,26 +58,40 @@ function ConfirmModal({
           <span className="material-symbols-outlined" style={{ fontSize: 28, fontVariationSettings: "'FILL' 1" }}>warning</span>
         </div>
         <h3 className="admin-modal__title">
-          {hiding ? 'Xác nhận tạm ẩn địa điểm' : 'Khôi phục địa điểm'}
+          {hiding ? 'Xác nhận đình chỉ khẩn cấp' : 'Gỡ đình chỉ địa điểm'}
         </h3>
         <p className="admin-modal__body">
-          Bạn có chắc muốn <strong>{hiding ? 'ẩn' : 'khôi phục'}</strong> địa điểm{' '}
+          Bạn có chắc muốn <strong>{hiding ? 'đình chỉ vận hành' : 'gỡ đình chỉ'}</strong> địa điểm{' '}
           <strong>{target.name}</strong> không?{' '}
           {hiding
-            ? 'Địa điểm sẽ không còn xuất hiện trên nền tảng người dùng.'
+            ? 'Địa điểm sẽ dừng bán và không thể tiếp nhận khách. Booking tương lai sẽ được mở Rescue hoặc hoàn 100%; booking đã bắt đầu được chuyển Staff xử lý khẩn.'
             : 'Địa điểm sẽ về trạng thái tạm dừng; đối tác phải kiểm tra và chủ động mở bán lại.'}
         </p>
 
         {hiding && (
-          <label className="admin-field">
-            <span>Lý do tạm ẩn</span>
-            <textarea
-              value={reason}
-              onChange={(event) => onReasonChange(event.target.value)}
-              placeholder="Nhập nội dung vi phạm hoặc lý do tạm ẩn..."
-              disabled={loading}
-            />
-          </label>
+          <>
+            <label className="admin-field">
+              <span>Lý do đình chỉ</span>
+              <textarea
+                value={reason}
+                onChange={(event) => onReasonChange(event.target.value)}
+                placeholder="Nhập nội dung vi phạm hoặc lý do đình chỉ..."
+                disabled={loading}
+              />
+            </label>
+            <label className="mt-4 flex items-start gap-2 text-sm text-on-surface">
+              <input
+                type="checkbox"
+                checked={impactAcknowledged}
+                onChange={(event) => onImpactAcknowledgedChange(event.target.checked)}
+                disabled={loading}
+                className="mt-1"
+              />
+              <span>
+                Tôi xác nhận vé chưa sử dụng sẽ bị vô hiệu và khách được Rescue hoặc hoàn 100%.
+              </span>
+            </label>
+          </>
         )}
 
         <div className="admin-modal__actions">
@@ -84,10 +100,10 @@ function ConfirmModal({
           </button>
           <button
             className="admin-modal__confirm"
-            disabled={loading || (hiding && !reason.trim())}
+            disabled={loading || (hiding && (!reason.trim() || !impactAcknowledged))}
             onClick={onConfirm}
           >
-            {loading ? 'Đang xử lý...' : hiding ? 'Xác nhận ẩn' : 'Khôi phục'}
+            {loading ? 'Đang xử lý...' : hiding ? 'Xác nhận đình chỉ' : 'Gỡ đình chỉ'}
           </button>
         </div>
       </div>
@@ -99,6 +115,7 @@ export default function ViolationManagementPage() {
   const [locations, setLocations] = useState([]);
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [reason, setReason] = useState('');
+  const [impactAcknowledged, setImpactAcknowledged] = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionId, setActionId] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -153,12 +170,14 @@ export default function ViolationManagementPage() {
   function handleToggle(location) {
     setConfirmTarget(location);
     setReason('');
+    setImpactAcknowledged(false);
   }
 
   function closeConfirm() {
     if (actionId) return;
     setConfirmTarget(null);
     setReason('');
+    setImpactAcknowledged(false);
   }
 
   async function confirmToggle() {
@@ -167,14 +186,22 @@ export default function ViolationManagementPage() {
     const hiding = confirmTarget.status !== 'hidden';
     const trimmedReason = reason.trim();
     if (hiding && !trimmedReason) {
-      toast.error('Vui lòng nhập lý do tạm ẩn.');
+      toast.error('Vui lòng nhập lý do đình chỉ.');
+      return;
+    }
+    if (hiding && !impactAcknowledged) {
+      toast.error('Vui lòng xác nhận phương án xử lý booking bị ảnh hưởng.');
       return;
     }
 
     setActionId(confirmTarget.id);
     try {
       if (hiding) {
-        await adminApi.hideAttraction(confirmTarget.id, trimmedReason);
+        await adminApi.hideAttraction(
+          confirmTarget.id,
+          trimmedReason,
+          impactAcknowledged,
+        );
       } else {
         await adminApi.restoreAttraction(confirmTarget.id);
       }
@@ -182,11 +209,12 @@ export default function ViolationManagementPage() {
       setReloadKey((value) => value + 1);
       toast.success(
         hiding
-          ? `Đã tạm ẩn địa điểm: ${confirmTarget.name}`
-          : `Đã khôi phục và giữ tạm dừng địa điểm: ${confirmTarget.name}`,
+          ? `Đã đình chỉ vận hành địa điểm: ${confirmTarget.name}`
+          : `Đã gỡ đình chỉ và giữ tạm dừng bán: ${confirmTarget.name}`,
       );
       setConfirmTarget(null);
       setReason('');
+      setImpactAcknowledged(false);
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -202,7 +230,10 @@ export default function ViolationManagementPage() {
       <div className="admin-page-header">
         <div>
           <h2 style={{ color: 'var(--adm-primary-dark)' }}>Quản lý vi phạm</h2>
-          <p>Kiểm soát và tạm ẩn các địa điểm vi phạm quy chuẩn cộng đồng.</p>
+          <p>
+            Đình chỉ khẩn cấp chỉ dành cho rủi ro an toàn hoặc vi phạm nghiêm trọng;
+            hệ thống đồng thời xử lý khách và booking bị ảnh hưởng.
+          </p>
         </div>
         <div
           style={{
@@ -341,7 +372,7 @@ export default function ViolationManagementPage() {
                     ) : (
                       <span className="badge badge--hidden">
                         <span className="badge__dot" style={{ background: 'var(--adm-outline)' }} />
-                        Đã ẩn
+                        Bị đình chỉ
                       </span>
                     )}
                   </td>
@@ -352,8 +383,8 @@ export default function ViolationManagementPage() {
                         disabled={actionId === location.id}
                         onClick={() => handleToggle(location)}
                       >
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>visibility_off</span>
-                        Tạm ẩn
+                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>block</span>
+                        Đình chỉ
                       </button>
                     ) : (
                       <button
@@ -373,8 +404,8 @@ export default function ViolationManagementPage() {
                           cursor: 'pointer',
                         }}
                       >
-                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>visibility</span>
-                        Khôi phục
+                        <span className="material-symbols-outlined" style={{ fontSize: 18 }}>settings_backup_restore</span>
+                        Gỡ đình chỉ
                       </button>
                     )}
                   </td>
@@ -414,8 +445,10 @@ export default function ViolationManagementPage() {
         target={confirmTarget}
         reason={reason}
         loading={Boolean(actionId)}
+        impactAcknowledged={impactAcknowledged}
         onClose={closeConfirm}
         onConfirm={confirmToggle}
+        onImpactAcknowledgedChange={setImpactAcknowledged}
         onReasonChange={setReason}
       />
     </AdminLayout>

@@ -3,7 +3,12 @@ import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import * as partnerApi from '../services/partnerApi.js'
 
-const EMPTY_FORM = { fullName: '', email: '', phoneNumber: '' }
+const EMPTY_FORM = {
+  fullName: '',
+  email: '',
+  phoneNumber: '',
+  staffAccessLevel: 'SCANNER',
+}
 
 function StatusBadge({ staff }) {
   if (staff.status === 'LOCKED') {
@@ -78,6 +83,7 @@ export default function PartnerStaffPage() {
         fullName: form.fullName.trim(),
         email: form.email.trim(),
         phoneNumber: form.phoneNumber.trim() || undefined,
+        staffAccessLevel: form.staffAccessLevel,
       })
       toast.success('Đã tạo nhân viên và gửi email mời đặt mật khẩu.')
       setShowCreate(false)
@@ -87,6 +93,19 @@ export default function PartnerStaffPage() {
       toast.error(err.message || 'Không thể tạo nhân viên.')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleAccessLevelChange = async (member, staffAccessLevel) => {
+    setActionId(member.id)
+    try {
+      await partnerApi.changeStaffAccessLevel(member.id, staffAccessLevel)
+      toast.success('Đã cập nhật cấp quyền; các phiên cũ của nhân viên đã được thu hồi.')
+      void fetchStaff()
+    } catch (err) {
+      toast.error(err.message || 'Không thể cập nhật cấp quyền nhân viên.')
+    } finally {
+      setActionId(null)
     }
   }
 
@@ -200,6 +219,7 @@ export default function PartnerStaffPage() {
                 <tr className="bg-[#f2f4f5] text-left text-[#3f484a]">
                   <th className="px-4 py-3 font-semibold">Nhân viên</th>
                   <th className="px-4 py-3 font-semibold">Trạng thái</th>
+                  <th className="px-4 py-3 font-semibold">Cấp quyền</th>
                   <th className="px-4 py-3 font-semibold">Địa điểm phân công</th>
                   <th className="px-4 py-3 font-semibold text-right">Thao tác</th>
                 </tr>
@@ -215,6 +235,18 @@ export default function PartnerStaffPage() {
                       )}
                     </td>
                     <td className="px-4 py-3"><StatusBadge staff={member} /></td>
+                    <td className="px-4 py-3">
+                      <select
+                        aria-label={`Cấp quyền của ${member.fullName}`}
+                        className="rounded-lg border border-[#bec8ca] bg-white px-2 py-1.5 text-xs font-semibold"
+                        disabled={actionId === member.id}
+                        onChange={(event) => void handleAccessLevelChange(member, event.target.value)}
+                        value={member.staffAccessLevel || 'SCANNER'}
+                      >
+                        <option value="SCANNER">Scanner · chỉ quét QR</option>
+                        <option value="MANAGER">Manager · vận hành</option>
+                      </select>
+                    </td>
                     <td className="px-4 py-3">
                       {member.assignments.length === 0 ? (
                         <span className="text-[#6f7f82]">Chưa phân công</span>
@@ -285,6 +317,20 @@ export default function PartnerStaffPage() {
                 onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))}
                 placeholder="Nguyễn Văn A"
               />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-[#3f484a]">Cấp quyền</span>
+              <select
+                className="rounded-lg border border-[#bec8ca] px-3 py-2"
+                onChange={(event) => setForm((current) => ({
+                  ...current,
+                  staffAccessLevel: event.target.value,
+                }))}
+                value={form.staffAccessLevel}
+              >
+                <option value="SCANNER">Scanner — chỉ tra cứu và quét QR</option>
+                <option value="MANAGER">Manager — vận hành và SmartQueue</option>
+              </select>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-[#3f484a]">Email</span>
