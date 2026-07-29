@@ -22,6 +22,7 @@ const mockPrisma = {
   },
   attraction: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
@@ -95,6 +96,27 @@ const mockPrisma = {
     update: jest.fn(),
     updateMany: jest.fn(),
   },
+  reviewHelpfulVote: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+    create: jest.fn(),
+    delete: jest.fn(),
+    count: jest.fn(),
+  },
+  attractionQuestion: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    count: jest.fn(),
+  },
+  attractionQuestionReport: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    count: jest.fn(),
+    delete: jest.fn(),
+  },
   attractionDailyStock: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -149,6 +171,24 @@ const mockPrisma = {
     count: jest.fn(),
     groupBy: jest.fn(),
   },
+  partnerKycChangeRequest: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
+  },
+  voucherRedemption: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
+    groupBy: jest.fn(),
+  },
   payment: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
@@ -157,6 +197,15 @@ const mockPrisma = {
     updateMany: jest.fn(),
     upsert: jest.fn(),
     aggregate: jest.fn(),
+  },
+  bankTransferReconciliation: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
   },
   refundTransaction: {
     findUnique: jest.fn(),
@@ -174,6 +223,7 @@ const mockPrisma = {
     create: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
+    deleteMany: jest.fn(),
   },
   partnerSettlement: {
     findUnique: jest.fn(),
@@ -240,6 +290,7 @@ const mockPrisma = {
   },
   review: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),

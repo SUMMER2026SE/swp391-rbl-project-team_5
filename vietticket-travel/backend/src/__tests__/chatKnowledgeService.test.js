@@ -115,7 +115,7 @@ describe('chatKnowledgeService', () => {
     expect(reply).toContain('không tự động bị hủy/hoàn');
   });
 
-  test('explains payment-before-approval deadline and mandatory refund', () => {
+  test('explains approval-before-payment and no-charge timeout', () => {
     const articles = retrieveKnowledge(
       'Vé chờ đối tác duyệt thì tiền đã trừ chưa và chờ bao lâu?',
       CHAT_INTENTS.BOOKING,
@@ -125,9 +125,9 @@ describe('chatKnowledgeService', () => {
       intent: CHAT_INTENTS.BOOKING,
     });
 
-    expect(reply).toContain('tiền được ghi nhận trước');
-    expect(reply).toContain('24 giờ sau thanh toán');
-    expect(reply).toContain('hoàn bắt buộc 100%');
+    expect(reply).toContain('chấp thuận trước');
+    expect(reply).toContain('chưa bị thu tiền');
+    expect(reply).toContain('không cần hoàn tiền');
   });
 
   test('does not imply support for voluntary amendments or partial ticket cancellation', () => {

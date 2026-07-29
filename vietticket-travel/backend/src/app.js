@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const prisma = require('./config/prisma');
 const { corsOptions } = require('./config/cors');
+const { getTrustProxySetting } = require('./config/runtimeConfig');
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
@@ -28,12 +29,14 @@ const liveTripRoutes = require('./routes/liveTripRoutes');
 const loyaltyRoutes = require('./routes/loyaltyRoutes');
 const recoveryCaseRoutes = require('./routes/recoveryCaseRoutes');
 const partyRoomRoutes = require('./routes/partyRoomRoutes');
+const questionRoutes = require('./routes/questionRoutes');
 const { errorHandler, notFound } = require('./middleware/errorMiddleware');
 
 const app = express();
 
 app.disable('x-powered-by');
-if (process.env.TRUST_PROXY === 'true') app.set('trust proxy', 1);
+const trustProxy = getTrustProxySetting();
+if (trustProxy !== false) app.set('trust proxy', trustProxy);
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -153,6 +156,7 @@ app.use('/api/live', liveTripRoutes);
 app.use('/api/loyalty', loyaltyRoutes);
 app.use('/api/recovery-cases', recoveryCaseRoutes);
 app.use('/api/party', partyRoomRoutes);
+app.use('/api/questions', questionRoutes);
 
 // Render demo deployment can serve the Vite build from the same origin as the
 // API. Keeping the SPA and API together preserves cookie-based authentication

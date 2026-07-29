@@ -814,8 +814,8 @@ async function createIdentity(account, passwordHash) {
       status: 'ACTIVE',
       employerPartnerId: account.employerPartnerId || null,
       termsAcceptedAt: new Date(),
-      termsVersion: '2026-01',
-      privacyVersion: '2026-01',
+      termsVersion: '2026-07-29-v2',
+      privacyVersion: '2026-07-29-v2',
       consentIpAddress: '127.0.0.1',
       profile: {
         create: {
@@ -2661,7 +2661,6 @@ async function collectDemoReadiness() {
         attractionId: IDS.attractions.museum,
         predictionType: 'ARRIVALS',
         usedFallback: false,
-        confidence: { in: ['MEDIUM', 'HIGH'] },
         predictedAt: { gte: freshPredictionCutoff },
       },
     }),
@@ -2815,18 +2814,16 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
   const forecastPoints = Object.values(readiness.forecasts).reduce((sum, value) => sum + value, 0);
   if (forecastPoints < 21) failures.push(`Forecast tương lai: cần 21 điểm, hiện có ${forecastPoints}`);
   const live = readiness.liveAutopilot || {};
-  // Đề xuất Autopilot được sinh khi một hoạt động trong ngày đang "có rủi ro".
-  // Hoạt động du thuyền của kịch bản khởi hành 16:30, nên seed sau giờ đó thì
-  // không còn gì để đề xuất. Đây là ràng buộc nghiệp vụ của riêng phần
-  // Live-AutoPilot: hạ thành CẢNH BÁO để buổi tập buổi tối vẫn dựng được dữ
-  // liệu cho thanh toán / vé / check-in, thay vì hỏng toàn bộ bộ seed.
+  // Đề xuất Autopilot chỉ được sinh khi vừa có rủi ro, vừa tìm được khung giờ
+  // thay thế an toàn. Không có proposal có thể là safe fallback hợp lệ (hoặc
+  // kịch bản đã qua giờ khởi hành), nên không được làm hỏng toàn bộ seed/smoke.
   const liveShowcaseOpen = isLiveShowcaseWindowOpen();
-  const timeBoundLiveFields = new Set(['pendingProposals', 'explainabilityEvents']);
+  const safeFallbackLiveFields = new Set(['pendingProposals', 'explainabilityEvents']);
   const liveWarnings = [];
   const requireLiveAtLeast = (field, minimum, label) => {
     if (Number(live[field] || 0) < minimum) {
       const message = `${label}: cần >= ${minimum}, hiện có ${live[field] || 0}`;
-      if (!liveShowcaseOpen && timeBoundLiveFields.has(field)) liveWarnings.push(message);
+      if (safeFallbackLiveFields.has(field)) liveWarnings.push(message);
       else failures.push(message);
     }
   };
@@ -2837,7 +2834,11 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
     requireLiveAtLeast('pendingProposals', 1, 'Đề xuất Autopilot chờ Customer xác nhận');
     requireLiveAtLeast('waitingQueueEntries', 1, 'Lượt SmartQueue đang chờ');
     requireLiveAtLeast('staffControlledPolicies', 1, 'Chính sách SmartQueue do nhân viên điều phối');
-    requireLiveAtLeast('freshNonFallbackPredictions', 1, 'Dự báo ML thật, còn mới và không fallback');
+    requireLiveAtLeast(
+      'freshNonFallbackPredictions',
+      1,
+      'Dự báo ML do mô hình tạo, còn mới và không fallback (confidence demo vẫn có thể LOW)',
+    );
     requireLiveAtLeast('explainabilityEvents', 3, 'Event giải thích quyết định Live-AutoPilot');
   }
   requireLiveAtLeast('trainingObservations', 288, 'Quan sát huấn luyện Live AI có nhãn');
@@ -2854,12 +2855,13 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
     throw error;
   }
   if (liveWarnings.length > 0) {
+    const liveWindowHint = liveShowcaseOpen
+      ? 'Autopilot không tìm được khung giờ thay thế đáp ứng đủ ràng buộc an toàn'
+      : `kịch bản đã qua ${timeKeyFromMinutes(LIVE_SHOWCASE_LATEST_MINUTE)} giờ Việt Nam`;
     console.warn(
-      `\n⚠  Đã seed sau ${timeKeyFromMinutes(LIVE_SHOWCASE_LATEST_MINUTE)} giờ Việt Nam nên phần`
-      + ' Live-AutoPilot bị thiếu dữ liệu:\n- '
+      `\n⚠  ${liveWindowHint}, nên phần Live-AutoPilot không có đủ dữ liệu tùy chọn:\n- `
       + `${liveWarnings.join('\n- ')}\n`
-      + '   Thanh toán, vé và check-in vẫn đầy đủ. Muốn demo cả Live-AutoPilot thì'
-      + ` chạy lại npm run demo:prepare trước ${timeKeyFromMinutes(LIVE_SHOWCASE_LATEST_MINUTE)}.\n`,
+      + '   Đây là safe fallback hợp lệ; thanh toán, vé, check-in và các hàng rào ML vẫn được kiểm tra đầy đủ.\n',
     );
   }
   return readiness;

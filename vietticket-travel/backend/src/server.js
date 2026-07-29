@@ -18,6 +18,7 @@ const { startPendingPartnerWorker } = require('./utils/pendingPartnerWorker');
 const { startLiveTripWorker } = require('./utils/liveTripWorker');
 const { startRecoveryWorker } = require('./utils/recoveryWorker');
 const { startNotificationOutboxWorker } = require('./utils/notificationOutboxWorker');
+const { startAuthSessionCleanupWorker } = require('./utils/authSessionCleanupWorker');
 
 const PORT = process.env.PORT || 5000;
 
@@ -38,7 +39,7 @@ const completionHandle = startCompletionWorker();
 const refundHandle = startRefundWorker();
 
 // Worker tự hủy và tạo hoàn tiền bắt buộc khi quá hạn duyệt:
-// sớm hơn giữa 24 giờ sau thanh toán và thời điểm hoạt động bắt đầu.
+// sớm hơn giữa 24 giờ sau yêu cầu duyệt và thời điểm hoạt động bắt đầu.
 const pendingPartnerHandle = startPendingPartnerWorker();
 
 // Worker điều phối SmartQueue và tạo đề xuất Autopilot có kiểm soát.
@@ -50,6 +51,7 @@ const recoveryHandle = startRecoveryWorker();
 // Hàng đợi bền vững đảm bảo email/realtime hoàn tiền được giao lại sau khi
 // tiến trình bị gián đoạn ngay sau lúc commit giao dịch tài chính.
 const notificationOutboxHandle = startNotificationOutboxWorker();
+const authSessionCleanupHandle = startAuthSessionCleanupWorker();
 
 let shutdownPromise = null;
 
@@ -74,6 +76,7 @@ function shutdown({ exit = true } = {}) {
   clearInterval(liveTripHandle);
   clearInterval(recoveryHandle);
   clearInterval(notificationOutboxHandle);
+  clearInterval(authSessionCleanupHandle);
 
   shutdownPromise = (async () => {
     await closeSocketServer();

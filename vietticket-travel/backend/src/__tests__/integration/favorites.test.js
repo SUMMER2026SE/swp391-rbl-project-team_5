@@ -66,6 +66,7 @@ describe('Favorites API', () => {
       id: 'attr-001',
       status: 'APPROVED',
       publicationStatus: 'ACTIVE',
+      operationalStatus: 'ACTIVE',
       publishedAt: new Date('2026-06-01T00:00:00.000Z'),
       archivedAt: null,
       partner: { status: 'APPROVED' },

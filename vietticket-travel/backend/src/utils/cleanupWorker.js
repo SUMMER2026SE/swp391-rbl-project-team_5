@@ -7,6 +7,7 @@ const { sendHoldExpiredEmail } = require('./mailer');
 const { BANK_TRANSFER_METHOD } = require('./bankTransferPolicy');
 const { writeAuditLog } = require('./auditLog');
 const { releaseHeldInventory } = require('./refundService');
+const { releaseVoucherRedemption } = require('../services/voucherRedemptionService');
 
 const DEFAULT_INTERVAL_MS = 60 * 1000; // chạy mỗi 1 phút
 const DEFAULT_GRACE_MS = 3 * 60 * 1000; // chừa 3 phút cho IPN trả trễ
@@ -131,7 +132,10 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
           }
 
           // Dọn đơn mồ côi: booking đã tạo nhưng chưa thanh toán.
-          if (r.booking && r.booking.status === 'PENDING_PAYMENT') {
+          if (
+            r.booking
+            && ['PENDING_PAYMENT', 'PENDING_PARTNER'].includes(r.booking.status)
+          ) {
             // Chuyển khoản ngân hàng KHÔNG có callback như VNPay, nên tại đây
             // hệ thống không thể biết khách đã chuyển tiền hay chưa. Nếu chỉ
             // hủy đơn, tiền của khách sẽ biến mất khỏi mọi hàng đợi: màn đối
@@ -146,8 +150,12 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
               data: {
                 status: 'CANCELLED',
                 cancelledAt,
-                cancellationSource: 'PAYMENT_TIMEOUT',
-                cancellationReason: needsManualRefundReview
+                cancellationSource: r.booking.status === 'PENDING_PARTNER'
+                  ? 'PARTNER_APPROVAL_TIMEOUT'
+                  : 'PAYMENT_TIMEOUT',
+                cancellationReason: r.booking.status === 'PENDING_PARTNER'
+                  ? 'Đối tác không phản hồi trước hạn duyệt; khách chưa bị thu tiền.'
+                  : needsManualRefundReview
                   ? 'Hết hạn giữ chỗ khi chờ đối chiếu chuyển khoản. '
                     + 'Kiểm tra sao kê ngân hàng và hoàn tiền thủ công nếu khách đã chuyển.'
                   : 'Khách không hoàn tất thanh toán trong thời hạn giữ chỗ.',
@@ -172,9 +180,9 @@ async function sweepExpiredReservations({ graceMs = DEFAULT_GRACE_MS } = {}) {
             }
 
             if (r.booking.voucherId) {
-              await tx.voucher.updateMany({
-                where: { id: r.booking.voucherId, usedCount: { gt: 0 } },
-                data: { usedCount: { decrement: 1 } },
+              await releaseVoucherRedemption(tx, {
+                bookingId: r.booking.id,
+                voucherId: r.booking.voucherId,
               });
             }
             await tx.payment.updateMany({

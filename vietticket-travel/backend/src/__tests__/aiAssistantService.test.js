@@ -70,6 +70,7 @@ function makeBookableProduct(ticketId, attractionId, capacity = 100, timeSlots =
       id: attractionId,
       publishedAt: new Date('2099-01-01T00:00:00.000Z'),
       publicationStatus: 'ACTIVE',
+      operationalStatus: 'ACTIVE',
       status: 'ACTIVE',
       archivedAt: null,
       partner: { status: 'APPROVED' },

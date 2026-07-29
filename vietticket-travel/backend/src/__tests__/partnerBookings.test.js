@@ -154,8 +154,10 @@ describe('getPartnerBookings', () => {
     );
     expect(mockPrisma.booking.count).toHaveBeenCalledWith({
       where: expect.objectContaining({
-        payments: { some: { status: 'SUCCESS', isDuplicate: false } },
-        status: { not: 'PENDING_PAYMENT' },
+        OR: expect.arrayContaining([
+          { payments: { some: { status: 'SUCCESS', isDuplicate: false } } },
+          { partnerApprovalRequestedAt: { not: null } },
+        ]),
       }),
     });
     expect(next).not.toHaveBeenCalled();
@@ -1001,17 +1003,21 @@ describe('getDashboard', () => {
     );
     expect(mockPrisma.booking.findMany.mock.calls[1][0].where).toEqual(
       expect.objectContaining({
-        status: { not: 'PENDING_PAYMENT' },
-        payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+        OR: expect.arrayContaining([
+          { payments: { some: { status: 'SUCCESS', isDuplicate: false } } },
+          { partnerApprovalRequestedAt: { not: null } },
+        ]),
       }),
     );
-    // "Đặt vé tháng này" phải đếm ĐƠN ĐÃ THANH TOÁN tạo trong tháng (chỉ số sản
-    // lượng), không phải đơn đã ghi nhận doanh thu theo ngày sử dụng.
+    // "Đặt vé tháng này" gồm đơn đã thanh toán và yêu cầu duyệt-trước-thanh-toán,
+    // còn doanh thu vẫn chỉ ghi nhận từ sổ cái thanh toán.
     expect(mockPrisma.booking.count).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          status: { not: 'PENDING_PAYMENT' },
-          payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+          OR: expect.arrayContaining([
+            { payments: { some: { status: 'SUCCESS', isDuplicate: false } } },
+            { partnerApprovalRequestedAt: { not: null } },
+          ]),
           createdAt: expect.objectContaining({ gte: expect.any(Date) }),
         }),
       }),

@@ -82,7 +82,17 @@ async function assertFinalState(prisma) {
     resolvedSupport,
   ] = await Promise.all([
     prisma.booking.findUnique({ where: { id: scenarioBookingId('partner-approve') } }),
-    prisma.booking.findUnique({ where: { id: scenarioBookingId('partner-reject') } }),
+    prisma.booking.findUnique({
+      where: { id: scenarioBookingId('partner-reject') },
+      include: {
+        refundRequests: {
+          where: {
+            requestKey: `mandatory:PARTNER_CANCELLATION:${scenarioBookingId('partner-reject')}`,
+          },
+          select: { status: true },
+        },
+      },
+    }),
     prisma.ticketInstance.findFirst({ where: { qrCodeToken: OPERATIONAL_VALUES.checkinQrPrimary } }),
     prisma.booking.findUnique({
       where: { id: scenarioBookingId('reissue') },
@@ -108,7 +118,12 @@ async function assertFinalState(prisma) {
 
   const assertions = [
     ['Booking đối tác duyệt', approvedBooking?.status === 'CONFIRMED'],
-    ['Booking đối tác từ chối', rejectedBooking?.status === 'CANCELLED'],
+    [
+      'Booking đối tác từ chối và hoàn tiền bắt buộc đã được xếp hàng hoặc hoàn tất',
+      ['CANCELLED', 'REFUNDED'].includes(rejectedBooking?.status)
+        && rejectedBooking?.refundRequests?.some((request) =>
+          ['PENDING', 'PROCESSING', 'APPROVED'].includes(request.status)),
+    ],
     ['QR đã check-in', checkedInTicket?.status === 'USED' && Boolean(checkedInTicket?.checkedInAt)],
     [
       'Cấp lại vé giữ đúng một QR hợp lệ',
