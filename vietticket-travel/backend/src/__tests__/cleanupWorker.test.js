@@ -1,5 +1,9 @@
 jest.mock('../config/prisma', () => ({
   reservation: { findMany: jest.fn() },
+  auditLog: {
+    findMany: jest.fn().mockResolvedValue([]),
+    create: jest.fn().mockResolvedValue({}),
+  },
   scheduledJobLock: {
     upsert: jest.fn().mockResolvedValue({}),
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -29,7 +33,10 @@ function makeTx({ reservation }) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  prisma.auditLog.findMany.mockResolvedValue([]);
+  prisma.auditLog.create.mockResolvedValue({});
   jest.spyOn(console, 'log').mockImplementation(() => {});
+  jest.spyOn(console, 'warn').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
 });
 
@@ -234,5 +241,114 @@ describe('sweepExpiredReservations', () => {
       expect.stringContaining('res-stock-drift'),
       expect.stringContaining('Không thể hoàn trả kho'),
     );
+  });
+
+  test('lệch kho -> ghi dấu cách ly ngoài transaction để Admin xử lý tay', async () => {
+    prisma.reservation.findMany.mockResolvedValue([{ id: 'res-stock-drift' }]);
+    const tx = makeTx({
+      reservation: {
+        id: 'res-stock-drift',
+        status: 'HELD',
+        ticketProductId: 'tkt-drift',
+        timeSlotId: null,
+        date: new Date('2026-06-21'),
+        quantity: 2,
+        booking: null,
+        ticketProduct: {
+          attractionId: 'attr-drift',
+          attraction: { title: 'Điểm lỗi kho' },
+        },
+      },
+    });
+    tx.attractionDailyStock.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockImplementation((cb) => cb(tx));
+
+    await sweepExpiredReservations();
+
+    // Ghi bằng client gốc, KHÔNG phải tx — tx đã rollback nên bản ghi trong đó
+    // sẽ biến mất và lần quét sau lại không biết gì.
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: 'HOLD_EXPIRY_STOCK_DRIFT',
+          entityType: 'Reservation',
+          entityId: 'res-stock-drift',
+          metadata: expect.objectContaining({ needsManualReview: true }),
+        }),
+      }),
+    );
+  });
+
+  test('lượt đã bị cách ly không được quét lại ở vòng sau', async () => {
+    prisma.reservation.findMany.mockResolvedValue([
+      { id: 'res-stock-drift' },
+      { id: 'res-healthy' },
+    ]);
+    prisma.auditLog.findMany.mockResolvedValue([{ entityId: 'res-stock-drift' }]);
+    const tx = makeTx({
+      reservation: {
+        id: 'res-healthy',
+        status: 'HELD',
+        ticketProductId: 'tkt-ok',
+        timeSlotId: null,
+        date: new Date('2026-06-21'),
+        quantity: 1,
+        booking: null,
+        ticketProduct: {
+          attractionId: 'attr-ok',
+          attraction: { title: 'Điểm bình thường' },
+        },
+      },
+    });
+    prisma.$transaction.mockImplementation((cb) => cb(tx));
+
+    const cleaned = await sweepExpiredReservations();
+
+    // Chỉ mở transaction cho lượt lành, không đốt thêm transaction cho lượt lệch.
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(cleaned).toBe(1);
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  test('không truy vấn dấu cách ly khi không có lượt nào hết hạn', async () => {
+    prisma.reservation.findMany.mockResolvedValue([]);
+
+    const cleaned = await sweepExpiredReservations();
+
+    expect(cleaned).toBe(0);
+    expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('sweepExpiredReservations - giới hạn lô', () => {
+  test('mỗi vòng chỉ ôm một lô, dọn lượt hết hạn lâu nhất trước', async () => {
+    prisma.reservation.findMany.mockResolvedValue([]);
+
+    await sweepExpiredReservations();
+
+    const [{ take, orderBy }] = prisma.reservation.findMany.mock.calls[0];
+    expect(take).toBe(500);
+    expect(orderBy).toEqual({ expiresAt: 'asc' });
+  });
+
+  test('không đọc được danh sách cách ly thì vẫn quét tiếp, không hỏng cả vòng', async () => {
+    prisma.reservation.findMany.mockResolvedValue([{ id: 'res-1' }]);
+    prisma.auditLog.findMany.mockRejectedValue(new Error('mất kết nối'));
+    const tx = makeTx({
+      reservation: {
+        id: 'res-1',
+        status: 'HELD',
+        ticketProductId: 'tkt-1',
+        timeSlotId: null,
+        date: new Date('2026-06-21'),
+        quantity: 1,
+        booking: null,
+        ticketProduct: { attractionId: 'attr-1', attraction: { title: 'X' } },
+      },
+    });
+    prisma.$transaction.mockImplementation((cb) => cb(tx));
+
+    await expect(sweepExpiredReservations()).resolves.toBe(1);
   });
 });

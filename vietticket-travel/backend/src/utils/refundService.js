@@ -8,6 +8,8 @@ const { getInventoryUnits } = require('./ticketCapacity');
 const VN_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
 const DEFAULT_REFUND_WITH_FEE_RATE = 0.5;
 const DEFAULT_REFUND_CUTOFF_HOURS = 24;
+// Bộ đếm kho không khớp với lượt giữ chỗ -> dữ liệu đã lệch, cần người rà.
+const HELD_STOCK_DRIFT = 'HELD_STOCK_DRIFT';
 
 function normalizeRefundFeeRate(policy, value) {
   if (policy !== 'REFUND_WITH_FEE') return 0;
@@ -236,6 +238,12 @@ async function releaseInventory(tx, booking) {
 /**
  * Return inventory that is still held by an unpaid reservation.
  * The reservation claim and all stock changes are expected to run in one transaction.
+ *
+ * Từ chối hoàn trả khi một lớp kho không khớp là CỐ Ý: bộ đếm đã lệch nghĩa là
+ * trạng thái kho không còn đáng tin, và không được chồng thêm thay đổi (hủy đơn,
+ * gắn cờ hoàn tiền) lên một nền đã sai. Lỗi mang code HELD_STOCK_DRIFT để phía
+ * gọi phân biệt được "dữ liệu lệch, cần người xử lý" với lỗi tạm thời như
+ * serialization failure — hai loại này phải được xử lý khác nhau.
  */
 async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = {}) {
   if (!reservation || reservation.status !== 'HELD') return false;
@@ -258,6 +266,7 @@ async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = 
   if (dailyStock.count !== 1) {
     const error = new Error('Không thể hoàn trả kho vé đang giữ theo ngày.');
     error.statusCode = 409;
+    error.code = HELD_STOCK_DRIFT;
     throw error;
   }
 
@@ -275,6 +284,7 @@ async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = 
   if (attractionStock.count !== 1) {
     const error = new Error('Không thể hoàn trả kho đang giữ của điểm tham quan.');
     error.statusCode = 409;
+    error.code = HELD_STOCK_DRIFT;
     throw error;
   }
 
@@ -286,6 +296,7 @@ async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = 
     if (timeSlotStock.count !== 1) {
       const error = new Error('Không thể hoàn trả kho vé đang giữ theo khung giờ.');
       error.statusCode = 409;
+      error.code = HELD_STOCK_DRIFT;
       throw error;
     }
   }
@@ -296,6 +307,7 @@ async function releaseHeldInventory(tx, reservation, { status = 'CANCELLED' } = 
 module.exports = {
   DEFAULT_REFUND_CUTOFF_HOURS,
   DEFAULT_REFUND_WITH_FEE_RATE,
+  HELD_STOCK_DRIFT,
   calculateRefundAmount,
   getRefundDeadline,
   getRefundEligibility,
