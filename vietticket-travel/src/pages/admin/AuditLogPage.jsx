@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
-import { getAuditLogs } from '../../services/adminApi.js'
+import {
+  getAuditLogs,
+  getInventoryDriftCases,
+  retryInventoryDriftCase,
+} from '../../services/adminApi.js'
 import {
   formatBookingReference,
   formatRefundRequestReference,
@@ -70,6 +74,7 @@ const ACTION_LABELS = {
   USER_ACCOUNT_UNLOCKED: 'Mở khóa tài khoản',
   BANK_TRANSFER_HOLD_EXPIRED: 'Hết hạn giữ chỗ chuyển khoản',
   HOLD_EXPIRY_STOCK_DRIFT: 'Lệch kho khi dọn giữ chỗ — cần xử lý tay',
+  HOLD_EXPIRY_STOCK_DRIFT_RESOLVED: 'Đã xử lý ca lệch kho',
 }
 
 function entityTypeLabel(value) {
@@ -176,6 +181,11 @@ const formatDateTime = (value) => new Intl.DateTimeFormat('vi-VN', {
 
 export default function AuditLogPage() {
   const [logs, setLogs] = useState([])
+  const [driftCases, setDriftCases] = useState([])
+  const [driftLoading, setDriftLoading] = useState(true)
+  const [retryingDriftId, setRetryingDriftId] = useState('')
+  const [driftNotes, setDriftNotes] = useState({})
+  const [driftRefreshToken, setDriftRefreshToken] = useState(0)
   const [searchDraft, setSearchDraft] = useState('')
   const [search, setSearch] = useState('')
   const [entityType, setEntityType] = useState('')
@@ -208,6 +218,48 @@ export default function AuditLogPage() {
     }
   }, [entityType, page, search])
 
+  useEffect(() => {
+    let active = true
+    getInventoryDriftCases({ status: 'OPEN', limit: 50 })
+      .then((response) => {
+        if (active) setDriftCases(response.data || [])
+      })
+      .catch((error) => {
+        if (active) toast.error(error.message || 'Không thể tải ca lệch tồn kho.')
+      })
+      .finally(() => {
+        if (active) setDriftLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [driftRefreshToken])
+
+  async function handleRetryDrift(item) {
+    const note = String(driftNotes[item.reservationId] || '').trim()
+    if (note.length < 5) {
+      toast.error('Vui lòng ghi bằng chứng đối soát tối thiểu 5 ký tự.')
+      return
+    }
+
+    setRetryingDriftId(item.reservationId)
+    try {
+      await retryInventoryDriftCase(item.reservationId, note)
+      toast.success('Đã giải phóng tồn kho và đóng ca lệch.')
+      setDriftNotes((current) => {
+        const next = { ...current }
+        delete next[item.reservationId]
+        return next
+      })
+      setDriftLoading(true)
+      setDriftRefreshToken((value) => value + 1)
+    } catch (error) {
+      toast.error(error.message || 'Tồn kho vẫn chưa khớp; ca lệch được giữ nguyên.')
+    } finally {
+      setRetryingDriftId('')
+    }
+  }
+
   return (
     <AdminLayout searchPlaceholder="Tìm nhật ký hệ thống...">
       <div className="admin-page-header">
@@ -216,6 +268,81 @@ export default function AuditLogPage() {
           <p>Theo dõi ai đã thực hiện thao tác nhạy cảm, trên đối tượng nào và vào thời điểm nào.</p>
         </div>
       </div>
+
+      {(driftLoading || driftCases.length > 0) && (
+        <section className="financial-section border-2 border-amber-200 bg-amber-50/40">
+          <div className="financial-section-header">
+            <div>
+              <h3>Ca lệch tồn kho cần đối soát</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Không tự ghi đè bộ đếm. Hãy kiểm tra ba lớp tồn kho trước khi retry;
+                nếu vẫn lệch, hệ thống rollback và giữ ca mở.
+              </p>
+            </div>
+            <span className="financial-status financial-status--pending">
+              {driftLoading ? 'Đang tải...' : `${driftCases.length} ca mở`}
+            </span>
+          </div>
+          {!driftLoading && (
+            <div className="admin-table-wrap">
+              <table className="admin-table financial-table">
+                <thead>
+                  <tr>
+                    <th>Lượt giữ chỗ</th>
+                    <th>Điểm tham quan</th>
+                    <th>Đơn liên quan</th>
+                    <th>Phát hiện</th>
+                    <th>Lý do</th>
+                    <th>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {driftCases.map((item) => (
+                    <tr key={item.reservationId}>
+                      <td className="financial-reference">{item.reservationId}</td>
+                      <td>{item.ticketProduct?.attraction?.title || 'Không còn dữ liệu'}</td>
+                      <td>
+                        {item.booking?.id || 'Không có đơn'}
+                        {item.booking?.refundRequired && (
+                          <div className="text-xs font-semibold text-[#ba1a1a]">Cần kiểm tra hoàn tiền</div>
+                        )}
+                      </td>
+                      <td className="admin-date-cell">{formatDateTime(item.detectedAt)}</td>
+                      <td className="max-w-xs text-xs text-slate-600">{item.reason || 'Không có mô tả'}</td>
+                      <td>
+                        <label className="grid min-w-64 gap-2">
+                          <span className="sr-only">Ghi chú đối soát cho {item.reservationId}</span>
+                          <textarea
+                            className="min-h-20 rounded-lg border border-slate-300 bg-white p-2 text-xs"
+                            maxLength="1000"
+                            placeholder="Bằng chứng đã đối chiếu DailyStock, kho điểm và kho khung giờ..."
+                            value={driftNotes[item.reservationId] || ''}
+                            onChange={(event) => setDriftNotes((current) => ({
+                              ...current,
+                              [item.reservationId]: event.target.value,
+                            }))}
+                          />
+                        </label>
+                        <button
+                          className="admin-pagination-button mt-2 px-3"
+                          type="button"
+                          disabled={
+                            retryingDriftId === item.reservationId
+                            || String(driftNotes[item.reservationId] || '').trim().length < 5
+                          }
+                          onClick={() => handleRetryDrift(item)}
+                        >
+                          {retryingDriftId === item.reservationId ? 'Đang thử...' : 'Đã đối soát, retry'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="financial-section">
         <div className="financial-section-header financial-section-header--transactions">

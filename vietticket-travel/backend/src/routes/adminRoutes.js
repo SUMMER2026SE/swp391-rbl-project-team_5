@@ -32,6 +32,7 @@ const bankTransferController = require('../controllers/bankTransferController');
 const settlementController = require('../controllers/settlementController');
 const questionController = require('../controllers/questionController');
 const kycChangeController = require('../controllers/kycChangeController');
+const inventoryDriftController = require('../controllers/inventoryDriftController');
 
 const router = express.Router();
 
@@ -41,6 +42,11 @@ router.get('/users', getUsers);
 router.post('/platform-staff', createPlatformStaff);
 router.post('/platform-staff/:id/invite', resendPlatformStaffInvite);
 router.get('/audit-logs', getAuditLogs);
+router.get('/inventory-drift-cases', inventoryDriftController.getInventoryDriftCases);
+router.post(
+  '/inventory-drift-cases/:reservationId/retry',
+  inventoryDriftController.retryInventoryDriftCase,
+);
 router.get('/dashboard', getDashboard);
 router.get('/financial-report', getFinancialReport);
 router.get('/financial-transactions', getFinancialTransactions);

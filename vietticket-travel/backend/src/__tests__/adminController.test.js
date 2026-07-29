@@ -285,4 +285,21 @@ describe('platform operations', () => {
       pagination: expect.objectContaining({ total: 1, totalPages: 1 }),
     }));
   });
+
+  test('lọc RESERVATION đọc được cả entityType cũ và mới', async () => {
+    mockPrisma.auditLog.findMany.mockResolvedValue([]);
+    mockPrisma.auditLog.count.mockResolvedValue(0);
+    mockPrisma.$transaction.mockImplementation((operations) => Promise.all(operations));
+    const res = createRes();
+
+    await getAuditLogs({
+      query: { entityType: 'reservation', page: '1', limit: '25' },
+    }, res, jest.fn());
+
+    expect(mockPrisma.auditLog.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        entityType: { in: ['RESERVATION', 'Reservation'] },
+      }),
+    }));
+  });
 });

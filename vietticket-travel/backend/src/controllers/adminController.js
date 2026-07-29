@@ -452,6 +452,7 @@ async function getAuditLogs(req, res, next) {
         REVIEW: ['REVIEW', 'Review'],
         SUPPORT_TICKET: ['SUPPORT_TICKET', 'SupportTicket'],
         TICKET: ['TICKET', 'Ticket'],
+        RESERVATION: ['RESERVATION', 'Reservation'],
       };
       where.entityType = { in: aliases[entityType] || [entityType] };
     }

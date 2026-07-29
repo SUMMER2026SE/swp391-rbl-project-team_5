@@ -82,10 +82,13 @@ async function releaseJobLock(jobName) {
   }
 }
 
-// Dấu cách ly cho lượt giữ chỗ có bộ đếm kho đã lệch. Dùng chính AuditLog làm
-// nơi lưu: đây đã là kênh "Admin cần xem việc này" của hệ thống, nên không cần
-// thêm cột/bảng mới chỉ để đánh dấu một tình huống hiếm.
+// Dấu cách ly cho lượt giữ chỗ có bộ đếm kho đã lệch. AuditLog được dùng như
+// event log bất biến: một event mở được ghi khi phát hiện lỗi, một event đóng
+// được ghi sau khi Admin đối chiếu và giải phóng thành công. Vì vậy worker
+// không coi một dấu cũ là trạng thái vĩnh viễn và vẫn truy được lịch sử xử lý.
 const STOCK_DRIFT_ACTION = 'HOLD_EXPIRY_STOCK_DRIFT';
+const STOCK_DRIFT_RESOLVED_ACTION = 'HOLD_EXPIRY_STOCK_DRIFT_RESOLVED';
+const STOCK_DRIFT_ACTIONS = [STOCK_DRIFT_ACTION, STOCK_DRIFT_RESOLVED_ACTION];
 
 // Ghi dấu cách ly NGOÀI transaction vừa rollback — nếu ghi bên trong, bản ghi
 // sẽ bị cuốn theo và lần quét sau lại không biết gì.
@@ -116,11 +119,203 @@ async function quarantineDriftedReservation(reservationId, error) {
   }
 }
 
+async function recordStockDriftResolution({
+  reservationId,
+  actorId,
+  req = null,
+  resolutionNote = null,
+  resolution = 'RELEASED_AFTER_RECONCILIATION',
+  reservationStatus = 'EXPIRED',
+}) {
+  return writeAuditLog({
+    req,
+    actorId,
+    action: STOCK_DRIFT_RESOLVED_ACTION,
+    entityType: 'Reservation',
+    entityId: reservationId,
+    metadata: {
+      status: 'RESOLVED',
+      reservationStatus,
+      resolvedAt: new Date().toISOString(),
+      resolutionNote: String(resolutionNote || '').trim().slice(0, 1000) || null,
+      resolution,
+    },
+  });
+}
+
+/**
+ * Đọc trạng thái mới nhất của các ca lệch kho.
+ *
+ * AuditLog có thể chứa nhiều lần phát hiện và nhiều lần retry. Chỉ event mới
+ * nhất quyết định trạng thái hiện tại; dữ liệu lịch sử vẫn được giữ nguyên để
+ * phục vụ đối soát và điều tra sự cố.
+ */
+async function getStockDriftStates(reservationIds) {
+  if (!reservationIds.length) return new Map();
+
+  const events = await prisma.auditLog.findMany({
+    where: {
+      action: { in: STOCK_DRIFT_ACTIONS },
+      entityType: 'Reservation',
+      entityId: { in: reservationIds },
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: {
+      entityId: true,
+      action: true,
+      metadata: true,
+      createdAt: true,
+    },
+  });
+
+  const states = new Map();
+  for (const event of events || []) {
+    if (!event?.entityId || states.has(event.entityId)) continue;
+    // Tương thích với các dấu cũ chỉ có entityId, chưa có action/createdAt.
+    const resolved = event.action === STOCK_DRIFT_RESOLVED_ACTION;
+    states.set(event.entityId, {
+      status: resolved ? 'RESOLVED' : 'OPEN',
+      event,
+    });
+  }
+  return states;
+}
+
+/**
+ * Liệt kê các ca lệch kho cho màn hình vận hành Admin.
+ * Đây là read model dựng từ event log, không cho phép sửa/xóa AuditLog.
+ */
+async function listInventoryDriftCases({
+  status = 'OPEN',
+  limit = 100,
+} = {}) {
+  const normalizedStatus = String(status || 'OPEN').trim().toUpperCase();
+  if (!['OPEN', 'RESOLVED', 'ALL'].includes(normalizedStatus)) {
+    const error = new Error('Trạng thái ca lệch kho không hợp lệ.');
+    error.statusCode = 400;
+    error.code = 'INVALID_DRIFT_STATUS';
+    throw error;
+  }
+
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const events = await prisma.auditLog.findMany({
+    where: {
+      action: { in: STOCK_DRIFT_ACTIONS },
+      entityType: 'Reservation',
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    select: {
+      entityId: true,
+      action: true,
+      metadata: true,
+      createdAt: true,
+      actor: { select: { id: true, fullName: true, email: true } },
+    },
+  });
+
+  const histories = new Map();
+  for (const event of events || []) {
+    if (!event?.entityId) continue;
+    const history = histories.get(event.entityId) || {
+      latest: event,
+      latestDetection: null,
+    };
+    if (
+      event.action === STOCK_DRIFT_ACTION
+      || (!event.action && !history.latestDetection)
+    ) {
+      history.latestDetection ||= event;
+    }
+    histories.set(event.entityId, history);
+  }
+
+  const selected = [...histories.values()]
+    .map(({ latest, latestDetection }) => ({
+      reservationId: latest.entityId,
+      status: latest.action === STOCK_DRIFT_RESOLVED_ACTION ? 'RESOLVED' : 'OPEN',
+      detectedAt: latestDetection?.metadata?.detectedAt
+        || latestDetection?.createdAt
+        || latest.createdAt,
+      updatedAt: latest.createdAt,
+      reason: latestDetection?.metadata?.reason || latest.metadata?.reason || null,
+      resolutionNote: latest.metadata?.resolutionNote || null,
+      actor: latest.actor || null,
+    }))
+    .filter((item) => normalizedStatus === 'ALL' || item.status === normalizedStatus)
+    .slice(0, safeLimit);
+
+  if (selected.length === 0) return [];
+
+  const reservations = await prisma.reservation.findMany({
+    where: { id: { in: selected.map((item) => item.reservationId) } },
+    select: {
+      id: true,
+      status: true,
+      expiresAt: true,
+      quantity: true,
+      date: true,
+      ticketProduct: {
+        select: {
+          name: true,
+          attraction: { select: { id: true, title: true } },
+        },
+      },
+      booking: {
+        select: {
+          id: true,
+          status: true,
+          totalAmount: true,
+          paymentMethod: true,
+          refundRequired: true,
+        },
+      },
+    },
+  });
+  const byId = new Map((reservations || []).map((reservation) => [reservation.id, reservation]));
+
+  return selected.map((item) => {
+    const reservation = byId.get(item.reservationId);
+    return {
+      ...item,
+      reservation: reservation
+        ? {
+            id: reservation.id,
+            status: reservation.status,
+            expiresAt: reservation.expiresAt,
+            quantity: reservation.quantity,
+            date: reservation.date,
+          }
+        : null,
+      ticketProduct: reservation?.ticketProduct
+        ? {
+            name: reservation.ticketProduct.name,
+            attraction: reservation.ticketProduct.attraction,
+          }
+        : null,
+      booking: reservation?.booking
+        ? {
+            id: reservation.booking.id,
+            status: reservation.booking.status,
+            totalAmount: Number(reservation.booking.totalAmount || 0),
+            paymentMethod: reservation.booking.paymentMethod,
+            refundRequired: reservation.booking.refundRequired,
+          }
+        : null,
+    };
+  });
+}
+
 // Quét và giải phóng các Reservation HELD đã quá hạn (qua grace).
 // Tách riêng khỏi timer để test được. Trả về số reservation đã dọn.
 async function sweepExpiredReservations({
   graceMs = DEFAULT_GRACE_MS,
   batchSize = DEFAULT_BATCH_SIZE,
+  reservationIds = null,
+  includeQuarantined = false,
+  actorId = null,
+  req = null,
+  resolutionNote = null,
+  returnDetails = false,
 } = {}) {
   const cutoff = new Date(Date.now() - graceMs);
 
@@ -128,45 +323,76 @@ async function sweepExpiredReservations({
   // rất lớn; không chặn thì một vòng quét sẽ ôm cả tồn đọng đó vào bộ nhớ và
   // đẩy một mệnh đề IN khổng lồ xuống Postgres. Worker chạy mỗi phút nên tồn
   // đọng vẫn được tiêu hoá dần, chỉ là chia thành nhiều lô.
-  const candidates = await prisma.reservation.findMany({
-    where: { status: 'HELD', expiresAt: { lt: cutoff } },
-    select: { id: true },
-    orderBy: { expiresAt: 'asc' }, // hết hạn lâu nhất được dọn trước
-    take: Math.max(1, Number(batchSize) || DEFAULT_BATCH_SIZE),
-  });
+  const take = Math.max(1, Number(batchSize) || DEFAULT_BATCH_SIZE);
+  const requestedIds = Array.isArray(reservationIds)
+    ? reservationIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : null;
+  const candidates = [];
+  const quarantined = new Set();
+  let offset = 0;
+  let canReadDriftState = true;
+  let hasMoreCandidates = true;
 
-  // Bỏ qua những lượt đã được đánh dấu cách ly. Một truy vấn cho cả vòng quét,
-  // không phải một truy vấn cho mỗi lượt. Lỗi ở đây không được làm hỏng cả
-  // vòng quét — cùng lắm là xử lý lại lượt đã cách ly và thất bại y như cũ.
-  let quarantined = new Set();
-  if (candidates.length > 0) {
-    try {
-      const marks = await prisma.auditLog.findMany({
-        where: {
-          action: STOCK_DRIFT_ACTION,
-          entityType: 'Reservation',
-          entityId: { in: candidates.map((row) => row.id) },
-        },
-        select: { entityId: true },
-      });
-      quarantined = new Set(marks.map((row) => row.entityId));
-    } catch (error) {
-      console.error('[cleanup] Không đọc được danh sách cách ly:', error.message);
+  // Không dừng ở 500 dòng đầu: nếu toàn bộ lô đầu đã cách ly thì vẫn phải
+  // quét các lô kế tiếp để các lượt lành không bị bỏ đói.
+  while (hasMoreCandidates && candidates.length < take) {
+    const page = await prisma.reservation.findMany({
+      where: {
+        status: 'HELD',
+        expiresAt: { lt: cutoff },
+        ...(requestedIds ? { id: { in: requestedIds } } : {}),
+      },
+      select: { id: true },
+      orderBy: { expiresAt: 'asc' }, // hết hạn lâu nhất được dọn trước
+      ...(requestedIds ? {} : { skip: offset }),
+      take,
+    });
+    if (!page.length) break;
+
+    offset += page.length;
+    let states = new Map();
+    if (canReadDriftState) {
+      try {
+        states = await getStockDriftStates(page.map((row) => row.id));
+      } catch (error) {
+        canReadDriftState = false;
+        console.error('[cleanup] Không đọc được danh sách cách ly:', error.message);
+      }
     }
+
+    for (const row of page) {
+      const state = states.get(row.id);
+      if (state?.status === 'OPEN') {
+        quarantined.add(row.id);
+        if (!includeQuarantined) continue;
+      }
+      candidates.push(row);
+      if (candidates.length >= take) break;
+    }
+
+    hasMoreCandidates = !requestedIds && page.length === take;
   }
 
-  const expired = candidates.filter((row) => !quarantined.has(row.id));
-  if (quarantined.size > 0) {
+  if (quarantined.size > 0 && !includeQuarantined) {
     console.warn(
       `[cleanup] Bỏ qua ${quarantined.size} lượt giữ chỗ đang chờ xử lý tay do lệch kho.`,
     );
   }
 
+  const expired = candidates;
   let cleaned = 0;
+  const result = {
+    cleaned: 0,
+    quarantined: [],
+    resolvedDriftIds: [],
+    failedDriftIds: [],
+  };
+  const cleanedIds = new Set();
+
   const cancelledBookings = []; // gom lại để gửi email SAU transaction
   for (const { id } of expired) {
     try {
-      await prisma.$transaction(
+      const outcome = await prisma.$transaction(
         async (tx) => {
           // Đọc lại trong transaction; nếu IPN đã xử lý (không còn HELD) thì bỏ qua.
           const r = await tx.reservation.findUnique({
@@ -192,7 +418,7 @@ async function sweepExpiredReservations({
               },
             },
           });
-          if (!r || r.status !== 'HELD') return;
+          if (!r || r.status !== 'HELD') return { cleaned: false };
           const released = await releaseHeldInventory(
             tx,
             r,
@@ -262,18 +488,27 @@ async function sweepExpiredReservations({
               where: { bookingId: r.booking.id, status: 'PENDING' },
               data: { status: 'FAILED' },
             });
-            cancelledBookings.push({
+            const cancelledBooking = {
               id: r.booking.id,
               email: r.booking.email,
               fullName: r.booking.fullName,
               attractionTitle: r.ticketProduct?.attraction?.title || null,
-            });
+            };
+            return { cleaned: true, cancelledBooking };
           }
 
-          cleaned += 1;
+          return { cleaned: true, cancelledBooking: null };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+      // Chỉ đếm và gửi email sau khi Prisma xác nhận transaction đã commit.
+      // Nếu commit vướng serialization failure, callback có thể đã chạy xong
+      // nhưng mọi thay đổi bị rollback và lượt này phải được quét lại.
+      if (outcome?.cleaned) {
+        cleaned += 1;
+        cleanedIds.add(id);
+        if (outcome.cancelledBooking) cancelledBookings.push(outcome.cancelledBooking);
+      }
     } catch (error) {
       // Serialization failure / lỗi 1 reservation -> bỏ qua, vòng sau quét lại.
       console.error(`[cleanup] Lỗi khi dọn reservation ${id}:`, error.message);
@@ -282,7 +517,28 @@ async function sweepExpiredReservations({
         // thất bại y hệt. Ghi dấu để (a) Admin có việc cụ thể để xử lý và
         // (b) các vòng sau bỏ qua, thay vì đốt một transaction mỗi phút và
         // in lỗi mãi mãi mà không ai được báo.
-        await quarantineDriftedReservation(id, error);
+        const marked = await quarantineDriftedReservation(id, error);
+        if (marked) result.quarantined.push(id);
+        if (includeQuarantined) result.failedDriftIds.push(id);
+      }
+    }
+  }
+
+  // Đóng ca chỉ sau khi transaction giải phóng kho và cập nhật booking đã
+  // commit. Nếu ghi event đóng thất bại, Admin vẫn nhìn thấy ca mở để retry.
+  if (includeQuarantined && actorId && cleaned > 0) {
+    for (const id of expired.map((row) => row.id)) {
+      if (!quarantined.has(id) || !cleanedIds.has(id)) continue;
+      try {
+        await recordStockDriftResolution({
+          reservationId: id,
+          actorId,
+          req,
+          resolutionNote,
+        });
+        result.resolvedDriftIds.push(id);
+      } catch (error) {
+        console.error(`[cleanup] Không ghi được event đóng ca lệch kho ${id}:`, error.message);
       }
     }
   }
@@ -302,7 +558,9 @@ async function sweepExpiredReservations({
   if (cleaned > 0) {
     console.log(`[cleanup] Đã giải phóng ${cleaned}/${expired.length} đơn giữ chỗ hết hạn.`);
   }
-  return cleaned;
+  result.cleaned = cleaned;
+  result.cleanedIds = [...cleanedIds];
+  return returnDetails ? result : cleaned;
 }
 
 // Khởi động vòng lặp định kỳ với distributed lock.
@@ -355,4 +613,8 @@ module.exports = {
   releaseJobLock,
   INSTANCE_ID,
   JOB_NAME,
+  STOCK_DRIFT_ACTION,
+  STOCK_DRIFT_RESOLVED_ACTION,
+  listInventoryDriftCases,
+  recordStockDriftResolution,
 };

@@ -216,6 +216,21 @@ export function getAuditLogs(params = {}) {
   return apiRequest(`/admin/audit-logs${qs ? `?${qs}` : ''}`, { method: 'GET' })
 }
 
+export function getInventoryDriftCases(params = {}) {
+  const query = new URLSearchParams()
+  if (params.status) query.set('status', params.status)
+  if (params.limit) query.set('limit', params.limit)
+  const qs = query.toString()
+  return apiRequest(`/admin/inventory-drift-cases${qs ? `?${qs}` : ''}`, { method: 'GET' })
+}
+
+export function retryInventoryDriftCase(reservationId, resolutionNote) {
+  return apiRequest(`/admin/inventory-drift-cases/${encodeURIComponent(reservationId)}/retry`, {
+    method: 'POST',
+    body: { resolutionNote },
+  })
+}
+
 export function getSettlements(params = {}) {
   const query = new URLSearchParams()
   if (params.status) query.set('status', params.status)

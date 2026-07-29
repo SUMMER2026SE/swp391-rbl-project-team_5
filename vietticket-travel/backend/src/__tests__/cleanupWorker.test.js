@@ -12,7 +12,10 @@ jest.mock('../config/prisma', () => ({
 }));
 
 const prisma = require('../config/prisma');
-const { sweepExpiredReservations } = require('../utils/cleanupWorker');
+const {
+  listInventoryDriftCases,
+  sweepExpiredReservations,
+} = require('../utils/cleanupWorker');
 
 function makeTx({ reservation }) {
   return {
@@ -206,6 +209,40 @@ describe('sweepExpiredReservations', () => {
     expect(tx.dailyStock.updateMany).not.toHaveBeenCalled();
   });
 
+  test('commit bị serialization failure không được đếm là đã dọn', async () => {
+    prisma.reservation.findMany.mockResolvedValue([{ id: 'res-commit-race' }]);
+    const tx = makeTx({
+      reservation: {
+        id: 'res-commit-race',
+        status: 'HELD',
+        ticketProductId: 'tkt-race',
+        timeSlotId: null,
+        date: new Date('2026-06-21'),
+        quantity: 1,
+        booking: null,
+        ticketProduct: {
+          attractionId: 'attr-race',
+          attraction: { title: 'Điểm race' },
+        },
+      },
+    });
+    prisma.$transaction.mockImplementation(async (cb) => {
+      await cb(tx);
+      const error = new Error('Transaction failed due to a write conflict');
+      error.code = 'P2034';
+      throw error;
+    });
+
+    const cleaned = await sweepExpiredReservations();
+
+    expect(cleaned).toBe(0);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining('res-commit-race'),
+      expect.stringContaining('write conflict'),
+    );
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
   test('không hủy booking nếu một lớp kho không thể hoàn trả an toàn', async () => {
     prisma.reservation.findMany.mockResolvedValue([{ id: 'res-stock-drift' }]);
     const tx = makeTx({
@@ -350,5 +387,142 @@ describe('sweepExpiredReservations - giới hạn lô', () => {
     prisma.$transaction.mockImplementation((cb) => cb(tx));
 
     await expect(sweepExpiredReservations()).resolves.toBe(1);
+  });
+
+  test('lô đầu toàn ca cách ly không được bỏ đói lượt khỏe ở lô kế tiếp', async () => {
+    prisma.reservation.findMany
+      .mockResolvedValueOnce([{ id: 'res-drift' }])
+      .mockResolvedValueOnce([{ id: 'res-healthy' }]);
+    prisma.auditLog.findMany
+      .mockResolvedValueOnce([{ entityId: 'res-drift', action: 'HOLD_EXPIRY_STOCK_DRIFT' }])
+      .mockResolvedValueOnce([]);
+    const tx = makeTx({
+      reservation: {
+        id: 'res-healthy',
+        status: 'HELD',
+        ticketProductId: 'tkt-ok',
+        timeSlotId: null,
+        date: new Date('2026-06-21'),
+        quantity: 1,
+        booking: null,
+        ticketProduct: {
+          attractionId: 'attr-ok',
+          attraction: { title: 'Điểm bình thường' },
+        },
+      },
+    });
+    prisma.$transaction.mockImplementation((cb) => cb(tx));
+
+    const cleaned = await sweepExpiredReservations({ batchSize: 1 });
+
+    expect(cleaned).toBe(1);
+    expect(prisma.reservation.findMany).toHaveBeenCalledTimes(2);
+    expect(prisma.reservation.findMany.mock.calls[1][0].skip).toBe(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  test('Admin retry thành công ghi event đóng ca và không giải phóng lần hai', async () => {
+    prisma.reservation.findMany.mockResolvedValue([{ id: 'res-drift' }]);
+    prisma.auditLog.findMany
+      .mockResolvedValueOnce([{
+        entityId: 'res-drift',
+        action: 'HOLD_EXPIRY_STOCK_DRIFT',
+        createdAt: new Date('2026-06-21T00:00:00Z'),
+      }]);
+    const tx = makeTx({
+      reservation: {
+        id: 'res-drift',
+        status: 'HELD',
+        ticketProductId: 'tkt-ok',
+        timeSlotId: null,
+        date: new Date('2026-06-21'),
+        quantity: 1,
+        booking: null,
+        ticketProduct: {
+          attractionId: 'attr-ok',
+          attraction: { title: 'Điểm đã đối soát' },
+        },
+      },
+    });
+    prisma.$transaction.mockImplementation((cb) => cb(tx));
+
+    const result = await sweepExpiredReservations({
+      graceMs: 0,
+      batchSize: 1,
+      reservationIds: ['res-drift'],
+      includeQuarantined: true,
+      actorId: 'admin-1',
+      resolutionNote: 'Đã đối chiếu đủ ba lớp tồn kho.',
+      returnDetails: true,
+    });
+
+    expect(console.error.mock.calls).toEqual([]);
+    expect(result.cleaned).toBe(1);
+    expect(result.resolvedDriftIds).toEqual(['res-drift']);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        action: 'HOLD_EXPIRY_STOCK_DRIFT_RESOLVED',
+        entityId: 'res-drift',
+        actorId: 'admin-1',
+        metadata: expect.objectContaining({
+          resolution: 'RELEASED_AFTER_RECONCILIATION',
+        }),
+      }),
+    }));
+  });
+});
+
+describe('listInventoryDriftCases', () => {
+  test('event đóng mới nhất làm ca RESOLVED nhưng vẫn giữ thời điểm và lý do phát hiện gốc', async () => {
+    prisma.auditLog.findMany.mockResolvedValue([
+      {
+        entityId: 'res-1',
+        action: 'HOLD_EXPIRY_STOCK_DRIFT_RESOLVED',
+        metadata: { resolutionNote: 'Đã đối soát và sửa bộ đếm.' },
+        createdAt: new Date('2026-07-29T10:10:00Z'),
+        actor: { id: 'admin-1', fullName: 'Admin', email: 'admin@example.com' },
+      },
+      {
+        entityId: 'res-1',
+        action: 'HOLD_EXPIRY_STOCK_DRIFT',
+        metadata: {
+          reason: 'Không thể hoàn trả kho điểm tham quan.',
+          detectedAt: '2026-07-29T10:00:00.000Z',
+        },
+        createdAt: new Date('2026-07-29T10:00:00Z'),
+        actor: null,
+      },
+    ]);
+    prisma.reservation.findMany.mockResolvedValue([{
+      id: 'res-1',
+      status: 'EXPIRED',
+      expiresAt: new Date('2026-07-29T09:50:00Z'),
+      quantity: 2,
+      date: new Date('2026-08-01T00:00:00Z'),
+      ticketProduct: {
+        name: 'Vé người lớn',
+        attraction: { id: 'attr-1', title: 'Điểm A' },
+      },
+      booking: {
+        id: 'booking-1',
+        status: 'CANCELLED',
+        totalAmount: 200000,
+        paymentMethod: 'vnpay',
+        refundRequired: false,
+      },
+    }]);
+
+    const cases = await listInventoryDriftCases({ status: 'ALL' });
+
+    expect(cases).toEqual([
+      expect.objectContaining({
+        reservationId: 'res-1',
+        status: 'RESOLVED',
+        detectedAt: '2026-07-29T10:00:00.000Z',
+        reason: 'Không thể hoàn trả kho điểm tham quan.',
+        resolutionNote: 'Đã đối soát và sửa bộ đếm.',
+        booking: expect.objectContaining({ totalAmount: 200000 }),
+      }),
+    ]);
   });
 });
