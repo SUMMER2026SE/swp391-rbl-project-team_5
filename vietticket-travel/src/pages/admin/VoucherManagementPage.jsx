@@ -3,6 +3,7 @@ import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout'
 import {
   createVoucher,
+  getPartners,
   getVouchers,
   updateVoucher,
 } from '../../services/adminApi'
@@ -18,13 +19,18 @@ const EMPTY_FORM = {
   minSpend: '',
   fundingSource: 'PLATFORM',
   platformFundingPercent: '100',
+  fundingPartnerId: '',
+  applicablePartnerId: '',
+  startDate: '',
   expiryDate: '',
   usageLimit: '',
+  maxUsesPerUser: '1',
   isActive: true,
 }
 
 const STATUS_LABELS = {
   ACTIVE: ['Đang áp dụng', 'admin-status-badge--approved'],
+  SCHEDULED: ['Đã lên lịch', 'admin-status-badge--pending'],
   INACTIVE: ['Đã tắt', 'admin-status-badge--inactive'],
   EXPIRED: ['Hết hạn', 'admin-status-badge--rejected'],
   EXHAUSTED: ['Hết lượt', 'admin-status-badge--pending'],
@@ -51,8 +57,12 @@ function voucherToForm(voucher) {
     minSpend: voucher.minSpend == null ? '' : String(voucher.minSpend),
     fundingSource: voucher.fundingSource || 'PARTNER',
     platformFundingPercent: String(voucher.platformFundingPercent ?? 0),
+    fundingPartnerId: voucher.fundingPartnerId || '',
+    applicablePartnerId: voucher.applicablePartnerId || '',
+    startDate: toDateTimeLocal(voucher.startDate),
     expiryDate: toDateTimeLocal(voucher.expiryDate),
     usageLimit: voucher.usageLimit == null ? '' : String(voucher.usageLimit),
+    maxUsesPerUser: String(voucher.maxUsesPerUser || 1),
     isActive: voucher.isActive,
   }
 }
@@ -76,14 +86,25 @@ function buildPayload(form) {
         : form.fundingSource === 'PARTNER'
           ? 0
           : Number(form.platformFundingPercent),
+    fundingPartnerId:
+      form.fundingSource === 'PLATFORM' ? null : form.fundingPartnerId,
+    applicablePartnerId:
+      form.fundingSource === 'PLATFORM'
+        ? form.applicablePartnerId || null
+        : form.fundingPartnerId,
+    startDate: form.startDate
+      ? new Date(form.startDate).toISOString()
+      : new Date().toISOString(),
     expiryDate: expiryDate.toISOString(),
     usageLimit: form.usageLimit || null,
+    maxUsesPerUser: Number(form.maxUsesPerUser || 1),
     isActive: form.isActive,
   }
 }
 
 export default function VoucherManagementPage() {
   const [vouchers, setVouchers] = useState([])
+  const [partners, setPartners] = useState([])
   const [pagination, setPagination] = useState({
     page: 1,
     total: 0,
@@ -154,6 +175,20 @@ export default function VoucherManagementPage() {
     // Each primitive below defines the server-side query.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, search, statusFilter])
+
+  useEffect(() => {
+    let active = true
+    getPartners({ status: 'approved', page: 1, limit: 100 })
+      .then((response) => {
+        if (active) setPartners(response.data || [])
+      })
+      .catch((error) => {
+        if (active) toast.error(`Không thể tải danh sách đối tác: ${error.message}`)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const resetForm = () => {
     setEditingVoucher(null)
@@ -342,8 +377,18 @@ export default function VoucherManagementPage() {
               placeholder="Không yêu cầu"
             />
           </label>
-          <label>
-            <span>Hết hạn</span>
+            <label>
+              <span>Bắt đầu áp dụng</span>
+              <input
+                className="admin-form-input"
+                type="datetime-local"
+                disabled={financialTermsLocked}
+                value={form.startDate}
+                onChange={(event) => setForm({ ...form, startDate: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>Hết hạn</span>
             <input
               className="admin-form-input"
               type="datetime-local"
@@ -366,6 +411,20 @@ export default function VoucherManagementPage() {
             />
           </label>
           <label>
+            <span>Tối đa mỗi khách</span>
+            <input
+              className="admin-form-input"
+              type="number"
+              required
+              min={1}
+              max={100}
+              step={1}
+              disabled={financialTermsLocked}
+              value={form.maxUsesPerUser}
+              onChange={(event) => setForm({ ...form, maxUsesPerUser: event.target.value })}
+            />
+          </label>
+          <label>
             <span>Nguồn tài trợ ưu đãi</span>
             <select
               className="admin-form-input"
@@ -382,6 +441,10 @@ export default function VoucherManagementPage() {
                       : fundingSource === 'PARTNER'
                         ? '0'
                         : '50',
+                  fundingPartnerId:
+                    fundingSource === 'PLATFORM' ? '' : form.fundingPartnerId,
+                  applicablePartnerId:
+                    fundingSource === 'PLATFORM' ? form.applicablePartnerId : '',
                 })
               }}
             >
@@ -406,6 +469,47 @@ export default function VoucherManagementPage() {
                   setForm({ ...form, platformFundingPercent: event.target.value })
                 }
               />
+            </label>
+          )}
+          {form.fundingSource !== 'PLATFORM' && (
+            <label>
+              <span>Đối tác tài trợ và được áp dụng</span>
+              <select
+                className="admin-form-input"
+                required
+                disabled={financialTermsLocked}
+                value={form.fundingPartnerId}
+                onChange={(event) =>
+                  setForm({ ...form, fundingPartnerId: event.target.value })
+                }
+              >
+                <option value="">Chọn đối tác</option>
+                {partners.map((partner) => (
+                  <option key={partner.id} value={partner.id}>
+                    {partner.businessName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {form.fundingSource === 'PLATFORM' && (
+            <label>
+              <span>Phạm vi đối tác</span>
+              <select
+                className="admin-form-input"
+                disabled={financialTermsLocked}
+                value={form.applicablePartnerId}
+                onChange={(event) =>
+                  setForm({ ...form, applicablePartnerId: event.target.value })
+                }
+              >
+                <option value="">Toàn nền tảng</option>
+                {partners.map((partner) => (
+                  <option key={partner.id} value={partner.id}>
+                    {partner.businessName}
+                  </option>
+                ))}
+              </select>
             </label>
           )}
         </div>
