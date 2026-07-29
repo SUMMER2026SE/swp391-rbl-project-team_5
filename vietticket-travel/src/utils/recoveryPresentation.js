@@ -5,8 +5,13 @@ const STATUS_PRIORITY = {
   REFUNDED: 3,
 }
 
+// `new Date(undefined || 0)` là epoch 0 — một số hữu hạn — nên nhánh fallback
+// sẽ không bao giờ chạy nếu chỉ dựa vào Number.isFinite. Phải bắt giá trị rỗng
+// trước, nếu không một case OPEN thiếu expiresAt sẽ nhảy lên đầu danh sách và
+// đẩy case sắp hết hạn xuống dưới.
 const timestamp = (value, fallback = 0) => {
-  const parsed = new Date(value || 0).getTime()
+  if (value == null || value === '') return fallback
+  const parsed = new Date(value).getTime()
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
@@ -23,6 +28,33 @@ export function sortRecoveryCases(cases) {
 
     return timestamp(right?.createdAt) - timestamp(left?.createdAt)
   })
+}
+
+/**
+ * Đồng hồ đếm ngược tới hạn chọn của một case Rescue.
+ *
+ * Tách khỏi component vì `expired` không chỉ để hiển thị: nó khoá nút chọn vé
+ * thay thế và nút từ chối. Kết luận sai ở đây là chặn khách khỏi thao tác trên
+ * chính case của mình, nên phần tính toán phải kiểm thử được độc lập.
+ */
+export function getCountdownState(expiresAt, now = Date.now()) {
+  const parsed = expiresAt == null || expiresAt === ''
+    ? Number.NaN
+    : new Date(expiresAt).getTime()
+  const hasDeadline = Number.isFinite(parsed)
+  const remaining = hasDeadline ? Math.max(0, parsed - now) : 0
+  const minutes = Math.floor(remaining / 60000)
+  const seconds = Math.floor((remaining % 60000) / 1000)
+
+  return {
+    hasDeadline,
+    remaining,
+    // Không biết hạn chót thì không được kết luận là đã hết hạn.
+    expired: hasDeadline && remaining <= 0,
+    label: hasDeadline
+      ? `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+      : '--:--',
+  }
 }
 
 export function getRecoveryResolutionContent(recoveryCase) {

@@ -41,7 +41,11 @@ module.exports = {
         "on-tertiary-container": "#ffc247",
         "surface-variant": "#e1e3e4",
         "on-tertiary-fixed": "#271900",
-        "on-secondary-container": "#001f23",
+        // secondary-container là tone tối (#006068) giống primary-container,
+        // nên on-color phải sáng. Để #001f23 thì nút "Đánh giá ngay" ở trang Vé
+        // của tôi chỉ còn tương phản 2.35:1 — chữ tối trên nền tối, dưới chuẩn
+        // WCAG AA. Trắng cho 7.3:1 và khớp với on-primary/on-secondary.
+        "on-secondary-container": "#ffffff",
         "surface-container-low": "#f2f4f5",
         "primary-fixed-dim": "#8ad2db",
         "on-secondary-fixed": "#001f23",

@@ -6,6 +6,7 @@ const {
   describeRuntimePolicy,
   demandToAdjustmentPercent,
   forecastConfidenceOf,
+  getPricingImpact,
   normalizePolicy,
   occupancyRatio,
   quotePrice,
@@ -430,5 +431,171 @@ describe('toPublicQuote', () => {
   test('báo giá không được áp dụng thì không trả gì cho khách', () => {
     expect(toPublicQuote(quote({ realizedRatio: 0.5 }))).toBeNull();
     expect(toPublicQuote(null)).toBeNull();
+  });
+});
+
+describe('getPricingImpact', () => {
+  const summaryRow = (overrides = {}) => ({
+    basePrice: 100000,
+    finalPrice: 115000,
+    quantity: 2,
+    demandLevel: 'PEAK',
+    ...overrides,
+  });
+  const detailRow = (id) => ({
+    id,
+    visitDate: new Date('2026-07-20T00:00:00.000Z'),
+    basePrice: 100000,
+    finalPrice: 115000,
+    adjustmentPercent: 15,
+    quantity: 2,
+    demandLevel: 'PEAK',
+    demandIndex: 0.9,
+    confidence: 'HIGH',
+    signalSource: 'BLENDED',
+    leadTimeDays: 3,
+    reason: 'Cao điểm',
+    createdAt: new Date('2026-07-17T00:00:00.000Z'),
+    ticketProduct: { name: 'Vé người lớn' },
+  });
+
+  // findMany được gọi hai lần với hai mục đích khác nhau; phân biệt bằng `take`
+  // vì chỉ truy vấn bảng chi tiết mới bị giới hạn.
+  function mockAdjustments({ summaryRows, detailRows, periodCount }) {
+    prisma.dynamicPriceAdjustment.findMany.mockImplementation((args) => (
+      args.take ? Promise.resolve(detailRows) : Promise.resolve(summaryRows)
+    ));
+    prisma.dynamicPriceAdjustment.count.mockResolvedValue(periodCount);
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('chỉ cộng những lượt đã thu được tiền, không cộng lượt giữ chỗ hết hạn', async () => {
+    mockAdjustments({ summaryRows: [summaryRow()], detailRows: [detailRow('a')], periodCount: 5 });
+
+    const result = await getPricingImpact({ attractionId: 'attraction-1', client: prisma });
+
+    const [summaryQuery] = prisma.dynamicPriceAdjustment.findMany.mock.calls[0];
+    expect(summaryQuery.where.reservation.is.booking.is).toEqual({
+      status: { notIn: ['CANCELLED', 'REFUNDED'] },
+      payments: { some: { status: 'SUCCESS', isDuplicate: false } },
+    });
+    // 5 dòng trong kỳ nhưng chỉ 1 dòng đã thành tiền.
+    expect(result.summary.totalAdjustments).toBe(1);
+    expect(result.summary.pendingAdjustments).toBe(4);
+    expect(result.summary.surchargeRevenue).toBe(30000);
+    expect(result.summary.netRevenueDelta).toBe(30000);
+    expect(result.summary.adjustedTickets).toBe(2);
+  });
+
+  test('không đếm dòng nào khi mọi lượt đổi giá đều chưa thành tiền', async () => {
+    mockAdjustments({ summaryRows: [], detailRows: [], periodCount: 12 });
+
+    const result = await getPricingImpact({ attractionId: 'attraction-1', client: prisma });
+
+    expect(result.summary.totalAdjustments).toBe(0);
+    expect(result.summary.pendingAdjustments).toBe(12);
+    expect(result.summary.netRevenueDelta).toBe(0);
+  });
+
+  test('tổng vẫn quét trọn kỳ dù bảng chi tiết bị cắt bớt', async () => {
+    mockAdjustments({
+      summaryRows: [summaryRow(), summaryRow(), summaryRow()],
+      detailRows: [detailRow('a'), detailRow('b')],
+      periodCount: 3,
+    });
+
+    const result = await getPricingImpact({
+      attractionId: 'attraction-1',
+      detailLimit: 2,
+      client: prisma,
+    });
+
+    const [summaryQuery] = prisma.dynamicPriceAdjustment.findMany.mock.calls[0];
+    // Truy vấn tính tổng không được mang `take`, nếu không tổng sẽ bị cắt âm thầm.
+    expect(summaryQuery.take).toBeUndefined();
+    expect(result.summary.totalAdjustments).toBe(3);
+    expect(result.summary.netRevenueDelta).toBe(90000);
+    expect(result.adjustments).toHaveLength(2);
+    expect(result.detailTruncated).toBe(true);
+    expect(result.detailLimit).toBe(2);
+  });
+});
+
+describe('savePolicy — ngưỡng nhu cầu', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('chặn cập nhật một phần làm ngưỡng vắng vượt ngưỡng đông đang lưu', async () => {
+    prisma.dynamicPricingPolicy.findUnique.mockResolvedValue({
+      ...BASE_POLICY,
+      highDemandThreshold: 0.75,
+      lowDemandThreshold: 0.35,
+    });
+
+    await expect(savePolicy({
+      attractionId: 'attraction-1',
+      payload: { lowDemandThreshold: 0.9 },
+      actorId: 'partner-user-1',
+      client: prisma,
+    })).rejects.toEqual(expect.objectContaining({
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+    }));
+    // Không được âm thầm ép về 0.70 rồi ghi vào CSDL.
+    expect(prisma.dynamicPricingPolicy.upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('minConfidence không được tra cứu qua prototype', () => {
+  test('key kế thừa từ Object.prototype bị coi là không hợp lệ', () => {
+    expect(normalizePolicy({ minConfidence: 'toString' }).minConfidence).toBe('MEDIUM');
+    expect(normalizePolicy({ minConfidence: 'constructor' }).minConfidence).toBe('MEDIUM');
+  });
+
+  test('không cho phép lách hàng rào độ tin cậy bằng minConfidence lạ', () => {
+    // Dự báo LOW + minConfidence rác: phải giữ giá niêm yết, không được áp giá.
+    const result = quote({
+      policy: { ...BASE_POLICY, minConfidence: 'toString' },
+      forecastConfidence: 'LOW',
+      realizedRatio: 0.95,
+      forecastRatio: 0.95,
+    });
+    expect(result.applied).toBe(false);
+    expect(result.finalPrice).toBe(200000);
+  });
+});
+
+describe('mốc thời gian của kỳ báo cáo', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.dynamicPriceAdjustment.findMany.mockResolvedValue([]);
+    prisma.dynamicPriceAdjustment.count.mockResolvedValue(0);
+  });
+
+  test('kỳ bắt đầu đúng lúc nửa đêm giờ VN, không phải nửa đêm UTC', async () => {
+    // 09:00 giờ VN ngày 15/07/2026 = 02:00 UTC cùng ngày.
+    const now = new Date('2026-07-15T02:00:00.000Z');
+
+    await getPricingImpact({ attractionId: 'a1', days: 1, now, client: prisma });
+
+    const [{ where }] = prisma.dynamicPriceAdjustment.count.mock.calls[0];
+    // days=1 -> kỳ là trọn ngày 15/07 giờ VN, bắt đầu lúc 14/07 17:00 UTC.
+    expect(where.createdAt.gte.toISOString()).toBe('2026-07-14T17:00:00.000Z');
+  });
+
+  test('lượt đổi giá lúc 2 giờ sáng giờ VN vẫn nằm trong kỳ', async () => {
+    const now = new Date('2026-07-15T12:00:00.000Z');
+
+    await getPricingImpact({ attractionId: 'a1', days: 30, now, client: prisma });
+
+    const [{ where }] = prisma.dynamicPriceAdjustment.count.mock.calls[0];
+    // 02:00 giờ VN ngày đầu kỳ (16/06) = 15/06 19:00 UTC — trước đây bị cắt mất
+    // vì mốc cũ là 16/06 00:00 UTC (tức 07:00 giờ VN).
+    const earlyMorningVn = new Date('2026-06-15T19:00:00.000Z');
+    expect(where.createdAt.gte.getTime()).toBeLessThanOrEqual(earlyMorningVn.getTime());
   });
 });

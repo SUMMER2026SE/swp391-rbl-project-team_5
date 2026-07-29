@@ -14,6 +14,7 @@ import {
 import fallbackImage from '../assets/halong_bay.webp'
 import { formatBookingReference } from '../utils/bookingReference.js'
 import {
+  getCountdownState,
   getRecoveryRefundStage,
   getRecoveryResolutionContent,
   sortRecoveryCases,
@@ -103,14 +104,8 @@ function useCountdown(expiresAt, active) {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [active])
-  const deadline = new Date(expiresAt || 0).getTime()
-  const remaining = Number.isFinite(deadline) ? Math.max(0, deadline - now) : 0
-  const minutes = Math.floor(remaining / 60000)
-  const seconds = Math.floor((remaining % 60000) / 1000)
-  return {
-    expired: remaining <= 0,
-    label: `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`,
-  }
+
+  return getCountdownState(expiresAt, now)
 }
 
 function FinancialSummary({ creditAmount, option }) {

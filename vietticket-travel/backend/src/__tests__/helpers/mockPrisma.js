@@ -263,6 +263,7 @@ const mockPrisma = {
   },
   dynamicPriceAdjustment: {
     findMany: jest.fn(),
+    count: jest.fn(),
     create: jest.fn(),
   },
   savedItinerary: {
