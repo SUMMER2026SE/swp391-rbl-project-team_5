@@ -346,7 +346,9 @@ function ImpactPanel({ impact }) {
         Tác động thực tế ({summary.days} ngày gần nhất)
       </h2>
       <p className="mt-1 text-xs text-slate-500">
-        Chỉ tính các lượt đặt đã thanh toán thành công và chưa bị hủy hoặc hoàn tiền.
+        Kỳ tính theo lúc hệ thống ghi nhận quyết định đổi giá (lượt giữ chỗ);
+        chỉ cộng doanh thu của lượt đã thanh toán thành công và chưa bị hủy hoặc hoàn tiền.
+        Đây không phải báo cáo dòng tiền theo ngày ngân hàng ghi nhận thanh toán.
       </p>
       {summary.totalAdjustments === 0 ? (
         <p className="mt-3 text-sm text-slate-500">

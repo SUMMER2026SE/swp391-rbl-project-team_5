@@ -963,6 +963,10 @@ async function getPricingImpact({
   return {
     summary: {
       ...summary,
+      // Kỳ báo cáo được xác định theo lúc hệ thống ghi nhận quyết định đổi giá
+      // (giữ chỗ), còn điều kiện "đã thành tiền" chỉ là bộ lọc tính doanh thu.
+      // Ghi rõ basis để không nhầm với báo cáo dòng tiền theo paidAt.
+      periodBasis: 'ADJUSTMENT_CREATED_AT',
       surchargeRevenue: Math.round(summary.surchargeRevenue),
       discountGiven: Math.round(summary.discountGiven),
       netRevenueDelta: Math.round(summary.netRevenueDelta),
