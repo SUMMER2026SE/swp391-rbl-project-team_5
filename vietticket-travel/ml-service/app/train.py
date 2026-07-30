@@ -17,6 +17,7 @@ loạt cho mọi attraction.
 """
 
 import argparse
+import sys
 from datetime import date, datetime, timezone
 from typing import Tuple
 
@@ -57,46 +58,93 @@ def _add_calendar_and_static_features(merged: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([merged, calendar_df, static_df], axis=1)
 
 
-def _add_lag_and_rolling_features(revenue_df: pd.DataFrame) -> pd.DataFrame:
-    """Tính lag/rolling PER ATTRACTION dùng groupby + shift, chỉ dựa trên
-    doanh thu thực tế các ngày trước đó (không rò rỉ ngày hiện tại/tương lai,
-    và không rò rỉ dữ liệu giữa các attraction khác nhau).
+LAG_COLUMNS = ["lag_1", "lag_7", "lag_14", "roll_mean_7", "roll_mean_28", "roll_std_7"]
+TICKET_PREFIX = "tk_"
+
+
+def _add_lag_and_rolling_features(
+    revenue_df: pd.DataFrame,
+    value_column: str = "revenue",
+    prefix: str = "",
+) -> pd.DataFrame:
+    """Tính lag/rolling PER ATTRACTION dùng groupby + shift, chỉ dựa trên giá
+    trị thực tế các ngày trước đó (không rò rỉ ngày hiện tại/tương lai, và
+    không rò rỉ dữ liệu giữa các attraction khác nhau).
+
+    `value_column` cho phép dùng lại đúng pipeline này cho cả hai target: doanh
+    thu và số vé. Hai model phải nhìn thấy feature được tính theo cùng một
+    cách, nếu không sai lệch giữa chúng sẽ đến từ pipeline chứ không phải từ
+    dữ liệu.
     """
     df = revenue_df.sort_values(["attraction_id", "date"]).reset_index(drop=True).copy()
-    grouped_revenue = df.groupby("attraction_id")["revenue"]
+    grouped_values = df.groupby("attraction_id")[value_column]
 
-    df["lag_1"] = grouped_revenue.shift(1)
-    df["lag_7"] = grouped_revenue.shift(7)
-    df["lag_14"] = grouped_revenue.shift(14)
+    df[f"{prefix}lag_1"] = grouped_values.shift(1)
+    df[f"{prefix}lag_7"] = grouped_values.shift(7)
+    df[f"{prefix}lag_14"] = grouped_values.shift(14)
 
     # Rolling phải chạy TRÊN TỪNG GROUP riêng biệt: nhóm lại theo attraction_id
     # sau khi shift(1) để không tính rolling window vắt qua ranh giới 2 attraction.
-    shifted = grouped_revenue.shift(1)
-    df["_shifted_revenue"] = shifted
-    grouped_shifted = df.groupby("attraction_id")["_shifted_revenue"]
-    df["roll_mean_7"] = grouped_shifted.rolling(7, min_periods=1).mean().reset_index(level=0, drop=True)
-    df["roll_mean_28"] = grouped_shifted.rolling(28, min_periods=1).mean().reset_index(level=0, drop=True)
-    df["roll_std_7"] = (
+    shifted = grouped_values.shift(1)
+    df["_shifted_value"] = shifted
+    grouped_shifted = df.groupby("attraction_id")["_shifted_value"]
+    df[f"{prefix}roll_mean_7"] = grouped_shifted.rolling(7, min_periods=1).mean().reset_index(level=0, drop=True)
+    df[f"{prefix}roll_mean_28"] = grouped_shifted.rolling(28, min_periods=1).mean().reset_index(level=0, drop=True)
+    df[f"{prefix}roll_std_7"] = (
         grouped_shifted.rolling(7, min_periods=1).std().reset_index(level=0, drop=True).fillna(0.0)
     )
-    df.drop(columns=["_shifted_revenue"], inplace=True)
+    df.drop(columns=["_shifted_value"], inplace=True)
 
     # Missing early lags must use only information available before the target
     # row. Filling from the full attraction mean would leak future revenue into
     # training and make the holdout metrics look falsely strong.
-    shifted_revenue = df.groupby("attraction_id")["revenue"].shift(1)
-    past_mean = shifted_revenue.groupby(df["attraction_id"]).transform(
+    shifted_values = df.groupby("attraction_id")[value_column].shift(1)
+    past_mean = shifted_values.groupby(df["attraction_id"]).transform(
         lambda values: values.expanding().mean()
     ).fillna(0.0)
-    for col in ["lag_1", "lag_7", "lag_14", "roll_mean_7", "roll_mean_28"]:
-        df[col] = df[col].fillna(past_mean)
+    for col in LAG_COLUMNS[:-1]:
+        df[f"{prefix}{col}"] = df[f"{prefix}{col}"].fillna(past_mean)
 
     df["day_offset"] = df.groupby("attraction_id").cumcount()
     return df
 
 
+def tickets_feature_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Frame feature cho model số vé: giống hệt frame doanh thu, chỉ thay 6 cột
+    lag/rolling bằng phiên bản tính trên chuỗi số vé."""
+    renamed = df.copy()
+    for col in LAG_COLUMNS:
+        renamed[col] = renamed[f"{TICKET_PREFIX}{col}"]
+    return feat.rows_to_dataframe(renamed.to_dict("records"))
+
+
+def weekday_mean_baseline(train_df: pd.DataFrame, test_df: pd.DataFrame, target: str) -> np.ndarray:
+    """Baseline trung bình theo (điểm tham quan, thứ trong tuần).
+
+    Đây là thứ mà bất kỳ ai cũng làm được bằng một câu GROUP BY, nên nó là
+    ngưỡng tối thiểu mà model học máy phải vượt qua. Không so với nó thì con số
+    MAPE của ensemble không nói lên điều gì cả.
+    """
+    lookup = train_df.groupby(["attraction_id", "dow"])[target].mean()
+    attraction_mean = train_df.groupby("attraction_id")[target].mean()
+    global_mean = float(train_df[target].mean()) if len(train_df) else 0.0
+
+    def predict(row):
+        key = (row["attraction_id"], row["dow"])
+        if key in lookup.index:
+            return float(lookup.loc[key])
+        if row["attraction_id"] in attraction_mean.index:
+            return float(attraction_mean.loc[row["attraction_id"]])
+        return global_mean
+
+    return test_df.apply(predict, axis=1).to_numpy()
+
+
 def build_training_frame(attractions: pd.DataFrame, revenue: pd.DataFrame) -> pd.DataFrame:
     revenue_with_lags = _add_lag_and_rolling_features(revenue)
+    revenue_with_lags = _add_lag_and_rolling_features(
+        revenue_with_lags, value_column="tickets", prefix=TICKET_PREFIX,
+    )
     merged = revenue_with_lags.merge(attractions, on="attraction_id", how="left")
 
     city_freq_map = default_city_freq_map(attractions)
@@ -104,6 +152,7 @@ def build_training_frame(attractions: pd.DataFrame, revenue: pd.DataFrame) -> pd
 
     merged = _add_calendar_and_static_features(merged)
     merged["target_log"] = np.log1p(merged["revenue"].clip(lower=0))
+    merged["target_tickets_log"] = np.log1p(merged["tickets"].clip(lower=0))
     return merged, city_freq_map
 
 
@@ -253,13 +302,55 @@ def train_and_save(
     test_wape = wape(y_test_actual, pred_revenue_test)
     test_mae = float(np.mean(np.abs(y_test_actual - pred_revenue_test)))
 
+    # ---- Model số vé: cùng feature, target khác ----
+    X_train_tickets = tickets_feature_frame(train_df)
+    X_test_tickets = tickets_feature_frame(test_df)
+    y_train_tickets = train_df["target_tickets_log"].to_numpy()
+    y_test_tickets_log = test_df["target_tickets_log"].to_numpy()
+    y_test_tickets_actual = test_df["tickets"].to_numpy()
+
+    model.fit_tickets(X_train_tickets, y_train_tickets)
+    pred_tickets_log = model.predict_tickets_log(X_test_tickets)
+    tickets_residual_std = (
+        float(np.std(y_test_tickets_log - pred_tickets_log)) if len(y_test_tickets_log) else 0.3
+    )
+    pred_tickets_test = np.expm1(pred_tickets_log)
+    tickets_mape = mape_on_observed_days(y_test_tickets_actual, pred_tickets_test)
+    tickets_wape = wape(y_test_tickets_actual, pred_tickets_test)
+
+    # Cách cũ để đối chứng: suy số vé từ doanh thu dự báo chia giá vé trung
+    # bình. Con số này chỉ có ý nghĩa khi đặt cạnh model số vé.
+    avg_price_test = test_df["avg_ticket_price"].to_numpy()
+    derived_tickets = np.where(avg_price_test > 0, pred_revenue_test / np.maximum(avg_price_test, 1), 0)
+    derived_tickets_wape = wape(y_test_tickets_actual, derived_tickets)
+
+    # ---- Baseline: ai cũng làm được bằng một câu GROUP BY ----
+    baseline_revenue = weekday_mean_baseline(train_df, test_df, "revenue")
+    baseline_tickets = weekday_mean_baseline(train_df, test_df, "tickets")
+    baseline_mape = mape_on_observed_days(y_test_actual, baseline_revenue)
+    baseline_wape = wape(y_test_actual, baseline_revenue)
+    baseline_mae = float(np.mean(np.abs(y_test_actual - baseline_revenue)))
+    baseline_tickets_wape = wape(y_test_tickets_actual, baseline_tickets)
+
     model.city_freq_map = city_freq_map
     model.residual_std = max(residual_std, 0.05)
+    model.tickets_residual_std = max(tickets_residual_std, 0.05)
     model.trained_at = datetime.now(timezone.utc)
     model.metrics = {
         "mape_observed_days": test_mape,
         "wape": test_wape,
         "mae": test_mae,
+        "tickets_mape_observed_days": tickets_mape,
+        "tickets_wape": tickets_wape,
+        "tickets_wape_derived_from_revenue": derived_tickets_wape,
+        # Baseline đi kèm model trong metadata để backend và giao diện luôn
+        # trình bày hai con số cạnh nhau, không thể chỉ khoe con số đẹp.
+        "baseline_method": "weekday_mean_per_attraction",
+        "baseline_mape_observed_days": baseline_mape,
+        "baseline_wape": baseline_wape,
+        "baseline_mae": baseline_mae,
+        "baseline_tickets_wape": baseline_tickets_wape,
+        "beats_baseline_wape": bool(test_wape < baseline_wape),
         "num_train_samples": int(len(train_df)),
         "num_test_samples": int(len(test_df)),
         "training_source": training_source,
@@ -274,6 +365,13 @@ def train_and_save(
         "mape": test_mape,
         "wape": test_wape,
         "mae": test_mae,
+        "tickets_wape": tickets_wape,
+        "tickets_wape_derived_from_revenue": derived_tickets_wape,
+        "baseline_mape": baseline_mape,
+        "baseline_wape": baseline_wape,
+        "baseline_mae": baseline_mae,
+        "baseline_tickets_wape": baseline_tickets_wape,
+        "beats_baseline_wape": bool(test_wape < baseline_wape),
         "notes": (
             f"Time-based split ({train_percent}/{100 - train_percent}), "
             f"train={len(train_df)} test={len(test_df)} rows."
@@ -282,6 +380,11 @@ def train_and_save(
 
 
 def main():
+    # Console Windows mặc định là cp1252 và sẽ ném UnicodeEncodeError giữa lúc
+    # in kết quả — model đã lưu xong nhưng người chạy chỉ thấy traceback.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Train ensemble revenue forecast model")
     parser.add_argument("--model-dir", default="./models")
     parser.add_argument("--model-version", default="rf_xgb_ensemble_v1")
@@ -322,10 +425,17 @@ def main():
         revenue=revenue,
         training_source=training_source,
     )
+    verdict = "TỐT HƠN baseline" if result["beats_baseline_wape"] else "CHƯA tốt hơn baseline"
     print(f"Trained model {result['model_version']}")
-    print(f"  MAPE (observed days): {result['mape']:.2f}%")
-    print(f"  WAPE (all days):      {result['wape']:.2f}%")
-    print(f"  MAE:  {result['mae']:,.0f} VND")
+    print("  Doanh thu:")
+    print(f"    MAPE (ngày có doanh thu): {result['mape']:.2f}%   | baseline: {result['baseline_mape']:.2f}%")
+    print(f"    WAPE (mọi ngày):          {result['wape']:.2f}%   | baseline: {result['baseline_wape']:.2f}%")
+    print(f"    MAE:                      {result['mae']:,.0f} VND | baseline: {result['baseline_mae']:,.0f} VND")
+    print("  Số vé:")
+    print(f"    WAPE model số vé:              {result['tickets_wape']:.2f}%")
+    print(f"    WAPE suy từ doanh thu (cũ):    {result['tickets_wape_derived_from_revenue']:.2f}%")
+    print(f"    WAPE baseline:                 {result['baseline_tickets_wape']:.2f}%")
+    print(f"  KẾT LUẬN: model {verdict} (so theo WAPE doanh thu).")
     print(f"  {result['notes']}")
     print(f"  Model saved to: {args.model_dir}")
 

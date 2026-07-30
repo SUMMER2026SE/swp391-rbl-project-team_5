@@ -127,6 +127,7 @@ router.get('/attractions/:id/pricing-policy', restrictTo('PARTNER'), dynamicPric
 router.put('/attractions/:id/pricing-policy', restrictTo('PARTNER'), dynamicPricingController.updatePricingPolicy);
 router.get('/attractions/:id/pricing-preview', restrictTo('PARTNER'), dynamicPricingController.getPricingPreview);
 router.get('/attractions/:id/pricing-impact', restrictTo('PARTNER'), dynamicPricingController.getImpactReport);
+router.get('/attractions/:id/forecast-accuracy', restrictTo('PARTNER'), dynamicPricingController.getForecastAccuracyReport);
 
 // Đặt vé (quản lý phía đối tác)
 router.get('/bookings', restrictTo('PARTNER'), partnerController.getPartnerBookings);

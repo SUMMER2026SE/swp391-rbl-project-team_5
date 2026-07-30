@@ -29,6 +29,20 @@ VietTicket Travel không chỉ là trang bán vé. Hệ thống quản lý trọ
 - Không phụ thuộc vào thanh toán VNPay trực tiếp trong bài chính. Dùng các booking đã chuẩn bị để trình bày đủ trạng thái; giao dịch sandbox không phải tiền thật.
 - Không bấm cùng một hành động từ hai cửa sổ. Backend có khóa cạnh tranh và sẽ từ chối thao tác thứ hai.
 
+### 2.1b. Ba biến môi trường quyết định phần AI có chạy được hay không
+
+Kiểm tra `backend/.env` **trước** buổi demo (mở bằng editor, không chiếu lên màn):
+
+| Biến | Giá trị cần có | Không có thì sao |
+|---|---|---|
+| `ML_SERVICE_URL` | `http://localhost:8000` | Mọi dự báo rơi về baseline, nhãn `HISTORICAL_BASELINE` |
+| `ALLOW_DEMO_AI` | `true` | Backend từ chối model huấn luyện bằng dữ liệu demo, cũng rơi về baseline |
+| `DYNAMIC_PRICING_AUTO_APPLY_ALLOWED` | `true` | Giá động luôn bị ép về "chỉ đề xuất"; hội đồng chỉ thấy dòng chữ AI gợi ý mà giá khách trả không đổi |
+
+Biến thứ ba là công tắc cấp hệ thống, nằm ngoài cấu hình của đối tác — đặt lại
+thành `false` là tắt giá động cho toàn hệ thống ngay lập tức. Đây cũng là một
+điểm đáng trình bày: mô hình không tự giành được quyền định giá.
+
 ### 2.2. Tối hôm trước: kiểm thử toàn bộ
 
 Mở Terminal 1, chạy ML service và giữ nguyên cửa sổ:
@@ -295,6 +309,46 @@ Lời thoại chuẩn:
 > Đây là pipeline ML thật chạy Random Forest kết hợp XGBoost, target là doanh thu vé thuần theo ngày sử dụng dịch vụ. Bộ kiểm thử có 90 ngày lịch sử cho ba điểm và được cách ly khỏi dữ liệu vận hành bằng cờ kỹ thuật riêng. Giao diện ghi rõ đây là mô hình ước tính thử nghiệm; nhóm không dùng dữ liệu kiểm thử để tuyên bố độ chính xác thực tế.
 
 > Khi có dữ liệu production, pipeline chỉ nhận booking COMPLETED/NO_SHOW đã thanh toán thành công, bỏ giao dịch trùng, trừ refund, zero-fill ngày không bán và không dùng ngày hiện tại chưa chốt. Nếu thiếu dữ liệu, hệ thống hiện baseline hoặc `chưa đủ dữ liệu`, không giả kết quả AI.
+
+### 7.4b. Giá động theo dự báo (`/partner/dynamic-pricing`)
+
+Chọn **Tour Hoàng hôn trên sông Sài Gòn** — đây là điểm duy nhất có hai khung
+giờ, nên là điểm duy nhất chứng minh được câu "theo từng khung giờ".
+
+1. **Panel Độ chính xác của dự báo** (trên cùng). Hai khối tách bạch:
+   - *Đo trên vận hành thật*: so 21 ngày đã qua với chính dự báo hệ thống đã
+     phát ra cho những ngày đó (backtest walk-forward, model chỉ được nhìn dữ
+     liệu trước ngày cần dự báo). Du thuyền ~6% MAPE.
+   - *Đo lúc huấn luyện*: bảng model vs **baseline trung bình theo thứ**. Chỉ
+     đúng vào cột baseline: 8.62% so với 10.53%.
+2. **Bảng giá 14 ngày tới**. Tìm một ngày cuối tuần và mở dòng chi tiết: hai
+   suất cùng ngày ra **hai mức giá khác nhau**, kèm tỷ trọng nhu cầu đã học
+   (≈38% suất chiều / 62% suất hoàng hôn ngày thường).
+3. Kéo xuống cuối bảng: dòng trạng thái *Phân bổ theo khung giờ* và *Nhịp đặt
+   chỗ* (còn 3 ngày: 65% vé đã bán; còn 7 ngày: 28%; còn 14 ngày: 6%).
+
+Lời thoại chuẩn:
+
+> Dự báo chạy ở cấp ngày. Để nói được về từng khung giờ, hệ thống học tỷ trọng
+> nhu cầu giữa các suất từ chính lịch sử bán vé của điểm đó, tách riêng ngày
+> thường và cuối tuần, rồi phân bổ số vé dự báo về từng suất và so với sức chứa
+> của chính suất ấy. Khi chưa đủ dữ liệu để học tỷ trọng, hệ thống nói thẳng là
+> đang dùng tín hiệu cấp ngày chứ không chia đều rồi gọi đó là dự báo theo giờ.
+
+> Tồn kho hiện tại và dự báo là hai đại lượng khác bản chất: một bên là đã bán
+> tới lúc này, một bên là tỷ lệ lấp đầy cuối cùng. Hệ thống quy chúng về cùng
+> một thước bằng đường cong đặt chỗ học từ lịch sử — còn 3 ngày mà mới bán 20%
+> là chậm, nhưng còn 14 ngày mà đã bán 20% là rất nhanh. Không có bước này thì
+> hệ thống sẽ giảm giá đúng vào những ngày sắp kín chỗ.
+
+> Con số ở panel tác động là **chênh lệch so với giá niêm yết** trên các lượt
+> đã đổi giá, không phải doanh thu tăng thêm nhờ giá động. Muốn kết luận nhân
+> quả thì phải có nhóm đối chứng giữ giá niêm yết; nhóm ghi rõ giới hạn đó ngay
+> cạnh số liệu.
+
+Nếu hội đồng hỏi *"model có hơn một phép trung bình đơn giản không"*: chỉ vào
+bảng baseline. Nếu hỏi *"số vé lấy ở đâu ra"*: số vé do một model riêng dự báo
+trực tiếp (WAPE 6.41%); cách cũ chia doanh thu cho giá trung bình sai 39.31%.
 
 ### 7.5. Đối soát Partner
 

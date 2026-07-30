@@ -45,6 +45,9 @@ class ForecastPoint(BaseModel):
     predicted_tickets: int
     confidence_lower: float
     confidence_upper: float
+    # "model": số vé do model dự báo trực tiếp.
+    # "derived_from_revenue": suy ra bằng doanh thu / giá vé trung bình.
+    tickets_source: str = "model"
 
 
 class ForecastResponse(BaseModel):
@@ -56,6 +59,9 @@ class ForecastResponse(BaseModel):
     generated_at: datetime
     forecast: List[ForecastPoint]
     warning: Optional[str] = None
+    # Chỉ số đánh giá đi kèm model, luôn kèm baseline để phía gọi không thể
+    # trình bày độ chính xác mà giấu mất mốc so sánh.
+    metrics: Optional[dict] = None
 
 
 class HealthResponse(BaseModel):
@@ -66,6 +72,10 @@ class HealthResponse(BaseModel):
     model_version: Optional[str] = None
     training_source: Optional[str] = None
     trained_at: Optional[datetime] = None
+    # Chỉ số holdout của model đang phục vụ, luôn kèm baseline. Nằm ở /health
+    # để giao diện đọc được mà không cần chờ một lần dự báo nào.
+    metrics: Optional[dict] = None
+    has_ticket_model: bool = False
 
 
 class LiveObservation(BaseModel):

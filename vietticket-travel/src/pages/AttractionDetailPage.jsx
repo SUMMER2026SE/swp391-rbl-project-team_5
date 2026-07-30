@@ -980,9 +980,14 @@ function InlineAvailabilityCalendar({ onChooseDate, ticket }) {
             (sum, slot) => sum + Math.max(0, Number(slot.availableTickets) || 0),
             0,
           )
+          // Không đặt được vì đã tới giờ khởi hành là chuyện khác hẳn hết chỗ:
+          // sức chứa vẫn còn nguyên, khách chỉ cần chọn ngày khác.
+          const closedByTime = slots.length > 0
+            && slots.every((slot) => slot.bookingClosed === true)
           return [date, {
             availableTickets,
             closed: Boolean(response.meta?.closed),
+            closedByTime,
           }]
         } catch (error) {
           if (error?.name === 'AbortError') return [date, null]
@@ -1052,7 +1057,11 @@ function InlineAvailabilityCalendar({ onChooseDate, ticket }) {
                     ? 'Thử lại sau'
                     : canBook
                       ? `${status.availableTickets} vé`
-                      : 'Hết chỗ'}
+                      : status.closed
+                        ? 'Đóng cửa'
+                        : status.closedByTime
+                          ? 'Đã qua giờ'
+                          : 'Hết chỗ'}
               </span>
             </button>
           )

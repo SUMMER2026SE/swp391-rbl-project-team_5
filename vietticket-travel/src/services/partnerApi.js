@@ -216,6 +216,13 @@ export function getPricingImpact(attractionId, days = 30) {
   )
 }
 
+export function getForecastAccuracy(attractionId, days = 30) {
+  return apiRequest(
+    `/partners/attractions/${encodeURIComponent(attractionId)}/forecast-accuracy?days=${encodeURIComponent(days)}`,
+    { method: 'GET' },
+  )
+}
+
 // ----- Đặt vé (quản lý phía đối tác) -----
 export function getPartnerBookings(params = {}) {
   const query = new URLSearchParams()

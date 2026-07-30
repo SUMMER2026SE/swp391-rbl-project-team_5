@@ -49,24 +49,36 @@ hoàn tất phát sinh doanh thu, backend trả `INSUFFICIENT_DATA`, không cộ
 
 ## Chạy pipeline demo local
 
-Khi database local chưa có đủ giao dịch, tạo booking mô phỏng được đánh dấu rõ:
+Bộ dữ liệu demo (`npm run demo:prepare`) sinh 90 ngày lịch sử theo một mô hình
+nhu cầu xác định: `backend/scripts/lib/demandHistoryModel.js`. Vì mô hình đó
+xác định hoàn toàn, dataset huấn luyện sinh lại được **không cần kết nối CSDL**,
+và không thể lệch khỏi dữ liệu mà seed đã ghi:
 
 ```bash
 cd backend
-npm run db:seed:forecast-demo
-node scripts/export_booking_history.js
+node scripts/export_demo_training_csv.js
 
 cd ../ml-service
 python -m app.train \
-  --data data/booking_history.csv \
+  --data data/demo_booking_history.csv \
   --training-source demo_booking_history \
-  --model-version demo-booking-v1
+  --model-version demo-booking-v2
 ```
+
+Lệnh train in ra bảng so sánh model với baseline; đọc dòng `KẾT LUẬN` trước khi
+dùng artifact.
+
+> `scripts/export_booking_history.js` là đường xuất dữ liệu **thật** cho
+> production. Nó cố tình loại mọi booking `isForecastTrainingSample=true`, nên
+> không xuất được lịch sử demo — đó là chủ ý, không phải thiếu sót.
 
 Đặt `ALLOW_DEMO_AI=true` trong `backend/.env`, rồi restart backend và ML service.
 Kết quả được trả bằng phương pháp `AI_DEMO_ENSEMBLE` và giao diện luôn hiển thị
-cảnh báo. Script seed bị chặn ở production, chỉ sở hữu các booking có marker
-`FORECAST_DEMO_V1`, và có thể tạo lại bằng `npm run db:seed:forecast-demo -- --reset`.
+cảnh báo.
+
+Script cũ `npm run db:seed:forecast-demo` (marker `FORECAST_DEMO_V1`) vẫn còn
+cho môi trường dev không dùng bộ demo bảo vệ; nó dùng bộ sinh nhu cầu đời đầu
+với vài vé mỗi ngày, **không phù hợp để huấn luyện model đem trình bày**.
 
 ## Retrain bằng dữ liệu thật
 
@@ -105,15 +117,47 @@ Backend chỉ gắn nhãn `AI_ENSEMBLE` khi `training_source=real_booking_histor
 ## Thiết kế model
 
 - Ensemble `RandomForestRegressor` + `XGBRegressor`.
-- Target `log1p(revenue)` để giảm ảnh hưởng của ngày doanh thu cực lớn.
+- **Hai target, hai model riêng**: `log1p(revenue)` và `log1p(tickets)`.
+  Trước đây số vé được suy ra bằng `predicted_revenue / avg_ticket_price`. Phép
+  chia đó chỉ đúng khi mọi vé cùng một giá — một điểm có vé người lớn 520k và
+  vé trẻ em 360k thì thương số ấy không phải số vé của ngày nào cả, và sai số
+  của model doanh thu còn bị khuếch đại thêm một lần. Số vé lại chính là đại
+  lượng tầng giá động cần (để so với sức chứa), nên nó được dự báo trực tiếp.
+  Trên bộ demo, cách cũ sai 39.31% còn model số vé sai 6.41% (WAPE).
 - Feature lịch: thứ, tháng, cuối tuần, ngày lễ Việt Nam và giai đoạn Tết.
 - Feature động: lag 1/7/14 ngày, rolling mean 7/28 ngày, rolling standard
-  deviation 7 ngày.
+  deviation 7 ngày. Model số vé dùng cùng bộ feature nhưng lag/rolling tính
+  trên chuỗi số vé, không phải chuỗi doanh thu.
 - Không dùng tuổi xuất bản của điểm tham quan làm feature vì catalog cũ có thể
   thiếu `publishedAt`; điều này tránh lệch train-serving và tương quan giả.
 - Chia train/validation theo thời gian, không random split.
 - Khoảng dự báo nới rộng theo horizon.
 - Backend chặn kết quả âm và không cho doanh thu/số vé dự kiến vượt sức chứa.
+- Artifact cũ (chỉ có model doanh thu) vẫn nạp được; khi đó service trả
+  `tickets_source=derived_from_revenue` để phía gọi biết con số kém tin cậy hơn.
+
+## Đánh giá: luôn kèm baseline
+
+`train.py` luôn tính và lưu vào metadata chỉ số của một **baseline trung bình
+theo (điểm tham quan, thứ trong tuần)** — thứ mà bất kỳ ai cũng làm được bằng
+một câu `GROUP BY`. Không có mốc so sánh này thì con số MAPE của ensemble không
+nói lên điều gì.
+
+`GET /health` và `POST /forecast` trả kèm cả hai nhóm chỉ số, nên giao diện đối
+tác không thể hiển thị độ chính xác của model mà giấu mất baseline.
+
+Kết quả trên bộ dữ liệu demo hiện tại (`demo-booking-v2`):
+
+| Chỉ số | Model | Baseline |
+|---|---|---|
+| Doanh thu — MAPE | 8.46% | 10.11% |
+| Doanh thu — WAPE | 8.62% | 10.53% |
+| Số vé — WAPE | 6.41% | 8.76% |
+
+Ngoài ra backend có `runForecastBacktest()` chạy **walk-forward**: đi ngược N
+ngày gần nhất, mỗi ngày gọi model bằng lịch sử cắt tới trước ngày đó rồi so với
+doanh thu thực. Đây là phép đo vận hành (không phải holdout lúc train) và là
+nguồn số cho panel "Độ chính xác của dự báo" ở trang giá động.
 
 ## API nội bộ
 

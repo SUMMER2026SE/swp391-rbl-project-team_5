@@ -68,6 +68,19 @@ const isSlotUnavailable = (slot) =>
   slot.available === false ||
   ['UNAVAILABLE', 'SOLD_OUT', 'DISABLED'].includes(slot.status)
 
+// Khung giờ đã tới giờ khởi hành. Backend trả cờ này riêng với tồn kho, nhưng
+// vẫn kèm availableTickets = 0 nên nếu chỉ nhìn số vé sẽ tưởng là đã bán hết.
+const isSlotClosedByTime = (slot) => slot.bookingClosed === true
+
+// Ba lý do khiến khung giờ không chọn được là khác nhau về bản chất; gộp chung
+// thành "Hết vé" khiến khách hiểu sai là chỗ đã bán hết trong khi sức chứa còn
+// nguyên, và đối tác không biết phải sửa gì.
+const getSlotUnavailableLabel = (slot, { lockedByItinerary = false } = {}) => {
+  if (lockedByItinerary) return 'Đã khoá theo lịch trình'
+  if (isSlotClosedByTime(slot)) return 'Đã qua giờ bắt đầu'
+  return 'Hết vé'
+}
+
 const clampQuantityToLimit = (quantity, availableTickets) => {
   const limit = typeof availableTickets === 'number' ? availableTickets : null
   if (limit === null) return quantity
@@ -617,12 +630,14 @@ export default function BookingModal({
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 max-h-48 overflow-y-auto pr-1">
                   {timeSlots.map((slot) => {
                     const slotId = getSlotId(slot)
+                    const lockedByItinerary = Boolean(
+                      isLockedItineraryLine
+                      && initialTimeSlotId
+                      && slotId !== String(initialTimeSlotId),
+                    )
                     const disabled = isSlotUnavailable(slot)
-                      || (
-                        isLockedItineraryLine
-                        && initialTimeSlotId
-                        && slotId !== String(initialTimeSlotId)
-                      )
+                      || isSlotClosedByTime(slot)
+                      || lockedByItinerary
                     const isSelected = selectedTimeSlotId === slotId
 
                     return (
@@ -640,7 +655,7 @@ export default function BookingModal({
                         <span className="text-sm font-bold">{getSlotLabel(slot)}</span>
                         <span className={`text-xs font-semibold ${disabled ? 'text-[#ba1a1a]' : 'text-[#3e494a]'}`}>
                           {disabled
-                            ? 'Hết vé'
+                            ? getSlotUnavailableLabel(slot, { lockedByItinerary })
                             : typeof slot.availableTickets === 'number'
                               ? `Còn ${slot.availableTickets} ${admissionCount > 1 ? 'gói' : 'vé'}`
                               : 'Sẵn sàng'}

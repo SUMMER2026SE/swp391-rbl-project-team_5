@@ -430,12 +430,24 @@ function applyHistoricalRangeGuardrail(forecast, history, forecastDays, features
     if (predictedRevenue === point.predictedRevenue) return point;
     adjusted = true;
 
+    // Số vé được model dự báo trực tiếp, nên khi guardrail nâng doanh thu thì
+    // phải nâng số vé theo cùng tỷ lệ. Tính lại bằng doanh thu / giá trung
+    // bình sẽ vứt bỏ dự báo của model và quay về đúng phép chia mà model số vé
+    // sinh ra để thay thế.
+    // Ngoại lệ: model trả 0 vé thì không nhân lên được, mà doanh thu sau
+    // guardrail lại dương — hai con số phải nhất quán, nên trường hợp này suy
+    // số vé từ giá vé trung bình.
+    const canScale = point.predictedRevenue > 0 && point.predictedTickets > 0;
+    const scaledTickets = canScale
+      ? Math.round(point.predictedTickets * (predictedRevenue / point.predictedRevenue))
+      : Math.round(predictedRevenue / avgPrice);
+
     return {
       ...point,
       predictedRevenue,
       predictedTickets: Math.min(
         features.capacity,
-        Math.max(0, Math.round(predictedRevenue / avgPrice)),
+        Math.max(0, scaledTickets),
       ),
       confidenceLower: Math.min(predictedRevenue, point.confidenceLower),
       confidenceUpper: Math.min(
@@ -838,8 +850,246 @@ async function getForecastForAttraction(
   };
 }
 
+// ============================================================
+// Độ chính xác
+// ------------------------------------------------------------
+// Hai con số khác nhau, không được trộn:
+//
+//   1. Độ chính xác HOLDOUT của model (đo lúc huấn luyện, trên tập test tách
+//      theo thời gian). Nói lên model học được gì, luôn kèm baseline.
+//   2. Độ chính xác THỰC TẾ: so dự báo đã lưu với doanh thu thật của chính
+//      những ngày đó sau khi chúng trôi qua. Đây mới là con số vận hành, và
+//      nó là thứ duy nhất chứng minh được hệ thống hoạt động ngoài đời.
+//
+// Cột `actualRevenue` đã được reconcileActualRevenue đối soát ngược sẵn, nên
+// (2) chỉ là một phép cộng — trước đây dữ liệu có mà không ai đọc.
+// ============================================================
+
+/**
+ * Backtest walk-forward: đi ngược N ngày gần nhất, mỗi ngày gọi model bằng
+ * lịch sử CẮT tới trước ngày đó rồi so với doanh thu thực đã xảy ra.
+ *
+ * Đây là cách duy nhất để có con số độ chính xác vận hành ngay từ đầu, thay vì
+ * phải chờ vài tuần cho các dự báo hiện tại đáo hạn. Quan trọng hơn: nó là
+ * phép đo thật chứ không phải số điền sẵn — model chỉ được nhìn thấy dữ liệu
+ * có trước ngày cần dự báo, đúng như lúc chạy thật.
+ *
+ * Không bao giờ ghi kết quả baseline vào đây: nếu lịch sử cắt chưa đủ để gọi
+ * model AI thì ngày đó bị bỏ qua, vì trộn baseline vào rồi gọi chung là "độ
+ * chính xác của AI" là nói sai.
+ */
+async function runForecastBacktest(
+  attractionId,
+  { days = 21 } = {},
+) {
+  const horizon = positiveInteger(days, 21, 1, 90);
+  const features = await getAttractionForecastFeatures(attractionId);
+  if (!features?.isForecastable) {
+    return { evaluated: 0, skipped: 0, reason: 'Điểm tham quan không đủ điều kiện dự báo.' };
+  }
+
+  const history = await getDailyRevenueHistory(attractionId);
+  const overallQuality = summarizeHistory(history);
+  features.effectiveAvgTicketPrice = overallQuality.avgRealizedTicketPrice
+    || features.catalogAvgTicketPrice;
+  if (features.effectiveAvgTicketPrice <= 0) {
+    return { evaluated: 0, skipped: 0, reason: 'Chưa có giá vé hợp lệ để dự báo.' };
+  }
+
+  const startIndex = Math.max(0, history.length - horizon);
+  const rows = [];
+  let skipped = 0;
+
+  for (let index = startIndex; index < history.length; index += 1) {
+    const target = history[index];
+    // Lịch sử model được phép nhìn: mọi ngày TRƯỚC ngày đích, không có ngày nào khác.
+    const priorHistory = history.slice(0, index);
+    const priorQuality = summarizeHistory(priorHistory);
+    if (!priorQuality.sufficientForAi) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      const mlResult = await callMlServiceForecast(features, priorHistory, 1);
+      if (!resolveTrainingSourceMode(mlResult.training_source)) {
+        skipped += 1;
+        continue;
+      }
+      const point = normalizeForecastPoint(
+        (mlResult.forecast || [])[0] || {},
+        target.date,
+        features,
+      );
+      rows.push({
+        forecastDate: dateOnly(target.date),
+        predictedRevenue: point.predictedRevenue,
+        predictedTickets: point.predictedTickets,
+        confidenceLower: point.confidenceLower,
+        confidenceUpper: point.confidenceUpper,
+        actualRevenue: finiteMoney(target.revenue),
+        modelVersion: String(mlResult.model_version || 'unknown'),
+        trainingSource: mlResult.training_source,
+        historyDays: priorQuality.lookbackDays,
+        observedDays: priorQuality.observedDays,
+        sampleBookings: priorQuality.completedBookings,
+        // Thời điểm dự báo này lẽ ra được tạo: cuối ngày liền trước ngày đích.
+        generatedAt: new Date(dateOnly(target.date).getTime() - 1000),
+      });
+    } catch {
+      // Một ngày lỗi (ml-service timeout, trả sai định dạng) chỉ được phép làm
+      // mất chính ngày đó. Ghi một con số phỏng đoán vào đây sẽ làm hỏng đúng
+      // cái mà backtest sinh ra để đo.
+      skipped += 1;
+    }
+  }
+
+  for (const row of rows) {
+    const { forecastDate, ...data } = row;
+    await prisma.revenueForecast.upsert({
+      where: { attractionId_forecastDate: { attractionId, forecastDate } },
+      create: { attractionId, forecastDate, usedFallback: false, ...data },
+      update: { usedFallback: false, ...data },
+    });
+  }
+
+  return { evaluated: rows.length, skipped, reason: null };
+}
+
+const MODEL_QUALITY_CACHE_TTL_MS = 10 * 60 * 1000;
+let modelQualityCache = null;
+
+async function getModelQuality({ force = false } = {}) {
+  if (!force && modelQualityCache && modelQualityCache.expiresAt > Date.now()) {
+    return modelQualityCache.value;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ML_REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${ML_SERVICE_URL}/health`, {
+      headers: ML_SERVICE_API_KEY ? { 'x-ml-api-key': ML_SERVICE_API_KEY } : {},
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`ml-service /health trả về ${response.status}`);
+    const body = await response.json();
+    const value = {
+      available: Boolean(body.model_loaded),
+      modelVersion: body.model_version || null,
+      trainingSource: body.training_source || 'unknown',
+      trainedAt: body.trained_at || null,
+      hasTicketModel: Boolean(body.has_ticket_model),
+      metrics: body.metrics || null,
+      warning: body.training_source === 'demo_booking_history'
+        ? 'Model được huấn luyện bằng lịch sử mô phỏng của bộ demo. Các chỉ số dưới đây đo trên chính dữ liệu đó, không phải bằng chứng độ chính xác với khách thật.'
+        : null,
+    };
+    modelQualityCache = { value, expiresAt: Date.now() + MODEL_QUALITY_CACHE_TTL_MS };
+    return value;
+  } catch (error) {
+    const value = {
+      available: false,
+      modelVersion: null,
+      trainingSource: 'unknown',
+      trainedAt: null,
+      hasTicketModel: false,
+      metrics: null,
+      warning: `Không đọc được thông tin model: ${error.message}`,
+    };
+    // Cache cả trạng thái lỗi, nhưng ngắn hơn nhiều: giao diện không được
+    // biến mỗi lần mở panel thành một lần chờ timeout 8 giây.
+    modelQualityCache = { value, expiresAt: Date.now() + 30 * 1000 };
+    return value;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function resetModelQualityCache() {
+  modelQualityCache = null;
+}
+
+/**
+ * Độ chính xác thực tế của các dự báo đã phát ra cho một điểm tham quan.
+ *
+ * Chỉ tính những ngày đã có doanh thu thực được đối soát. Ngày chưa chốt hoặc
+ * chưa có dữ liệu thực bị loại hoàn toàn thay vì tính như dự báo lệch 100%.
+ */
+async function getForecastAccuracy(
+  attractionId,
+  { days = 30, now = new Date(), client = prisma } = {},
+) {
+  const horizon = positiveInteger(days, 30, 7, 365);
+  const todayKey = vietnamDateKey(now);
+  const startKey = addDateKeyDays(todayKey, -horizon);
+  const endKey = addDateKeyDays(todayKey, -1);
+
+  const rows = await client.revenueForecast.findMany({
+    where: {
+      attractionId,
+      forecastDate: { gte: dateOnly(startKey), lte: dateOnly(endKey) },
+      actualRevenue: { not: null },
+    },
+    orderBy: { forecastDate: 'asc' },
+    select: {
+      forecastDate: true,
+      predictedRevenue: true,
+      actualRevenue: true,
+      modelVersion: true,
+      usedFallback: true,
+    },
+  });
+
+  const points = rows.map((row) => ({
+    date: row.forecastDate.toISOString().slice(0, 10),
+    predictedRevenue: finiteMoney(row.predictedRevenue),
+    actualRevenue: finiteMoney(row.actualRevenue),
+    modelVersion: row.modelVersion,
+    usedFallback: Boolean(row.usedFallback),
+  }));
+
+  const observed = points.filter((point) => point.actualRevenue > 0);
+  const totalActual = observed.reduce((sum, point) => sum + point.actualRevenue, 0);
+  const totalAbsError = observed.reduce(
+    (sum, point) => sum + Math.abs(point.actualRevenue - point.predictedRevenue),
+    0,
+  );
+  const mape = observed.length === 0
+    ? null
+    : (observed.reduce(
+      (sum, point) => sum + Math.abs(
+        (point.actualRevenue - point.predictedRevenue) / point.actualRevenue,
+      ),
+      0,
+    ) / observed.length) * 100;
+  // Lệch dương = dự báo cao hơn thực tế. Trưng ra để đối tác biết model đang
+  // lạc quan hay thận trọng, thứ mà một con số sai lệch tuyệt đối giấu mất.
+  const bias = observed.length === 0
+    ? null
+    : observed.reduce(
+      (sum, point) => sum + (point.predictedRevenue - point.actualRevenue),
+      0,
+    ) / observed.length;
+
+  return {
+    days: horizon,
+    comparedDays: observed.length,
+    // Số ngày có dự báo nhưng chưa có doanh thu thực để đối chiếu.
+    skippedDays: points.length - observed.length,
+    mape: mape === null ? null : Number(mape.toFixed(2)),
+    wape: totalActual > 0 ? Number(((totalAbsError / totalActual) * 100).toFixed(2)) : null,
+    meanBias: bias === null ? null : Math.round(bias),
+    sufficient: observed.length >= 7,
+    points: observed,
+  };
+}
+
 module.exports = {
   FORECAST_DATA_BASIS,
+  getForecastAccuracy,
+  getModelQuality,
+  resetModelQualityCache,
+  runForecastBacktest,
   applyHistoricalRangeGuardrail,
   buildFallbackForecast,
   buildInsufficientDataForecast,

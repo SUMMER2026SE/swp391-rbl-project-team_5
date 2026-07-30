@@ -7,7 +7,12 @@
 //
 // Chuỗi suy luận cho mỗi (gói vé, ngày, khung giờ):
 //   1. realizedRatio  = (đã bán + đang giữ) / sức chứa   -> sự thật đã xảy ra
-//   2. forecastRatio  = vé dự báo bán được / sức chứa ngày -> RevenueForecast (AI)
+//   2. forecastRatio  = vé dự báo bán được của KHUNG GIỜ / sức chứa khung giờ.
+//                       Dự báo (RevenueForecast) chạy ở cấp ngày, nên số vé
+//                       ngày được phân bổ về từng khung giờ theo tỷ trọng học
+//                       từ lịch sử bán vé của chính điểm đó (slotDemandService).
+//                       Khi chưa học được tỷ trọng, hệ thống quay về tín hiệu
+//                       cấp ngày và nói rõ điều đó thay vì giả định chia đều.
 //   3. demandIndex    = trộn 2 tín hiệu theo lead time, nhưng KHÔNG BAO GIỜ
 //                       thấp hơn realizedRatio (đã bán 90% thì không thể coi là vắng)
 //   4. demandIndex -> phần trăm điều chỉnh (dốc tuyến tính, không có bậc thang)
@@ -24,6 +29,8 @@ const {
   getProductCapacity,
   getSlotCapacity,
 } = require('./availabilityService');
+const { getSlotDemandShares, shareForSlot } = require('./slotDemandService');
+const { getBookingPaceCurve, paceAtLead } = require('./bookingPaceService');
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -157,6 +164,12 @@ function vietnamDayStart(date) {
   return Math.floor((new Date(date).getTime() + VN_OFFSET_MS) / MS_PER_DAY);
 }
 
+// Cột ngày tham quan là @db.Date (Prisma trả về nửa đêm UTC), nên khoá ngày
+// lấy thẳng theo UTC — cộng thêm offset ở đây sẽ lệch sang ngày hôm sau.
+function dateKeyOf(date) {
+  return new Date(date).toISOString().slice(0, 10);
+}
+
 // Số ngày từ "hôm nay" (giờ VN) tới ngày tham quan.
 function leadTimeDays(visitDate, now = new Date()) {
   return vietnamDayStart(visitDate) - vietnamDayStart(now);
@@ -165,19 +178,34 @@ function leadTimeDays(visitDate, now = new Date()) {
 /**
  * Trộn dự báo AI với mức lấp đầy thực tế.
  *
- * Trọng số của dự báo giảm dần khi tới gần ngày tham quan: còn xa thì hầu như
- * chưa ai đặt nên realizedRatio ≈ 0 và không nói lên điều gì; càng sát ngày thì
- * số vé đã bán càng là bằng chứng đáng tin hơn mọi mô hình.
+ * Hai nguồn này KHÔNG cùng một đại lượng: dự báo nói về tỷ lệ lấp đầy CUỐI
+ * CÙNG của ngày, còn tồn kho nói về tỷ lệ ĐÃ BÁN TỚI LÚC NÀY. Trộn thẳng
+ * chúng theo lead time là so sánh hai thứ khác bản chất, và hậu quả rất cụ
+ * thể: còn 3 ngày nữa, khách mới đặt 20% — con số 20% kéo tín hiệu xuống vùng
+ * vắng và hệ thống giảm giá đúng vào ngày model dự báo sẽ gần kín.
  *
- * Bất biến: demandIndex >= realizedRatio. Số vé đã bán là chặn dưới cứng của
- * nhu cầu — một khung giờ đã lấp đầy 90% thì không bao giờ được giảm giá vì
- * model đoán "vắng".
+ * Khi có đường cong đặt chỗ (`paceShare` = tỷ lệ vé thường đã bán được ở mốc
+ * lead này, học từ lịch sử), tồn kho được quy về cùng đại lượng với dự báo:
+ *
+ *   tỷ lệ lấp đầy cuối dự kiến = đã bán / paceShare
+ *
+ * và trọng số không còn chọn tay: paceShare chính là phần nhu cầu đã biết
+ * chắc, phần còn lại mới phải dựa vào dự báo. Ở sát ngày đi paceShare → 1 nên
+ * quyết định gần như hoàn toàn dựa vào tồn kho thật; còn xa thì ngược lại.
+ *
+ * Khi chưa học được đường cong, giữ nguyên heuristic cũ theo lead time thay vì
+ * bịa ra một đường cong tuyến tính.
+ *
+ * Bất biến (đúng ở cả hai nhánh): demandIndex >= realizedRatio. Số vé đã bán
+ * là chặn dưới cứng của nhu cầu — một khung giờ đã lấp đầy 90% thì không bao
+ * giờ được giảm giá vì model đoán "vắng".
  */
 function blendDemandIndex({
   realizedRatio,
   forecastRatio,
   leadDays,
   lookaheadDays,
+  paceShare = null,
 }) {
   const realized = clamp(Number(realizedRatio) || 0, 0, 1);
 
@@ -186,10 +214,33 @@ function blendDemandIndex({
       demandIndex: realized,
       forecastWeight: 0,
       signalSource: 'REALTIME_OCCUPANCY',
+      paceShare: null,
+      projectedRatio: null,
     };
   }
 
   const forecast = clamp(Number(forecastRatio), 0, 1);
+  const pace = Number(paceShare);
+  const hasPace = Number.isFinite(pace) && pace > 0 && pace <= 1;
+
+  if (hasPace) {
+    const projected = clamp(realized / pace, 0, 1);
+    const forecastWeight = clamp(1 - pace, 0, 1);
+    const blended = forecast * forecastWeight + projected * pace;
+
+    let signalSource = 'BLENDED';
+    if (forecastWeight <= 0.05) signalSource = 'REALTIME_OCCUPANCY';
+    else if (forecastWeight >= 0.95) signalSource = 'AI_FORECAST';
+
+    return {
+      demandIndex: Math.max(realized, blended),
+      forecastWeight,
+      signalSource,
+      paceShare: pace,
+      projectedRatio: projected,
+    };
+  }
+
   const horizon = Math.max(1, Number(lookaheadDays) || 1);
   const forecastWeight = clamp(Math.max(0, Number(leadDays) || 0) / horizon, 0, 1);
   const blended = forecast * forecastWeight + realized * (1 - forecastWeight);
@@ -202,6 +253,8 @@ function blendDemandIndex({
     demandIndex: Math.max(realized, blended),
     forecastWeight,
     signalSource,
+    paceShare: null,
+    projectedRatio: null,
   };
 }
 
@@ -260,6 +313,14 @@ function quotePrice({
   leadDays,
   modelVersion = null,
   forecastGeneratedAt = null,
+  // Dự báo đang được đọc ở mức nào: 'SLOT' khi số vé cấp ngày đã được phân bổ
+  // về khung giờ bằng tỷ trọng học từ lịch sử, 'DAY' khi chưa học được.
+  // Hai field này không tham gia phép tính giá, chỉ để giải trình.
+  forecastBasis = 'DAY',
+  slotShare = null,
+  // Tỷ lệ vé thường đã bán được ở mốc lead này (đường cong đặt chỗ). Null =
+  // chưa học được, quay về heuristic theo lead time.
+  paceShare = null,
 }) {
   const policy = normalizePolicy(rawPolicy);
   const base = parseVndInteger(basePrice);
@@ -279,6 +340,10 @@ function quotePrice({
     leadTimeDays: Number.isFinite(leadDays) ? leadDays : 0,
     modelVersion: null,
     forecastGeneratedAt: null,
+    forecastBasis: 'DAY',
+    slotShare: null,
+    paceShare: null,
+    projectedRatio: null,
     mode: policy.mode,
     reason,
     ...extra,
@@ -313,11 +378,18 @@ function quotePrice({
     );
   }
 
-  const { demandIndex, forecastWeight, signalSource } = blendDemandIndex({
+  const {
+    demandIndex,
+    forecastWeight,
+    signalSource,
+    paceShare: appliedPace,
+    projectedRatio,
+  } = blendDemandIndex({
     realizedRatio: realized,
     forecastRatio: hasForecast ? forecastRatio : null,
     leadDays: lead,
     lookaheadDays: policy.lookaheadDays,
+    paceShare,
   });
 
   const { percent, demandLevel } = demandToAdjustmentPercent(demandIndex, policy);
@@ -363,6 +435,12 @@ function quotePrice({
     leadTimeDays: lead,
     modelVersion: hasForecast ? modelVersion : null,
     forecastGeneratedAt: hasForecast ? forecastGeneratedAt : null,
+    forecastBasis: hasForecast && forecastBasis === 'SLOT' ? 'SLOT' : 'DAY',
+    slotShare: hasForecast && forecastBasis === 'SLOT' && Number.isFinite(Number(slotShare))
+      ? Number(Number(slotShare).toFixed(4))
+      : null,
+    paceShare: appliedPace === null ? null : Number(appliedPace.toFixed(4)),
+    projectedRatio: projectedRatio === null ? null : Number(projectedRatio.toFixed(4)),
     mode: policy.mode,
   };
 
@@ -409,14 +487,23 @@ function buildReason(quote) {
     NONE: 'không có tín hiệu',
   }[quote.signalSource] || 'tín hiệu nhu cầu';
 
+  // Nói rõ dự báo đang được đọc ở mức nào. Đây là khác biệt có thật giữa "AI
+  // dự báo cho khung giờ này" và "AI dự báo cho cả ngày rồi dùng chung", nên
+  // không được để người đọc tự suy diễn.
+  const basisText = quote.signalSource === 'REALTIME_OCCUPANCY' || quote.signalSource === 'NONE'
+    ? ''
+    : (quote.forecastBasis === 'SLOT'
+      ? ` (dự báo phân bổ riêng cho khung giờ này, chiếm ${Math.round(Number(quote.slotShare || 0) * 100)}% nhu cầu ngày)`
+      : ' (dự báo ở mức cả ngày, dùng chung cho mọi khung giờ)');
+
   if (quote.demandLevel === 'PEAK') {
-    return `Cao điểm: ${sourceText} cho thấy mức lấp đầy khoảng ${occupancyText} nên phụ thu ${percentText}.`;
+    return `Cao điểm: ${sourceText} cho thấy mức lấp đầy khoảng ${occupancyText}${basisText} nên phụ thu ${percentText}.`;
   }
   if (quote.demandLevel === 'QUIET') {
     // "giảm -15%" là phủ định kép; mức giảm đã mang nghĩa âm trong câu chữ.
-    return `Giờ vắng: ${sourceText} cho thấy mức lấp đầy chỉ khoảng ${occupancyText} nên giảm ${Math.abs(quote.adjustmentPercent)}% để kích cầu.`;
+    return `Giờ vắng: ${sourceText} cho thấy mức lấp đầy chỉ khoảng ${occupancyText}${basisText} nên giảm ${Math.abs(quote.adjustmentPercent)}% để kích cầu.`;
   }
-  return `Nhu cầu trung bình (${occupancyText}), điều chỉnh ${percentText}.`;
+  return `Nhu cầu trung bình (${occupancyText})${basisText}, điều chỉnh ${percentText}.`;
 }
 
 // ------------------------------------------------------------
@@ -465,6 +552,25 @@ function occupancyRatio(used, capacity) {
 }
 
 /**
+ * Số vé dự báo của cả ngày -> tỷ lệ lấp đầy dự báo của MỘT khung giờ.
+ *
+ * Mẫu số là sức chứa của chính khung giờ đó, không phải sức chứa ngày: một
+ * suất 45 chỗ được dự báo 30 khách là 67% (cao điểm), trong khi so với sức
+ * chứa ngày 90 chỗ thì chỉ là 33% (vùng trung tính) — hai kết luận trái ngược
+ * từ cùng một dự báo.
+ */
+function forecastRatioForSlot({ predictedTickets, share, slotCapacity }) {
+  // null/undefined phải trả về null chứ không được Number() thành 0: 0 ở đây
+  // mang nghĩa "dự báo vắng khách" và sẽ kéo giá xuống mức giảm kịch trần.
+  if (predictedTickets == null || share == null) return null;
+  const tickets = Number(predictedTickets);
+  const capacity = Number(slotCapacity || 0);
+  const slotShare = Number(share);
+  if (!Number.isFinite(tickets) || !Number.isFinite(slotShare) || capacity <= 0) return null;
+  return clamp((tickets * slotShare) / capacity, 0, 1);
+}
+
+/**
  * Báo giá cho toàn bộ khung giờ của một lịch bán (schedule) trong một ngày.
  *
  * Dùng chung cho ba nơi để cả ba không bao giờ lệch nhau:
@@ -482,7 +588,7 @@ async function quoteSchedule(client, { schedule, date, now = new Date(), policy 
   const lead = leadTimeDays(date, now);
 
   const slotIds = schedule.slots.map((slot) => slot.id);
-  const [dailyStock, attractionStock, slotStocks, forecast] = await Promise.all([
+  const [dailyStock, attractionStock, slotStocks, forecast, paceCurve] = await Promise.all([
     client.dailyStock.findUnique({
       where: { ticketProductId_date: { ticketProductId: schedule.product.id, date } },
     }),
@@ -495,7 +601,15 @@ async function quoteSchedule(client, { schedule, date, now = new Date(), policy 
     resolvedPolicy.enabled
       ? getForecastForDate(attractionId, date, client)
       : Promise.resolve(null),
+    // CỐ Ý dùng client thường chứ không phải client giao dịch: đường cong đặt
+    // chỗ đọc dữ liệu tham chiếu của 3 tháng đã chốt, không liên quan tới tính
+    // nhất quán của lượt giữ chỗ đang chạy. Nhét truy vấn quét lịch sử vào
+    // trong $transaction chỉ kéo dài thời gian giữ khoá tồn kho.
+    resolvedPolicy.enabled
+      ? getBookingPaceCurve(prisma, { attractionId, now })
+      : Promise.resolve(null),
   ]);
+  const paceShare = paceAtLead(paceCurve, lead);
 
   // Tỷ lệ lấp đầy cấp ngày lấy theo kho của điểm tham quan (dùng chung cho mọi
   // gói vé) — sát với "hôm đó có đông không" hơn là kho riêng của một gói vé.
@@ -507,7 +621,7 @@ async function quoteSchedule(client, { schedule, date, now = new Date(), policy 
 
   const stockBySlot = new Map((slotStocks || []).map((stock) => [stock.timeSlotId, stock]));
 
-  const quoteWith = (realizedRatio) => quotePrice({
+  const quoteWith = (realizedRatio, overrides = {}) => quotePrice({
     basePrice,
     policy: resolvedPolicy,
     realizedRatio,
@@ -516,6 +630,8 @@ async function quoteSchedule(client, { schedule, date, now = new Date(), policy 
     leadDays: lead,
     modelVersion: forecast?.modelVersion || null,
     forecastGeneratedAt: forecast?.generatedAt || null,
+    paceShare,
+    ...overrides,
   });
 
   if (schedule.slots.length === 0) {
@@ -528,24 +644,60 @@ async function quoteSchedule(client, { schedule, date, now = new Date(), policy 
     return {
       policy: configuredPolicy,
       byTimeSlotId: new Map(),
+      slotDemand: null,
+      paceCurve,
       allDay: quoteWith(productRatio),
     };
   }
+
+  // Tỷ trọng khung giờ chỉ cần khi thực sự có dự báo để phân bổ. Cũng đọc bằng
+  // client thường, vì cùng lý do với đường cong đặt chỗ ở trên.
+  const slotDemand = forecast
+    ? await getSlotDemandShares(prisma, {
+        attractionId,
+        slotIds,
+        now,
+      })
+    : null;
 
   const byTimeSlotId = new Map();
   schedule.slots.forEach((slot) => {
     const stock = stockBySlot.get(slot.id);
     const slotUsed = Number(stock?.bookedQty || 0) + Number(stock?.heldQty || 0);
+    const slotCapacity = getSlotCapacity(schedule, slot);
     // Khung giờ chật hơn cả ngày thì tín hiệu của khung giờ mới là cái quyết
     // định: một suất chiều đã kín vẫn phải phụ thu dù cả ngày còn trống.
     const slotRatio = Math.max(
       dayRatio,
-      occupancyRatio(slotUsed, getSlotCapacity(schedule, slot)),
+      occupancyRatio(slotUsed, slotCapacity),
     );
-    byTimeSlotId.set(slot.id, quoteWith(slotRatio));
+
+    const share = slotDemand?.learned
+      ? shareForSlot(slotDemand, slot.id, dateKeyOf(date))
+      : null;
+    const slotForecastRatio = share === null
+      ? null
+      : forecastRatioForSlot({
+          predictedTickets: forecast?.predictedTickets,
+          share,
+          slotCapacity,
+        });
+
+    byTimeSlotId.set(slot.id, quoteWith(
+      slotRatio,
+      slotForecastRatio === null
+        ? {}
+        : { forecastRatio: slotForecastRatio, forecastBasis: 'SLOT', slotShare: share },
+    ));
   });
 
-  return { policy: configuredPolicy, byTimeSlotId, allDay: null };
+  return {
+    policy: configuredPolicy,
+    byTimeSlotId,
+    slotDemand,
+    paceCurve,
+    allDay: null,
+  };
 }
 
 function quoteForSlot(quotes, timeSlotId) {
@@ -654,6 +806,38 @@ function vietnamDayStartUtc(now) {
 }
 
 /**
+ * Gộp trạng thái của nhiều lịch khung giờ thành một dòng cho giao diện.
+ *
+ * Quy tắc bảo thủ: chỉ báo "đã học được" khi MỌI lịch đều học được. Một gói vé
+ * còn đang dùng tín hiệu cấp ngày mà cả bảng lại khoe đã phân bổ theo khung giờ
+ * là nói quá.
+ */
+function summarizeSlotDemand(entries) {
+  const usable = (entries || []).filter(Boolean);
+  if (usable.length === 0) return null;
+
+  const notLearned = usable.find((entry) => !entry.learned);
+  if (notLearned) {
+    return {
+      learned: false,
+      reason: notLearned.reason,
+      lookbackDays: notLearned.lookbackDays,
+      weekdaySampleDays: notLearned.weekdaySampleDays,
+      weekendSampleDays: notLearned.weekendSampleDays,
+    };
+  }
+  return {
+    learned: true,
+    reason: null,
+    lookbackDays: usable[0].lookbackDays,
+    // Lấy mẫu nhỏ nhất trong các lịch: đó mới là mức tin cậy yếu nhất mà bảng
+    // này đang dựa vào.
+    weekdaySampleDays: Math.min(...usable.map((entry) => entry.weekdaySampleDays)),
+    weekendSampleDays: Math.min(...usable.map((entry) => entry.weekendSampleDays)),
+  };
+}
+
+/**
  * Bảng giá dự kiến N ngày tới cho toàn bộ gói vé của một điểm tham quan.
  *
  * Chạy hoàn toàn trong bộ nhớ sau vài truy vấn gom theo khoảng ngày, thay vì
@@ -717,7 +901,35 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
     }),
   ]);
 
-  const keyOf = (date) => new Date(date).toISOString().slice(0, 10);
+  const keyOf = dateKeyOf;
+
+  // Tỷ trọng khung giờ phải được chuẩn hoá TRONG TỪNG lịch bán, không phải
+  // trên hợp của mọi khung giờ trong điểm tham quan. Một gói vé có lịch riêng
+  // 2 suất mà bị gộp chung với 2 suất của gói khác thì mỗi suất chỉ còn ~25%
+  // thay vì ~50%, và toàn bộ tín hiệu dự báo theo khung giờ bị chia đôi.
+  const slotSetByProduct = new Map(products.map((product) => [
+    product.id,
+    (product.timeSlots.length > 0 ? product.timeSlots : product.attraction.timeSlots)
+      .map((slot) => slot.id),
+  ]));
+  const signatureOf = (ids) => ids.slice().sort().join(',');
+  const distinctSlotSets = new Map();
+  for (const ids of slotSetByProduct.values()) {
+    const signature = signatureOf(ids);
+    if (signature && !distinctSlotSets.has(signature)) distinctSlotSets.set(signature, ids);
+  }
+
+  // Một lần học cho mỗi lịch khác nhau: bảng 14 ngày × nhiều gói vé mà gọi lại
+  // theo từng ô thì thành hàng trăm truy vấn giống hệt nhau.
+  const [slotShareEntries, paceCurve] = await Promise.all([
+    Promise.all([...distinctSlotSets].map(async ([signature, ids]) => [
+      signature,
+      await getSlotDemandShares(prisma, { attractionId, slotIds: ids, now }),
+    ])),
+    getBookingPaceCurve(prisma, { attractionId, now }),
+  ]);
+  const slotDemandBySignature = new Map(slotShareEntries);
+  const slotDemand = summarizeSlotDemand([...slotDemandBySignature.values()]);
   const attractionStockByDate = new Map(attractionStocks.map((row) => [keyOf(row.date), row]));
   const dailyStockByKey = new Map(dailyStocks.map((row) => [`${row.ticketProductId}|${keyOf(row.date)}`, row]));
   const slotStockByKey = new Map(slotStocks.map((row) => [`${row.timeSlotId}|${keyOf(row.date)}`, row]));
@@ -730,6 +942,9 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
 
   const previewProducts = products.map((product) => {
     const dayRows = [];
+    const productSlotDemand = slotDemandBySignature.get(
+      signatureOf(slotSetByProduct.get(product.id) || []),
+    ) || null;
 
     for (let offset = 0; offset < horizon; offset += 1) {
       const date = addDays(startDate, offset);
@@ -761,7 +976,7 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
       );
       const lead = leadTimeDays(date, now);
 
-      const quoteWith = (realizedRatio) => quotePrice({
+      const quoteWith = (realizedRatio, overrides = {}) => quotePrice({
         basePrice: product.sellingPrice,
         policy: evaluationPolicy,
         realizedRatio,
@@ -770,22 +985,40 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
         leadDays: lead,
         modelVersion: forecast?.modelVersion || null,
         forecastGeneratedAt: forecast?.generatedAt || null,
+        paceShare: paceAtLead(paceCurve, lead),
+        ...overrides,
       });
 
       const slotQuotes = schedule.slots.length > 0
         ? schedule.slots.map((slot) => {
             const stock = slotStockByKey.get(`${slot.id}|${dateKey}`);
+            const slotCapacity = getSlotCapacity(schedule, slot);
             const realized = Math.max(
               dayRatio,
               occupancyRatio(
                 Number(stock?.bookedQty || 0) + Number(stock?.heldQty || 0),
-                getSlotCapacity(schedule, slot),
+                slotCapacity,
               ),
             );
+            const share = forecast && productSlotDemand?.learned
+              ? shareForSlot(productSlotDemand, slot.id, dateKey)
+              : null;
+            const slotForecastRatio = share === null
+              ? null
+              : forecastRatioForSlot({
+                  predictedTickets: forecast?.predictedTickets,
+                  share,
+                  slotCapacity,
+                });
             return {
               timeSlotId: slot.id,
               label: `${slot.startTime} - ${slot.endTime}`,
-              quote: quoteWith(realized),
+              quote: quoteWith(
+                realized,
+                slotForecastRatio === null
+                  ? {}
+                  : { forecastRatio: slotForecastRatio, forecastBasis: 'SLOT', slotShare: share },
+              ),
             };
           })
         : [(() => {
@@ -827,6 +1060,7 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
         realizedRatio: representative.quote.realizedRatio,
         confidence: representative.quote.confidence,
         signalSource: representative.quote.signalSource,
+        forecastBasis: representative.quote.forecastBasis,
         applied: representative.quote.applied,
         adjustmentPercent: representative.quote.adjustmentPercent,
         minPrice: Math.min(...prices),
@@ -839,6 +1073,11 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
           adjustmentPercent: entry.quote.adjustmentPercent,
           demandLevel: entry.quote.demandLevel,
           applied: entry.quote.applied,
+          // Hai field dưới đây là bằng chứng cho câu "giá động theo khung giờ":
+          // tỷ trọng nhu cầu học được và tỷ lệ lấp đầy dự báo của riêng suất đó.
+          forecastBasis: entry.quote.forecastBasis,
+          slotShare: entry.quote.slotShare,
+          forecastRatio: entry.quote.forecastRatio,
         })),
       });
     }
@@ -856,6 +1095,37 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
     // Bảng xem trước có đang là giá khách thật sự trả hay không.
     live: policy.enabled && policy.effectiveMode === 'AUTO_APPLY',
     forecastDays: forecastByDate.size,
+    // Trạng thái của lớp phân bổ theo khung giờ: có học được tỷ trọng hay
+    // không, học từ bao nhiêu ngày. Giao diện phải nói đúng điều này thay vì
+    // mặc định quảng cáo "dự báo theo từng khung giờ".
+    slotDemand: slotDemand
+      ? {
+          learned: slotDemand.learned,
+          reason: slotDemand.reason,
+          lookbackDays: slotDemand.lookbackDays,
+          weekdaySampleDays: slotDemand.weekdaySampleDays,
+          weekendSampleDays: slotDemand.weekendSampleDays,
+        }
+      : null,
+    // Đường cong đặt chỗ: cho đối tác thấy hệ thống đang quy tồn kho hiện tại
+    // về tỷ lệ lấp đầy cuối dự kiến dựa trên nhịp bán thật của chính họ.
+    bookingPace: paceCurve
+      ? {
+          learned: paceCurve.learned,
+          reason: paceCurve.reason,
+          observedDates: paceCurve.observedDates,
+          lookbackDays: paceCurve.lookbackDays,
+          // Vài mốc tiêu biểu là đủ để đọc; không đổ cả 61 phần tử ra API.
+          milestones: paceCurve.learned
+            ? [0, 1, 3, 7, 14, 21, 30]
+                .filter((lead) => lead < paceCurve.curve.length)
+                .map((lead) => ({
+                  leadDays: lead,
+                  soldShare: Number(paceCurve.curve[lead].toFixed(4)),
+                }))
+            : [],
+        }
+      : null,
     products: previewProducts,
   };
 }
@@ -967,6 +1237,18 @@ async function getPricingImpact({
       // (giữ chỗ), còn điều kiện "đã thành tiền" chỉ là bộ lọc tính doanh thu.
       // Ghi rõ basis để không nhầm với báo cáo dòng tiền theo paidAt.
       periodBasis: 'ADJUSTMENT_CREATED_AT',
+      // ---------------------------------------------------------------
+      // Cảnh báo phương pháp, đi kèm số liệu và không được tách rời.
+      //
+      // netRevenueDelta là CHÊNH LỆCH SO VỚI GIÁ NIÊM YẾT trên những lượt đã
+      // đổi giá, không phải doanh thu tăng thêm nhờ giá động. Muốn nói tới
+      // doanh thu tăng thêm thì phải trả lời được "nếu giữ giá niêm yết thì
+      // khách có mua không, và mua bao nhiêu" — câu đó cần một nhóm đối chứng
+      // mà hệ thống hiện chưa có. Ghi thẳng vào payload để mọi nơi hiển thị
+      // đều buộc phải nói đúng.
+      // ---------------------------------------------------------------
+      measurement: 'DIFFERENCE_VS_LISTED_PRICE',
+      measurementNote: 'Đây là chênh lệch so với giá niêm yết trên các lượt đã đổi giá, không phải ước lượng doanh thu tăng thêm do giá động. Kết luận nhân quả cần nhóm đối chứng giữ giá niêm yết.',
       surchargeRevenue: Math.round(summary.surchargeRevenue),
       discountGiven: Math.round(summary.discountGiven),
       netRevenueDelta: Math.round(summary.netRevenueDelta),
@@ -1004,6 +1286,7 @@ module.exports = {
   blendDemandIndex,
   demandToAdjustmentPercent,
   forecastConfidenceOf,
+  forecastRatioForSlot,
   getForecastForDate,
   getPolicy,
   isAutoApplyAllowed,

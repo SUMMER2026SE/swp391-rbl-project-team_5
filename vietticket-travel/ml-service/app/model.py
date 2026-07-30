@@ -55,9 +55,23 @@ class EnsembleForecastModel:
         metrics: Optional[dict] = None,
         artifact_sha256: Optional[str] = None,
         artifact_integrity_verified: bool = False,
+        rf_tickets: Optional[RandomForestRegressor] = None,
+        xgb_tickets: Optional[XGBRegressor] = None,
+        tickets_residual_std: float = 0.3,
     ):
         self.rf = rf
         self.xgb = xgb
+        # Model thứ hai, cùng kiến trúc nhưng target là SỐ VÉ.
+        #
+        # Trước đây số vé được suy ra bằng phép chia predicted_revenue /
+        # avg_ticket_price. Điều đó chỉ đúng khi mọi vé bán ra cùng một giá:
+        # một điểm có vé người lớn 520k và vé trẻ em 360k thì thương số ấy
+        # không phải số vé của ngày nào cả, và sai số của model doanh thu còn
+        # bị khuếch đại thêm một lần nữa. Số vé lại chính là đại lượng mà tầng
+        # giá động cần (để so với sức chứa), nên nó phải được dự báo trực tiếp.
+        self.rf_tickets = rf_tickets
+        self.xgb_tickets = xgb_tickets
+        self.tickets_residual_std = tickets_residual_std
         self.city_freq_map = city_freq_map or {}
         self.residual_std = residual_std
         self.model_version = model_version
@@ -65,6 +79,10 @@ class EnsembleForecastModel:
         self.metrics = metrics or {}
         self.artifact_sha256 = artifact_sha256
         self.artifact_integrity_verified = artifact_integrity_verified
+
+    @property
+    def has_ticket_model(self) -> bool:
+        return self.rf_tickets is not None and self.xgb_tickets is not None
 
     # ---------- Training helpers ----------
 
@@ -89,14 +107,48 @@ class EnsembleForecastModel:
             random_state=42,
             n_jobs=-1,
         )
-        return EnsembleForecastModel(rf=rf, xgb=xgb, model_version=model_version)
+        rf_tickets = RandomForestRegressor(
+            n_estimators=300,
+            max_depth=8,
+            min_samples_leaf=5,
+            max_features=0.6,
+            n_jobs=-1,
+            random_state=42,
+        )
+        xgb_tickets = XGBRegressor(
+            n_estimators=400,
+            max_depth=5,
+            learning_rate=0.03,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.5,
+            reg_lambda=1.0,
+            random_state=42,
+            n_jobs=-1,
+        )
+        return EnsembleForecastModel(
+            rf=rf,
+            xgb=xgb,
+            rf_tickets=rf_tickets,
+            xgb_tickets=xgb_tickets,
+            model_version=model_version,
+        )
 
     def fit(self, X: pd.DataFrame, y_log: np.ndarray):
         self.rf.fit(X, y_log)
         self.xgb.fit(X, y_log)
 
+    def fit_tickets(self, X: pd.DataFrame, y_log: np.ndarray):
+        self.rf_tickets.fit(X, y_log)
+        self.xgb_tickets.fit(X, y_log)
+
     def predict_log(self, X: pd.DataFrame) -> np.ndarray:
         return (self.rf.predict(X) + self.xgb.predict(X)) / 2.0
+
+    def predict_tickets_log(self, X: pd.DataFrame) -> np.ndarray:
+        if not self.has_ticket_model:
+            raise ValueError("Model chưa được huấn luyện cho target số vé.")
+        return (self.rf_tickets.predict(X) + self.xgb_tickets.predict(X)) / 2.0
 
     def predict_revenue(self, X: pd.DataFrame) -> np.ndarray:
         pred_log = self.predict_log(X)
@@ -116,7 +168,15 @@ class EnsembleForecastModel:
     def save(self, model_dir: str):
         os.makedirs(model_dir, exist_ok=True)
         model_path = os.path.join(model_dir, MODEL_FILE)
-        joblib.dump({"rf": self.rf, "xgb": self.xgb}, model_path)
+        joblib.dump(
+            {
+                "rf": self.rf,
+                "xgb": self.xgb,
+                "rf_tickets": self.rf_tickets,
+                "xgb_tickets": self.xgb_tickets,
+            },
+            model_path,
+        )
         with open(model_path, "rb") as artifact:
             artifact_sha256 = hashlib.sha256(artifact.read()).hexdigest()
         self.artifact_sha256 = artifact_sha256
@@ -126,6 +186,7 @@ class EnsembleForecastModel:
             "trained_at": self.trained_at.isoformat(),
             "city_freq_map": self.city_freq_map,
             "residual_std": self.residual_std,
+            "tickets_residual_std": self.tickets_residual_std,
             "metrics": self.metrics,
             "artifact_sha256": artifact_sha256,
         }
@@ -151,6 +212,11 @@ class EnsembleForecastModel:
         return cls(
             rf=models["rf"],
             xgb=models["xgb"],
+            # Artifact cũ (chỉ có model doanh thu) vẫn nạp được: khi thiếu, lớp
+            # serving tự quay về cách suy số vé từ doanh thu và nói rõ điều đó.
+            rf_tickets=models.get("rf_tickets"),
+            xgb_tickets=models.get("xgb_tickets"),
+            tickets_residual_std=metadata.get("tickets_residual_std", 0.3),
             city_freq_map=metadata.get("city_freq_map", {}),
             residual_std=metadata.get("residual_std", 0.3),
             model_version=metadata.get("model_version", "rf_xgb_ensemble_v1"),
@@ -174,6 +240,10 @@ class ForecastDayResult:
     predicted_tickets: int
     confidence_lower: float
     confidence_upper: float
+    # 'model' = số vé do model dự báo trực tiếp; 'derived_from_revenue' = suy
+    # ra bằng phép chia cho giá vé trung bình (artifact cũ). Backend hiển thị
+    # khác nhau cho hai trường hợp này.
+    tickets_source: str = "model"
 
 
 def forecast_recursive(
@@ -195,24 +265,34 @@ def forecast_recursive(
     """
     history_dates = [h["date"] for h in history]
     history_revenue = [float(h["revenue"]) for h in history]
+    history_tickets = [float(h.get("tickets") or 0.0) for h in history]
 
     last_date = history_dates[-1] if history_dates else date.today() - timedelta(days=1)
     city_enc = model.city_encoded(city)
+    # Chỉ dự báo số vé trực tiếp khi vừa có model vừa có lịch sử số vé; nếu
+    # phía gọi không gửi cột tickets thì lag/rolling toàn số 0 và kết quả sẽ vô
+    # nghĩa — trường hợp đó phải quay về cách suy từ doanh thu.
+    use_ticket_model = model.has_ticket_model and any(value > 0 for value in history_tickets)
 
     results: List[ForecastDayResult] = []
     working_revenue = list(history_revenue)
+    working_tickets = list(history_tickets)
+
+    static_features = dict(
+        tier=tier,
+        city_encoded=city_enc,
+        capacity=capacity,
+        avg_ticket_price=avg_ticket_price,
+        rating=rating,
+        num_reviews=num_reviews,
+    )
 
     for step in range(1, forecast_days + 1):
         target_date = last_date + timedelta(days=step)
         row = feat.build_feature_row(
             target_date=target_date,
-            history_revenue=working_revenue,
-            tier=tier,
-            city_encoded=city_enc,
-            capacity=capacity,
-            avg_ticket_price=avg_ticket_price,
-            rating=rating,
-            num_reviews=num_reviews,
+            history_values=working_revenue,
+            **static_features,
         )
         X = feat.rows_to_dataframe([row])
         pred_log = model.predict_log(X)[0]
@@ -226,7 +306,25 @@ def forecast_recursive(
         confidence_lower = float(np.clip(np.expm1(lower_log), 0, None))
         confidence_upper = float(np.clip(np.expm1(upper_log), 0, None))
 
-        predicted_tickets = int(round(pred_revenue / avg_ticket_price)) if avg_ticket_price > 0 else 0
+        if use_ticket_model:
+            ticket_row = feat.build_feature_row(
+                target_date=target_date,
+                history_values=working_tickets,
+                **static_features,
+            )
+            pred_tickets_raw = float(
+                np.clip(
+                    np.expm1(model.predict_tickets_log(feat.rows_to_dataframe([ticket_row]))[0]),
+                    0,
+                    None,
+                )
+            )
+            predicted_tickets = int(round(pred_tickets_raw))
+            tickets_source = "model"
+        else:
+            pred_tickets_raw = pred_revenue / avg_ticket_price if avg_ticket_price > 0 else 0.0
+            predicted_tickets = int(round(pred_tickets_raw))
+            tickets_source = "derived_from_revenue"
 
         results.append(
             ForecastDayResult(
@@ -235,8 +333,10 @@ def forecast_recursive(
                 predicted_tickets=predicted_tickets,
                 confidence_lower=round(confidence_lower, 2),
                 confidence_upper=round(confidence_upper, 2),
+                tickets_source=tickets_source,
             )
         )
         working_revenue.append(pred_revenue)
+        working_tickets.append(pred_tickets_raw)
 
     return results
