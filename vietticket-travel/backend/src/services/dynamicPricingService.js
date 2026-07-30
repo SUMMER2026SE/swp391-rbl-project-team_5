@@ -826,14 +826,29 @@ function summarizeSlotDemand(entries) {
       weekendSampleDays: notLearned.weekendSampleDays,
     };
   }
+  // Mọi lịch chỉ có đúng một khung giờ: không có gì để phân bổ, và cũng không
+  // có ngày mẫu nào. Báo "đã học từ 0 ngày" ở đây là vô nghĩa với người đọc.
+  const multiSlot = usable.filter((entry) => !entry.singleSlot);
+  if (multiSlot.length === 0) {
+    return {
+      learned: true,
+      singleSlot: true,
+      reason: null,
+      lookbackDays: usable[0].lookbackDays,
+      weekdaySampleDays: 0,
+      weekendSampleDays: 0,
+    };
+  }
+
   return {
     learned: true,
+    singleSlot: false,
     reason: null,
-    lookbackDays: usable[0].lookbackDays,
-    // Lấy mẫu nhỏ nhất trong các lịch: đó mới là mức tin cậy yếu nhất mà bảng
-    // này đang dựa vào.
-    weekdaySampleDays: Math.min(...usable.map((entry) => entry.weekdaySampleDays)),
-    weekendSampleDays: Math.min(...usable.map((entry) => entry.weekendSampleDays)),
+    lookbackDays: multiSlot[0].lookbackDays,
+    // Lấy mẫu nhỏ nhất trong các lịch nhiều khung giờ: đó mới là mức tin cậy
+    // yếu nhất mà bảng này đang dựa vào.
+    weekdaySampleDays: Math.min(...multiSlot.map((entry) => entry.weekdaySampleDays)),
+    weekendSampleDays: Math.min(...multiSlot.map((entry) => entry.weekendSampleDays)),
   };
 }
 
@@ -1101,6 +1116,9 @@ async function previewPricing({ attractionId, days = 14, now = new Date(), clien
     slotDemand: slotDemand
       ? {
           learned: slotDemand.learned,
+          // Bắt buộc phải đi kèm: giao diện dựa vào cờ này để không nói "đã học
+          // từ 0 ngày" với lịch bán chỉ có một khung giờ.
+          singleSlot: Boolean(slotDemand.singleSlot),
           reason: slotDemand.reason,
           lookbackDays: slotDemand.lookbackDays,
           weekdaySampleDays: slotDemand.weekdaySampleDays,

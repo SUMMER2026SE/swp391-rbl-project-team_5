@@ -106,8 +106,23 @@ describe('getSlotDemandShares', () => {
     });
 
     expect(result.learned).toBe(true);
+    // Phải phân biệt với "học được từ dữ liệu": không có ngày mẫu nào cả, nên
+    // giao diện không được nói "đã học từ 0 ngày thường và 0 ngày cuối tuần".
+    expect(result.singleSlot).toBe(true);
     expect(result.bySlotId.get(SUNSET)).toEqual({ weekdayShare: 1, weekendShare: 1 });
     expect(client.timeSlotStock.findMany).not.toHaveBeenCalled();
+  });
+
+  test('nhiều khung giờ học được thì không bị đánh dấu là lịch một khung', async () => {
+    const client = historyClient(buildHistoryRows());
+    const result = await getSlotDemandShares(client, {
+      attractionId: ATTRACTION_ID,
+      slotIds: [SUNSET, AFTERNOON],
+      now: NOW,
+    });
+
+    expect(result.singleSlot).toBeUndefined();
+    expect(result.weekdaySampleDays).toBeGreaterThan(0);
   });
 
   test('học đúng tỷ trọng và tách riêng ngày thường với cuối tuần', async () => {
@@ -389,6 +404,10 @@ describe('quoteSchedule — giá khác nhau giữa các khung giờ trong cùng 
       now: new Date('2026-06-13T03:00:00.000Z'),
       client: prisma,
     });
+
+    // Cờ này phải sống sót qua bước chọn lọc field ở payload trả về, nếu không
+    // giao diện lại rơi về câu "đã học từ 0 ngày".
+    expect(preview.slotDemand.singleSlot).toBe(false);
 
     const slots = preview.products[0].days[0].slots;
     const shares = slots.map((slot) => slot.slotShare);

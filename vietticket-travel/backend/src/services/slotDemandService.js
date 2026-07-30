@@ -106,9 +106,11 @@ async function getSlotDemandShares(
   if (ids.length === 0) return buildEmptyResult(ids, 'Lịch bán không có khung giờ nào.');
   if (ids.length === 1) {
     // Một khung giờ duy nhất: tỷ trọng luôn là 100%, và đó là sự thật hiển
-    // nhiên chứ không phải thứ học được từ dữ liệu.
+    // nhiên chứ không phải thứ học được từ dữ liệu. Phải phân biệt rõ với
+    // trường hợp học được thật, nếu không giao diện sẽ khoe "đã học từ 0 ngày".
     return {
       learned: true,
+      singleSlot: true,
       reason: null,
       lookbackDays: LOOKBACK_DAYS,
       weekdaySampleDays: 0,
