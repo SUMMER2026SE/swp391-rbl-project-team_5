@@ -39,6 +39,19 @@ const trustProxy = getTrustProxySetting();
 if (trustProxy !== false) app.set('trust proxy', trustProxy);
 
 app.use(helmet({
+  // The production service also serves the Vite app. Keep Helmet's default
+  // policy, but allow the external resources that the frontend intentionally
+  // uses. Local Vite does not send this CSP, so omitting these directives
+  // makes remote attraction images and Google Identity silently disappear.
+  contentSecurityPolicy: {
+    directives: {
+      imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+      scriptSrc: ["'self'", 'https://accounts.google.com/gsi/client'],
+      frameSrc: ["'self'", 'https://accounts.google.com/gsi/'],
+      connectSrc: ["'self'", 'https://accounts.google.com/gsi/'],
+    },
+  },
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 app.use(cors(corsOptions));
