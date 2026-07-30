@@ -107,6 +107,29 @@ def require_api_key(x_ml_api_key: str = Header(default="")):
     return True
 
 
+# Chỉ số nào được phép rời khỏi service: đủ để backend trình bày độ chính xác
+# KÈM baseline, và không kèm bất cứ thứ gì mô tả cấu hình nội bộ của model.
+_PUBLIC_METRIC_KEYS = (
+    "mape_observed_days",
+    "wape",
+    "mae",
+    "tickets_wape",
+    "tickets_wape_derived_from_revenue",
+    "baseline_method",
+    "baseline_mape_observed_days",
+    "baseline_wape",
+    "baseline_mae",
+    "baseline_tickets_wape",
+    "beats_baseline_wape",
+    "num_train_samples",
+    "num_test_samples",
+)
+
+
+def _forecast_metrics(metrics: dict) -> dict:
+    return {key: metrics[key] for key in _PUBLIC_METRIC_KEYS if key in (metrics or {})}
+
+
 @app.get("/health", response_model=HealthResponse)
 def health():
     return HealthResponse(
@@ -119,6 +142,8 @@ def health():
             else None
         ),
         trained_at=_model.trained_at if _model else None,
+        metrics=_forecast_metrics(_model.metrics) if _model else None,
+        has_ticket_model=bool(_model.has_ticket_model) if _model else False,
     )
 
 
@@ -164,10 +189,12 @@ def forecast(payload: ForecastRequest, _auth: bool = Depends(require_api_key)):
                 "predicted_tickets": r.predicted_tickets,
                 "confidence_lower": r.confidence_lower,
                 "confidence_upper": r.confidence_upper,
+                "tickets_source": r.tickets_source,
             }
             for r in results
         ],
         warning=warning,
+        metrics=_forecast_metrics(_model.metrics),
     )
 
 

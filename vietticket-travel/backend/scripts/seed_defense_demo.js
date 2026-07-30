@@ -38,6 +38,12 @@ const {
   LIVE_AUTOPILOT_DEMO_MARKER,
   seedLiveAutopilotSignals,
 } = require('./seed_live_autopilot_demo');
+// Mô hình nhu cầu của lịch sử demo: tách riêng để kiểm thử được không cần CSDL.
+const {
+  paceShareAtLead,
+  planDayDemand,
+  seededGenerator,
+} = require('./lib/demandHistoryModel');
 
 const LEGACY_PREFIX = 'defense-demo-v1-';
 const PREFIX = 'defense-demo-v2-';
@@ -608,6 +614,20 @@ async function resetOwnedDemoData({ purgeLocalTestData = false } = {}) {
         },
       },
     });
+    // BankTransferReconciliation.bookingId dùng onDelete: Restrict, nên chỉ cần
+    // một lần đối chiếu chuyển khoản được tạo qua giao diện Admin là lệnh xoá
+    // booking bên dưới sẽ vỡ và cả demo:prepare/demo:smoke không chạy lại được.
+    await tx.bankTransferReconciliation.deleteMany({
+      where: {
+        OR: [
+          { bookingId: { startsWith: LEGACY_PREFIX } },
+          { bookingId: { startsWith: PREFIX } },
+          { booking: { userId: { in: ownedUserIds } } },
+          { matchedById: { in: ownedUserIds } },
+          { approvedById: { in: ownedUserIds } },
+        ],
+      },
+    });
     await tx.booking.deleteMany({
       where: {
         OR: [
@@ -623,6 +643,22 @@ async function resetOwnedDemoData({ purgeLocalTestData = false } = {}) {
           { id: { startsWith: LEGACY_PREFIX } },
           { id: { startsWith: PREFIX } },
           { userId: { in: ownedUserIds } },
+        ],
+      },
+    });
+    // Voucher phải bị xoá TRƯỚC Attraction và PartnerProfile: bốn khoá ngoại
+    // phạm vi voucher (applicableAttractionId, applicablePartnerId,
+    // applicableTicketProductId, fundingPartnerId) đều là Restrict, nên một mã
+    // giảm giá giới hạn theo điểm do đối tác tạo trên giao diện sẽ chặn toàn bộ
+    // lệnh xoá catalog bên dưới.
+    await tx.voucher.deleteMany({
+      where: {
+        OR: [
+          { applicableAttraction: { partnerId: { in: ownedPartnerIds } } },
+          { applicableAttractionId: { in: ownedAttractionIds } },
+          { applicablePartnerId: { in: ownedPartnerIds } },
+          { fundingPartnerId: { in: ownedPartnerIds } },
+          { applicableTicketProduct: { attraction: { partnerId: { in: ownedPartnerIds } } } },
         ],
       },
     });
@@ -646,6 +682,17 @@ async function resetOwnedDemoData({ purgeLocalTestData = false } = {}) {
             : []),
         ],
         attractions: { none: {} },
+      },
+    });
+    // PartnerKycChangeRequest.requestedById cũng là Restrict: một yêu cầu đổi
+    // thông tin KYC do đối tác demo gửi sẽ chặn lệnh xoá user ở cuối hàm.
+    await tx.partnerKycChangeRequest.deleteMany({
+      where: {
+        OR: [
+          { partnerId: { in: ownedPartnerIds } },
+          { requestedById: { in: ownedUserIds } },
+          { reviewedById: { in: ownedUserIds } },
+        ],
       },
     });
     await tx.partnerProfile.deleteMany({
@@ -816,6 +863,10 @@ async function createIdentity(account, passwordHash) {
       isEmailVerified: true,
       status: 'ACTIVE',
       employerPartnerId: account.employerPartnerId || null,
+      // Quyền của nhân viên phải khai báo tường minh ở từng tài khoản (xem
+      // ACCOUNTS.gateStaff), không mặc định nâng mọi STAFF lên MANAGER: kịch
+      // bản chỉ cần nhân viên cổng có quyền cấp lại vé, còn nhân viên nền tảng
+      // thì không.
       staffAccessLevel: account.staffAccessLevel || null,
       termsAcceptedAt: new Date(),
       termsVersion: '2026-07-29-v2',
@@ -1834,10 +1885,13 @@ async function seedScenarioBookings() {
   return created;
 }
 
-async function seedInventory(scenarioBookings) {
-  const ticketByDate = new Map();
-  const attractionByDate = new Map();
-  const timeSlotByDate = new Map();
+// `preloaded` là sổ tồn kho của nhu cầu tương lai (seedForwardDemand). Phải
+// gộp vào cùng một lần ghi: hai nguồn cùng chạm (gói vé, ngày) mà ghi riêng sẽ
+// vi phạm khóa duy nhất, và tệ hơn là làm mất một nửa số chỗ đã bán.
+async function seedInventory(scenarioBookings, preloaded = {}) {
+  const ticketByDate = new Map(preloaded.dailyStockRows || []);
+  const attractionByDate = new Map(preloaded.attractionStockRows || []);
+  const timeSlotByDate = new Map(preloaded.timeSlotStockRows || []);
 
   for (const booking of scenarioBookings) {
     if (booking.offset < 0 || booking.reservationStatus === 'CANCELLED') continue;
@@ -1888,145 +1942,517 @@ async function seedInventory(scenarioBookings) {
     if (timeSlotKey) timeSlotByDate.set(timeSlotKey, timeSlotRow);
   }
 
-  if (ticketByDate.size > 0) {
-    await prisma.dailyStock.createMany({ data: [...ticketByDate.values()] });
-  }
-  if (attractionByDate.size > 0) {
-    await prisma.attractionDailyStock.createMany({ data: [...attractionByDate.values()] });
-  }
-  if (timeSlotByDate.size > 0) {
-    await prisma.timeSlotStock.createMany({ data: [...timeSlotByDate.values()] });
+  await createManyChunked(prisma.dailyStock, [...ticketByDate.values()], 1000);
+  await createManyChunked(prisma.attractionDailyStock, [...attractionByDate.values()], 1000);
+  await createManyChunked(prisma.timeSlotStock, [...timeSlotByDate.values()], 1000);
+}
+
+// ============================================================
+// Lịch sử vận hành dùng cho dự báo
+// ------------------------------------------------------------
+// Bộ sinh này quyết định chất lượng của toàn bộ tầng dự báo và giá động:
+// model chỉ học được những gì có trong dữ liệu.
+//
+// Bản trước sinh đúng 1 đơn/ngày với 1-3 vé trên sức chứa 90-180 chỗ, nên tỷ
+// lệ lấp đầy lịch sử luôn quanh 2%. Hệ quả dây chuyền: dự báo trả về vài vé,
+// forecastRatio ≈ 0.02, mọi ngày và mọi khung giờ đều rơi dưới ngưỡng vắng
+// khách, và giá động không còn quyết định gì ngoài việc giảm kịch trần.
+//
+// Bản này sinh nhu cầu theo TỶ LỆ LẤP ĐẦY, với các thành phần tách bạch để
+// vừa giống vận hành thật, vừa kiểm chứng được model có học ra đúng các thành
+// phần đó hay không:
+//
+//   occupancy = nền theo điểm × cuối tuần × lễ × mùa hè × xu hướng × nhiễu
+//
+// Nhiễu dùng PRNG có seed cố định theo (điểm, ngày) nên hai lần seed cho ra
+// cùng một bộ số — runbook, smoke test và số liệu trình bày không đổi giữa
+// các lần chạy.
+// ============================================================
+
+// Hồ sơ nhu cầu của từng điểm. Các hệ số được chọn để ba điểm có ba dáng nhu
+// cầu khác nhau: bảo tàng ổn định, du thuyền phụ thuộc mạnh vào cuối tuần,
+// sinh thái phụ thuộc mùa — nếu cả ba giống nhau thì model chỉ cần học một
+// hằng số là đủ và bài toán trở nên vô nghĩa.
+function historyDemandProfiles() {
+  return new Map([
+    [IDS.attractions.museum, {
+      baseOccupancy: 0.36,
+      weekendLift: 1.55,
+      holidayLift: 1.9,
+      summerLift: 1.10,
+      trendPercent: 0.10,
+      checkInHour: 10,
+      products: [
+        { id: IDS.tickets.museumAdult, share: 0.6 },
+        { id: IDS.tickets.museumStudent, share: 0.25 },
+        { id: IDS.tickets.museumChild, share: 0.15 },
+      ],
+      slots: [{ id: `${IDS.attractions.museum}-slot-all-day`, weekdayShare: 1, weekendShare: 1, checkInHour: 10 }],
+    }],
+    [IDS.attractions.cruise, {
+      baseOccupancy: 0.44,
+      weekendLift: 1.75,
+      holidayLift: 2.0,
+      summerLift: 1.05,
+      trendPercent: 0.18,
+      checkInHour: 17,
+      products: [
+        { id: IDS.tickets.cruiseAdult, share: 1 },
+      ],
+      // Suất hoàng hôn luôn được ưa chuộng hơn suất chiều, và khoảng cách giãn
+      // ra vào cuối tuần. Đây chính là quy luật mà slotDemandService phải học
+      // lại được từ TimeSlotStock.
+      slots: [
+        { id: `${IDS.attractions.cruise}-slot-1`, weekdayShare: 0.38, weekendShare: 0.32, checkInHour: 16 },
+        { id: `${IDS.attractions.cruise}-slot-2`, weekdayShare: 0.62, weekendShare: 0.68, checkInHour: 18 },
+      ],
+    }],
+    [IDS.attractions.eco, {
+      baseOccupancy: 0.30,
+      weekendLift: 1.95,
+      holidayLift: 2.1,
+      summerLift: 1.25,
+      trendPercent: 0.14,
+      checkInHour: 9,
+      products: [
+        { id: IDS.tickets.ecoAdult, share: 0.72 },
+        { id: IDS.tickets.ecoChild, share: 0.28 },
+      ],
+      slots: [{ id: `${IDS.attractions.eco}-slot-all-day`, weekdayShare: 1, weekendShare: 1, checkInHour: 9 }],
+    }],
+  ]);
+}
+
+async function createManyChunked(delegate, rows, chunkSize = 500) {
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    await delegate.createMany({ data: rows.slice(index, index + chunkSize) });
   }
 }
 
 async function seedForecastHistory(attractionDefinitions) {
-  const ticketIds = [
-    IDS.tickets.museumAdult,
-    IDS.tickets.cruiseAdult,
-    IDS.tickets.ecoAdult,
-  ];
-  const ticketPrices = new Map([
-    [IDS.tickets.museumAdult, 30000],
-    [IDS.tickets.cruiseAdult, 280000],
-    [IDS.tickets.ecoAdult, 520000],
-  ]);
+  const profiles = historyDemandProfiles();
   const endKey = addDateKeyDays(vietnamDateKey(), -1);
   const startKey = addDateKeyDays(endKey, -(HISTORY_DAYS - 1));
   const reservations = [];
   const bookings = [];
   const payments = [];
   const ticketInstances = [];
+  const dailyStockRows = new Map();
+  const attractionStockRows = new Map();
+  const timeSlotStockRows = new Map();
 
-  for (let dayIndex = 0; dayIndex < HISTORY_DAYS; dayIndex += 1) {
-    const visitDateKey = addDateKeyDays(startKey, dayIndex);
-    const visitDate = dateOnly(visitDateKey);
-    const weekday = visitDate.getUTCDay();
-    const weekend = weekday === 0 || weekday === 6;
-    for (let attractionIndex = 0; attractionIndex < attractionDefinitions.length; attractionIndex += 1) {
-      const attraction = attractionDefinitions[attractionIndex];
-      const ticketId = ticketIds[attractionIndex];
-      const price = ticketPrices.get(ticketId);
-      const demandWave = Math.sin((dayIndex + attractionIndex * 4) / 8) > 0 ? 1 : 0;
-      const quantity = Math.min(4, 1 + (weekend ? 1 : 0) + demandWave);
-      const suffix = `${attractionIndex + 1}-${visitDateKey.replaceAll('-', '')}`;
-      const reservationId = fixtureId('history-reservation', suffix);
-      const bookingId = fixtureId('history-booking', suffix);
-      const paymentId = fixtureId('history-payment', suffix);
-      const historyCustomer = BACKGROUND_CUSTOMERS[
-        (dayIndex * attractionDefinitions.length + attractionIndex) % BACKGROUND_CUSTOMERS.length
-      ];
-      const createdAt = new Date(visitDate.getTime() - (7 + attractionIndex) * DAY_MS);
-      const subtotal = price * quantity;
-      const { commission, partnerNet } = commissionAmounts(subtotal, 0.1);
-      const noShow = (dayIndex + attractionIndex * 7) % 37 === 0;
+  for (let attractionIndex = 0; attractionIndex < attractionDefinitions.length; attractionIndex += 1) {
+    const attraction = attractionDefinitions[attractionIndex];
+    const profile = profiles.get(attraction.id);
+    if (!profile) {
+      throw new Error(`Thiếu hồ sơ nhu cầu lịch sử cho điểm ${attraction.title}.`);
+    }
 
-      reservations.push({
-        id: reservationId,
-        userId: historyCustomer.id,
-        ticketProductId: ticketId,
-        date: visitDate,
-        quantity,
-        snapshotAdmissionCount: Number(attraction.tickets[0].admissionCount ?? 1),
-        status: 'CONFIRMED',
-        expiresAt: new Date(createdAt.getTime() + 15 * 60 * 1000),
-        snapshotUnitPrice: price,
-        snapshotRefundPolicy: 'FREE_CANCELLATION',
-        snapshotRefundFeeRate: 0,
-        snapshotRefundCutoffHours: 24,
-        snapshotCommissionRate: 0.1,
-        createdAt,
+    const capacity = Math.max(1, Number(attraction.defaultCapacity || 1));
+    const ticketById = new Map(attraction.tickets.map((ticket) => [ticket.id, ticket]));
+    const productChoices = profile.products.map((entry) => {
+      const ticket = ticketById.get(entry.id);
+      if (!ticket) throw new Error(`Gói vé ${entry.id} không thuộc điểm ${attraction.title}.`);
+      return { ...entry, ticket };
+    });
+    // Khung giờ của bảo tàng/sinh thái là suất cả ngày (sức chứa = sức chứa
+    // ngày); du thuyền có hai suất 45 chỗ.
+    const slots = profile.slots.map((slot) => ({
+      ...slot,
+      capacity: attraction.id === IDS.attractions.cruise ? 45 : capacity,
+    }));
+
+    for (let dayIndex = 0; dayIndex < HISTORY_DAYS; dayIndex += 1) {
+      const visitDateKey = addDateKeyDays(startKey, dayIndex);
+      const visitDate = dateOnly(visitDateKey);
+      const random = seededGenerator(`${attraction.id}:${visitDateKey}`);
+
+      // Kế hoạch nhu cầu của ngày dùng chung với script sinh dataset huấn
+      // luyện, nên dữ liệu đem train luôn đúng bằng dữ liệu đang chạy.
+      const plan = planDayDemand({
+        profile,
+        dateKey: visitDateKey,
+        dayIndex,
+        historyDays: HISTORY_DAYS,
+        capacity,
+        slots,
+        productChoices,
+        random,
       });
-      bookings.push({
-        id: bookingId,
-        userId: historyCustomer.id,
-        reservationId,
-        subtotalAmount: subtotal,
-        discountAmount: 0,
-        totalAmount: subtotal,
-        platformDiscountAmountSnapshot: 0,
-        partnerDiscountAmountSnapshot: 0,
-        commissionBaseAmountSnapshot: subtotal,
-        status: noShow ? 'NO_SHOW' : 'COMPLETED',
-        paymentMethod: 'vnpay',
-        fullName: historyCustomer.fullName,
-        email: historyCustomer.email,
-        phone: historyCustomer.phone,
-        note: 'Đơn đặt vé trực tuyến.',
-        snapshotAt: createdAt,
-        snapshotAttractionId: attraction.id,
-        snapshotAttractionTitle: attraction.title,
-        snapshotAttractionAddress: attraction.address,
-        snapshotAttractionCity: attraction.city,
-        snapshotAttractionDistrict: attraction.district,
-        snapshotAttractionImage: attraction.imageUrl,
-        snapshotTicketName: attraction.tickets[0].name,
-        snapshotTicketType: attraction.tickets[0].type,
-        snapshotAdmissionCount: Number(attraction.tickets[0].admissionCount ?? 1),
-        snapshotTicketDescription: 'Gói vé tiêu chuẩn đã bao gồm quyền vào cửa.',
-        snapshotUnitPrice: price,
-        snapshotRefundPolicy: 'FREE_CANCELLATION',
-        snapshotRefundFeeRate: 0,
-        snapshotRefundCutoffHours: 24,
-        snapshotVisitDate: visitDate,
-        commissionRateSnapshot: 0.1,
-        commissionAmountSnapshot: commission,
-        partnerNetAmountSnapshot: partnerNet,
-        platformNetRevenueSnapshot: commission,
-        isForecastTrainingSample: true,
-        createdAt,
-      });
-      payments.push({
-        id: paymentId,
-        bookingId,
-        amount: subtotal,
-        paymentGateway: 'VNPAY',
-        transactionId: gatewayReference(`history-payment-${suffix}`),
-        status: 'SUCCESS',
-        paidAt: new Date(createdAt.getTime() + 5 * 60 * 1000),
-        rawResponse: { source: 'demo_booking_history', disclaimer: 'Không phải giao dịch thật.' },
-        createdAt,
-      });
-      for (let index = 0; index < quantity; index += 1) {
-        ticketInstances.push({
-          id: fixtureId('history-ticket', `${suffix}-${index + 1}`),
-          bookingId,
-          ticketProductId: ticketId,
-          qrCodeToken: qrTokenForHistory(suffix, index),
-          status: noShow ? 'EXPIRED' : 'USED',
-          checkedInAt: noShow ? null : atVietnamTime(visitDateKey, 10, 0),
-          checkedInById: noShow ? null : IDS.users.gateStaff,
-          createdAt,
-        });
+
+      let bookingSeq = 0;
+      {
+        for (const order of plan.orders) {
+          const { slot, quantity, leadDays, noShow } = order;
+          bookingSeq += 1;
+
+          const ticket = order.product.ticket;
+          const price = Number(ticket.sellingPrice);
+          const admissionCount = Number(ticket.admissionCount ?? 1);
+          const suffix = `${attractionIndex + 1}-${visitDateKey.replaceAll('-', '')}-${bookingSeq}`;
+          const reservationId = fixtureId('history-reservation', suffix);
+          const bookingId = fixtureId('history-booking', suffix);
+          const paymentId = fixtureId('history-payment', suffix);
+          const historyCustomer = BACKGROUND_CUSTOMERS[
+            Math.floor(order.customerIndex * BACKGROUND_CUSTOMERS.length)
+          ];
+          const createdAt = new Date(
+            visitDate.getTime() - leadDays * DAY_MS + 9 * 60 * 60 * 1000,
+          );
+          const subtotal = price * quantity;
+          const { commission, partnerNet } = commissionAmounts(subtotal, 0.1);
+
+          reservations.push({
+            id: reservationId,
+            userId: historyCustomer.id,
+            ticketProductId: ticket.id,
+            timeSlotId: slots.length > 1 ? slot.id : null,
+            date: visitDate,
+            quantity,
+            snapshotAdmissionCount: admissionCount,
+            status: 'CONFIRMED',
+            expiresAt: new Date(createdAt.getTime() + 15 * 60 * 1000),
+            snapshotUnitPrice: price,
+            snapshotRefundPolicy: ticket.refundPolicy,
+            snapshotRefundFeeRate: Number(ticket.refundFeeRate || 0),
+            snapshotRefundCutoffHours: 24,
+            snapshotCommissionRate: 0.1,
+            createdAt,
+          });
+          bookings.push({
+            id: bookingId,
+            userId: historyCustomer.id,
+            reservationId,
+            subtotalAmount: subtotal,
+            discountAmount: 0,
+            totalAmount: subtotal,
+            platformDiscountAmountSnapshot: 0,
+            partnerDiscountAmountSnapshot: 0,
+            commissionBaseAmountSnapshot: subtotal,
+            status: noShow ? 'NO_SHOW' : 'COMPLETED',
+            paymentMethod: 'vnpay',
+            fullName: historyCustomer.fullName,
+            email: historyCustomer.email,
+            phone: historyCustomer.phone,
+            note: 'Đơn đặt vé trực tuyến.',
+            snapshotAt: createdAt,
+            snapshotAttractionId: attraction.id,
+            snapshotAttractionTitle: attraction.title,
+            snapshotAttractionAddress: attraction.address,
+            snapshotAttractionCity: attraction.city,
+            snapshotAttractionDistrict: attraction.district,
+            snapshotAttractionImage: attraction.imageUrl,
+            snapshotTicketName: ticket.name,
+            snapshotTicketType: ticket.type,
+            snapshotAdmissionCount: admissionCount,
+            snapshotTicketDescription: `${ticket.name}; sử dụng đúng ngày, khung giờ và điều kiện độ tuổi đã chọn.`,
+            snapshotUnitPrice: price,
+            snapshotRefundPolicy: ticket.refundPolicy,
+            snapshotRefundFeeRate: Number(ticket.refundFeeRate || 0),
+            snapshotRefundCutoffHours: 24,
+            snapshotVisitDate: visitDate,
+            commissionRateSnapshot: 0.1,
+            commissionAmountSnapshot: commission,
+            partnerNetAmountSnapshot: partnerNet,
+            platformNetRevenueSnapshot: commission,
+            isForecastTrainingSample: true,
+            createdAt,
+          });
+          payments.push({
+            id: paymentId,
+            bookingId,
+            amount: subtotal,
+            paymentGateway: 'VNPAY',
+            transactionId: gatewayReference(`history-payment-${suffix}`),
+            status: 'SUCCESS',
+            paidAt: new Date(createdAt.getTime() + 5 * 60 * 1000),
+            rawResponse: { source: 'demo_booking_history', disclaimer: 'Không phải giao dịch thật.' },
+            createdAt,
+          });
+          for (let index = 0; index < quantity; index += 1) {
+            ticketInstances.push({
+              id: fixtureId('history-ticket', `${suffix}-${index + 1}`),
+              bookingId,
+              ticketProductId: ticket.id,
+              qrCodeToken: qrTokenForHistory(suffix, index),
+              status: noShow ? 'EXPIRED' : 'USED',
+              checkedInAt: noShow
+                ? null
+                : atVietnamTime(visitDateKey, slot.checkInHour ?? profile.checkInHour, (index * 7) % 60),
+              checkedInById: noShow ? null : IDS.users.gateStaff,
+              createdAt,
+            });
+          }
+
+          // Sổ tồn kho của ngày đã qua. Không có các dòng này thì lịch sử bán
+          // vé tồn tại mà kho lại trống, và slotDemandService không có gì để
+          // học tỷ trọng khung giờ.
+          const units = quantity * admissionCount;
+          const productKey = `${ticket.id}|${visitDateKey}`;
+          const productRow = dailyStockRows.get(productKey) || {
+            ticketProductId: ticket.id,
+            date: visitDate,
+            capacity,
+            bookedQuantity: 0,
+            heldQuantity: 0,
+          };
+          productRow.bookedQuantity += units;
+          dailyStockRows.set(productKey, productRow);
+
+          const attractionKey = `${attraction.id}|${visitDateKey}`;
+          const attractionRow = attractionStockRows.get(attractionKey) || {
+            attractionId: attraction.id,
+            date: visitDate,
+            capacity,
+            bookedQty: 0,
+            heldQty: 0,
+          };
+          attractionRow.bookedQty += units;
+          attractionStockRows.set(attractionKey, attractionRow);
+
+          const slotKey = `${slot.id}|${visitDateKey}`;
+          const slotRow = timeSlotStockRows.get(slotKey) || {
+            timeSlotId: slot.id,
+            date: visitDate,
+            bookedQty: 0,
+            heldQty: 0,
+          };
+          slotRow.bookedQty += units;
+          timeSlotStockRows.set(slotKey, slotRow);
+        }
       }
     }
   }
 
-  await prisma.reservation.createMany({ data: reservations });
-  await prisma.booking.createMany({ data: bookings });
-  await prisma.payment.createMany({ data: payments });
-  await prisma.ticketInstance.createMany({ data: ticketInstances });
+  await createManyChunked(prisma.reservation, reservations);
+  await createManyChunked(prisma.booking, bookings, 300);
+  await createManyChunked(prisma.payment, payments);
+  await createManyChunked(prisma.ticketInstance, ticketInstances, 1000);
+  await createManyChunked(prisma.dailyStock, [...dailyStockRows.values()], 1000);
+  await createManyChunked(prisma.attractionDailyStock, [...attractionStockRows.values()], 1000);
+  await createManyChunked(prisma.timeSlotStock, [...timeSlotStockRows.values()], 1000);
 
   return bookings;
+}
+
+// ============================================================
+// Nhu cầu của những ngày sắp tới
+// ------------------------------------------------------------
+// Không có phần này thì mọi ngày trong tầm dự báo đều có tồn kho trống trơn,
+// và tầng giá động buộc phải kết luận "sắp tới vắng khách" cho toàn bộ lịch —
+// dù model dự báo nói ngược lại. Đó chính là lý do giá luôn bị đẩy về mức
+// giảm kịch trần: không phải model sai, mà là dữ liệu demo không có tương lai.
+//
+// Số vé đã bán cho một ngày còn L ngày nữa được suy ra từ đúng hai thứ đã
+// dùng cho lịch sử: tỷ lệ lấp đầy cuối cùng của ngày đó, và nhịp đặt chỗ
+// paceShareAtLead(L). Nhờ vậy đường cong đặt chỗ mà backend học từ lịch sử
+// khớp với tồn kho đang nhìn thấy, và câu "ngày mai sẽ kín dù giờ mới bán
+// 68%" là một suy luận đúng chứ không phải trùng hợp.
+//
+// Các đơn này được đánh dấu isForecastTrainingSample nên không xuất hiện
+// trong bất kỳ danh sách, báo cáo hay KPI nào; chúng chỉ tồn tại trong sổ tồn
+// kho, đúng vai trò "chỗ đã có người giữ".
+// ============================================================
+const FORWARD_DEMAND_DAYS = 21;
+
+async function seedForwardDemand(attractionDefinitions, closedDateKeys = new Set()) {
+  const profiles = historyDemandProfiles();
+  const todayKey = vietnamDateKey();
+  const reservations = [];
+  const bookings = [];
+  const payments = [];
+  const ticketInstances = [];
+  const dailyStockRows = new Map();
+  const attractionStockRows = new Map();
+  const timeSlotStockRows = new Map();
+
+  for (let attractionIndex = 0; attractionIndex < attractionDefinitions.length; attractionIndex += 1) {
+    const attraction = attractionDefinitions[attractionIndex];
+    const profile = profiles.get(attraction.id);
+    if (!profile) continue;
+
+    const capacity = Math.max(1, Number(attraction.defaultCapacity || 1));
+    const ticketById = new Map(attraction.tickets.map((ticket) => [ticket.id, ticket]));
+    const productChoices = profile.products.map((entry) => ({
+      ...entry,
+      ticket: ticketById.get(entry.id),
+    }));
+    const slots = profile.slots.map((slot) => ({
+      ...slot,
+      capacity: attraction.id === IDS.attractions.cruise ? 45 : capacity,
+    }));
+
+    for (let lead = 1; lead <= FORWARD_DEMAND_DAYS; lead += 1) {
+      const visitDateKey = addDateKeyDays(todayKey, lead);
+      if (closedDateKeys.has(`${attraction.id}|${visitDateKey}`)) continue;
+      const visitDate = dateOnly(visitDateKey);
+      const random = seededGenerator(`forward:${attraction.id}:${visitDateKey}`);
+
+      // Số chỗ đã bán của một ngày còn `lead` ngày nữa = tỷ lệ lấp đầy cuối
+      // cùng của ngày đó × nhịp đặt chỗ tại mốc đó. Dùng đúng hàm nhịp mà
+      // lịch sử đã dùng, nên đường cong backend học được khớp với tồn kho.
+      const plan = planDayDemand({
+        profile,
+        dateKey: visitDateKey,
+        dayIndex: HISTORY_DAYS - 1 + lead,
+        historyDays: HISTORY_DAYS,
+        capacity,
+        slots,
+        productChoices,
+        random,
+        paceRatio: paceShareAtLead(lead),
+      });
+      if (plan.orders.length === 0) continue;
+
+      let bookingSeq = 0;
+      {
+        for (const order of plan.orders) {
+          const { slot, quantity } = order;
+          bookingSeq += 1;
+
+          const ticket = order.product.ticket;
+          if (!ticket) break;
+          const price = Number(ticket.sellingPrice);
+          const admissionCount = Number(ticket.admissionCount ?? 1);
+          const suffix = `${attractionIndex + 1}-${visitDateKey.replaceAll('-', '')}-${bookingSeq}`;
+          const reservationId = fixtureId('forward-reservation', suffix);
+          const bookingId = fixtureId('forward-booking', suffix);
+          const customer = BACKGROUND_CUSTOMERS[
+            Math.floor(order.customerIndex * BACKGROUND_CUSTOMERS.length)
+          ];
+          // Đơn đã đặt rồi nên thời điểm đặt phải nằm trong quá khứ.
+          const createdAt = new Date(
+            Date.now() - (1 + Math.floor(order.customerIndex * 72)) * 60 * 60 * 1000,
+          );
+          const subtotal = price * quantity;
+          const { commission, partnerNet } = commissionAmounts(subtotal, 0.1);
+
+          reservations.push({
+            id: reservationId,
+            userId: customer.id,
+            ticketProductId: ticket.id,
+            timeSlotId: slots.length > 1 ? slot.id : null,
+            date: visitDate,
+            quantity,
+            snapshotAdmissionCount: admissionCount,
+            status: 'CONFIRMED',
+            expiresAt: new Date(createdAt.getTime() + 15 * 60 * 1000),
+            snapshotUnitPrice: price,
+            snapshotRefundPolicy: ticket.refundPolicy,
+            snapshotRefundFeeRate: Number(ticket.refundFeeRate || 0),
+            snapshotRefundCutoffHours: 24,
+            snapshotCommissionRate: 0.1,
+            createdAt,
+          });
+          bookings.push({
+            id: bookingId,
+            userId: customer.id,
+            reservationId,
+            subtotalAmount: subtotal,
+            discountAmount: 0,
+            totalAmount: subtotal,
+            platformDiscountAmountSnapshot: 0,
+            partnerDiscountAmountSnapshot: 0,
+            commissionBaseAmountSnapshot: subtotal,
+            status: 'CONFIRMED',
+            paymentMethod: 'vnpay',
+            fullName: customer.fullName,
+            email: customer.email,
+            phone: customer.phone,
+            note: 'Đơn đặt vé trực tuyến.',
+            snapshotAt: createdAt,
+            snapshotAttractionId: attraction.id,
+            snapshotAttractionTitle: attraction.title,
+            snapshotAttractionAddress: attraction.address,
+            snapshotAttractionCity: attraction.city,
+            snapshotAttractionDistrict: attraction.district,
+            snapshotAttractionImage: attraction.imageUrl,
+            snapshotTicketName: ticket.name,
+            snapshotTicketType: ticket.type,
+            snapshotAdmissionCount: admissionCount,
+            snapshotTicketDescription: `${ticket.name}; sử dụng đúng ngày, khung giờ và điều kiện độ tuổi đã chọn.`,
+            snapshotUnitPrice: price,
+            snapshotRefundPolicy: ticket.refundPolicy,
+            snapshotRefundFeeRate: Number(ticket.refundFeeRate || 0),
+            snapshotRefundCutoffHours: 24,
+            snapshotVisitDate: visitDate,
+            commissionRateSnapshot: 0.1,
+            commissionAmountSnapshot: commission,
+            partnerNetAmountSnapshot: partnerNet,
+            platformNetRevenueSnapshot: commission,
+            isForecastTrainingSample: true,
+            createdAt,
+          });
+          payments.push({
+            id: fixtureId('forward-payment', suffix),
+            bookingId,
+            amount: subtotal,
+            paymentGateway: 'VNPAY',
+            transactionId: gatewayReference(`forward-payment-${suffix}`),
+            status: 'SUCCESS',
+            paidAt: new Date(createdAt.getTime() + 5 * 60 * 1000),
+            rawResponse: { source: 'demo_booking_history', disclaimer: 'Không phải giao dịch thật.' },
+            createdAt,
+          });
+          for (let index = 0; index < quantity; index += 1) {
+            ticketInstances.push({
+              id: fixtureId('forward-ticket', `${suffix}-${index + 1}`),
+              bookingId,
+              ticketProductId: ticket.id,
+              qrCodeToken: stableUuid('ticket-qr-forward', `${suffix}:${index}`),
+              status: 'VALID',
+              createdAt,
+            });
+          }
+
+          const units = quantity * admissionCount;
+          const productKey = `${ticket.id}|${visitDateKey}`;
+          const productRow = dailyStockRows.get(productKey) || {
+            ticketProductId: ticket.id,
+            date: visitDate,
+            capacity,
+            bookedQuantity: 0,
+            heldQuantity: 0,
+          };
+          productRow.bookedQuantity += units;
+          dailyStockRows.set(productKey, productRow);
+
+          const attractionKey = `${attraction.id}|${visitDateKey}`;
+          const attractionRow = attractionStockRows.get(attractionKey) || {
+            attractionId: attraction.id,
+            date: visitDate,
+            capacity,
+            bookedQty: 0,
+            heldQty: 0,
+          };
+          attractionRow.bookedQty += units;
+          attractionStockRows.set(attractionKey, attractionRow);
+
+          const slotKey = `${slot.id}|${visitDateKey}`;
+          const slotRow = timeSlotStockRows.get(slotKey) || {
+            timeSlotId: slot.id,
+            date: visitDate,
+            bookedQty: 0,
+            heldQty: 0,
+          };
+          slotRow.bookedQty += units;
+          timeSlotStockRows.set(slotKey, slotRow);
+        }
+      }
+    }
+  }
+
+  await createManyChunked(prisma.reservation, reservations);
+  await createManyChunked(prisma.booking, bookings, 300);
+  await createManyChunked(prisma.payment, payments);
+  await createManyChunked(prisma.ticketInstance, ticketInstances, 1000);
+
+  return {
+    bookingCount: bookings.length,
+    dailyStockRows,
+    attractionStockRows,
+    timeSlotStockRows,
+  };
 }
 
 async function seedSettlements(scenarioBookings) {
@@ -2521,7 +2947,10 @@ async function seedAuditLogs() {
 }
 
 async function prepareForecastCache() {
-  const { getForecastForAttraction } = require('../src/services/forecastService');
+  const {
+    getForecastForAttraction,
+    runForecastBacktest,
+  } = require('../src/services/forecastService');
   const results = [];
   for (const attractionId of [
     IDS.attractions.museum,
@@ -2529,15 +2958,24 @@ async function prepareForecastCache() {
     IDS.attractions.eco,
   ]) {
     try {
+      // Phải phủ hết tầm nhìn mặc định của chính sách giá động (lookaheadDays
+      // = 14). Nếu chỉ dựng 7 ngày thì nửa sau bảng giá xem trước không có dự
+      // báo và tự động rơi về tín hiệu tồn kho, trông như model ngừng hoạt động.
       const result = await getForecastForAttraction(attractionId, {
-        forecastDays: 7,
+        forecastDays: 14,
         forceRefresh: true,
       });
+      // Backtest walk-forward: dựng lại các dự báo mà hệ thống LẼ RA đã phát ra
+      // trong 21 ngày vừa qua, mỗi ngày chỉ được nhìn lịch sử trước đó, rồi so
+      // với doanh thu thực. Không có bước này thì panel độ chính xác trống rỗng
+      // suốt buổi demo, dù toàn bộ dữ liệu cần thiết đã có sẵn.
+      const backtest = await runForecastBacktest(attractionId, { days: 21 });
       results.push({
         attractionId,
         method: result.method,
         trainingSource: result.trainingSource,
         points: result.forecast.length,
+        backtestDays: backtest.evaluated,
       });
     } catch (error) {
       results.push({ attractionId, error: error.message });
@@ -2974,9 +3412,15 @@ async function main() {
   const attractions = await seedCatalog();
   console.log(`Đang tạo ${HISTORY_DAYS} ngày lịch sử doanh thu cho ba điểm vận hành...`);
   await seedForecastHistory(attractions);
+  console.log(`Đang tạo nhu cầu đã đặt cho ${FORWARD_DEMAND_DAYS} ngày sắp tới...`);
+  const forwardDemand = await seedForwardDemand(
+    attractions,
+    // Ngày bảo trì của du thuyền không mở bán, không được có chỗ đã bán.
+    new Set([`${IDS.attractions.cruise}|${addDateKeyDays(vietnamDateKey(), 14)}`]),
+  );
   console.log('Đang tạo booking theo trạng thái, QR, refund và review...');
   const scenarioBookings = await seedScenarioBookings();
-  await seedInventory(scenarioBookings);
+  await seedInventory(scenarioBookings, forwardDemand);
   console.log('Đang tạo 288 quan sát có nhãn cho Live AI và chính sách SmartQueue...');
   const liveSignals = await seedLiveAutopilotSignals({
     attractionIds: [IDS.attractions.museum, IDS.attractions.cruise, IDS.attractions.eco],
@@ -3023,12 +3467,14 @@ if (require.main === module) {
 module.exports = {
   ACCOUNTS,
   BACKGROUND_CUSTOMERS,
+  HISTORY_DAYS,
   IDS,
   MARKER,
   OPERATIONAL_VALUES,
   PREFIX,
   addDateKeyDays,
   assertDemoReady,
+  historyDemandProfiles,
   buildSubmittedSnapshot,
   fixtureId,
   scenarioBookingDefinitions,

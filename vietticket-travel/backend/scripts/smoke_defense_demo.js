@@ -294,6 +294,8 @@ async function run() {
       'Admin tạm ẩn địa điểm đang kinh doanh',
       admin.put(`/api/admin/attractions/${IDS.attractions.museum}/hide`).send({
         reason: 'Tạm ẩn để kiểm tra phản ánh về thời gian mở cửa trong ngày lễ.',
+        // Bắt buộc từ commit "xử lý sự cố an toàn": admin phải xác nhận đã có
+        // phương án cho booking đang mở trước khi đình chỉ điểm đang kinh doanh.
         acknowledgeCustomerImpact: true,
       }),
     );

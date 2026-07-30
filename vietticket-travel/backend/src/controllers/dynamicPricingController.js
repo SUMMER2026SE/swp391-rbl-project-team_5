@@ -8,6 +8,10 @@ const {
   previewPricing,
   savePolicy,
 } = require('../services/dynamicPricingService');
+const {
+  getForecastAccuracy,
+  getModelQuality,
+} = require('../services/forecastService');
 
 // Chỉ những field này được nhận từ client. Mọi field lạ bị bỏ qua để đối tác
 // không thể ghi đè cột hệ thống qua payload.
@@ -128,7 +132,26 @@ async function getImpactReport(req, res, next) {
   }
 }
 
+// GET /api/partner/attractions/:id/forecast-accuracy?days=30
+//
+// Trả về HAI con số tách bạch: độ chính xác thực tế của các dự báo đã phát ra
+// cho chính điểm này, và chỉ số holdout của model kèm baseline. Gộp chúng làm
+// một là cách nhanh nhất để nói sai về năng lực của hệ thống.
+async function getForecastAccuracyReport(req, res, next) {
+  try {
+    const attractionId = await assertPartnerAttraction(req);
+    const [realized, model] = await Promise.all([
+      getForecastAccuracy(attractionId, { days: req.query.days }),
+      getModelQuality(),
+    ]);
+    return res.json({ success: true, data: { realized, model } });
+  } catch (error) {
+    return fail(res, error, next);
+  }
+}
+
 module.exports = {
+  getForecastAccuracyReport,
   getImpactReport,
   getPricingPolicy,
   getPricingPreview,

@@ -63,13 +63,16 @@ def calendar_features(d: date) -> dict:
     }
 
 
-def lag_and_rolling_features(history_revenue: Sequence[float]) -> dict:
-    """history_revenue: doanh thu các ngày TRƯỚC ngày cần dự báo, sắp xếp
-    tăng dần theo thời gian (phần tử cuối = ngày ngay trước target).
-    Nếu lịch sử ngắn hơn window cần thiết, dùng mean của phần có sẵn
-    (hoặc 0 nếu rỗng hoàn toàn) để tránh NaN.
+def lag_and_rolling_features(history_values: Sequence[float]) -> dict:
+    """history_values: giá trị chuỗi thời gian của các ngày TRƯỚC ngày cần dự
+    báo, sắp xếp tăng dần (phần tử cuối = ngày ngay trước target).
+
+    Hàm này không quan tâm chuỗi đó là doanh thu hay số vé — cả hai model đều
+    dùng chung một bộ feature, chỉ khác chuỗi đầu vào. Nếu lịch sử ngắn hơn
+    window cần thiết, dùng mean của phần có sẵn (hoặc 0 nếu rỗng hoàn toàn)
+    để tránh NaN.
     """
-    arr = np.asarray(history_revenue, dtype=float)
+    arr = np.asarray(history_values, dtype=float)
 
     def lag(n):
         return float(arr[-n]) if len(arr) >= n else (float(arr.mean()) if len(arr) else 0.0)
@@ -112,7 +115,7 @@ def static_attraction_features(
 
 def build_feature_row(
     target_date: date,
-    history_revenue: Sequence[float],
+    history_values: Sequence[float],
     tier: str,
     city_encoded: float,
     capacity: int,
@@ -122,7 +125,7 @@ def build_feature_row(
 ) -> dict:
     row = {}
     row.update(calendar_features(target_date))
-    row.update(lag_and_rolling_features(history_revenue))
+    row.update(lag_and_rolling_features(history_values))
     row.update(
         static_attraction_features(
             tier, city_encoded, capacity, avg_ticket_price, rating, num_reviews

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 import PartnerLayout from '../components/partner/PartnerLayout.jsx'
 import {
+  getForecastAccuracy,
   getPricingImpact,
   getPricingPolicy,
   getPricingPreview,
@@ -54,6 +55,7 @@ function PartnerDynamicPricingPage() {
   const [form, setForm] = useState(null)
   const [preview, setPreview] = useState(null)
   const [impact, setImpact] = useState(null)
+  const [accuracy, setAccuracy] = useState(null)
   const [loading, setLoading] = useState(true)
   // Điểm tham quan mà dữ liệu bên phải đang thuộc về. Lệch với lựa chọn hiện
   // tại nghĩa là đang tải — không cần cờ loading riêng.
@@ -83,18 +85,23 @@ function PartnerDynamicPricingPage() {
       getPricingPolicy(attractionId),
       getPricingPreview(attractionId, 14),
       getPricingImpact(attractionId, 30),
+      // Độ chính xác phụ thuộc ml-service; hỏng phần này không được kéo sập cả
+      // trang cấu hình giá.
+      getForecastAccuracy(attractionId, 30).catch(() => null),
     ])
-      .then(([policyRes, previewRes, impactRes]) => {
+      .then(([policyRes, previewRes, impactRes, accuracyRes]) => {
         if (cancelled) return
         setForm(policyRes.data)
         setPreview(previewRes.data)
         setImpact(impactRes.data)
+        setAccuracy(accuracyRes?.data || null)
       })
       .catch((error) => {
         if (cancelled) return
         setForm(null)
         setPreview(null)
         setImpact(null)
+        setAccuracy(null)
         toast.error(error.message || 'Không thể tải cấu hình giá động.')
       })
       .finally(() => {
@@ -326,6 +333,7 @@ function PartnerDynamicPricingPage() {
             </form>
 
             <div className="space-y-6">
+              <AccuracyPanel accuracy={accuracy} />
               <ImpactPanel impact={impact} />
               <PreviewPanel preview={preview} loading={loadingDetail} />
             </div>
@@ -333,6 +341,138 @@ function PartnerDynamicPricingPage() {
         )}
       </div>
     </PartnerLayout>
+  )
+}
+
+/**
+ * Độ chính xác của dự báo.
+ *
+ * Trình bày hai con số tách bạch và không được gộp:
+ *   - Thực tế: so dự báo đã phát ra với doanh thu thật của chính những ngày đó.
+ *   - Holdout: đo lúc huấn luyện, luôn kèm baseline "trung bình theo thứ" để
+ *     người đọc biết model có hơn một phép tính đơn giản hay không.
+ */
+function AccuracyPanel({ accuracy }) {
+  if (!accuracy) return null
+  const { realized, model } = accuracy
+  const metrics = model?.metrics || null
+
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+      <h2 className="text-sm font-black uppercase tracking-wide text-slate-500">
+        Độ chính xác của dự báo
+      </h2>
+
+      <div className="mt-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+          Đo trên vận hành thật ({realized?.days || 30} ngày gần nhất)
+        </p>
+        {realized?.comparedDays > 0 ? (
+          <>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <StatTile label="Sai lệch trung bình (MAPE)" value={`${realized.mape}%`} />
+              <StatTile label="Sai lệch theo quy mô (WAPE)" value={`${realized.wape}%`} />
+              <StatTile
+                label={realized.meanBias >= 0 ? 'Xu hướng dự báo cao hơn' : 'Xu hướng dự báo thấp hơn'}
+                value={formatSignedVnd(realized.meanBias)}
+                tone={realized.meanBias >= 0 ? 'down' : 'up'}
+              />
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              So {realized.comparedDays} ngày đã có doanh thu thực với dự báo đã lưu cho chính những
+              ngày đó.
+              {realized.skippedDays > 0 &&
+                ` Bỏ qua ${realized.skippedDays} ngày chưa phát sinh doanh thu để không tính thành sai lệch 100%.`}
+              {!realized.sufficient &&
+                ' Số ngày đối chiếu còn ít, chưa đủ để kết luận về độ chính xác.'}
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-slate-500">
+            Chưa có ngày nào vừa có dự báo vừa có doanh thu thực để đối chiếu. Con số sẽ xuất hiện
+            sau khi các ngày đã dự báo trôi qua và được đối soát.
+          </p>
+        )}
+      </div>
+
+      <div className="mt-5 border-t border-slate-100 pt-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+          Đo lúc huấn luyện (tập kiểm tra tách theo thời gian)
+        </p>
+        {metrics ? (
+          <>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[420px] text-left text-sm">
+                <thead>
+                  <tr className="text-xs uppercase tracking-wide text-slate-400">
+                    <th className="pb-2">Chỉ số</th>
+                    <th className="pb-2">Model</th>
+                    <th className="pb-2">Baseline trung bình theo thứ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  <MetricRow
+                    label="Doanh thu — MAPE"
+                    model={metrics.mape_observed_days}
+                    baseline={metrics.baseline_mape_observed_days}
+                  />
+                  <MetricRow
+                    label="Doanh thu — WAPE"
+                    model={metrics.wape}
+                    baseline={metrics.baseline_wape}
+                  />
+                  <MetricRow
+                    label="Số vé — WAPE"
+                    model={metrics.tickets_wape}
+                    baseline={metrics.baseline_tickets_wape}
+                  />
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">
+              {metrics.beats_baseline_wape
+                ? 'Model đang tốt hơn baseline trên tập kiểm tra.'
+                : 'Model CHƯA tốt hơn baseline; hệ thống vẫn giữ cơ chế hạ về baseline và giảm độ tin cậy khi dữ liệu mỏng.'}
+              {Number.isFinite(metrics.tickets_wape_derived_from_revenue) && (
+                <>
+                  {' '}Nếu suy số vé từ doanh thu chia giá trung bình như cách cũ, sai lệch là{' '}
+                  {Number(metrics.tickets_wape_derived_from_revenue).toFixed(2)}% — lý do số vé được
+                  dự báo bằng một model riêng.
+                </>
+              )}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              Model {model.modelVersion} · huấn luyện trên {metrics.num_train_samples} mẫu, kiểm tra
+              trên {metrics.num_test_samples} mẫu.
+            </p>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-slate-500">
+            {model?.warning || 'Chưa đọc được chỉ số của model.'}
+          </p>
+        )}
+        {metrics && model?.warning && (
+          <p className="mt-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+            {model.warning}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function MetricRow({ label, model, baseline }) {
+  const format = (value) => (Number.isFinite(Number(value)) ? `${Number(value).toFixed(2)}%` : '—')
+  const better = Number.isFinite(Number(model)) && Number.isFinite(Number(baseline))
+    && Number(model) < Number(baseline)
+  return (
+    <tr>
+      <td className="py-2 font-semibold text-slate-600">{label}</td>
+      <td className={`py-2 font-black ${better ? 'text-[#006068]' : 'text-slate-800'}`}>
+        {format(model)}
+      </td>
+      <td className="py-2 text-slate-500">{format(baseline)}</td>
+    </tr>
   )
 }
 
@@ -372,13 +512,19 @@ function ImpactPanel({ impact }) {
             />
           </div>
           <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm font-bold text-slate-700">
-            Chênh lệch doanh thu ròng:{' '}
+            Chênh lệch so với giá niêm yết:{' '}
             <span className={summary.netRevenueDelta >= 0 ? 'text-[#006068]' : 'text-[#ba1a1a]'}>
               {formatSignedVnd(summary.netRevenueDelta)}
             </span>
             <span className="ml-2 font-normal text-slate-500">
               ({summary.peakCount} lượt cao điểm / {summary.quietCount} lượt giờ vắng)
             </span>
+          </p>
+          {/* Ranh giới phương pháp phải nằm ngay cạnh con số, không nằm ở
+              chú thích cuối trang: đây là chênh lệch giá, không phải doanh thu
+              tăng thêm nhờ giá động. */}
+          <p className="mt-2 text-xs text-slate-500">
+            {summary.measurementNote}
           </p>
           {summary.pendingAdjustments > 0 && (
             <p className="mt-2 text-xs text-slate-500">
@@ -510,6 +656,24 @@ function PreviewPanel({ preview, loading }) {
                         {day.minPrice === day.maxPrice
                           ? formatVnd(day.minPrice)
                           : `${formatVnd(day.minPrice)} – ${formatVnd(day.maxPrice)}`}
+                        {/* Ngày có nhiều suất và các suất lệch giá nhau: liệt kê
+                            ra để thấy dự báo đang được phân bổ theo khung giờ
+                            chứ không dùng chung một con số cho cả ngày. */}
+                        {day.slots?.length > 1 && day.minPrice !== day.maxPrice && (
+                          <span className="mt-1 block text-xs font-normal text-slate-500">
+                            {day.slots.map((slot) => (
+                              <span className="block" key={slot.timeSlotId || slot.label}>
+                                {slot.label}: {formatVnd(slot.price)}
+                                {slot.forecastBasis === 'SLOT' &&
+                                  Number.isFinite(Number(slot.slotShare)) && (
+                                    <span className="text-slate-400">
+                                      {' '}· {Math.round(Number(slot.slotShare) * 100)}% nhu cầu ngày
+                                    </span>
+                                  )}
+                              </span>
+                            ))}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )
@@ -519,6 +683,38 @@ function PreviewPanel({ preview, loading }) {
           </div>
         </div>
       ))}
+
+      {/* Trạng thái của hai lớp học từ lịch sử. Nếu chưa học được, giao diện
+          phải nói thẳng thay vì để người xem tưởng hệ thống luôn chạy đủ. */}
+      {(preview.slotDemand || preview.bookingPace) && (
+        <div className="mt-5 space-y-1 border-t border-slate-100 pt-4 text-xs text-slate-500">
+          {preview.slotDemand && (
+            <p>
+              <span className="font-bold text-slate-600">Phân bổ theo khung giờ: </span>
+              {preview.slotDemand.learned
+                ? `đã học từ ${preview.slotDemand.weekdaySampleDays} ngày thường và ${preview.slotDemand.weekendSampleDays} ngày cuối tuần gần nhất.`
+                : preview.slotDemand.reason}
+            </p>
+          )}
+          {preview.bookingPace && (
+            <p>
+              <span className="font-bold text-slate-600">Nhịp đặt chỗ: </span>
+              {preview.bookingPace.learned ? (
+                <>
+                  học từ {preview.bookingPace.observedDates} ngày —{' '}
+                  {preview.bookingPace.milestones
+                    .filter((point) => [1, 3, 7, 14].includes(point.leadDays))
+                    .map((point) => `còn ${point.leadDays} ngày: ${Math.round(point.soldShare * 100)}%`)
+                    .join(' · ')}
+                  . Tồn kho hiện tại được quy về tỷ lệ lấp đầy cuối dự kiến theo nhịp này.
+                </>
+              ) : (
+                preview.bookingPace.reason
+              )}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   )
 }
