@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router'
 import { useAuth } from '../context/useAuth.js'
 import { hasAnyRole, hasRole } from '../utils/userRoles.js'
+import AccessDenied from './AccessDenied.jsx'
 
 function isPlatformStaff(user) {
   return hasRole(user, 'ADMIN') || (
@@ -42,15 +43,25 @@ function ProtectedRoute({
   }
 
   if (allowedRoles && !hasAnyRole(user, allowedRoles)) {
-    return <Navigate to="/" replace />
+    return <AccessDenied user={user} />
   }
 
   if (requirePlatformStaff && !isPlatformStaff(user)) {
-    return <Navigate to="/staff/checkin" replace />
+    return (
+      <AccessDenied
+        user={user}
+        description="Chức năng này chỉ dành cho nhân viên vận hành nền tảng VietTicket."
+      />
+    )
   }
 
   if (requirePartnerStaff && hasRole(user, 'STAFF') && !user?.employerPartnerId) {
-    return <Navigate to="/staff/tickets" replace />
+    return (
+      <AccessDenied
+        user={user}
+        description="Chức năng này chỉ dành cho nhân viên đã được một đối tác điểm đến phân công."
+      />
+    )
   }
 
   if (
@@ -59,7 +70,12 @@ function ProtectedRoute({
     && (user.staffAccessLevel || (user.employerPartnerId ? 'SCANNER' : 'MANAGER'))
       !== requiredStaffAccess
   ) {
-    return <Navigate to="/staff/checkin" replace />
+    return (
+      <AccessDenied
+        user={user}
+        description="Tài khoản nhân viên hiện tại chưa có quyền trưởng ca để thực hiện chức năng này."
+      />
+    )
   }
 
   return children

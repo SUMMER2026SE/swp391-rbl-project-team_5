@@ -14,8 +14,13 @@ const {
   getBankTransferInstruction,
   listPaymentMethods,
 } = require('../controllers/bankTransferController');
+const { sepayWebhook } = require('../controllers/sepayWebhookController');
 
 const router = express.Router();
+
+// SePay server-to-server callback (không dùng phiên đăng nhập của khách).
+// Chữ ký HMAC-SHA256 trên raw body được kiểm tra trong controller.
+router.post('/sepay/webhook', sepayWebhook);
 
 // Danh sách phương thức thanh toán đang mở (VNPay luôn có; chuyển khoản chỉ
 // xuất hiện khi nền tảng đã cấu hình tài khoản nhận tiền).

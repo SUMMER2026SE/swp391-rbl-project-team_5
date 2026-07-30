@@ -81,6 +81,7 @@ export default function SupportTicketsPage() {
     totalPages: 1,
   })
   const [stats, setStats] = useState({ OPEN: 0, IN_PROGRESS: 0, RESOLVED: 0 })
+  const [isLoading, setIsLoading] = useState(true)
   const [activeId, setActiveId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [draft, setDraft] = useState('')
@@ -91,6 +92,7 @@ export default function SupportTicketsPage() {
   const messagesEndRef = useRef(null)
 
   const loadTickets = useCallback(async () => {
+    setIsLoading(true)
     try {
       const result = await supportApi.getAllTickets({
         status: filter,
@@ -104,8 +106,14 @@ export default function SupportTicketsPage() {
       setStats(result.stats)
     } catch (error) {
       toast.error(error.message)
+    } finally {
+      setIsLoading(false)
     }
   }, [assignment, filter, page, priority, search])
+
+  useEffect(() => {
+    document.title = 'Hỗ trợ khách hàng | VietTicket Staff'
+  }, [])
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadTickets(), 300)
@@ -285,11 +293,17 @@ export default function SupportTicketsPage() {
               </select>
             </div>
             <p className="mt-2 text-[11px] text-on-surface-variant">
-              Chờ {stats.OPEN || 0} · Đang xử lý {stats.IN_PROGRESS || 0} · Đã xong {stats.RESOLVED || 0}
+              {isLoading
+                ? 'Đang tải hàng chờ...'
+                : `Chờ ${stats.OPEN || 0} · Đang xử lý ${stats.IN_PROGRESS || 0} · Đã xong ${stats.RESOLVED || 0}`}
             </p>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {tickets.length === 0 ? (
+            {isLoading ? (
+              <div className="p-6 text-center text-sm font-semibold text-on-surface-variant" role="status">
+                Đang tải yêu cầu hỗ trợ...
+              </div>
+            ) : tickets.length === 0 ? (
               <p className="p-6 text-center text-sm text-on-surface-variant">
                 Không có yêu cầu nào.
               </p>

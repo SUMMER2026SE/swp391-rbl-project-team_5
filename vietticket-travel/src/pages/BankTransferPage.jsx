@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { QRCodeSVG } from 'qrcode.react'
 import { toast } from 'react-toastify'
+import useSocket from '../context/useSocket.js'
 import { getBankTransferInstruction } from '../services/paymentApi.js'
 import { completeItineraryQueueItemByBookingId } from '../utils/aiItineraryBookingQueue.js'
 
@@ -49,6 +50,7 @@ function CopyRow({ label, value, highlight = false }) {
 export default function BankTransferPage() {
   const { bookingId } = useParams()
   const navigate = useNavigate()
+  const socket = useSocket()
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -87,11 +89,20 @@ export default function BankTransferPage() {
     load()
   }, [load])
 
-  // Tự kiểm tra lại mỗi 15 giây để khách thấy ngay khi nhân viên xác nhận.
+  // Webhook thường đẩy trạng thái qua Socket.IO ngay lập tức. Polling ngắn là
+  // fallback khi trình duyệt vừa mất kết nối hoặc chạy qua proxy không hỗ trợ websocket.
   useEffect(() => {
-    const timer = window.setInterval(() => void load(), 15000)
+    const timer = window.setInterval(() => void load(), 5000)
     return () => window.clearInterval(timer)
   }, [load])
+
+  useEffect(() => {
+    const handleBookingStatusUpdated = (event) => {
+      if (event?.bookingId === bookingId) void load()
+    }
+    socket.on('BOOKING_STATUS_UPDATED', handleBookingStatusUpdated)
+    return () => socket.off('BOOKING_STATUS_UPDATED', handleBookingStatusUpdated)
+  }, [bookingId, load, socket])
 
   // Đếm ngược hạn giữ chỗ.
   useEffect(() => {
@@ -224,8 +235,8 @@ export default function BankTransferPage() {
             </li>
             <li>Chuyển đúng số tiền {formatCurrency(info.amount)}.</li>
             <li>
-              Vé điện tử sẽ được phát sau khi nhân viên đối chiếu sao kê ngân hàng (thường trong ít
-              phút). Trang này tự cập nhật khi đơn được xác nhận.
+              Hệ thống tự đối chiếu giao dịch và phát vé điện tử ngay khi ngân hàng báo tiền vào.
+              Chỉ giao dịch sai số tiền hoặc sai nội dung mới cần nhân viên kiểm tra.
             </li>
           </ul>
         </div>
