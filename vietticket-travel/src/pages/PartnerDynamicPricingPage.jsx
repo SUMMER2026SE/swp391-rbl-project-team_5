@@ -691,9 +691,11 @@ function PreviewPanel({ preview, loading }) {
           {preview.slotDemand && (
             <p>
               <span className="font-bold text-slate-600">Phân bổ theo khung giờ: </span>
-              {preview.slotDemand.learned
-                ? `đã học từ ${preview.slotDemand.weekdaySampleDays} ngày thường và ${preview.slotDemand.weekendSampleDays} ngày cuối tuần gần nhất.`
-                : preview.slotDemand.reason}
+              {preview.slotDemand.singleSlot
+                ? 'lịch bán chỉ có một khung giờ nên dự báo của ngày áp dụng trực tiếp cho khung đó, không cần phân bổ.'
+                : preview.slotDemand.learned
+                  ? `đã học từ ${preview.slotDemand.weekdaySampleDays} ngày thường và ${preview.slotDemand.weekendSampleDays} ngày cuối tuần gần nhất.`
+                  : preview.slotDemand.reason}
             </p>
           )}
           {preview.bookingPace && (

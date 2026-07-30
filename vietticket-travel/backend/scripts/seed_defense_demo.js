@@ -2254,6 +2254,16 @@ async function seedForecastHistory(attractionDefinitions) {
 // kho, đúng vai trò "chỗ đã có người giữ".
 // ============================================================
 const FORWARD_DEMAND_DAYS = 21;
+// Trần lấp đầy của nhu cầu dựng sẵn cho ngày tương lai.
+//
+// Nhu cầu này được ghi TRƯỚC các booking kịch bản, và cả hai cùng cộng vào một
+// sổ tồn kho. Để nhu cầu chạy tới sát sức chứa thì hai chuyện xấu xảy ra: chỗ
+// còn lại không đủ cho booking kịch bản (tràn sức chứa), và người trình diễn
+// bấm đặt thử 2 vé sẽ nhận thông báo hết chỗ ngay trước hội đồng.
+//
+// 80% vẫn đủ để tầng giá động kết luận "sắp kín" — ở mốc còn 1-2 ngày, nhịp
+// đặt chỗ quy 80% đã bán thành gần 100% lấp đầy cuối dự kiến.
+const FORWARD_MAX_OCCUPANCY = 0.8;
 
 async function seedForwardDemand(attractionDefinitions, closedDateKeys = new Set()) {
   const profiles = historyDemandProfiles();
@@ -2277,10 +2287,16 @@ async function seedForwardDemand(attractionDefinitions, closedDateKeys = new Set
       ...entry,
       ticket: ticketById.get(entry.id),
     }));
-    const slots = profile.slots.map((slot) => ({
-      ...slot,
-      capacity: attraction.id === IDS.attractions.cruise ? 45 : capacity,
-    }));
+    // Sức chứa dùng để phân bổ bị hạ xuống theo trần headroom, nên mọi khung
+    // giờ chắc chắn còn chỗ cho booking kịch bản và cho lượt đặt thử tại chỗ.
+    const slots = profile.slots.map((slot) => {
+      const realCapacity = attraction.id === IDS.attractions.cruise ? 45 : capacity;
+      return {
+        ...slot,
+        capacity: Math.max(1, Math.floor(realCapacity * FORWARD_MAX_OCCUPANCY)),
+      };
+    });
+    const forwardDayCapacity = Math.max(1, Math.floor(capacity * FORWARD_MAX_OCCUPANCY));
 
     for (let lead = 1; lead <= FORWARD_DEMAND_DAYS; lead += 1) {
       const visitDateKey = addDateKeyDays(todayKey, lead);
@@ -2296,7 +2312,7 @@ async function seedForwardDemand(attractionDefinitions, closedDateKeys = new Set
         dateKey: visitDateKey,
         dayIndex: HISTORY_DAYS - 1 + lead,
         historyDays: HISTORY_DAYS,
-        capacity,
+        capacity: forwardDayCapacity,
         slots,
         productChoices,
         random,

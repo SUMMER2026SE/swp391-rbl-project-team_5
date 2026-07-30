@@ -205,6 +205,46 @@ describe('planDayDemand', () => {
       .toEqual(second.orders.map((order) => order.quantity));
   });
 
+  test('nhu cầu dựng sẵn cho ngày tương lai luôn chừa chỗ trống', () => {
+    // Bộ seed hạ sức chứa dùng để phân bổ xuống 80% trước khi gọi hàm này, nên
+    // dù nhu cầu cuối tuần chạm trần thì khung giờ vẫn còn ~20% chỗ cho booking
+    // kịch bản và cho lượt đặt thử ngay tại buổi trình diễn.
+    const HEADROOM = 0.8;
+    const realSlotCapacity = 45;
+    const cappedSlots = SLOTS.map((slot) => ({
+      ...slot,
+      capacity: Math.floor(realSlotCapacity * HEADROOM),
+    }));
+    const cappedDayCapacity = Math.floor(90 * HEADROOM);
+
+    let worstSlotFill = 0;
+    for (let lead = 1; lead <= 21; lead += 1) {
+      const dateKey = new Date(Date.UTC(2026, 6, 30) + lead * 86400000).toISOString().slice(0, 10);
+      const result = planDayDemand({
+        profile: PROFILE,
+        dateKey,
+        dayIndex: 89 + lead,
+        historyDays: 90,
+        capacity: cappedDayCapacity,
+        slots: cappedSlots,
+        productChoices: PRODUCTS,
+        random: seededGenerator(`forward:${dateKey}`),
+        paceRatio: paceShareAtLead(lead),
+      });
+
+      const perSlot = new Map();
+      for (const order of result.orders) {
+        perSlot.set(order.slot.id, (perSlot.get(order.slot.id) || 0) + order.quantity);
+      }
+      for (const sold of perSlot.values()) {
+        expect(sold).toBeLessThanOrEqual(Math.floor(realSlotCapacity * HEADROOM));
+        worstSlotFill = Math.max(worstSlotFill, sold / realSlotCapacity);
+      }
+    }
+    // Không khung giờ nào vượt 80% sức chứa thật.
+    expect(worstSlotFill).toBeLessThanOrEqual(HEADROOM);
+  });
+
   test('nhận diện cuối tuần theo lịch, không theo múi giờ chạy test', () => {
     expect(isWeekendDateKey('2026-06-13')).toBe(true); // thứ Bảy
     expect(isWeekendDateKey('2026-06-15')).toBe(false); // thứ Hai
