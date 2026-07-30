@@ -18,6 +18,7 @@ const FALLBACK_TITLES = new Map([
   ['/my-support', 'Yêu cầu hỗ trợ của tôi | VietTicket Travel'],
   ['/booking-success', 'Kết quả đặt vé | VietTicket Travel'],
   ['/admin', 'Tổng quan hệ thống | VietTicket Admin'],
+  ['/admin/users', 'Quản lý người dùng | VietTicket Admin'],
   ['/admin/reports', 'Báo cáo tài chính | VietTicket Admin'],
   ['/admin/kyc-approval', 'Hồ sơ và trạng thái đối tác | VietTicket Admin'],
   ['/admin/attraction-approval', 'Phê duyệt địa điểm | VietTicket Admin'],
@@ -28,9 +29,12 @@ const FALLBACK_TITLES = new Map([
   ['/admin/settlements', 'Đối soát đối tác | VietTicket Admin'],
   ['/partner/settlements', 'Đối soát và chi trả | VietTicket B2B'],
   ['/partner/smart-queue', 'SmartQueue & Autopilot | VietTicket B2B'],
+  ['/partner/dynamic-pricing', 'Giá vé linh hoạt | VietTicket B2B'],
+  ['/partner/questions', 'Hỏi đáp du khách | VietTicket B2B'],
   ['/staff/smart-queue', 'SmartQueue Control Tower | VietTicket Staff'],
   ['/staff/refunds', 'Quản lý hoàn tiền | VietTicket Staff'],
   ['/staff/tickets', 'Hỗ trợ khách hàng | VietTicket Staff'],
+  ['/staff/reports', 'Báo cáo tài chính | VietTicket Staff'],
 ])
 
 const FALLBACK_TITLE_PATTERNS = [

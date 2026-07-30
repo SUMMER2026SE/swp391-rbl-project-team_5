@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../../context/useAuth.js'
 import { hasRole } from '../../utils/userRoles.js'
 import { formatBookingReference } from '../../utils/bookingReference'
+import { getFinancialTransactionDisplay } from '../../utils/financialTransactionDisplay.js'
 import '../../styles/admin.css'
 
 const PERIODS = [
@@ -79,6 +80,22 @@ function EmptyRow({ columns, children }) {
   )
 }
 
+function TransactionAmount({ transaction }) {
+  const cashDisplay = getFinancialTransactionDisplay(transaction)
+  return (
+    <td className={`admin-table-cell--right financial-emphasis ${
+      cashDisplay.isNegative
+        ? 'financial-negative'
+        : !cashDisplay.isRecognized ? 'financial-neutral' : ''
+    }`}>
+      {cashDisplay.sign}{formatCurrency(transaction.amount)}
+      {cashDisplay.note && (
+        <div className="financial-secondary-text">{cashDisplay.note}</div>
+      )}
+    </td>
+  )
+}
+
 export default function FinancialReportPage() {
   const { user } = useAuth()
   const isAdmin = hasRole(user, 'ADMIN')
@@ -95,6 +112,12 @@ export default function FinancialReportPage() {
   const [search, setSearch] = useState('')
   const [transactions, setTransactions] = useState([])
   const [transactionsLoading, setTransactionsLoading] = useState(true)
+
+  useEffect(() => {
+    document.title = isAdmin
+      ? 'Báo cáo tài chính | VietTicket Admin'
+      : 'Báo cáo tài chính | VietTicket Staff'
+  }, [isAdmin])
 
   useEffect(() => {
     let active = true
@@ -478,9 +501,7 @@ export default function FinancialReportPage() {
                       {STATUS_LABELS[transaction.status] || transaction.status}
                     </span>
                   </td>
-                  <td className={`admin-table-cell--right financial-emphasis ${transaction.type === 'REFUND' ? 'financial-negative' : ''}`}>
-                    {transaction.type === 'REFUND' ? '−' : '+'}{formatCurrency(transaction.amount)}
-                  </td>
+                  <TransactionAmount transaction={transaction} />
                 </tr>
               ))}
             </tbody>

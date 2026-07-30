@@ -13,7 +13,7 @@ import {
 } from '../utils/formValidators.js'
 
 const benefits = [
-  { icon: 'language', text: 'Tiếp cận khách hàng toàn cầu' },
+  { icon: 'language', text: 'Tiếp cận du khách trên VietTicket' },
   { icon: 'trending_up', text: 'Tăng doanh số bán vé trực tiếp' },
   { icon: 'dashboard', text: 'Quản lý đặt vé thời gian thực' },
   { icon: 'verified_user', text: 'Thanh toán bảo mật' },
@@ -166,7 +166,7 @@ function PartnerRegisterPage() {
               VietTicket Travel B2B Portal
             </span>
             <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight tracking-tight">
-              Gia nhập mạng lưới đối tác toàn cầu
+              Gia nhập mạng lưới đối tác du lịch Việt Nam
             </h1>
             <p className="text-lg text-white/90 leading-7">
               Kết nối doanh nghiệp của bạn với khách hàng đang tìm vé tham quan. Quản lý,
@@ -560,7 +560,7 @@ function PartnerRegisterPage() {
               >
                 public
               </span>
-              Được tin dùng toàn cầu
+              Đồng hành cùng hệ sinh thái du lịch Việt
             </div>
           </div>
         </div>
