@@ -125,18 +125,16 @@ function FinancialSummary({ creditAmount, option }) {
       </div>
       <div className="my-3 h-px bg-slate-200" />
       <div className="flex items-center justify-between text-sm">
-        <span className="font-semibold text-slate-700">
-          {hasRefund ? 'Bạn được hoàn chênh lệch' : 'Phí đổi vé'}
-        </span>
+        <span className="font-semibold text-slate-700">Số tiền chênh lệch</span>
         <strong className={`text-base ${hasRefund ? 'text-emerald-700' : 'text-slate-900'}`}>
           {formatCurrency(refundAmount)}
         </strong>
       </div>
-      {!hasRefund && (
-        <p className="mt-2 text-xs font-semibold text-emerald-700">
-          Không cần trả thêm tiền khi xác nhận phương án này.
-        </p>
-      )}
+      <p className="mt-2 text-xs font-semibold text-emerald-700">
+        {hasRefund
+          ? 'Không phát sinh thanh toán thêm. Phần chênh lệch sẽ được hoàn về phương thức thanh toán gốc.'
+          : 'Không phát sinh thanh toán thêm; giá vé thay thế bằng số tiền bạn đã thanh toán.'}
+      </p>
     </div>
   )
 }
