@@ -43,6 +43,7 @@ const avatarClass = {
   indigo: 'bg-indigo-500',
   coral: 'bg-orange-500',
 }
+const avatarOptions = Object.keys(avatarClass)
 
 const voteOptions = [
   {
@@ -837,7 +838,9 @@ function InvitePanel({ inviteUrl, loading, onCopy, onRotate, room }) {
 }
 
 function PreferencePanel({ disabled, member, onSaved, partyToken, roomId }) {
+  const [avatarKey, setAvatarKey] = useState(member?.avatarKey || 'teal')
   const [budgetCap, setBudgetCap] = useState(Number(member?.budgetCap || 500000))
+  const [budgetTouched, setBudgetTouched] = useState(false)
   const [preferences, setPreferences] = useState(member?.preferences?.categories || [])
   const [saving, setSaving] = useState(false)
 
@@ -857,13 +860,16 @@ function PreferencePanel({ disabled, member, onSaved, partyToken, roomId }) {
       const response = await updatePartyMember(
         roomId,
         {
-          budgetCap: Number(budgetCap),
+          avatarKey,
+          ...(budgetTouched || member?.budgetCap != null
+            ? { budgetCap: budgetTouched ? Number(budgetCap) : Number(member.budgetCap) }
+            : {}),
           preferences: { categories: preferences },
         },
         partyToken,
       )
       onSaved(response?.data)
-      toast.success('Đã cập nhật gu và mức chi của bạn.')
+      toast.success('Đã cập nhật hồ sơ và gu của bạn.')
     } catch (error) {
       toast.error(error.message)
     } finally {
@@ -876,8 +882,29 @@ function PreferencePanel({ disabled, member, onSaved, partyToken, roomId }) {
       <div className="flex items-center gap-3">
         <MemberAvatar member={member} size="h-10 w-10" />
         <div>
-          <p className="text-xs font-black uppercase tracking-[0.14em] text-[#008b84]">Gu của bạn</p>
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-[#008b84]">Bổ sung hồ sơ</p>
           <h2 className="font-black">{member.displayName}</h2>
+          <p className="mt-1 text-xs leading-5 text-slate-500">Không bắt buộc · giúp nhóm hiểu bạn hơn</p>
+        </div>
+      </div>
+      <div className="mt-5">
+        <p className="text-xs font-bold text-slate-600">Avatar trong phòng</p>
+        <div className="mt-3 flex flex-wrap gap-3">
+          {avatarOptions.map((option) => (
+            <button
+              aria-label={`Chọn avatar ${option}`}
+              aria-pressed={avatarKey === option}
+              className={`flex h-10 w-10 items-center justify-center rounded-full ${avatarClass[option]} text-sm font-black text-white transition ${
+                avatarKey === option ? 'ring-4 ring-[#006b68]/20 ring-offset-2' : 'opacity-75 hover:opacity-100'
+              }`}
+              disabled={disabled}
+              key={option}
+              onClick={() => setAvatarKey(option)}
+              type="button"
+            >
+              {member.displayName.trim().charAt(0).toUpperCase() || '•'}
+            </button>
+          ))}
         </div>
       </div>
       <label className="mt-5 block">
@@ -890,7 +917,10 @@ function PreferencePanel({ disabled, member, onSaved, partyToken, roomId }) {
           disabled={disabled}
           max="5000000"
           min="50000"
-          onChange={(event) => setBudgetCap(Number(event.target.value))}
+          onChange={(event) => {
+            setBudgetTouched(true)
+            setBudgetCap(Number(event.target.value))
+          }}
           step="50000"
           type="range"
           value={budgetCap}
@@ -924,7 +954,7 @@ function PreferencePanel({ disabled, member, onSaved, partyToken, roomId }) {
           onClick={() => void save()}
           type="button"
         >
-          {saving ? 'Đang lưu...' : 'Lưu gu của tôi'}
+          {saving ? 'Đang lưu...' : 'Lưu hồ sơ của tôi'}
         </button>
       )}
     </section>

@@ -3,18 +3,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { toast } from 'react-toastify'
 import Header from '../components/Header.jsx'
 import Seo from '../components/Seo.jsx'
-import { CATEGORY_OPTIONS } from '../constants/travelCriteria.js'
 import { joinPartyRoom, previewPartyInvite } from '../services/partyApi.js'
 import { loadPartySession, savePartySession } from '../utils/partySession.js'
-
-const avatarOptions = [
-  { value: 'teal', color: 'bg-teal-500' },
-  { value: 'blue', color: 'bg-blue-500' },
-  { value: 'violet', color: 'bg-violet-500' },
-  { value: 'rose', color: 'bg-rose-500' },
-  { value: 'amber', color: 'bg-amber-500' },
-  { value: 'emerald', color: 'bg-emerald-500' },
-]
 
 const formatInviteDate = (value) => {
   if (!value) return ''
@@ -37,9 +27,6 @@ function PartyJoinPage() {
   const [previewError, setPreviewError] = useState('')
   const [form, setForm] = useState({
     displayName: '',
-    avatarKey: 'teal',
-    budgetCap: 500000,
-    preferences: [],
   })
   const [joining, setJoining] = useState(false)
 
@@ -66,15 +53,6 @@ function PartyJoinPage() {
     }
   }, [inviteToken, roomId])
 
-  const togglePreference = (value) => {
-    setForm((current) => ({
-      ...current,
-      preferences: current.preferences.includes(value)
-        ? current.preferences.filter((item) => item !== value)
-        : [...current.preferences, value].slice(0, 5),
-    }))
-  }
-
   const handleSubmit = async (event) => {
     event.preventDefault()
     if (joining || !inviteToken) return
@@ -82,9 +60,6 @@ function PartyJoinPage() {
     try {
       const response = await joinPartyRoom(roomId, {
         displayName: form.displayName,
-        avatarKey: form.avatarKey,
-        budgetCap: Number(form.budgetCap),
-        preferences: { categories: form.preferences },
         inviteToken,
       })
       const session = response?.data
@@ -142,9 +117,9 @@ function PartyJoinPage() {
             )}
             <div className="mt-8 space-y-4 text-sm font-semibold text-white/85">
               {[
-                ['favorite', 'Chọn điểm bạn thực sự muốn đi'],
-                ['payments', 'Chia sẻ mức chi thoải mái'],
-                ['route', 'Xem lịch trình chung sau khi chốt'],
+                ['login', 'Vào phòng ngay sau khi nhập tên'],
+                ['touch_app', 'Bình chọn cùng mọi người trong phòng'],
+                ['tune', 'Bổ sung gu, avatar và ngân sách sau'],
               ].map(([icon, label]) => (
                 <div className="flex items-center gap-3" key={label}>
                   <span className="material-symbols-outlined text-[#8ff9ec]">{icon}</span>
@@ -157,9 +132,13 @@ function PartyJoinPage() {
           <section className="p-6 md:p-10">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.16em] text-[#008b84]">
-                Hồ sơ trong phòng
+                Tham gia nhanh
               </p>
-              <h2 className="mt-1 text-2xl font-black">Bạn muốn được gọi là gì?</h2>
+              <h2 className="mt-1 text-2xl font-black">Nhập tên để vào phòng</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                Chỉ tên hiển thị là bắt buộc. Avatar, gu du lịch và mức chi chỉ là thông tin gợi ý,
+                bạn có thể bổ sung sau khi vào phòng.
+              </p>
             </div>
 
             {existingSession && (
@@ -215,88 +194,6 @@ function PartyJoinPage() {
                     />
                   </label>
 
-                  <fieldset>
-                    <legend className="text-sm font-extrabold text-slate-700">Màu đại diện</legend>
-                    <div className="mt-3 flex flex-wrap gap-3">
-                      {avatarOptions.map((avatar, index) => (
-                        <label className="cursor-pointer" key={avatar.value}>
-                          <input
-                            aria-label={`Màu đại diện ${index + 1}`}
-                            checked={form.avatarKey === avatar.value}
-                            className="sr-only"
-                            name="avatar"
-                            onChange={() =>
-                              setForm((current) => ({ ...current, avatarKey: avatar.value }))
-                            }
-                            type="radio"
-                            value={avatar.value}
-                          />
-                          <span
-                            className={`flex h-10 w-10 items-center justify-center rounded-full ${avatar.color} text-sm font-black text-white transition ${
-                              form.avatarKey === avatar.value
-                                ? 'ring-4 ring-[#006b68]/20 ring-offset-2'
-                                : ''
-                            }`}
-                          >
-                            {form.displayName.trim().charAt(0).toUpperCase() || '•'}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-
-                  <label className="block">
-                    <span className="flex items-center justify-between gap-3 text-sm font-extrabold text-slate-700">
-                      Mức chi vé thoải mái của bạn
-                      <strong className="text-[#006b68]">
-                        {Number(form.budgetCap || 0).toLocaleString('vi-VN')}đ
-                      </strong>
-                    </span>
-                    <input
-                      className="mt-2 w-full accent-[#006b68]"
-                      max="5000000"
-                      min="50000"
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          budgetCap: Number(event.target.value),
-                        }))
-                      }
-                      step="50000"
-                      type="range"
-                      value={form.budgetCap}
-                    />
-                    <p className="mt-1 text-xs text-slate-500">
-                      Đây là tín hiệu tham khảo để cân bằng phương án, không phải cam kết thanh toán.
-                    </p>
-                  </label>
-
-                  <fieldset>
-                    <legend className="text-sm font-extrabold text-slate-700">
-                      Bạn thích trải nghiệm nào?
-                    </legend>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {CATEGORY_OPTIONS.map((option) => {
-                        const selected = form.preferences.includes(option.value)
-                        return (
-                          <button
-                            aria-pressed={selected}
-                            className={`rounded-full border px-3 py-2 text-xs font-bold transition ${
-                              selected
-                                ? 'border-[#008b84] bg-[#dff7f3] text-[#005b59]'
-                                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                            }`}
-                            key={option.value}
-                            onClick={() => togglePreference(option.value)}
-                            type="button"
-                          >
-                            {selected ? '✓ ' : ''}{option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </fieldset>
-
                   <button
                     className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#006b68] px-5 py-4 font-extrabold text-white shadow-lg shadow-[#006b68]/20 transition hover:bg-[#005b59] disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={joining}
@@ -305,7 +202,7 @@ function PartyJoinPage() {
                     <span className={`material-symbols-outlined ${joining ? 'animate-spin' : ''}`}>
                       {joining ? 'progress_activity' : 'login'}
                     </span>
-                    {joining ? 'Đang tham gia...' : 'Vào phòng bình chọn'}
+                    {joining ? 'Đang tham gia...' : 'Tham gia phòng ngay'}
                   </button>
                 </form>
               </>
