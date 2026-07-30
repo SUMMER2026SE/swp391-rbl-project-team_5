@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router';
 import { useAuth } from '../context/useAuth.js';
 import { hasRole } from '../utils/userRoles.js';
+import AccessDenied from './AccessDenied.jsx';
 
 function RouteLoading() {
   return (
@@ -18,7 +19,8 @@ function RouteLoading() {
 /**
  * AdminRoute protects admin routes.
  * It checks if the user is authenticated and has the ADMIN role.
- * If not, it redirects the user to the login page.
+ * Guests are redirected to login; authenticated users without the role receive
+ * a clear access-denied explanation.
  */
 function AdminRoute({ children }) {
   const location = useLocation();
@@ -28,8 +30,12 @@ function AdminRoute({ children }) {
     return <RouteLoading />;
   }
 
-  if (!isAuthenticated || !hasRole(user, 'ADMIN')) {
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (!hasRole(user, 'ADMIN')) {
+    return <AccessDenied user={user} />;
   }
 
   return children;

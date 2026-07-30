@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   getCountdownState,
+  buildRecoveryChain,
   getRecoveryRefundStage,
   getRecoveryResolutionContent,
   sortRecoveryCases,
@@ -62,6 +63,26 @@ describe('recovery presentation', () => {
         transaction: { status: 'SUCCESS' },
       },
     })).toBe('CONFIRMED')
+  })
+
+  it('joins repeated Rescue cases through replacement booking ids', () => {
+    const first = {
+      id: 'case-1',
+      originalBookingId: 'booking-original',
+      replacementBookingId: 'booking-a',
+      status: 'REPLACED',
+      original: { attractionTitle: 'Điểm A' },
+      replacementBooking: { attractionTitle: 'Điểm B' },
+    }
+    const second = {
+      id: 'case-2',
+      originalBookingId: 'booking-a',
+      status: 'OPEN',
+      original: { attractionTitle: 'Điểm B' },
+    }
+
+    expect(buildRecoveryChain([second, first], second).map((item) => item.id))
+      .toEqual(['case-1', 'case-2'])
   })
 })
 

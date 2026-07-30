@@ -2209,6 +2209,10 @@
   color: var(--adm-error);
 }
 
+.financial-neutral {
+  color: var(--adm-on-surface-variant);
+}
+
 .financial-secondary-text {
   color: var(--adm-on-surface-variant);
   font-size: 12px;

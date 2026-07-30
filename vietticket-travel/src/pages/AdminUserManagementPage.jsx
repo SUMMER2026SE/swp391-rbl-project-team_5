@@ -54,7 +54,7 @@ function AdminUserManagementPage() {
   const [resendingInviteId, setResendingInviteId] = useState('')
 
   useEffect(() => {
-    document.title = 'Quản lý Người dùng | VietTicket Travel'
+    document.title = 'Quản lý người dùng | VietTicket Admin'
   }, [])
 
   useEffect(() => {

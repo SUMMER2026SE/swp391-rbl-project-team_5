@@ -110,6 +110,20 @@ function validateProductionEnv() {
     throw new Error('ML_SERVICE_API_KEY must be at least 32 characters in production.');
   }
 
+  const sepayWebhook = getSepayWebhookConfig();
+  if (sepayWebhook.enabled) {
+    if (sepayWebhook.secret.length < 32) {
+      throw new Error(
+        'SEPAY_WEBHOOK_SECRET must be at least 32 characters when SePay automation is enabled.',
+      );
+    }
+    if (!getBankTransferConfig().configured) {
+      throw new Error(
+        'BANK_BIN, BANK_ACCOUNT_NUMBER, and BANK_ACCOUNT_NAME are required when SePay automation is enabled.',
+      );
+    }
+  }
+
   getTrustProxySetting();
   parseExchangeRates();
 
@@ -148,9 +162,23 @@ function getBankTransferConfig() {
   return { bankBin, accountNumber, accountName, bankName, configured };
 }
 
+function getSepayWebhookConfig() {
+  const enabled = String(process.env.SEPAY_WEBHOOK_ENABLED || '')
+    .trim()
+    .toLowerCase() === 'true';
+  const secret = String(process.env.SEPAY_WEBHOOK_SECRET || '').trim();
+  const rawTolerance = Number(process.env.SEPAY_WEBHOOK_TOLERANCE_SECONDS);
+  const toleranceSeconds = Number.isFinite(rawTolerance)
+    ? Math.min(Math.max(Math.round(rawTolerance), 60), 900)
+    : 300;
+
+  return { enabled, secret, toleranceSeconds };
+}
+
 module.exports = {
   getBankTransferConfig,
   getFrontendUrl,
+  getSepayWebhookConfig,
   getTrustProxySetting,
   isProduction,
   normalizeUrl,

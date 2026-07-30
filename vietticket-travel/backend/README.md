@@ -59,6 +59,24 @@ API base URL: `http://localhost:5000/api`
 
 Health check: `http://localhost:5000/api/health`
 
+## Automatic bank transfer confirmation
+
+The VietQR flow can receive signed SePay callbacks at:
+
+```text
+POST /api/payments/sepay/webhook
+```
+
+Use SePay HMAC-SHA256 authentication and set `SEPAY_WEBHOOK_ENABLED=true` plus
+`SEPAY_WEBHOOK_SECRET` in the backend environment. The callback verifies the
+exact raw request body, rejects replayed timestamps, deduplicates SePay event
+IDs, matches the configured receiving account, booking reference, and exact
+VND amount, then issues the ticket atomically. Any mismatch remains in the
+manual Admin reconciliation flow and never issues a ticket.
+
+See `../docs/SEPAY_WEBHOOK_SETUP.md` for separate local, staging, and production
+configuration.
+
 ## Test
 
 ```bash

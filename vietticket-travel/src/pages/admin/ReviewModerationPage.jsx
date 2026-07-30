@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 import AdminLayout from '../../layouts/AdminLayout.jsx'
 import reviewService from '../../services/reviewService.js'
+import { useAuth } from '../../context/useAuth.js'
+import { hasRole } from '../../utils/userRoles.js'
 import '../../styles/admin.css'
 
 const PAGE_SIZE = 10
 
 export default function ReviewModerationPage() {
+  const { user } = useAuth()
+  const isAdmin = hasRole(user, 'ADMIN')
   const [reviews, setReviews] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -23,7 +27,9 @@ export default function ReviewModerationPage() {
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
-    document.title = 'Kiểm duyệt Đánh giá | VietTicket Admin'
+    document.title = isAdmin
+      ? 'Kiểm duyệt đánh giá | VietTicket Admin'
+      : 'Kiểm duyệt đánh giá | VietTicket Staff'
     let active = true
     const timer = window.setTimeout(() => {
       setLoading(true)
@@ -57,7 +63,7 @@ export default function ReviewModerationPage() {
       active = false
       window.clearTimeout(timer)
     }
-  }, [filterRating, page, reloadKey, searchText])
+  }, [filterRating, isAdmin, page, reloadKey, searchText])
 
   const handleToggleHide = async () => {
     if (!moderationTarget) return
@@ -129,7 +135,7 @@ export default function ReviewModerationPage() {
             <span className="material-symbols-outlined" style={{ fontSize: 20, fontVariationSettings: "'FILL' 1" }}>
               visibility
             </span>
-            Hiển thị: {activeCount}
+            Hiển thị: {loading ? '…' : activeCount}
           </div>
           <div
             style={{
@@ -147,7 +153,7 @@ export default function ReviewModerationPage() {
             <span className="material-symbols-outlined" style={{ fontSize: 20, fontVariationSettings: "'FILL' 1" }}>
               visibility_off
             </span>
-            Đã ẩn: {hiddenCount}
+            Đã ẩn: {loading ? '…' : hiddenCount}
           </div>
         </div>
       </div>

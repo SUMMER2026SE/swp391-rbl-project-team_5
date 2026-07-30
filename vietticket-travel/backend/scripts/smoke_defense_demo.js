@@ -228,16 +228,6 @@ async function run() {
       }),
     );
 
-    // Smoke test có thể chạy ban đêm; chỉ trong transaction kiểm thử này mở
-    // cửa sổ check-in toàn ngày. Khối finally seed lại lịch công khai 08:00–17:00.
-    await prisma.attraction.update({
-      where: { id: IDS.attractions.museum },
-      data: { openTime: '00:00', closeTime: '23:59' },
-    });
-    await prisma.timeSlot.update({
-      where: { id: `${IDS.attractions.museum}-slot-all-day` },
-      data: { startTime: '00:00', endTime: '23:59' },
-    });
     await call('Nhân viên cổng tra cứu QR hợp lệ', gateStaff.get(`/api/staff/checkin/${OPERATIONAL_VALUES.checkinQrPrimary}`));
     await call('Nhân viên cổng check-in QR', gateStaff.post(`/api/staff/checkin/${OPERATIONAL_VALUES.checkinQrPrimary}`));
     await call(

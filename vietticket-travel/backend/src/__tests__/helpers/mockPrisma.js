@@ -207,6 +207,15 @@ const mockPrisma = {
     updateMany: jest.fn(),
     count: jest.fn(),
   },
+  bankTransferWebhookEvent: {
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+    count: jest.fn(),
+  },
   refundTransaction: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),

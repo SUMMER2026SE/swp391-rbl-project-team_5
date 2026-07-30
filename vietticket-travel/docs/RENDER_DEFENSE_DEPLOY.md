@@ -51,6 +51,27 @@ For the defense, payment and email can remain disabled. If the runtime
 validator is changed to production mode, configure real VNPay sandbox and
 SMTP values instead of placeholders.
 
+To demonstrate automatic VietQR confirmation with SePay Test Mode, also set:
+
+```text
+BANK_BIN=<receiving bank BIN>
+BANK_ACCOUNT_NUMBER=<same account selected in SePay>
+BANK_ACCOUNT_NAME=<receiving account owner>
+BANK_NAME=<display name>
+SEPAY_WEBHOOK_ENABLED=true
+SEPAY_WEBHOOK_SECRET=<staging-only HMAC secret from SePay>
+SEPAY_WEBHOOK_TOLERANCE_SECONDS=300
+```
+
+Create a staging webhook whose URL is:
+
+```text
+https://<api-service>.onrender.com/api/payments/sepay/webhook
+```
+
+Use a separate webhook and HMAC secret for production. Never reuse the
+staging/demo database or secret for real customer payments.
+
 After the first deploy, open the service shell and set the two temporary
 confirmation variables in Render. They are deliberately required so a demo
 reset cannot be run accidentally:

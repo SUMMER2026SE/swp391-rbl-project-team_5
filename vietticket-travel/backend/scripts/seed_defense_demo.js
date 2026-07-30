@@ -170,6 +170,9 @@ const ACCOUNTS = Object.freeze({
     role: 'STAFF',
     phone: '0938246715',
     employerPartnerId: IDS.partners.owner,
+    // Kịch bản bảo vệ có thao tác thu hồi QR cũ/cấp lại vé và điều phối
+    // SmartQueue, nên đây phải là trưởng ca chứ không phải tài khoản chỉ quét.
+    staffAccessLevel: 'MANAGER',
   },
   platformStaff: {
     id: IDS.users.platformStaff,
@@ -324,32 +327,18 @@ function timeKeyFromMinutes(totalMinutes) {
 // Khung giờ nhận khách trong ngày của điểm demo check-in (Bảo tàng Mỹ thuật).
 //
 // getActivityWindow() (utils/activityTime.js) lấy khung giờ của TimeSlot gắn
-// trên đơn làm cửa sổ hiệu lực của vé. Trước đây slot này bằng đúng giờ mở
-// cửa 08:00–17:00, nên mọi buổi tập/bảo vệ sau 17:00 đều bị chặn với thông
-// báo "Khung giờ sử dụng vé đã kết thúc" — không còn vé nào check-in được.
-//
-// Nay slot kéo tới cuối ngày: seed lúc nào trong ngày thì buổi demo cũng quét
-// được vé. Giờ mở cửa công bố của địa điểm (openTime/closeTime) giữ nguyên
-// 08:00–17:00 nên trang chi tiết vẫn đúng thực tế; chỉ khung giờ nhận khách
-// của vé hôm nay được nới cho phù hợp lịch trình trình diễn.
-//
-// Vẫn dùng TimeSlot thật (không gỡ khỏi đơn) để tồn kho theo khung giờ được
-// ghi nhận — SmartQueue/Live-AutoPilot tính áp lực dựa trên số liệu này.
+// trên đơn làm cửa sổ hiệu lực của vé. Dữ liệu trình diễn phải dùng đúng giờ
+// công bố của điểm đến; không kéo dài vé sau giờ đóng cửa chỉ để smoke test qua.
 // ------------------------------------------------------------
 const DEMO_GATE_OPEN_MINUTE = 8 * 60;
-const DEMO_GATE_LEAD_MINUTES = 120;
+const DEMO_GATE_CLOSE_MINUTE = 17 * 60;
 const DEMO_GATE_MIN_RUNWAY_MINUTES = 30;
-const END_OF_DAY_MINUTE = 23 * 60 + 59;
 
 function demoGateWindow(now = new Date()) {
   const vietnamNow = new Date(now.getTime() + VN_OFFSET_MS);
   const currentMinute = vietnamNow.getUTCHours() * 60 + vietnamNow.getUTCMinutes();
-  // Seed trong/sau giờ mở cửa -> bắt đầu đúng giờ mở cửa công bố.
-  // Seed trước giờ mở cửa (tập buổi sớm) -> lùi lại để vé đã có hiệu lực.
-  const startMinute = currentMinute >= DEMO_GATE_OPEN_MINUTE
-    ? DEMO_GATE_OPEN_MINUTE
-    : Math.max(0, currentMinute - DEMO_GATE_LEAD_MINUTES);
-  const endMinute = END_OF_DAY_MINUTE;
+  const startMinute = DEMO_GATE_OPEN_MINUTE;
+  const endMinute = DEMO_GATE_CLOSE_MINUTE;
   const startTime = timeKeyFromMinutes(startMinute);
   const endTime = timeKeyFromMinutes(endMinute);
   return {
@@ -364,29 +353,23 @@ function demoGateWindow(now = new Date()) {
   };
 }
 
-// Seed quá sát nửa đêm thì dữ liệu "hôm nay" sẽ hết hạn ngay khi sang ngày mới.
+// Chỉ báo READY khi người trình diễn thực sự đang ở trong giờ vận hành.
 function assertDemoGateWindowUsable(now = new Date()) {
   const gate = demoGateWindow(now);
-  if (gate.runwayMinutes < DEMO_GATE_MIN_RUNWAY_MINUTES) {
+  if (
+    gate.currentMinute < gate.startMinute
+    || gate.runwayMinutes < DEMO_GATE_MIN_RUNWAY_MINUTES
+  ) {
     throw new Error(
-      `Chỉ còn ${gate.runwayMinutes} phút trước nửa đêm giờ Việt Nam nên không dựng được dữ liệu "hôm nay" `
-      + `(cần tối thiểu ${DEMO_GATE_MIN_RUNWAY_MINUTES} phút). Hãy seed lại sau 00:00 để có ngày dữ liệu mới.`,
+      `Cổng demo chỉ vận hành trong khung ${gate.label} giờ Việt Nam và cần còn tối thiểu `
+      + `${DEMO_GATE_MIN_RUNWAY_MINUTES} phút. Hãy chạy demo:prepare trong giờ mở cửa thực tế.`,
     );
   }
   return gate;
 }
 
-// Kịch bản Autopilot xoay quanh chuyến du thuyền 16:30; seed sau mốc này thì
-// không còn hoạt động nào "có rủi ro" để sinh đề xuất.
-const LIVE_SHOWCASE_LATEST_MINUTE = 16 * 60 + 45;
-
-function isLiveShowcaseWindowOpen(now = new Date()) {
-  return demoGateWindow(now).currentMinute < LIVE_SHOWCASE_LATEST_MINUTE;
-}
-
 function liveShowcaseWindow(now = new Date()) {
-  // Bám theo cùng cửa sổ soát vé để LiveTrip/SmartQueue chạy được ở mọi khung
-  // giờ, thay vì bị khóa cứng trong 08:00–17:00 như trước.
+  // Bám theo cùng cửa sổ vận hành thật của điểm đến.
   const gate = demoGateWindow(now);
   const currentMinute = gate.currentMinute;
   const opensAt = gate.startMinute;
@@ -394,8 +377,8 @@ function liveShowcaseWindow(now = new Date()) {
   const latestStart = closesAt - 15;
   if (currentMinute >= latestStart) {
     throw new Error(
-      'Không đủ thời gian trong ngày để dựng Live-AutoPilot showcase '
-      + '(SmartQueue cần tối thiểu 15 phút vận hành hợp lệ). Hãy seed lại sau 00:00 giờ Việt Nam.',
+      'Không đủ thời gian trong giờ mở cửa để dựng Live-AutoPilot showcase '
+      + '(SmartQueue cần tối thiểu 15 phút vận hành hợp lệ). Hãy seed lại trước 16:45 giờ Việt Nam.',
     );
   }
   const proposedStart = currentMinute < opensAt - 15
@@ -512,12 +495,29 @@ function buildSubmittedSnapshot({
   };
 }
 
-async function resetOwnedDemoData() {
+async function resetOwnedDemoData({ purgeLocalTestData = false } = {}) {
+  const localTestUsers = purgeLocalTestData
+    ? await prisma.user.findMany({
+        where: {
+          // Dấu vết đã được tạo từ checklist trình duyệt cũ trên DB local.
+          // Chỉ dùng khóa chính xác để không xóa nhầm dữ liệu nghiệp vụ khác.
+          email: { in: ['tranhoangkt70@gmail.com'] },
+        },
+        select: {
+          id: true,
+          partnerProfile: { select: { id: true } },
+        },
+      })
+    : [];
   const ownedUserIds = [...new Set([
     ...Object.values(IDS.users),
     ...BACKGROUND_CUSTOMERS.map(({ id }) => id),
+    ...localTestUsers.map(({ id }) => id),
   ])];
-  const ownedPartnerIds = Object.values(IDS.partners);
+  const ownedPartnerIds = [...new Set([
+    ...Object.values(IDS.partners),
+    ...localTestUsers.map(({ partnerProfile }) => partnerProfile?.id).filter(Boolean),
+  ])];
   const ownedAttractionIds = Object.values(IDS.attractions);
 
   await prisma.$transaction(async (tx) => {
@@ -677,6 +677,9 @@ async function resetOwnedDemoData() {
         OR: [
           { description: { contains: '[DEFENSE_DEMO_V1]' } },
           { description: { contains: MARKER } },
+          ...(purgeLocalTestData
+            ? [{ name: { in: ['Test Category Auto'] } }]
+            : []),
         ],
         attractions: { none: {} },
       },
@@ -860,12 +863,11 @@ async function createIdentity(account, passwordHash) {
       isEmailVerified: true,
       status: 'ACTIVE',
       employerPartnerId: account.employerPartnerId || null,
-      // Phải khai báo tường minh: nhân viên thuộc đối tác mặc định là SCANNER,
-      // mà kịch bản runbook lại yêu cầu nhân viên cổng thu hồi và cấp lại vé —
-      // thao tác chỉ dành cho MANAGER. Để trống thì smoke test hỏng ở bước này.
-      staffAccessLevel: account.role === 'STAFF'
-        ? (account.staffAccessLevel || 'MANAGER')
-        : null,
+      // Quyền của nhân viên phải khai báo tường minh ở từng tài khoản (xem
+      // ACCOUNTS.gateStaff), không mặc định nâng mọi STAFF lên MANAGER: kịch
+      // bản chỉ cần nhân viên cổng có quyền cấp lại vé, còn nhân viên nền tảng
+      // thì không.
+      staffAccessLevel: account.staffAccessLevel || null,
       termsAcceptedAt: new Date(),
       termsVersion: '2026-07-29-v2',
       privacyVersion: '2026-07-29-v2',
@@ -1155,8 +1157,7 @@ async function seedCatalog() {
             : [{
                 id: `${attraction.id}-slot-all-day`,
                 startTime: attraction.openTime,
-                // Điểm dùng cho kịch bản check-in nhận khách tới cuối ngày để
-                // buổi demo giờ nào cũng quét được vé (xem demoGateWindow).
+                // Khung nhận khách phải khớp giờ mở/đóng cửa công bố.
                 endTime: attraction.id === IDS.attractions.museum
                   ? demoGateWindow().endTime
                   : attraction.closeTime,
@@ -1370,8 +1371,8 @@ function scenarioBookingDefinitions(todayKey) {
     cancelled: BACKGROUND_CUSTOMERS[10],
   };
   return [
-    // Các kịch bản cổng soát vé dùng khung giờ nhận khách trong ngày của bảo
-    // tàng (timeSlotIndex 0), khung này kéo tới cuối ngày — xem demoGateWindow.
+    // Các kịch bản cổng soát vé dùng đúng khung giờ nhận khách 08:00–17:00
+    // của bảo tàng (timeSlotIndex 0).
     {
       key: 'checkin-today', ticketId: IDS.tickets.museumAdult, offset: 0,
       timeSlotIndex: 0,
@@ -3002,6 +3003,7 @@ async function collectDemoReadiness() {
     visibleReviews,
     settlements,
     partnerAssignments,
+    gateStaffAccount,
     forecasts,
     showcaseTrips,
     showcaseItems,
@@ -3051,6 +3053,10 @@ async function collectDemoReadiness() {
       by: ['status'], where: { partnerId: IDS.partners.owner }, _count: { _all: true },
     }),
     prisma.staffAttractionAssignment.count({ where: { staffId: IDS.users.gateStaff, revokedAt: null } }),
+    prisma.user.findUnique({
+      where: { id: IDS.users.gateStaff },
+      select: { employerPartnerId: true, staffAccessLevel: true },
+    }),
     prisma.revenueForecast.groupBy({
       by: ['trainingSource'],
       where: { attractionId: { in: [IDS.attractions.museum, IDS.attractions.cruise, IDS.attractions.eco] }, forecastDate: { gte: today } },
@@ -3197,6 +3203,10 @@ async function collectDemoReadiness() {
     visibleReviews,
     settlements: Object.fromEntries(settlements.map((row) => [row.status, row._count._all])),
     partnerAssignments,
+    gateStaffAccess: {
+      employerPartnerId: gateStaffAccount?.employerPartnerId || null,
+      staffAccessLevel: gateStaffAccount?.staffAccessLevel || null,
+    },
     forecasts: {
       controlledHistoryPoints: forecasts.reduce((sum, row) => sum + row._count._all, 0),
     },
@@ -3248,23 +3258,24 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
   requireAtLeast('actionableSupport', 2, 'Support ticket đang xử lý');
   requireAtLeast('visibleReviews', 2, 'Review để Partner/Admin xử lý');
   requireAtLeast('partnerAssignments', 3, 'Phân công điểm cho nhân viên cổng');
+  if (
+    readiness.gateStaffAccess?.employerPartnerId !== IDS.partners.owner
+    || readiness.gateStaffAccess?.staffAccessLevel !== 'MANAGER'
+  ) {
+    failures.push(
+      'Nhân viên cổng demo phải thuộc đúng Partner và có quyền MANAGER để cấp lại vé/điều phối hàng chờ',
+    );
+  }
   for (const status of ['DRAFT', 'APPROVED', 'PAID']) {
     if (!readiness.settlements[status]) failures.push(`Thiếu settlement ${status}`);
   }
   const forecastPoints = Object.values(readiness.forecasts).reduce((sum, value) => sum + value, 0);
   if (forecastPoints < 21) failures.push(`Forecast tương lai: cần 21 điểm, hiện có ${forecastPoints}`);
   const live = readiness.liveAutopilot || {};
-  // Đề xuất Autopilot chỉ được sinh khi vừa có rủi ro, vừa tìm được khung giờ
-  // thay thế an toàn. Không có proposal có thể là safe fallback hợp lệ (hoặc
-  // kịch bản đã qua giờ khởi hành), nên không được làm hỏng toàn bộ seed/smoke.
-  const liveShowcaseOpen = isLiveShowcaseWindowOpen();
-  const safeFallbackLiveFields = new Set(['pendingProposals', 'explainabilityEvents']);
-  const liveWarnings = [];
   const requireLiveAtLeast = (field, minimum, label) => {
     if (Number(live[field] || 0) < minimum) {
       const message = `${label}: cần >= ${minimum}, hiện có ${live[field] || 0}`;
-      if (safeFallbackLiveFields.has(field)) liveWarnings.push(message);
-      else failures.push(message);
+      failures.push(message);
     }
   };
   if (requireLiveShowcase) {
@@ -3293,16 +3304,6 @@ function assertDemoReady(readiness, { requireLiveShowcase = true } = {}) {
     const error = new Error(`Bộ dữ liệu vận hành chưa sẵn sàng:\n- ${failures.join('\n- ')}`);
     error.readiness = readiness;
     throw error;
-  }
-  if (liveWarnings.length > 0) {
-    const liveWindowHint = liveShowcaseOpen
-      ? 'Autopilot không tìm được khung giờ thay thế đáp ứng đủ ràng buộc an toàn'
-      : `kịch bản đã qua ${timeKeyFromMinutes(LIVE_SHOWCASE_LATEST_MINUTE)} giờ Việt Nam`;
-    console.warn(
-      `\n⚠  ${liveWindowHint}, nên phần Live-AutoPilot không có đủ dữ liệu tùy chọn:\n- `
-      + `${liveWarnings.join('\n- ')}\n`
-      + '   Đây là safe fallback hợp lệ; thanh toán, vé, check-in và các hàng rào ML vẫn được kiểm tra đầy đủ.\n',
-    );
   }
   return readiness;
 }
@@ -3351,7 +3352,7 @@ function printHandoff(
   } else if (!liveWindowAvailable) {
     console.log('\nLive-AutoPilot showcase: TẠM KHÔNG DỰNG');
     console.log('Lý do: đã ngoài cửa sổ vận hành thật của điểm đến; hệ thống không tạo hàng chờ giả sau giờ đóng.');
-    console.log('Chạy lại npm run demo:prepare trước 16:45 giờ Việt Nam để có WAITING/proposal live.');
+    console.log('Chạy lại npm run demo:prepare trước 16:30 giờ Việt Nam để còn đủ thời gian trình diễn an toàn.');
   }
   console.log('\nTrước mỗi lần tập/trình diễn: npm run demo:prepare');
   console.log('Kiểm tra không ghi DB:    npm run demo:check');
@@ -3396,15 +3397,15 @@ async function main() {
   }
   assertDemoDatabaseTarget({ allowExplicitRemote: confirmedRemoteDemo });
 
-  // Chặn sớm trường hợp seed quá sát nửa đêm (dữ liệu "hôm nay" sẽ hết hạn ngay).
+  // Chặn sớm nếu ngoài giờ vận hành thật của kịch bản cổng.
   const gateWindow = assertDemoGateWindowUsable();
   console.log(
     `Cửa sổ soát vé cho kịch bản check-in hôm nay: ${gateWindow.label} `
     + `(còn hiệu lực ${Math.floor(gateWindow.runwayMinutes / 60)}h${String(gateWindow.runwayMinutes % 60).padStart(2, '0')} kể từ bây giờ).`,
   );
 
-  console.log('Đang phục hồi bộ dữ liệu vận hành do script sở hữu...');
-  await resetOwnedDemoData();
+  console.log('Đang phục hồi bộ dữ liệu vận hành và dọn dấu vết test local đã biết...');
+  await resetOwnedDemoData({ purgeLocalTestData: confirmedLocalDemo });
   console.log('Đang tạo tài khoản và hồ sơ KYC theo vai trò...');
   await seedIdentitiesAndPartners();
   console.log('Đang tạo catalog, ticket, lịch và hồ sơ moderation...');
