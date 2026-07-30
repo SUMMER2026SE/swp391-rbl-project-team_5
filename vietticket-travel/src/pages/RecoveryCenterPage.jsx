@@ -14,9 +14,11 @@ import {
 import fallbackImage from '../assets/halong_bay.webp'
 import { formatBookingReference } from '../utils/bookingReference.js'
 import {
+  buildRecoveryChain,
   getCountdownState,
   getRecoveryRefundStage,
   getRecoveryResolutionContent,
+  recoveryChainBookingLabel,
   sortRecoveryCases,
 } from '../utils/recoveryPresentation.js'
 
@@ -223,6 +225,150 @@ function RefundProgress({ recoveryCase, compact = false }) {
         </p>
       )}
     </div>
+  )
+}
+
+function getChainDecisionMeta(recoveryCase) {
+  if (recoveryCase?.status === 'REPLACED') {
+    return {
+      icon: 'published_with_changes',
+      tone: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+      title: 'Đã cứu chuyến bằng vé thay thế',
+      detail: `Đã chuyển sang ${recoveryChainBookingLabel(recoveryCase)}.`,
+    }
+  }
+  if (recoveryCase?.status === 'REFUNDED') {
+    return {
+      icon: 'price_check',
+      tone: 'border-slate-200 bg-slate-50 text-slate-800',
+      title: 'Đã hoàn tiền cho sự cố này',
+      detail: 'Cổng thanh toán đã xác nhận khoản hoàn về phương thức gốc.',
+    }
+  }
+  if (recoveryCase?.status === 'REFUND_PENDING') {
+    return {
+      icon: 'payments',
+      tone: 'border-sky-200 bg-sky-50 text-sky-900',
+      title: 'Đang hoàn tiền cho sự cố này',
+      detail: 'Quyền hoàn tiền của booking này đang được xử lý.',
+    }
+  }
+  return {
+    icon: 'timer',
+    tone: 'border-amber-200 bg-amber-50 text-amber-950',
+    title: 'Đang chờ bạn quyết định',
+    detail: 'Bạn có thể chọn một vé thay thế hoặc nhận hoàn 100%.',
+  }
+}
+
+function RecoveryChainTimeline({ cases, anchorCase }) {
+  const chain = buildRecoveryChain(cases, anchorCase)
+  if (chain.length === 0) return null
+
+  return (
+    <section
+      aria-labelledby="recovery-chain-title"
+      className="mb-8 overflow-hidden rounded-3xl border border-teal-100 bg-white shadow-sm"
+    >
+      <div className="border-b border-teal-100 bg-gradient-to-r from-[#ecfffb] to-white p-5 sm:p-6">
+        <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-teal-700">
+          Lịch sử liên kết booking
+        </p>
+        <h2 id="recovery-chain-title" className="mt-1 text-2xl font-black text-slate-900">
+          Chuỗi cứu chuyến của bạn
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+          Mỗi lần một booking thay thế gặp sự cố sẽ tạo một case Rescue mới. Case cũ vẫn giữ
+          trạng thái lịch sử, còn quyết định hiện tại nằm ở chặng cuối bên dưới.
+        </p>
+      </div>
+      <div className="space-y-0 p-5 sm:p-6">
+        {chain.map((item, index) => {
+          const original = item.original || {}
+          const decision = getChainDecisionMeta(item)
+          const replacementId = item.replacementBookingId
+          const replacementTitle = recoveryChainBookingLabel(item)
+          const replacement = item.replacementBooking
+          return (
+            <div className="relative" key={item.id || `${item.originalBookingId}:${index}`}>
+              <div className="flex gap-4">
+                <div className="relative flex w-8 shrink-0 justify-center">
+                  <span className="z-10 flex h-8 w-8 items-center justify-center rounded-full bg-[#07545b] text-sm font-black text-white">
+                    {index + 1}
+                  </span>
+                  {(index < chain.length - 1 || replacementId) && (
+                    <span className="absolute top-8 h-full w-px bg-teal-100" aria-hidden="true" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 pb-6">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-slate-500">
+                          {index === 0 ? 'Booking gốc' : 'Booking thay thế trước đó'}
+                        </p>
+                        <h3 className="mt-1 text-lg font-black text-slate-900">
+                          {original.attractionTitle || 'Hoạt động du lịch'}
+                        </h3>
+                      </div>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold text-slate-700">
+                        {formatBookingReference(item.originalBookingId)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {formatDate(original.visitDate)} · {original.quantity || 1} vé
+                    </p>
+                  </div>
+
+                  <div className={`mt-3 rounded-2xl border p-4 ${decision.tone}`}>
+                    <div className="flex items-start gap-3">
+                      <span className="material-symbols-outlined mt-0.5 text-[21px]" aria-hidden="true">
+                        {decision.icon}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-black">{decision.title}</p>
+                        <p className="mt-1 text-sm leading-6">{decision.detail}</p>
+                        <p className="mt-2 text-xs font-semibold opacity-75">
+                          Sự cố: {item.reason || 'Đối tác không thể tiếp tục cung cấp dịch vụ.'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {replacementId && (
+                    <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-emerald-700">
+                            Booking thay thế đã cấp
+                          </p>
+                          <h3 className="mt-1 text-lg font-black text-emerald-950">
+                            {replacement?.attractionTitle || replacementTitle}
+                          </h3>
+                        </div>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-extrabold text-emerald-800">
+                          {formatBookingReference(replacementId)}
+                        </span>
+                      </div>
+                      {replacement?.visitDate && (
+                        <p className="mt-2 text-sm text-emerald-900">
+                          {formatDate(replacement.visitDate)} · {replacement.timeSlotLabel || 'Vé cả ngày'}
+                        </p>
+                      )}
+                      {index < chain.length - 1 && (
+                        <p className="mt-2 text-xs font-bold text-emerald-800">
+                          Booking này tiếp tục là điểm bắt đầu của case kế tiếp.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
@@ -486,7 +632,7 @@ function DecisionDialog({ mode, option, recoveryCase, busy, onClose, onConfirm }
   )
 }
 
-function RecoveryDetail({ recoveryCase, loading, refreshing, onReload }) {
+function RecoveryDetail({ recoveryCase, historyCases, loading, refreshing, onReload }) {
   const [dialogMode, setDialogMode] = useState(null)
   const [selectedOption, setSelectedOption] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -627,6 +773,7 @@ function RecoveryDetail({ recoveryCase, loading, refreshing, onReload }) {
 
       <main className={`bg-[#f7faf9] ${isOpen ? 'pb-24 lg:pb-0' : ''}`}>
         <div className="container py-8 sm:py-12">
+          <RecoveryChainTimeline cases={historyCases} anchorCase={recoveryCase} />
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
             <div>
               <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
@@ -1010,6 +1157,8 @@ function RecoveryCaseList({ cases, loading }) {
     <div className="grid gap-5">
       {orderedCases.map((recoveryCase) => {
         const meta = STATUS_META[recoveryCase.status] || STATUS_META.OPEN
+        const chain = buildRecoveryChain(cases, recoveryCase)
+        const chainIndex = Math.max(0, chain.findIndex((item) => item.id === recoveryCase.id))
         return (
           <Link
             className={`group grid gap-5 rounded-3xl bg-white p-5 shadow-sm transition hover:shadow-lg sm:grid-cols-[1fr_auto] sm:items-center sm:p-6 ${
@@ -1029,6 +1178,11 @@ function RecoveryCaseList({ cases, loading }) {
                 <span className="text-xs font-bold text-slate-500">
                   {formatBookingReference(recoveryCase.originalBookingId)}
                 </span>
+                {chain.length > 1 && (
+                  <span className="rounded-full bg-teal-50 px-2.5 py-1 text-xs font-extrabold text-teal-800">
+                    Sự cố lần {chainIndex + 1} trong chuỗi
+                  </span>
+                )}
               </div>
               <h2 className="mt-3 text-xl font-black text-slate-900 group-hover:text-teal-800">
                 {recoveryCase.original.attractionTitle}
@@ -1113,6 +1267,20 @@ function RecoveryCenterPage() {
         const nextCase = await getRecoveryCase(id)
         if (requestSequence === requestSequenceRef.current) {
           setRecoveryCase(nextCase)
+          try {
+            const relatedCases = await listRecoveryCases()
+            const merged = new Map(relatedCases.map((item) => [String(item.id), item]))
+            merged.set(String(nextCase.id), nextCase)
+            setCases(sortRecoveryCases([...merged.values()]))
+          } catch {
+            // The detail response remains authoritative when the history list
+            // is temporarily unavailable.
+            setCases((current) => {
+              const merged = new Map(current.map((item) => [String(item.id), item]))
+              merged.set(String(nextCase.id), nextCase)
+              return sortRecoveryCases([...merged.values()])
+            })
+          }
           setLoadError(null)
         }
       } else {
@@ -1149,7 +1317,9 @@ function RecoveryCenterPage() {
 
   useEffect(() => {
     const refresh = (event) => {
-      if (!id || event.recoveryCaseId === id) void load(null, { quiet: true })
+      if (!id || event.recoveryCaseId === id || event.originalBookingId) {
+        void load(null, { quiet: true })
+      }
     }
     socket.on('RECOVERY_CASE_CREATED', refresh)
     socket.on('RECOVERY_CASE_UPDATED', refresh)
@@ -1207,6 +1377,7 @@ function RecoveryCenterPage() {
               </div>
             )}
             <RecoveryDetail
+              historyCases={cases}
               loading={loading || !visibleRecoveryCase}
               refreshing={refreshing}
               recoveryCase={visibleRecoveryCase}

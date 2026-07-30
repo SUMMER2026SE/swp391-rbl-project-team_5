@@ -101,3 +101,63 @@ export function getRecoveryRefundStage(recoveryCase) {
   if (transactionStatus === 'FAILED') return 'RETRY_PENDING'
   return 'QUEUED'
 }
+
+/**
+ * Builds the customer-facing Rescue history from the durable case links.
+ *
+ * A later incident is a new RecoveryCase whose originalBookingId points to
+ * the previous case's replacementBookingId.  The API deliberately keeps
+ * cases independent, so the UI must join them into one understandable chain.
+ */
+export function buildRecoveryChain(cases, anchorCase) {
+  const rows = Array.isArray(cases) ? cases : []
+  const byId = new Map(rows.filter((item) => item?.id).map((item) => [String(item.id), item]))
+  if (anchorCase?.id) byId.set(String(anchorCase.id), {
+    ...byId.get(String(anchorCase.id)),
+    ...anchorCase,
+  })
+
+  const allCases = [...byId.values()].filter((item) => item?.originalBookingId)
+  if (!anchorCase?.originalBookingId) return []
+
+  const replacementToCase = new Map(
+    allCases
+      .filter((item) => item.replacementBookingId)
+      .map((item) => [String(item.replacementBookingId), item]),
+  )
+
+  let root = anchorCase
+  const visited = new Set()
+  while (root?.originalBookingId) {
+    const predecessor = replacementToCase.get(String(root.originalBookingId))
+    if (!predecessor || predecessor.id === root.id || visited.has(String(predecessor.id))) break
+    visited.add(String(root.id))
+    root = predecessor
+  }
+
+  const byOriginalBooking = new Map(
+    allCases.map((item) => [String(item.originalBookingId), item]),
+  )
+  const chain = []
+  let bookingId = String(root.originalBookingId)
+  const seenBookings = new Set()
+  while (bookingId && !seenBookings.has(bookingId)) {
+    seenBookings.add(bookingId)
+    const item = byOriginalBooking.get(bookingId)
+    if (!item) break
+    chain.push(item)
+    if (!item.replacementBookingId) break
+    bookingId = String(item.replacementBookingId)
+  }
+
+  // A detail response can be newer than the list response. Keep the detail
+  // case visible even if a stale list did not contain the whole chain yet.
+  if (!chain.some((item) => item.id === anchorCase.id)) chain.push(anchorCase)
+  return chain
+}
+
+export function recoveryChainBookingLabel(recoveryCase, fallback = 'Booking thay thế') {
+  return recoveryCase?.replacementBooking?.attractionTitle
+    || recoveryCase?.selectedOption?.attractionTitle
+    || fallback
+}

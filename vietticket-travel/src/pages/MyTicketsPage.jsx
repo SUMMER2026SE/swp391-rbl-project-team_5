@@ -13,7 +13,11 @@ import { getBookingStatusMeta } from '../utils/bookingStatus.js'
 import { formatBookingReference } from '../utils/bookingReference.js'
 import { hasUsableTicketInstances } from '../utils/ticketInstanceStatus.js'
 import { getManualApprovalTiming } from '../utils/manualApproval.js'
-import { sortRecoveryCases } from '../utils/recoveryPresentation.js'
+import {
+  buildRecoveryChain,
+  recoveryChainBookingLabel,
+  sortRecoveryCases,
+} from '../utils/recoveryPresentation.js'
 import {
   filterBookingsByTicketTab,
   getRemainingPaymentTime,
@@ -445,6 +449,7 @@ function MyTicketsPage() {
             ) : (
               filteredBookings.map((booking) => (
                 <TicketCard
+                  allRecoveryCases={recoveryCases}
                   booking={booking}
                   key={booking.id}
                   now={now}
@@ -579,9 +584,94 @@ function OpenRescueStrip({ recoveryCases }) {
   )
 }
 
-function RecoveryBookingNotice({ recoveryCase, sourceRecoveryCase }) {
+function RecoveryChainSummary({ cases, anchorCase }) {
+  const chain = buildRecoveryChain(cases, anchorCase)
+  if (chain.length === 0) return null
+
+  const bookings = []
+  const seen = new Set()
+  chain.forEach((item) => {
+    const originalId = String(item.originalBookingId || '')
+    if (originalId && !seen.has(originalId)) {
+      seen.add(originalId)
+      bookings.push({
+        id: originalId,
+        title: item.original?.attractionTitle || 'Booking du lịch',
+        original: bookings.length === 0,
+      })
+    }
+    const replacementId = String(item.replacementBookingId || '')
+    if (replacementId && !seen.has(replacementId)) {
+      seen.add(replacementId)
+      bookings.push({
+        id: replacementId,
+        title: recoveryChainBookingLabel(item),
+        original: false,
+      })
+    }
+  })
+
+  const activeCase = anchorCase || chain[chain.length - 1]
+  const activeMessage = activeCase.status === 'OPEN'
+    ? 'Sự cố mới đang chờ bạn chọn đổi vé hoặc hoàn tiền.'
+    : activeCase.status === 'REFUND_PENDING'
+      ? 'Sự cố mới đang được hoàn tiền về phương thức gốc.'
+      : activeCase.status === 'REFUNDED'
+        ? 'Sự cố mới đã được hoàn tiền.'
+        : 'Chuỗi đã được tiếp tục bằng booking thay thế.'
+
+  return (
+    <section className="rounded-xl border border-teal-200 bg-teal-50/70 p-4" aria-label="Lịch sử chuỗi cứu chuyến">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-teal-800">
+            Lịch sử chuỗi cứu chuyến
+          </p>
+          <p className="mt-1 text-sm font-semibold leading-6 text-teal-950">
+            {activeMessage}
+          </p>
+        </div>
+        <Link
+          className="shrink-0 rounded-lg bg-white px-3 py-2 text-xs font-extrabold text-teal-800 shadow-sm ring-1 ring-teal-200 hover:bg-teal-100"
+          to={`/rescue/${activeCase.id}`}
+        >
+          Xem chuỗi đầy đủ
+        </Link>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        {bookings.map((booking, index) => (
+          <span className="flex items-center gap-2" key={booking.id}>
+            <span className="max-w-[180px] rounded-lg bg-white px-2.5 py-2 font-bold text-slate-800 ring-1 ring-teal-100">
+              <span className="block text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                {booking.original ? 'Booking gốc' : 'Vé thay thế'}
+              </span>
+              <span className="mt-0.5 block truncate">{booking.title}</span>
+              <span className="mt-0.5 block font-mono text-[10px] text-slate-500">
+                {formatBookingReference(booking.id)}
+              </span>
+            </span>
+            {index < bookings.length - 1 && (
+              <span className="material-symbols-outlined text-[17px] text-teal-700" aria-hidden="true">
+                arrow_forward
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+      {chain.length > 1 && (
+        <p className="mt-3 text-xs font-semibold leading-5 text-teal-900">
+          Case cũ vẫn được giữ là lịch sử; sự cố phát sinh trên vé thay thế được theo dõi bằng case mới.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function RecoveryBookingNotice({ recoveryCase, sourceRecoveryCase, allRecoveryCases }) {
+  const chainAnchor = recoveryCase || sourceRecoveryCase
   return (
     <div className="space-y-3">
+      <RecoveryChainSummary cases={allRecoveryCases} anchorCase={chainAnchor} />
       {sourceRecoveryCase && sourceRecoveryCase.id !== recoveryCase?.id && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm">
           <p className="font-semibold text-emerald-900">
@@ -663,6 +753,7 @@ function TicketCard({
   onOpenReview,
   recoveryCase,
   sourceRecoveryCase,
+  allRecoveryCases,
 }) {
   const [showRefund, setShowRefund] = useState(false)
   const status = normalizeBookingStatus(booking.status)
@@ -729,6 +820,7 @@ function TicketCard({
         {(recoveryCase || sourceRecoveryCase) && (
           <div className="mb-4">
             <RecoveryBookingNotice
+              allRecoveryCases={allRecoveryCases}
               recoveryCase={recoveryCase}
               sourceRecoveryCase={sourceRecoveryCase}
             />
